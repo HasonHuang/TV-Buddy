@@ -7,6 +7,10 @@
 > 整理而成。每条声明都用 `规格 ID` 标注，供 `07-baseline-and-verification.md` 逐条核验。
 > **级别**：本文所有条目默认为 **【基线观测】**（来自基线实测）；逆向未复位前，状态列默认为 `⏳`。
 > 核验结果（观测/推断/未知）由逆向产出回填，**不得**在此文件直接改写结论。
+>
+> **版本告警**：上游**无 tag/release**，`main` 随构建变动。已取得产物为 **≈ v0.8.9**
+> （`main@b6331774f8`，2026-10-15），**非本文基线的 v0.8.2**。差异见 [`07`](07-baseline-and-verification.md) §3 `D-001`。
+> 本文状态列的 `✅` 只表示**静态存在性**一致；**行为**待动态核验。
 
 来源缩写：`RM`=公开 README ｜ `D-README`/`D-iptv`/`D-fields`/`D-panel`/`D-disg`/`D-res`/`D-mode-*`=基线各文档。
 
@@ -22,7 +26,8 @@
 | S-ENV-04 | 服务常驻：systemd（Alpine 用 OpenRC），开机自启 | RM | ⏳ |
 | S-ENV-05 | 默认面板端口 `19899`，默认监听 `[::]`（双栈） | RM/D-panel | ⏳ |
 | S-ENV-06 | 启动命令形如 `./iptv-proxy config.toml`（配置以参数传入） | D-panel | ⏳ |
-| S-ENV-07 | 依赖语言/工具链为 **Rust**（**推断**，须二进制证据支撑） | 推断 | ⏳ |
+| S-ENV-07 | 依赖语言/工具链为 **Rust** | RM | ✅【观测】`rustc version 1.99.0` |
+| S-ENV-08 | 分发产物经 **UPX 4.24** 加壳；脱壳后静态、非 PIE、已 strip | 二进制 | ✅【观测】 |
 
 ## 2. HTTP 端点（surface）
 
@@ -36,7 +41,9 @@
 | S-EP-06 | 台标：`GET /logo/<文件名>` | D-panel | ⏳ |
 | S-EP-07 | 自助解封：`GET /unban`，**无需登录**，每月限 3 次 | D-panel | ⏳ |
 | S-EP-08 | 状态：`/status`（返回 `entry_exts` 等）、`/status/metrics` | D-panel/D-res | ⏳ |
-| S-EP-09 | 多 VPS 数据分享端点（同步 token/封禁；路径待确认） | D-panel | ⏳ |
+| S-EP-09 | 多 VPS 数据分享端点 `POST /api/share/pull`（同步 token/封禁；基线路径待确认→已确认） | D-panel/二进制 | ⏳路径✅ |
+| S-EP-10 | 健康检查：`GET /health`（安装脚本用于就绪探测） | 安装脚本 | ⏳ |
+| S-EP-11 | 运维 API：`/api/reload`、`/api/backup`、`/api/restore`、`/whoami` | 二进制 | ⏳ |
 
 ## 3. 播放地址与扩展名规则
 

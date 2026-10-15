@@ -56,6 +56,19 @@ HasonHuang/sontv/docs/iptv-proxy/
 
 > 上表仅列关键项；完整项从基线各文件抽取，逐条回填。
 
+### 2.2 静态核验（2026-10-15，来源 [`../findings/static/01-sample-packing-and-toolchain.md`](../findings/static/01-sample-packing-and-toolchain.md)）
+
+| 规格 ID | 声明 | 本次静态观测 | 状态 |
+| --- | --- | --- | --- |
+| S-ENV-02 | 预编译二进制 `iptv-proxy-linux-{amd64,arm64}` + 安装脚本 | 仓库内同时存在 `arm64`/`amd64`/`armv7` 产物与 `iptv-proxy.sh` | ✅ |
+| S-ENV-06 | 启动命令为 `./iptv-proxy config.toml` | 安装脚本 `ExecStart=${BIN} ${CONFIG}`；无子命令 | ✅ |
+| S-ENV-07 | 语言/工具链为 Rust（基线为"推断"） | 命中 `rustc version 1.99.0`、`/rustc/<hash>/`、`panicked at` | ✅（升级为**观测**） |
+| S-ENV-08 | （新增）分发产物经 **UPX 4.24** 加壳 | `$Id: UPX 4.24`、熵 7.9999、无节头 | ✅ |
+| S-EP-09 | 多 VPS 分享端点（基线路径待确认） | 路由字面量 `/api/share/pull` | ✅（路径确认） |
+| S-CFG-04 | 顶层配置键名 | 全部键命中字面量（§7） | ✅（键名） |
+
+> **`✅` 仅表示"静态存在性"一致**（键名/路由/工具链）。**行为**（如 EPG 关闭时 404、伪装字节）一律待动态核验。
+
 ## 3. 差异登记
 
 出现 `⚠️ 差异` 时，在 `docs/findings/` 下建独立小节，包含：
@@ -64,6 +77,23 @@ HasonHuang/sontv/docs/iptv-proxy/
 2. 本次证据（命令 / Evidence ID / 环境）；
 3. 差异范围（是否版本差异、架构差异、环境差异）；
 4. 处置（更新基线建议 / 待复测 / 已澄清）。
+
+### 3.1 差异清单
+
+| ID | 差异 | 范围 | 状态 |
+| --- | --- | --- | --- |
+| `D-001` | 基线版本 **v0.8.2**，但已取得产物 **≈ v0.8.9** | **版本差异** | ⏳ 待处置 |
+
+**`D-001` 详情**
+
+- 基线原文：`07` 头部与 `08` 标题均标注目标为 **iptv-proxy v0.8.2**（基线实测于 2026-10-02/03）。
+- 本次证据：上游 `CHANGELOG.md` 最新为 **v0.8.8（2026-10-03）**；
+  已取得产物内嵌面板含 **`[v0.8.9]`** 标注，构建于 **2026-10-15**（提交 `b6331774f8`）。
+  证据见 [`../findings/static/01-sample-packing-and-toolchain.md`](../findings/static/01-sample-packing-and-toolchain.md) §5。
+- 差异范围：**版本差异**（非架构/环境）。上游**无 tag/release**，`main` 随时变动。
+- 处置：**待用户决定**（二选一）——
+  (a) 以当前 `main`（≈ v0.8.9）为分析对象，另建 `08b-target-spec-v0.8.9.md`，不复用 `08` 状态列；
+  (b) 取历史提交产物贴近 v0.8.2（候选：`ae6bf91bb1`=v0.8.8、`d302316fb8`=09-09），逐条比对后再定基线。
 
 ## 4. 收敛条件
 

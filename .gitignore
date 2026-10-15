@@ -1,0 +1,6 @@
+# macOS
+.DS_Store
+
+# 分析样本（二进制，体积大且为第三方产物，不入库）
+# 只登记指纹（见 docs/findings/artifact.md）
+/samples/

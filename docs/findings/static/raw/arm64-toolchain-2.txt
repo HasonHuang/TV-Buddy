@@ -1,0 +1,41 @@
+## rustc version string candidates
+1.87.8
+1.92.0
+1.99.0
+
+## cargo registry crate versions (normalize src/index path)
+     100
+axum-0.7.9
+axum-core-0.4.5
+bytes-1.12.1
+chrono-0.4.45
+http-1.5.0
+http-body-1.1.0
+http-body-util-0.1.5
+hyper-1.11.1
+hyper-rustls-0.27.10
+hyper-util-0.1.20
+quick-xml-0.36.2
+regex-automata-0.4.18
+regex-syntax-0.8.11
+reqwest-0.12.28
+rustls-0.23.45
+rustls-pki-types-1.15.1
+rustls-webpki-0.103.15
+tokio-1.53.1
+tokio-rustls-0.26.5
+tokio-util-0.7.19
+toml-0.8.23
+tower-0.5.3
+tower-http-0.5.2
+tower-http-0.6.11
+tracing-appender-0.2.5
+tracing-core-0.1.36
+tracing-log-0.2.0
+tracing-subscriber-0.3.23
+
+## version context lines
+clang version 18.1.6 (https://github.com/ziglang/zig-bootstrap 98bc6bf4fc4009888d33941daf6b600d20a42a56)
+rustc version 1.99.0 (b940084d7 2026-09-28)
+
+## exact bare version tokens near 0.8
