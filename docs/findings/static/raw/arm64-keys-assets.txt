@@ -1,0 +1,75 @@
+## config keys / disguise markers (literal presence)
+HIT(8)  token_enabled
+HIT(1)  password_sha256
+HIT(18)  username
+HIT(4)  session_ttl
+HIT(13)  disk_path
+HIT(7)  disk_max_mb
+HIT(4)  m3u8_max_entries
+HIT(4)  segment_max_entries
+HIT(4)  timezone_offset_hours
+HIT(17)  log_level
+HIT(23)  bind
+HIT(35)  backend
+HIT(3)  obfuscate_filenames
+MISS    [cache.disguise]
+HIT(45)  disguise
+MISS    lumberjack
+HIT(37)  playseek
+HIT(4)  #EXT-X-MAP
+HIT(13)  x-tvg-url
+HIT(6)  entry_exts
+
+## embedded panel assets (template/asset markers)
+-count2.html
+.min.js
+//.css
+//docs.rs/rustls/latest/rustls/manual/_03_howto/index.html
+//www.css
+/all.js
+/epg.html
+/index.html
+Basketball/style.css
+becameexecutivejquery.js
+birthsindex.html
+bluestrulydavis.js
+btn.js
+cellsp.css
+checked.min.js
+countriesmin.js
+el.style.css
+epg.xml.gzepg.xmlepg_map.js
+failedNode.js
+groups_export.js
+handlerprintedconsoleEasternexportswindowsChannelillegalneutralsuggest_headersigning.html
+header.min.js
+index.js
+initializedNode.js
+inmin.js
+insertschedule.js
+issuetranslations.jsongemini_models.js
+label.not_foundlabel.upstream_errlabel.homelabel.ip_limitlabel.ip_banepg/scripts/resolvers/logos/epg/scriptsmanifest.js
+manifest.js
+minister.js
+mpd_timeout_secs/snap/bin/ffmpegepg/epg_map.js
+Node.js
+of/index.html
+ofdifficultyfacilitateacceptablestyle.css
+ofeveningmin.js
+overlay.style.css
+panel/index.html
+quer.css
+r.js
+rights.html
+
+## route literals with path params
+{cid}/start
+{cid}/stop
+{cur}/{total}
+{disk_path}/dash
+{done}/{total}
+{gid}/channels
+{gid}/export
+{gid}/playlist.m3u
+{m}/{t}
+{ok}/{total}
