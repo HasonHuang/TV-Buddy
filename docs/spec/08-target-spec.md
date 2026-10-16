@@ -8,8 +8,9 @@
 > **级别**：本文所有条目默认为 **【基线观测】**（来自基线实测）；逆向未复位前，状态列默认为 `⏳`。
 > 核验结果（观测/推断/未知）由逆向产出回填，**不得**在此文件直接改写结论。
 >
-> **版本告警**：上游**无 tag/release**，`main` 随构建变动。已取得产物为 **≈ v0.8.9**
-> （`main@b6331774f8`，2026-10-15），**非本文基线的 v0.8.2**。差异见 [`07`](07-baseline-and-verification.md) §3 `D-001`。
+> **版本说明**：上游**无 tag/release**，`main` 随构建变动。主分析对象为 **v0.8.2**
+> （提交 `d302316fb8`，与本文基线一致）；`main` 实为 **v0.8.8**，仅作差异对照。
+> 锚点与判定见 [`../findings/artifact.md`](../findings/artifact.md) §5 与 [`07`](07-baseline-and-verification.md) §3.1 `D-001`。
 > 本文状态列的 `✅` 只表示**静态存在性**一致；**行为**待动态核验。
 
 来源缩写：`RM`=公开 README ｜ `D-README`/`D-iptv`/`D-fields`/`D-panel`/`D-disg`/`D-res`/`D-mode-*`=基线各文档。
@@ -26,7 +27,7 @@
 | S-ENV-04 | 服务常驻：systemd（Alpine 用 OpenRC），开机自启 | RM | ⏳ |
 | S-ENV-05 | 默认面板端口 `19899`，默认监听 `[::]`（双栈） | RM/D-panel | ⏳ |
 | S-ENV-06 | 启动命令形如 `./iptv-proxy config.toml`（配置以参数传入） | D-panel | ⏳ |
-| S-ENV-07 | 依赖语言/工具链为 **Rust** | RM | ✅【观测】`rustc version 1.99.0` |
+| S-ENV-07 | 依赖语言/工具链为 **Rust** | RM | ✅【观测】`rustc version 1.98.1`（v0.8.2） |
 | S-ENV-08 | 分发产物经 **UPX 4.24** 加壳；脱壳后静态、非 PIE、已 strip | 二进制 | ✅【观测】 |
 
 ## 2. HTTP 端点（surface）

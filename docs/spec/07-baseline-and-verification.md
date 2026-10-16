@@ -82,18 +82,18 @@ HasonHuang/sontv/docs/iptv-proxy/
 
 | ID | 差异 | 范围 | 状态 |
 | --- | --- | --- | --- |
-| `D-001` | 基线版本 **v0.8.2**，但已取得产物 **≈ v0.8.9** | **版本差异** | ⏳ 待处置 |
+| `D-001` | 基线 **v0.8.2** 与上游 `main`（**v0.8.8**）不同 | **版本差异** | ✅ 已解决（取 v0.8.2 产物） |
 
 **`D-001` 详情**
 
 - 基线原文：`07` 头部与 `08` 标题均标注目标为 **iptv-proxy v0.8.2**（基线实测于 2026-10-02/03）。
-- 本次证据：上游 `CHANGELOG.md` 最新为 **v0.8.8（2026-10-03）**；
-  已取得产物内嵌面板含 **`[v0.8.9]`** 标注，构建于 **2026-10-15**（提交 `b6331774f8`）。
-  证据见 [`../findings/static/01-sample-packing-and-toolchain.md`](../findings/static/01-sample-packing-and-toolchain.md) §5。
-- 差异范围：**版本差异**（非架构/环境）。上游**无 tag/release**，`main` 随时变动。
-- 处置：**待用户决定**（二选一）——
-  (a) 以当前 `main`（≈ v0.8.9）为分析对象，另建 `08b-target-spec-v0.8.9.md`，不复用 `08` 状态列；
-  (b) 取历史提交产物贴近 v0.8.2（候选：`ae6bf91bb1`=v0.8.8、`d302316fb8`=09-09），逐条比对后再定基线。
+- 现象：上游 `main` 随构建变动，当前 `main` 实为 **v0.8.8**（非 v0.8.2）。
+- 证据：Rust 版本常量 `env!("CARGO_PKG_VERSION")` 落在固定 `.rodata` 槽
+  `…local_path.m3u8start_epoch<VER>logo…`：`d302316fb8`=**0.8.2**、`b6331774f8`(main)=**0.8.8**。
+  见 [`../findings/static/01-sample-packing-and-toolchain.md`](../findings/static/01-sample-packing-and-toolchain.md) §5。
+- 差异范围：**版本差异**（非架构/环境）。上游**无 tag/release**，须以**提交 SHA**锚定。
+- 处置：**已解决**——主分析对象改用 **v0.8.2 = `d302316fb8`**（与基线一致），登记于
+  [`../findings/artifact.md`](../findings/artifact.md) §2.1。`main`(v0.8.8) 仅作**差异对照**，不作主分析对象。
 
 ## 4. 收敛条件
 

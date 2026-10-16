@@ -2,7 +2,7 @@
 
 本目录存放 **IPTV Proxy 逆向工程的分析产出**。所有内容遵循 [`../spec/`](../spec/) 的规范。
 
-> 目标版本：基线 **v0.8.2** ｜ 已取得产物 **≈ v0.8.9**（`main@b6331774f8`，差异 `D-001`）
+> 目标版本：**v0.8.2**（主，`d302316fb8`）｜ 对照 **v0.8.8**（= `main`）
 > ｜ 目标指纹：见 [`artifact.md`](artifact.md)（**已登记**）
 
 ---
@@ -21,7 +21,8 @@ docs/findings/
 
 | 编号 | 标题 | 域 | 结论级别 | 关联规格 ID | 日期 | 文件 |
 | --- | --- | --- | --- | --- | --- | --- |
-| F-001 | 样本加壳与工具链判定（UPX 4.24 / Rust 1.99.0） | 静态 | 观测 | S-ENV-02, S-ENV-07, S-ENV-08, S-EP-09, S-CFG-04 | 2026-10-15 | [`static/01-sample-packing-and-toolchain.md`](static/01-sample-packing-and-toolchain.md) |
+| F-001 | 样本加壳与工具链判定（UPX 4.24 / Rust 1.98.1，v0.8.2） | 静态 | 观测 | S-ENV-02, S-ENV-07, S-ENV-08, S-EP-09, S-CFG-04 | 2026-10-15 | [`static/01-sample-packing-and-toolchain.md`](static/01-sample-packing-and-toolchain.md) |
+| F-002 | 版本判定：v0.8.2 = `d302316fb8`；main = v0.8.8 | 静态 | 观测 | S-ENV-01 | 2026-10-15 | [`static/01-sample-packing-and-toolchain.md`](static/01-sample-packing-and-toolchain.md) §5 |
 
 > 每完成一篇发现，在此登记一行；`关联规格 ID` 指向
 > [`../spec/08-target-spec.md`](../spec/08-target-spec.md) 的 `S-*` 条目。
