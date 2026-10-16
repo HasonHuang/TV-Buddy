@@ -1,0 +1,82 @@
+## rustc / zig
+clang version 18.1.6
+rustc version 1.98.1 (48a229cea 2026-09-01)
+zig-bootstrap 98bc6bf4fc4009888d33941daf6b600d20a42a56
+
+## CARGO_PKG_VERSION constant slot
+local_path.m3u8start_epoch0.8.2logo
+
+## third-party crates (registry paths, normalized, unique)
+     100
+axum-0.7.9
+axum-core-0.4.5
+bytes-1.11.1
+chrono-0.4.44
+http-1.4.0
+http-body-1.0.1
+http-body-util-0.1.3
+hyper-1.9.0
+hyper-rustls-0.27.9
+hyper-util-0.1.20
+quick-xml-0.36.2
+rand-0.8.6
+regex-automata-0.4.14
+regex-syntax-0.8.10
+reqwest-0.12.28
+rustls-0.23.40
+rustls-pki-types-1.14.1
+rustls-webpki-0.103.13
+tokio-1.52.1
+tokio-rustls-0.26.4
+tokio-util-0.7.18
+toml-0.8.23
+tower-0.5.3
+tower-http-0.5.2
+tower-http-0.6.8
+tracing-appender-0.2.5
+tracing-core-0.1.36
+tracing-log-0.2.0
+tracing-subscriber-0.3.23
+
+## route literals present
+HIT   /panel
+HIT   /health
+HIT   /status
+HIT   /status/metrics
+HIT   /unban
+HIT   /playlist.m3u
+HIT   /epg
+HIT   /epg.xml
+HIT   /epg.xml.gz
+HIT   /logo/
+HIT   /api/reload
+HIT   /api/share/pull
+HIT   /whoami
+HIT   /api/backup
+HIT   /api/restore
+
+## config keys / markers present
+HIT(8)  token_enabled
+HIT(1)  password_sha256
+HIT(8)  username
+HIT(4)  session_ttl
+HIT(13)  disk_path
+HIT(7)  disk_max_mb
+HIT(4)  m3u8_max_entries
+HIT(4)  segment_max_entries
+HIT(4)  timezone_offset_hours
+HIT(6)  log_level
+HIT(18)  bind
+HIT(16)  backend
+HIT(3)  obfuscate_filenames
+HIT(26)  disguise
+HIT(18)  playseek
+HIT(3)  #EXT-X-MAP
+HIT(3)  x-tvg-url
+HIT(6)  entry_exts
+MISS    lumberjack
+
+## max embedded [vX.Y.Z] annotation
+[v0.7.24]
+[v0.7.26]
+[v0.8.1]
