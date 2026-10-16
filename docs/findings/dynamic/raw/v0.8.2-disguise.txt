@@ -1,0 +1,53 @@
+## entry playlist: GET /test1/c1.m3u8 (headers + body)
+HTTP/1.1 200 OK
+content-type: text/plain; charset=utf-8
+cache-control: public, max-age=5, s-maxage=5
+vary: origin, access-control-request-method, access-control-request-headers
+vary: accept-encoding
+access-control-allow-origin: *
+access-control-expose-headers: *
+transfer-encoding: chunked
+date: Fri, 16 Oct 2026 15:05:50 GMT
+
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:5
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:5.0,
+http://127.0.0.1:19899/test1/c1/ea8680a1b61c17e4_e4b50304d62739a7b6df027f7cfc3155.jpg
+#EXTINF:5.0,
+http://127.0.0.1:19899/test1/c1/ea8680a1b61c17e4_fdda4a7f4a9a62d68930090bd29a96a5.webp
+#EXTINF:5.0,
+http://127.0.0.1:19899/test1/c1/ea8680a1b61c17e4_4528cb59b78721cf5cba897d6b744f03.bmp
+#EXT-X-ENDLIST
+## group playlist: GET /test1/playlist.m3u
+#EXTM3U
+#EXTINF:-1 tvg-id="c1" tvg-name="C1" tvg-logo="" group-title="test1",C1
+http://127.0.0.1:19899/test1/c1.m3u8
+#EXTINF:-1 tvg-id="c2" tvg-name="C2" tvg-logo="" group-title="test1",C2
+http://127.0.0.1:19899/test1/c2.m3u8
+
+## segment: /test1/c1/<ids>.jpg  (headers)
+HTTP/1.1 200 OK
+content-type: image/jpeg
+content-length: 1880
+cache-control: private, max-age=300
+vary: origin, access-control-request-method, access-control-request-headers
+access-control-allow-origin: *
+access-control-expose-headers: *
+date: Fri, 16 Oct 2026 15:05:50 GMT
+
+## suffix-not-validated: same 32-hex id, several extensions
+jpg -> code=200 ct=image/jpeg sha=da8d1496216a40a4
+png -> code=200 ct=image/png sha=da8d1496216a40a4
+webp -> code=200 ct=image/webp sha=da8d1496216a40a4
+gif -> code=200 ct=image/gif sha=da8d1496216a40a4
+bmp -> code=200 ct=image/bmp sha=da8d1496216a40a4
+txt -> code=200 ct=video/mp2t sha=da8d1496216a40a4
+ts -> code=200 ct=video/mp2t sha=da8d1496216a40a4
+m3u8 -> code=200 ct=video/mp2t sha=da8d1496216a40a4
+
+## derivation: suffix == sha256(absolute upstream segment url)[:32]
+  seg0: sha256(http://host.docker.internal:9999/seg0.ts)[:32] = e4b50304d62739a7b6df027f7cfc3155
+  seg1: sha256(http://host.docker.internal:9999/seg1.ts)[:32] = fdda4a7f4a9a62d68930090bd29a96a5
+  seg2: sha256(http://host.docker.internal:9999/seg2.ts)[:32] = 4528cb59b78721cf5cba897d6b744f03
