@@ -69,6 +69,24 @@ HasonHuang/sontv/docs/iptv-proxy/
 
 > **`✅` 仅表示"静态存在性"一致**（键名/路由/工具链）。**行为**（如 EPG 关闭时 404、伪装字节）一律待动态核验。
 
+### 2.3 动态核验（2026-10-16，来源 [`../findings/dynamic/01-runtime-surface-and-disguise.md`](../findings/dynamic/01-runtime-surface-and-disguise.md)）
+
+| 规格 ID | 声明 | 本次运行实测 | 状态 |
+| --- | --- | --- | --- |
+| S-ENV-05 | 默认端口 `19899`，监听 `[::]` | 日志：`http://[::]:19899` | ✅ |
+| S-EP-05 | EPG 关闭时 `/epg*` 全 404 | `/epg`、`/epg.xml`、`/epg.xml.gz` 均 404 | ✅ |
+| S-EP-07 | `/unban` 无需登录 | `/unban` 200 HTML；无需 token | ✅ |
+| S-EP-10 | `/health` | 200 `ok` | ✅ |
+| S-DIS-01 | 伪装默认 `enabled=true`,`playlist=true` | `GET /panel/api/config` 默认值一致 | ✅ |
+| S-DIS-02 | 不改载荷字节 | 切片字节与上游同长同内容 | ✅ |
+| S-DIS-04 | 后缀由 频道ID+切片哈希 推导 | **切片哈希 = `sha256(上游切片绝对URL)[:32]`**；16-hex 频道前缀确定性但推导未解 | 🔶 部分 |
+| S-DIS-05 | 后缀不参与校验 | 同 ID 换 8 种后缀，字节全同 | ✅ |
+| S-DIS-11 | `obfuscate_filenames` 独立 | 位于 `[cache.dash]`，与 disguise 分区不同 | ✅ |
+| S-CFG-01 | 面板改动落盘 `config.toml` | 建组后文件出现 `[[groups]]` | ✅ |
+| S-CFG-02 | 配置热重载监视 | 启动日志：热重载监视已启动 | ✅ |
+| S-CFG-04 | 顶层键与默认值 | `GET /panel/api/config` 全量（见 raw） | ✅ |
+| S-AUTH-01 | 密码存 SHA-256，明文不落盘 | 登录 `admin` 成功；配置中 `password_sha256` 已屏蔽 | ✅ |
+
 ## 3. 差异登记
 
 出现 `⚠️ 差异` 时，在 `docs/findings/` 下建独立小节，包含：

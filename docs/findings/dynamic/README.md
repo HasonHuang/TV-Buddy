@@ -15,15 +15,16 @@
 
 | 编号 | 主题 | 方法 | 关联规格 ID | 状态 |
 | --- | --- | --- | --- | --- |
-| D1 | 端点探测 | `curl` / `capture_process_scenario` | S-EP-* | ⏳ |
-| D2 | 扩展名规则 | 对照 `/status.entry_exts` | S-URL-* | ⏳ |
+| D1 | 端点探测 | `curl` | S-EP-* | ✅ [`01`](01-runtime-surface-and-disguise.md) §2 |
+| D2 | 扩展名规则 | 对照 `/status.entry_exts` | S-URL-01 | ✅ [`01`](01-runtime-surface-and-disguise.md)（format→hls=.m3u8/mpd=.mpd） |
 | D3 | 六种模式行为 | 各模式实测 | S-MODE-* | ⏳ |
-| D4 | 切片伪装（字节级复现） | 下载+比对+`file`+`ffprobe` | S-DIS-* | ⏳ |
-| D5 | 缓存窗口与响应头 | 时序采样 | S-DIS-06/07 | ⏳ |
+| D4 | 切片伪装（字节级复现） | 下载+比对+哈希 | S-DIS-* | 🔶 后缀已破解；前缀未解 [`01`](01-runtime-surface-and-disguise.md) §5 |
+| D5 | 缓存窗口与响应头 | 时序采样 | S-DIS-06/07 | 🔶 响应头✅/时序⏳ |
 | D6 | Token / 随机频道 ID / IP 管控 | 请求矩阵 | S-AUTH-* | ⏳ |
 | D7 | 订阅聚合 vs M3U 导入 | 两条路径对比 | S-SUB-* | ⏳ |
-| D8 | 配置热重载与重启项 | 改配置观测 | S-CFG-02/03 | ⏳ |
+| D8 | 配置热重载与落盘 | 改配置观测 | S-CFG-01/02 | ✅ [`01`](01-runtime-surface-and-disguise.md) §1/§7 |
 | D9 | 资源占用 | `docker stats` | S-BUG-01 | ⏳ |
+| D10 | 配置全量 schema | `GET /panel/api/config` | S-CFG-04 | ✅ [`01`](01-runtime-surface-and-disguise.md) §4 |
 
 ## 运行期纪律
 

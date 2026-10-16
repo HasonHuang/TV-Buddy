@@ -147,14 +147,18 @@
 | S-DIS-01 | 配置段 `[cache.disguise]`：`enabled`/`playlist`/`subtitle`/`master`/`formats`；**出厂默认 `enabled=true` + `playlist=true`** | D-panel/D-disg | ⏳ |
 | S-DIS-02 | **不改切片载荷字节**：只改 URL 后缀与 Content-Type；四种后缀同一切片前 32 字节相同，首字节 `0x47` | D-disg | ⏳ |
 | S-DIS-03 | 切片为原始 MPEG-TS：每 188 字节 `0x47`，文件大小 188 倍数；无 FLV/图片/fMP4 特征 | D-disg | ⏳ |
-| S-DIS-04 | 后缀**轮换稳定且按频道独立**：同一频道重复拉清单序列不变；同一切片哈希在不同频道后缀不同（由 频道ID+切片哈希 推导） | D-disg | ⏳ |
-| S-DIS-05 | 后缀**不参与校验**：清单写 `.png`，请求 `.jpg` 得同字节（MD5 相同） | D-disg | ⏳ |
+| S-DIS-04 | 后缀**轮换稳定且按频道独立**：同一频道重复拉清单序列不变；同一切片哈希在不同频道后缀不同（由 频道ID+切片哈希 推导） | D-disg | ✅【观测】切片后缀=`sha256(上游切片绝对URL)[:32]`；16-hex 频道前缀确定性（推导未解） |
+| S-DIS-05 | 后缀**不参与校验**：清单写 `.png`，请求 `.jpg` 得同字节（MD5 相同） | D-disg | ✅【观测】 |
 | S-DIS-06 | `Cache-Control` 切换：切片刚写入短暂 `public, max-age=300`，之后 `private, max-age=300` | D-disg | ⏳ |
 | S-DIS-07 | 切片不支持 `Range`（忽略，返回 200 全量）；无 `Accept-Ranges`/`ETag`/`Last-Modified` | D-disg | ⏳ |
 | S-DIS-08 | 每切片自包含 MPEG-TS（PAT/SDT/PMT + ~10s）；PID 布局非 ffmpeg 默认（PMT `0x100`、视频 `0x102`、音频 `0x101`） | D-disg | ⏳ |
 | S-DIS-09 | 每切片第 0 个包为 SDT，描述符载荷 ASCII `lumberjack`（两次）——来源水印，与伪装无关 | D-disg | ⏳ |
 | S-DIS-10 | 媒体清单伪装成 `.txt`（`.../video/index.txt`），主清单入口仍为 `.m3u8`；媒体清单无 `#EXT-X-MAP` | D-disg | ⏳ |
 | S-DIS-11 | 文件名混淆由独立的 `cache.dash.obfuscate_filenames` 控制，**与伪装无关** | D-panel | ⏳ |
+| S-DIS-12 | 伪装切片 URL 形状 `/{gid}/{cid}/<16hex>_<32hex>.<ext>` | 二进制 | ✅ |
+| S-DIS-13 | 切片 `Content-Type` 由后缀映射（图片→图片类型；其余→`video/mp2t`） | 二进制 | ✅ |
+| S-DIS-14 | 频道入口清单以 `text/plain` 下发（`[cache.disguise].playlist=true`） | 二进制 | ✅ |
+| S-DIS-15 | 未知/无效切片 ID → 302 到 `server.not_found_url` | 二进制 | ✅ |
 
 ## 10. 缓存
 
