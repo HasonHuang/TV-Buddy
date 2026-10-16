@@ -1,0 +1,107 @@
+## embedded HTML pages (offset in unpacked arm64 binary)
+733330:<!DOCTYPE html>
+773055:<!DOCTYPE html>
+1395274:<!DOCTYPE html>
+1403700:<!DOCTYPE html>
+1580983:<!DOCTYPE html>
+1588401:<!DOCTYPE html>
+1590532:<!DOCTYPE html>
+1591291:<!DOCTYPE html>
+733126:<title>节目单</title>
+733485:<title>节目单</title>
+773358:<title>IPTV Proxy 管理面板</title>
+1395043:<title>台标库</title>
+1395429:<title>台标库</title>
+1403834:<title>IPTV Proxy - 自助解封</title>
+
+## panel API endpoints referenced across the 4 panel pages (union)
+/api/backup
+/api/epg
+/api/epg/extra
+/api/epg/mapping
+/api/epg/mappings
+/api/epg/match-report
+/api/epg/programmes/
+/api/epg/regenerate
+/api/epg/search
+/api/epg/source-channels/
+/api/epg/status
+/api/epg/suggest/
+/api/epg/viewer-channels
+/api/list
+/api/restore
+/api/schedule/download/
+/dash_timeshift/
+/dash-timeshift/status
+/dash/
+/dash/status
+/dash/tracks/
+/epg
+/epg.html
+/epg.xml
+/epg.xml.gz
+/epg/api
+/epg/cron-preview
+/epg/extra
+/epg/mapping
+/epg/mappings
+/epg/match-report
+/epg/programmes/
+/epg/refresh
+/epg/regenerate
+/epg/script
+/epg/script-delete
+/epg/scripts
+/epg/source-channels/
+/epg/source-channels/__all__
+/epg/status
+/epg/suggest/
+/epg/translate/clear
+/epg/translate/models
+/epg/translate/mtran/test
+/epg/translate/probe
+/epg/translate/run
+/epg/translate/status
+/epg/tz-preview/
+/logo
+/logo/
+/logo/animate
+/logo/api/list
+/logo/apply
+/logo/delete
+/logo/list
+/logo/match-report
+/logo/rename
+/logo/restore
+/logo/suggest
+/logo/upload
+/logo/x.webp
+/logout
+/panel
+/panel/api
+/panel/api/backup
+/panel/api/epg
+/panel/api/epg/extra
+/panel/api/epg/mapping
+/panel/api/epg/mappings
+/panel/api/epg/match-report
+/panel/api/epg/programmes/
+/panel/api/epg/regenerate
+/panel/api/epg/search
+/panel/api/epg/source-channels/
+/panel/api/epg/status
+/panel/api/epg/suggest/
+/panel/api/epg/viewer-channels
+/panel/api/restore
+/panel/api/schedule/download/
+/panel/epg
+/status
+/status/metrics
+/subs/groups
+/subs/preview
+/subs/status
+/unban
+/unban/whoami
+
+## i18n languages
+'en' 'ja' 'ko' 'ru' 'zh-CN' 'zh-TW' 'zh' 
