@@ -23,6 +23,7 @@ docs/findings/
 | --- | --- | --- | --- | --- | --- | --- |
 | F-001 | 样本加壳与工具链判定（UPX 4.24 / Rust 1.98.1，v0.8.2） | 静态 | 观测 | S-ENV-02, S-ENV-07, S-ENV-08, S-EP-09, S-CFG-04 | 2026-10-15 | [`static/01-sample-packing-and-toolchain.md`](static/01-sample-packing-and-toolchain.md) |
 | F-002 | 版本判定：v0.8.2 = `d302316fb8`；main = v0.8.8 | 静态 | 观测 | S-ENV-01 | 2026-10-15 | [`static/01-sample-packing-and-toolchain.md`](static/01-sample-packing-and-toolchain.md) §5 |
+| F-003 | 内嵌面板前端与 HTTP 接口表面 | 静态 | 观测 | S-MODE-01, S-DIS-01, S-DIS-11, S-EP-07/08, S-AUTH-01, S-CFG-04 | 2026-10-16 | [`static/02-embedded-panel-frontend.md`](static/02-embedded-panel-frontend.md) |
 
 > 每完成一篇发现，在此登记一行；`关联规格 ID` 指向
 > [`../spec/08-target-spec.md`](../spec/08-target-spec.md) 的 `S-*` 条目。

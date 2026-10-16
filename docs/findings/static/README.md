@@ -12,10 +12,10 @@
 | S1 | 目标指纹与 ELF 结构 | `file` + 容器内 `readelf` | S-ENV-* | ✅ [`01`](01-sample-packing-and-toolchain.md) |
 | S2 | 加壳与脱壳 | UPX 特征 + `upx -d` | S-ENV-08 | ✅ [`01`](01-sample-packing-and-toolchain.md) |
 | S3 | 语言/工具链判定（Rust） | `strings` 符号/元数据 | S-ENV-07 | ✅ [`01`](01-sample-packing-and-toolchain.md) |
-| S4 | 字符串与端点定位 | `strings` 字面量（静态） | S-EP-* | 🔶 部分（存在性） |
+| S4 | 字符串与端点定位 | `strings` + 内嵌面板雕刻 | S-EP-* | ✅ [`02`](02-embedded-panel-frontend.md) |
 | S5 | 配置键与默认值 | 字符串/数据段 | S-CFG-* | 🔶 键名✅/默认值⏳ |
 | S6 | 关键流程反编译 | REA + Hopper 伪代码 | S-MODE-* / S-DIS-* | ⏳ |
-| S7 | 内嵌面板前端恢复 | 提取 HTML/CSS/JS | S-EP-* | ⏳ |
+| S7 | 内嵌面板前端恢复 | 雕刻 `.rodata` HTML | S-EP-* | ✅ [`02`](02-embedded-panel-frontend.md) |
 
 > REA `inspect_binary_layout` 本机**不可用**（provider `pwntools-elf` 仅支持 Linux x64 且未安装），
 > 故 ELF 结构改用容器内 `readelf`。`inspect_go_binary` 已用（未发现 Go 元数据）。

@@ -45,6 +45,10 @@
 | S-EP-09 | 多 VPS 数据分享端点 `POST /api/share/pull`（同步 token/封禁；基线路径待确认→已确认） | D-panel/二进制 | ⏳路径✅ |
 | S-EP-10 | 健康检查：`GET /health`（安装脚本用于就绪探测） | 安装脚本 | ⏳ |
 | S-EP-11 | 运维 API：`/api/reload`、`/api/backup`、`/api/restore`、`/whoami` | 二进制 | ⏳ |
+| S-EP-12 | 面板接口前缀 `/panel/api/…`（备份/恢复、EPG 全套） | 二进制 | ⏳ |
+| S-EP-13 | EPG 翻译接口 `/epg/translate/{run,status,clear,probe,models,mtran/test}` | 二进制 | ⏳ |
+| S-EP-14 | DASH 接口 `/dash/…`、`/dash-timeshift/status` | 二进制 | ⏳ |
+| S-EP-15 | 解封辅助 `/unban/whoami` | 二进制 | ⏳ |
 
 ## 3. 播放地址与扩展名规则
 
