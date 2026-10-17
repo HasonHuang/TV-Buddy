@@ -1,0 +1,13 @@
+## GET /logo/<file> (S-EP-06)  -- files served from cache/logos/
+-- existing (cache/logos/rea-test.png):
+  HTTP/1.1 200 OK
+  content-type: image/png
+  cache-control: public, max-age=86400
+-- missing:
+  code=404
+
+## panel logo APIs (from carved panel.html)
+  /panel/api/logo/{list,apply,delete,rename,restore,suggest,animate,match-report}
+
+## [logo] defaults
+  {'public_enabled': True, 'max_bytes': 2097152, 'anim_frame_ms': 80, 'max_size': 512, 'quality': 80, 'convert_default': True}

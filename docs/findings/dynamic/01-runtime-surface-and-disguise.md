@@ -50,7 +50,8 @@
 | `GET /unban/whoami` | 200 `application/json` | 辅助接口 |
 | `GET /status` | **404** | **无此路由**（≠ 基线写法） |
 | `GET /status/metrics` | 302 | 被当作 `/{gid}/{cid}` → 未知频道 |
-| `GET /epg`、`/epg.xml`、`/epg.xml.gz` | **404** | EPG 关闭 → 全 404（**S-EP-05 行为实证**） |
+| `GET /epg`、`/epg.xml`、`/epg.xml.gz` | **404**（EPG 关） | 关闭时全 404（**S-EP-05 行为实证**）；开启后 200，见 [`05`](05-epg.md) |
+| `GET /logo/<file>` | **200** `image/png`，`public, max-age=86400`（缺→**404**） | 台标，取自 `cache/logos/`（**S-EP-06 ✅**） |
 | `GET /playlist.m3u` | 200 `application/x-mpegurl` | 空总订阅 |
 | `GET /{gid}/{cid}`（未知） | **302** | 到占位视频（见 §5.4） |
 | `GET /panel/api/*`（无 token） | **401** `application/json` | 需认证 |
