@@ -54,11 +54,12 @@
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-URL-01 | 播放地址扩展名由**后端**计算（`/status.entry_exts`），前端只查表：HLS→`.m3u8`，MPEG-DASH→`.mpd`，**开启切片伪装→`.txt`** | D-panel | ⏳ |
+| S-URL-01 | 播放地址扩展名由**后端**计算（`/status.entry_exts`），前端只查表：HLS→`.m3u8`，MPEG-DASH→`.mpd`，**开启切片伪装→`.txt`** | D-panel | 🔶【观测】入口=按 `format`（`.m3u8`/`.mpd`）；`.txt` 用于**媒体清单** `…/video/index.txt`，非入口 |
 | S-URL-02 | **Passthrough 例外**：播放地址直接是上游原始 URL，不走 `/{gid}/{cid}` 路由 | D-panel | ⏳ |
 | S-URL-03 | 订阅地址含分组 ID：`http://host:19899/<gid>/playlist.m3u`；改分组 ID 使旧地址失效 | D-fields | ⏳ |
 | S-URL-04 | 开启 Token 后，**导出** M3U 自动附加 token；手工拼地址需自带 token | D-panel | ⏳ |
 | S-URL-05 | 回看时间戳 `yyyyMMddHHmmss`，**使用本地时间**（依赖 `timezone_offset_hours`） | D-panel | ⏳ |
+| S-URL-06 | 播放 token 参数名为 `token`（`?t=` 无效）；面板 Bearer token 不适用于播放 | 二进制 | ✅ |
 
 ## 4. 六种工作模式
 
@@ -123,13 +124,13 @@
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-AUTH-01 | 面板密码在配置中存 **SHA-256**（明文不落盘）；改密码后旧会话立即失效 | RM/D-panel | ⏳ |
-| S-AUTH-02 | Token 验证：开启后所有播放地址需带 token；**随机频道 ID**（6 位）替换真实 ID，与 Token 同步轮转 | D-panel | ⏳ |
-| S-AUTH-03 | Token 有效期（小时）可配；失效跳转可指向自定义提示页 | D-panel | ⏳ |
-| S-AUTH-04 | IP 管控：每 IP 并发会话数、会话超时、频率限制与封禁、白名单；**仅监控播放列表请求** | D-panel | ⏳ |
+| S-AUTH-01 | 面板密码在配置中存 **SHA-256**（明文不落盘）；改密码后旧会话立即失效 | RM/D-panel | ✅【观测】`password_sha256`；SHA-256("admin") |
+| S-AUTH-02 | Token 验证：开启后所有播放地址需带 token；**随机频道 ID**（6 位）替换真实 ID，与 Token 同步轮转 | D-panel | 🔶【观测】入口需 `?token=`；**随机频道 ID 未观测**（入口路径/切片前缀不变） |
+| S-AUTH-03 | Token 有效期（小时）可配；失效跳转可指向自定义提示页 | D-panel | ✅【观测】`token_ttl_hours=24`；失效→`token_failure_url` |
+| S-AUTH-04 | IP 管控：每 IP 并发会话数、会话超时、频率限制与封禁、白名单；**仅监控播放列表请求** | D-panel | 🔶 开启后 45+60 次突发未触发；触发条件未定 |
 | S-AUTH-05 | 访问范围：公开 / 隐藏（不进总订阅，独立地址可播）/ 归档（整组停用，EPG+台标照常匹配）/ 免验证（跳过 Token） | D-fields | ⏳ |
 | S-AUTH-06 | 多 VPS 数据分享：共享 token 与封禁 IP；可开关"同时分享 token" | D-panel | ⏳ |
-| S-AUTH-07 | 自助解封 `/unban` 无需登录，每月限 3 次 | D-panel | ⏳ |
+| S-AUTH-07 | 自助解封 `/unban` 无需登录，每月限 3 次 | D-panel | 🔶【观测】`/unban` 无需登录 200；每月 3 次未验 |
 | S-AUTH-08 | `iptv-proxy pass <密码> [账号]` 可直接改密码（无需进面板）；改端口/密码均改 `config.toml` 并重启 | RM/D-panel | ⏳ |
 
 ## 8. EPG / 台标 / 录制 / 回看
@@ -164,6 +165,7 @@
 | S-DIS-13 | 切片 `Content-Type` 由后缀映射（图片→图片类型；其余→`video/mp2t`） | 二进制 | ✅ |
 | S-DIS-14 | 频道入口清单以 `text/plain` 下发（`[cache.disguise].playlist=true`） | 二进制 | ✅ |
 | S-DIS-15 | 未知/无效切片 ID → 302 到 `server.not_found_url` | 二进制 | ✅ |
+| S-DIS-16 | 切片（段）**不受** `token_enabled` 保护；安全性依赖不可猜测的切片 ID | 二进制 | ✅ |
 
 ## 10. 缓存
 

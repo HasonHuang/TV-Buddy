@@ -86,6 +86,10 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-CFG-02 | 配置热重载监视 | 启动日志：热重载监视已启动 | ✅ |
 | S-CFG-04 | 顶层键与默认值 | `GET /panel/api/config` 全量（见 raw） | ✅ |
 | S-AUTH-01 | 密码存 SHA-256，明文不落盘 | 登录 `admin` 成功；配置中 `password_sha256` 已屏蔽 | ✅ |
+| S-AUTH-02 | Token 开启后播放需 token | 入口需 `?token=<48hex>`；无/错 token → 302 `token_failure_url` | ✅ |
+| S-AUTH-03 | Token 有效期可配、失效跳转可配 | `token_ttl_hours=24`；日志「新 Token 有效期 24 小时」 | ✅ |
+| S-DIS-16 | **切片不受 token 保护** | 无 token 取切片 → 200 | ✅ |
+| S-URL-06 | 播放 token 参数名为 `token`，面板 Bearer 不适用 | `?t=` → 302；Bearer → 302 | ✅ |
 | S-MODE-01 | 六种模式 | 面板 `<select id="mg-mode">` 六个 `<option>` | ✅ |
 | S-MODE-02 | 模式属于分组 | `PUT /panel/api/groups/{id}` `{"mode":…}` 改变全组行为 | ✅ |
 | S-MODE-08 | Redirect=302 直连；缓存上游地址 300s | 302 `location=上游`；`cache/m3u8/redirect_url_…` TTL=300 | ✅ |
