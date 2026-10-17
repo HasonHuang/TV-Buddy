@@ -1,0 +1,25 @@
+## slice Cache-Control lifecycle (group gslow4, upstream delay 0.3s, mode=proxy)
+## procedure: delete cached playlist+mapping+bytes FILES (keep dirs) -> GET entry -> GET slice
+--- trial 1 url=http://127.0.0.1:19899/gslow4/s4/7b9747e528b8fa47_d29ed86d790ae01be395b2348c71ae8f.png
+  first  (fresh fill -> expect public ): cache-control: public, max-age=300
+  second (cached     -> expect private): cache-control: private, max-age=300
+  third  (cached     -> expect private): cache-control: private, max-age=300
+--- trial 2 url=http://127.0.0.1:19899/gslow4/s4/7b9747e528b8fa47_d29ed86d790ae01be395b2348c71ae8f.png
+  first  (fresh fill -> expect public ): cache-control: public, max-age=300
+  second (cached     -> expect private): cache-control: private, max-age=300
+  third  (cached     -> expect private): cache-control: private, max-age=300
+--- trial 3 url=http://127.0.0.1:19899/gslow4/s4/7b9747e528b8fa47_d29ed86d790ae01be395b2348c71ae8f.png
+  first  (fresh fill -> expect public ): cache-control: public, max-age=300
+  second (cached     -> expect private): cache-control: private, max-age=300
+  third  (cached     -> expect private): cache-control: private, max-age=300
+
+## entry playlist headers
+HTTP/1.1 200 OK
+content-type: text/plain; charset=utf-8
+cache-control: public, max-age=5, s-maxage=5
+
+## seg_url mapping (id -> upstream url)
+  7b9747e528b8fa47_d29__60b17de30dcac9455d82096b7f0fa96d = http://host.docker.internal:9998/seg0.ts
+  ea8680a1b61c17e4_fdd__c72658c036f3508ecbafbad5570c936a = http://host.docker.internal:9999/seg1.ts
+  ea8680a1b61c17e4_e4b__429e6e7fadd605425410f8fd9369a5d1 = http://host.docker.internal:9999/seg0.ts
+  7b9747e528b8fa47_061__0a2245cf363484c4d2f276414c31ce5a = http://host.docker.internal:9998/seg1.ts

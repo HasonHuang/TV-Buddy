@@ -93,6 +93,10 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-MODE-11 | Passthrough 原样导出上游 URL | 302 `location=上游` | ✅ |
 | S-MODE-05 | Remux 源容器自动识别 | 日志 `【remux】自动识别容器: Ts` | 🔶 部分 |
 | S-MODE-06 | Dash MPD→HLS、片段级容错 | 解析 MPD 轨道 `video_360p`、取 `init.mp4`→404、失败清缓存 | 🔶 部分 |
+| S-DIS-06 | 切片刚写入短暂 `public`，之后 `private`（均 `max-age=300`） | 人为延迟上游：首写 `public, max-age=300`；命中 `private, max-age=300`（3 次复现） | ✅ |
+| S-DIS-07 | 切片忽略 `Range`，返回 200 全量，无 `Accept-Ranges`/`ETag` | `Range: bytes=100-199` → `200`、`content-length: 1880`、无 `Content-Range` | ✅ |
+| S-DIS-10 | 媒体清单伪装为 `.../video/index.txt`；主清单入口仍 `.m3u8` | master 上游 → 主清单 `.m3u8`（`no-cache`），媒体清单 `video/index.txt`（`text/plain`） | ✅ |
+| S-DIS-14 | 入口/媒体清单以 `text/plain` 下发 | 见上 | ✅ |
 
 ## 3. 差异登记
 

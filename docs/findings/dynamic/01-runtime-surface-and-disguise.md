@@ -156,6 +156,21 @@ http://127.0.0.1:19899/test1/c1/ea8680a1b61c17e4_4528cb59b78721cf5cba897d6b744f0
 | 切片 | 由后缀映射 | `private, max-age=300` |
 | 分组订阅 `.m3u` | `application/x-mpegurl` + `Content-Disposition` | — |
 
+### 5.6 主清单 / 媒体清单伪装（S-DIS-10 ✅）
+
+上游为 **master**（`#EXT-X-STREAM-INF` → 变体）时，实测：
+
+| 资源 | 路径 | `Content-Type` | `Cache-Control` |
+| --- | --- | --- | --- |
+| 主清单 | `/{gid}/{cid}.m3u8` | `application/vnd.apple.mpegurl` | `no-cache, no-store` |
+| 媒体清单 | `/{gid}/{cid}/video/index.txt` | `text/plain; charset=utf-8` | `public, max-age=5, s-maxage=5` |
+| 切片 | `/{gid}/{cid}/<16hex>_<32hex>.<ext>` | 由后缀映射 | 首写 `public`→命中 `private` |
+
+- 媒体清单**伪装为 `video/index.txt`**，入口/主清单仍为 `.m3u8` → 与 `[cache.disguise]` 默认（`playlist=true`、`master=false`）一致。
+- 主清单被重写并**规范化**（追加 `#EXT-X-INDEPENDENT-SEGMENTS`、升到 `#EXT-X-VERSION:6`）。
+- 媒体清单**无 `#EXT-X-MAP`**（本例上游无）。
+- 上游为**媒体清单**（无 master）时，入口 `/{gid}/{cid}.m3u8` 即媒体清单，`text/plain`（见 §5.1）。
+
 ## 6. 缓存与预取（实测）
 
 - 上游 3 个切片，目标只预取 **2 个**（`seg0`、`seg1`）→ 与 `[cache.prefetch].skip_tail = 1`（默认跳过尾切片）一致。【推断】
