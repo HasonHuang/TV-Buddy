@@ -107,6 +107,11 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-EPG-02 | 时间裁剪：早于 `keep_days`、晚于 `future_days` 丢弃 | 10 天前/5 天后丢弃；今天未来保留 | ✅ |
 | S-EPG-03 | 缺 `xml:lang` 补 `lang="zh"`；显式 lang 保留 | 缺→`zh`；`lang="en"` 保留 | ✅ |
 | S-EP-06 | 台标 `GET /logo/<file>` 公开可读 | 200 `image/png`、`public, max-age=86400`；缺→404 | ✅ |
+| S-AUTH-05 | 分组访问范围四档 | hidden→不进总订阅可直连；archived→分组订阅 404/播放 302、EPG 照常；open→免 token 且也不进总订阅 | ✅ |
+| S-URL-03 | 订阅地址含分组 ID | `/{gid}/playlist.m3u` 200，`filename="<gid>.m3u"` | ✅ |
+| S-URL-04 | Token 开启后导出 M3U 自动附加 token | public 条目 `?token=<48hex>`；open 组条目不带 | ✅ |
+| S-URL-07 | `server.m3u_header_lines` 自定义 M3U 头 | 自定义行附加于 `#EXTM3U` 后，热重载+重启持久 | ✅ |
+| S-CFG-02 | 配置热重载监视 | `[server]`/`[auth]` 文件直改即时生效；`[epg]` 例外；文件直改与面板保存有竞态 | ✅ |
 
 ## 3. 差异登记
 

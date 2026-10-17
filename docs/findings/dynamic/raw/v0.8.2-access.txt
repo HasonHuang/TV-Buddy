@@ -1,0 +1,27 @@
+## D13 入口清单改写/访问范围（v0.8.2, 2026-10-17）
+
+### 订阅响应头（/playlist.m3u 与 /test1/playlist.m3u）
+  HTTP/1.1 200 OK
+  content-type: application/x-mpegurl; charset=utf-8
+  content-disposition: attachment; filename="playlist.m3u"
+  content-disposition: attachment; filename="test1.m3u"
+
+### access 矩阵（PUT /panel/api/groups/test1 {access}）
+hidden : 总订阅含 test1 条目=0（g2=1 仍在）；/test1/playlist.m3u=200；/test1/c1.m3u8=200 可播
+archived: 总订阅=0；/test1/playlist.m3u=404；/test1/c1.m3u8=302(占位)；epg.xml 仍含 channel=c1 节目
+open   : /test1/c1.m3u8 无 token=200；g2(public) 无 token=302、+token=200
+
+### open 组 + token_enabled=true 的 token 形态
+总订阅不含 test1；/test1/playlist.m3u 条目无 ?token=（对比 g2 条目带 ?token=）：
+  http://127.0.0.1:19899/test1/c1.m3u8
+  #EXTINF:-1 tvg-id="c2" tvg-name="C2" tvg-logo="" group-title="test1",C2
+  http://127.0.0.1:19899/g2/c1.m3u8?token=0afb148fe4cb540d47d9790f4edf1d4ff937f9400d13329b
+
+### server.m3u_header_lines（自定义 M3U 头行）
+  #EXTM3U x-tvg-url="http://127.0.0.1:19899/epg.xml.gz"
+  #EXTVLCOPT:http-user-agent=ReaTest/1.0
+  #EXT-X-VERIFY:rea
+  （热重载生效，重启后仍在；追加在 #EXTM3U 行之后；总/分组订阅均生效）
+
+### EPG 开启时的自动头 x-tvg-url
+  #EXTM3U x-tvg-url="http://127.0.0.1:19899/epg.xml.gz"

@@ -29,6 +29,7 @@ docs/findings/
 | F-006 | 缓存布局与切片缓存窗口（首写 public→命中 private，max-age=300） | 动态 | 观测 | S-DIS-06/07, S-MODE-13/14 | 2026-10-17 | [`dynamic/03-cache-layout-and-window.md`](dynamic/03-cache-layout-and-window.md) |
 | F-007 | 播放 Token 与安全护栏（入口需 `?token=`，切片不受保护） | 动态 | 观测 | S-AUTH-01/02/03, S-DIS-16, S-URL-06 | 2026-10-17 | [`dynamic/04-auth-token-and-guards.md`](dynamic/04-auth-token-and-guards.md) |
 | F-008 | EPG 采集与下发（`/epg.xml[.gz]`、`/epg`；时间裁剪、`lang` 处理） | 动态 | 观测 | S-EP-05/06/12/13 | 2026-10-17 | [`dynamic/05-epg.md`](dynamic/05-epg.md) |
+| F-009 | 入口清单改写与分组访问范围（access 四档、m3u_header_lines、配置原子保存） | 动态 | 观测 | S-AUTH-05, S-URL-03/04/07, S-CFG-01/02, S-EPG-01 | 2026-10-17 | [`dynamic/06-entry-playlist-and-access.md`](dynamic/06-entry-playlist-and-access.md) |
 
 > 每完成一篇发现，在此登记一行；`关联规格 ID` 指向
 > [`../spec/08-target-spec.md`](../spec/08-target-spec.md) 的 `S-*` 条目。
