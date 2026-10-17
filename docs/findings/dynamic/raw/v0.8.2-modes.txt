@@ -1,0 +1,115 @@
+################ group=test1 channel=c1 mode=proxy ################
+--- proxy: entry response (headers) ---
+HTTP/1.1 200 OK
+content-type: text/plain; charset=utf-8
+cache-control: public, max-age=5, s-maxage=5
+vary: origin, access-control-request-method, access-control-request-headers
+vary: accept-encoding
+access-control-allow-origin: *
+access-control-expose-headers: *
+transfer-encoding: chunked
+--- proxy: entry body (head 220) ---
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:5
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:5.0,
+http://127.0.0.1:19899/test1/c1/ea8680a1b61c17e4_e4b50304d62739a7b6df027f7cfc3155.jpg
+#EXTINF:5.0,
+http://127.0.0.1:19899/test1/c1/ea8
+
+################ group=test1 channel=c1 mode=redirect ################
+--- redirect: entry response (headers) ---
+HTTP/1.1 302 Found
+location: http://host.docker.internal:9999/x.m3u8
+vary: origin, access-control-request-method, access-control-request-headers
+vary: accept-encoding
+access-control-allow-origin: *
+access-control-expose-headers: *
+transfer-encoding: chunked
+date: Sat, 17 Oct 2026 04:02:05 GMT
+--- redirect: entry body (head 220) ---
+
+
+################ group=test1 channel=c1 mode=rewrite ################
+--- rewrite: entry response (headers) ---
+HTTP/1.1 200 OK
+content-type: text/plain; charset=utf-8
+cache-control: no-cache, must-revalidate
+vary: origin, access-control-request-method, access-control-request-headers
+vary: accept-encoding
+access-control-allow-origin: *
+access-control-expose-headers: *
+transfer-encoding: chunked
+--- rewrite: entry body (head 220) ---
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:5
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:5.0,
+http://host.docker.internal:9999/seg0.ts
+#EXTINF:5.0,
+http://host.docker.internal:9999/seg1.ts
+#EXTINF:5.0,
+http://host.docker.interna
+
+################ group=test1 channel=c1 mode=passthrough ################
+--- passthrough: entry response (headers) ---
+HTTP/1.1 302 Found
+location: http://host.docker.internal:9999/x.m3u8
+vary: origin, access-control-request-method, access-control-request-headers
+vary: accept-encoding
+access-control-allow-origin: *
+access-control-expose-headers: *
+transfer-encoding: chunked
+date: Sat, 17 Oct 2026 04:02:06 GMT
+--- passthrough: entry body (head 220) ---
+
+
+################ group=gdash channel=v mode=dash ################
+--- dash: entry response (headers) ---
+--- dash: entry body (head 220) ---
+
+
+################ group=gremux channel=r mode=remux ################
+--- remux: entry response (headers) ---
+--- remux: entry body (head 220) ---
+
+
+################ redirect_url cache ################
+redirect_url_test1_c__52f8bfaa09d0ba6b35b671bdb75238ed
+redirect_url_test1_c__52f8bfaa09d0ba6b35b671bdb75238ed.meta
+rw_test1_c1__a6a039ae1237cd8302f2a1c7f56deca7
+rw_test1_c1__a6a039ae1237cd8302f2a1c7f56deca7.meta
+test1_c1__adcfd0a409ee1746dd5acd560fa793ae
+test1_c1__adcfd0a409ee1746dd5acd560fa793ae.meta
+--- samples/work/dyn-v0.8.2/cache/m3u8/redirect_url_test1_c__52f8bfaa09d0ba6b35b671bdb75238ed ---
+http://host.docker.internal:9999/x.m3u8
+--- samples/work/dyn-v0.8.2/cache/m3u8/redirect_url_test1_c__52f8bfaa09d0ba6b35b671bdb75238ed.meta ---
+{"ttl_secs":300,"created_at":1792209490}
+################ remux log lines ################
+   5 10-17 12:02:18  INFO 【remux】自动识别容器: Ts
+   5 10-17 12:02:19  INFO 【remux】自动识别容器: Ts
+   5 10-17 12:02:20  INFO 【remux】自动识别容器: Ts
+   4 10-17 12:02:21  INFO 【remux】自动识别容器: Ts
+   2 10-17 12:02:22  INFO 【remux】自动识别容器: Ts
+################ dash / remux (retry, longer timeout) ################
+--- gdash/v.m3u8 (max-time 25) ---
+  [body] 
+--- gremux/r.m3u8 (max-time 8) ---
+  [body] 
+################ dash/remux log lines (from iptv-proxy.log) ################
+1343 INFO 【remux】自动识别容器: Ts
+  19 WARN 【DASH】切片失败(含音频) → 视为 MPD 失效,清空缓存让下一轮强制重新拉 stream=gdash_v failed=1 total=1 failed_audio=0 total_audio=0
+  19 WARN 【DASH】轨道下载失败,跳过 stream=gdash_v track=video_360p error=Segment fetch failed: init: Segment fetch failed: HTTP 404 Not Found http://host.docker.internal:9999/init.mp4
+  19 WARN 【DASH】常驻频道连续失败,停止(看门狗将在 60s 内重建) stream=gdash_v fails=1
+   5 WARN 【DASH】主播放列表 30s 内未就绪 stream=gdash_v
+   2 WARN 【看门狗】常驻频道卡死/停止,销毁重建 stream=gdash_v attempt=3 stalled_secs=0
+   2 WARN 【看门狗】常驻频道卡死/停止,销毁重建 stream=gdash_v attempt=2 stalled_secs=0
+   2 WARN 【看门狗】常驻频道卡死/停止,销毁重建 stream=gdash_v attempt=1 stalled_secs=0
+   2 INFO 【remux】启动会话 gremuxr 容器=Auto url=http://host.docker.internal:9999/live.ts
+   1 WARN 【看门狗】连续重建仍未恢复,转入冷却,到点后自动再试 stream=gdash_v fails=5 cooldown_secs=3600
+   1 WARN 【看门狗】常驻频道卡死/停止,销毁重建 stream=gdash_v attempt=5 stalled_secs=0
+   1 WARN 【看门狗】常驻频道卡死/停止,销毁重建 stream=gdash_v attempt=4 stalled_secs=0
+
+################ m3u8 cache keys per mode ################

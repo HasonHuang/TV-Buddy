@@ -86,6 +86,13 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-CFG-02 | 配置热重载监视 | 启动日志：热重载监视已启动 | ✅ |
 | S-CFG-04 | 顶层键与默认值 | `GET /panel/api/config` 全量（见 raw） | ✅ |
 | S-AUTH-01 | 密码存 SHA-256，明文不落盘 | 登录 `admin` 成功；配置中 `password_sha256` 已屏蔽 | ✅ |
+| S-MODE-01 | 六种模式 | 面板 `<select id="mg-mode">` 六个 `<option>` | ✅ |
+| S-MODE-02 | 模式属于分组 | `PUT /panel/api/groups/{id}` `{"mode":…}` 改变全组行为 | ✅ |
+| S-MODE-08 | Redirect=302 直连；缓存上游地址 300s | 302 `location=上游`；`cache/m3u8/redirect_url_…` TTL=300 | ✅ |
+| S-MODE-09 | Rewrite=取一次清单、相对改绝对 | 200 `text/plain`，切片=上游绝对 URL，客户端直连 | ✅ |
+| S-MODE-11 | Passthrough 原样导出上游 URL | 302 `location=上游` | ✅ |
+| S-MODE-05 | Remux 源容器自动识别 | 日志 `【remux】自动识别容器: Ts` | 🔶 部分 |
+| S-MODE-06 | Dash MPD→HLS、片段级容错 | 解析 MPD 轨道 `video_360p`、取 `init.mp4`→404、失败清缓存 | 🔶 部分 |
 
 ## 3. 差异登记
 

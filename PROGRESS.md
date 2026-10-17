@@ -56,7 +56,7 @@
 | D4 版本运行时确认 | ✅ | `/panel/api/status` → `"version":"0.8.2"` |
 | D5 完整配置 schema | ✅ | `/panel/api/config` 全量（默认值）；见 `findings/dynamic/raw/v0.8.2-config.json` |
 | D6 分组/频道与伪装 | ✅ | 分组 `POST /panel/api/groups {id}`；频道 `POST /panel/api/groups/{gid}/channels`；`PUT …/channels/{cid}` |
-| D7 六模式行为 | ⏳ | 待做 |
+| D7 六模式行为 | ✅ | proxy/redirect/rewrite/passthrough 实测；dash/remux 失败路径+看门狗；见 F-005 |
 | D8 切片伪装字节级 | 🔶 | **后缀已破解**：`sha256(上游切片绝对URL)[:32]`；16-hex 频道前缀未解 |
 | D9 缓存窗口 | 🔶 | 响应头已测（入口 `public,max-age=5`；切片 `private,max-age=300`）；时序未测 |
 | D10 录制/EPG/台标 | ⏳ | 待做（需 ffmpeg） |
@@ -81,18 +81,22 @@
 8. **切片伪装（实测）**：切片 URL `/{gid}/{cid}/<16hex>_<32hex>.<ext>`；
    **`<32hex> = sha256(上游切片绝对 URL) 前 32 位**（已复现）；`<16hex>` 每频道固定（推导未解）。
    后缀**不校验**（换任意后缀字节相同）；`Content-Type` 由后缀映射。
+9. **六种模式**（面板 `mg-mode`）：`proxy`/`remux`/`redirect`/`rewrite`/`dash`/`passthrough`（README 只写四种）。
+   `redirect`、`passthrough` → **302 直连上游**；`rewrite` → 清单**绝对化**、客户端直连；
+   `proxy` → 反代+伪装切片。模式属**分组**级。`redirect` 缓存上游地址（TTL 300s）。
+10. `dash` 主清单就绪超时 **30s**；`remux` 预热期 `503 Retry-After:2`；看门狗失败重建、**连续 5 次→冷却 3600s**。
 
 ## 3. 当前状态与下一步
 
 - 容器 `iptv82` **运行中**（`samples/work/dyn-v0.8.2`）；宿主假源 `python3 -m http.server 9999`
   于 `samples/work/origin`（**注意**：后台进程，重启终端后需重开）。
-- 已建：分组 `test1`（`mode=proxy`，伪装开）+ 频道 `c1`/`c2`。
+- 已建：分组 `test1`（proxy）、`g2`、`gdash`（dash）、`gremux`（remux）；频道 `c1`/`c2`（HLS 上游）、`v`（MPD）、`r`（TS）。
 - **下一步**：
-  1. 破解 16-hex 频道前缀（换更多 `(gid,cid)` 样例 / 反编译）。
-  2. D7 六种模式行为实测。
-  3. D9 缓存窗口时序采样。
-  4. S7 关键函数反编译（Hopper/REA）定位前缀哈希与伪装实现。
-  5. D10 录制/EPG/台标（需装 ffmpeg）。
+  1. 破解 16-hex 频道前缀（已排除 sha256/md5/sha1/sha3/blake2/3/xxh/mmh3/siphash13-24/seahash 常见串）→ 需 **S7 反编译**。
+  2. D9 缓存窗口时序采样（`public→private`）。
+  3. D6 Token / 随机频道 ID / IP 管控。
+  4. D10 录制/EPG/台标（需装 ffmpeg）。
+  5. 用真实媒体源复测 dash/remux 成功路径。
 
 ## 4. 进度日志
 
@@ -103,4 +107,5 @@
 | 2026-10-15 | 版本判定（v0.8.2 vs v0.8.8）；重登记指纹 | ✅ `c938fbd`（F-002） |
 | 2026-10-16 | 内嵌面板雕刻 + 接口表面 | ✅ `5d94435`（F-003） |
 | 2026-10-16 | 动态：启动、端点、认证、配置 schema、版本确认 | ✅ 见 `findings/dynamic/` |
-| 2026-10-16 | 动态：建组/建频道；**切片伪装后缀破解**（sha256） | ✅（F-004） |
+| 2026-10-16 | 动态：建组/建频道；**切片伪装后缀破解**（sha256） | ✅（F-004）`54a5b9f` |
+| 2026-10-17 | 动态：**六种模式 + 看门狗**；前缀推导仍未解 | ✅（F-005） |
