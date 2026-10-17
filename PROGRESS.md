@@ -97,11 +97,8 @@
 - 容器 `iptv82` **运行中**（`samples/work/dyn-v0.8.2`）；宿主假源 `python3 -m http.server 9999`
   于 `samples/work/origin`（**注意**：后台进程，重启终端后需重开）。
 - 已建：分组 `test1`（proxy）、`g2`、`gdash`（dash）、`gremux`（remux）；频道 `c1`/`c2`（HLS 上游）、`v`（MPD）、`r`（TS）。
-- **下一步**：
-  1. 破解 16-hex 频道前缀（已排除 sha256/md5/sha1/sha3/blake2/3/xxh/mmh3/siphash13-24/seahash 常见串）→ 需 **S7 反编译**。
-  2. D10b 录制/台标（需装 ffmpeg）。
-  3. 用真实媒体源复测 dash/remux 成功路径；回看（timeshift）。
-  4. 深挖 `ip_guard` 触发条件与 `random_id_enabled` 作用域；EPG 匹配算法与译制。
+- **下一步**：见 **§5 功能全集路线图**（Batch 1 起）。
+- 快速遗留：16-hex 频道前缀（低影响，功能可替代）→ 归入 S7 反编译批次。
 
 ## 4. 进度日志
 
@@ -118,3 +115,69 @@
 | 2026-10-17 | 动态：**播放 Token 与护栏**（入口需 `?token=`，切片不受保护） | ✅（F-007） |
 | 2026-10-17 | 动态：**EPG 采集/下发/裁剪/lang**；严格 TOML 校验 | ✅（F-008）`14fbe5e` |
 | 2026-10-17 | 动态：**台标** `/logo/<file>`（`cache/logos/`，公开可读） | ✅（补 F-008） |
+| 2026-10-17 | 委派 agent 盘点**二进制实际功能全集**（55k 字符串+面板），产出优先级路线图 | ✅ §5 |
+
+## 5. 功能全集路线图（按优先级 · 2026-10-17）
+
+> 来源：委派子代理对**二进制产物**的全量盘点（脱壳 strings 55k 条 + 雕刻面板 `panel.html` + 配置 schema）。
+> 注：盘点证据为内嵌字符串/面板表单，路由前缀（如 `/panel/api`）以实测为准；「状态」为当前验证覆盖。
+
+### P0 · 反向代理与 302 直连核心（最高优先级）
+
+| 域 | 代表能力（二进制证据） | 状态 | 路线图项 |
+| --- | --- | --- | --- |
+| ① 反代播放 HLS（proxy/rewrite） | `/{gid}/{cid}/index.m3u8`、【代理】×44、`badge-proxy` | ✅ D7/F-004/F-005 | — |
+| ② 切片伪装 URL | `<16hex>_<32hex>.<ext>`、`invalid segment hash` | 🔶 S 已破解；P 未解（低影响） | 随 S7 |
+| ③ 切片缓存/预取 | `m3u8_max_entries`、`segment_cache_max_mb`、`prefetch.*`、`/cache/flush`、`/cache/stats` | 🔶 盘面已验；容量/淘汰/GC 未验 | **D12** |
+| ④ 302 直连 redirect | `redirect_mode`(direct/default+best 解析)、`redirect_ttl`、`redirect_url_…` 缓存 | 🔶 direct ✅；best 未触发 | **D17a** |
+| ⑤ passthrough 直链透传 | `badge-passthrough`、直链不套 token | ✅ D7 | — |
+| ⑥ Token 鉴权 | `token_enabled/ttl/rotate`、`/security/token{,/rotate}`、`/link-info` | 🔶 主体 ✅；轮换 API 未测 | **D13a** |
+| ⑦ 入口清单改写/聚合 | `m3u_header_lines`、`x-tvg-url`、`subscription-merge`、`access`(public/hidden/archived/免验证) | ⏳ | **D13** |
+| ⑧ MPD/ClearKey 反代 | `mpd_keep_seconds`、`license_key`、`#KODIPROP clearkey`、`key_manager.rs`(088) | ⏳（需 MPD 样本） | **D14** |
+| ⑨ URL 池多上游轮询 | `url_pool_size`、`pool[0..n]`、`/dash/scan-url`、`final_url` | ⏳ | **D15** |
+| ⑩ 解析器最佳画质 | `/resolver/scripts`、`resolver_script/ttl/catchup`（Python） | ⏳（容器无 python3） | **D19b** |
+
+### P1 · 中优先级（流处理与增值）
+
+| 域 | 代表能力 | 状态 | 路线图项 |
+| --- | --- | --- | --- |
+| Remux（TS/FLV/MMT） | `remux_container(auto/ts/flv/mmt)`、`libx264…aac` | 🔶 容器识别已验；成功路径未验 | **D16**（需 ffmpeg） |
+| DASH 时移/解密 | `/dash-timeshift/:track/…`、`dash_timeshift_hours/max_gb` | ⏳ | 随 D14 |
+| 回看 catchup | `playseek=`、`catchup_days`、`catchup_tpl`、本地/上游双模式 | ⏳ | **D17b** |
+| 定时录制 | 【录制】×49、`/schedule{,/from-epg,/:idx/stop}`、`recordings/` | ⏳ | **D18**（需 ffmpeg） |
+| 字幕 | `WebVTT` 转换、样式注入、`srt_ua_keywords`、`.vtt` 伪装 | ⏳ | **D19** |
+| 推流 livestream | `/livestream/:gid/:cid/start\|stop`、【推流】×35 | ⏳ | **D20** |
+| 多 CDN 容错/降级 | `consecutive_fails`、`fallback_pct`(088) | ⏳ | **D21**（假源故障注入即可） |
+| EPG 匹配/译制 | `match-report`、`mappings`、`epg_map`、gemini/mtran | ⏳ | **D22** |
+| 台标库管理 | `/logo/{suggest,match-report,apply,animate}`、`to_webp` | 🔶 端点已验 | **D23** |
+
+### P2 · 低优先级（运维与管理面）
+
+| 域 | 代表能力 | 状态 | 路线图项 |
+| --- | --- | --- | --- |
+| 面板配置/组导入导出 | `/groups/{export,import,/m3u}`、`channels/:cid/purge`(088) | ⏳ | **D24** |
+| 备份/恢复 | `/panel/api/backup?include=`、`restore`（tar/flate2） | ⏳ | **D25** |
+| 多 VPS 分享 | `share.{role,master_url,trust_ips}`、`x-ipp-master`、`/api/share/pull` | ⏳ | **D26**（需双容器） |
+| 边缘校验 | `edge_mode(off/proxy/cloudflare)`、`x-ipp-edge-secret`、观察模式 | ⏳ | **D27** |
+| 健康检查 | 【健康】、`health{interval,timeout,concurrency}` | ⏳ | **D28** |
+| IP 封禁/解封 | `/security/ip/{ban,stats,unban}`、`/unban` 每月 3 次 | 🔶（unban 200 已验） | 随 D13a |
+| 指标/资源 | `/metrics`、`requests_total`、`mem_rss_mb`；`/status/metrics` 302 之谜 | ⏳ | **D29** |
+| 资产/ffmpeg 检测 | `/assets/{convert,list,ffmpeg-status}` | ⏳ | 随 D18 |
+| EPG 公开 JSON API | `/epg/api/channels\|programmes\|search` | 🔶 仅 088，记录不测 | spec 登记 |
+
+### 执行批次
+
+- **Batch 1（无 ffmpeg 即可）**：D13 入口改写/访问范围 → D13a Token 轮换与 IP 封禁面 → D15 URL 池 → D21 多 CDN 故障注入 → D24 组导入导出 → D25 备份恢复 → D27 边缘模式 → D29 指标。
+- **Batch 2（容器装 ffmpeg）**：D18 录制 → D16 remux 成功路径 → D19 字幕 → D20 推流 → D19b 解析器（同时装 python3）。
+- **Batch 3（样本/深层静态）**：D14 MPD/ClearKey/DASH 时移 → D17ab catchup 与重定向 best → D22 EPG 匹配算法 → S7 反编译（伪装 `<P>` 生成、热重载边界）。
+
+### spec 缺口登记（盘点新发现，待补入 spec/08）
+
+1. ClearKey/DRM 完整子系统（`license_key` + KODI 注入 + 088 `key_manager.rs`/AES-GCM）
+2. `/panel/api/epg/api/*` 公开 JSON API（088）
+3. `/panel/api/dash/scan-url`（手动 URL 池扫描）
+4. `/panel/api/link-info`（播放链接/token 剩余有效期审计）
+5. 每频道独立上游代理（`proxy{kind,addr,user,pass}`）
+6. 旧数据迁移（088 清理 `./var/dash`）
+7. 订阅合并 `subscription-merge`
+8. `l1/l2` 双层限流窗口与缓存层级（hls/m3u8/sub_url/seg_url/seg_bytes）
