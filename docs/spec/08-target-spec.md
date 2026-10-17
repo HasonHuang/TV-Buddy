@@ -56,8 +56,9 @@
 | --- | --- | --- | --- |
 | S-URL-01 | 播放地址扩展名由**后端**计算（`/status.entry_exts`），前端只查表：HLS→`.m3u8`，MPEG-DASH→`.mpd`，**开启切片伪装→`.txt`** | D-panel | 🔶【观测】入口=按 `format`（`.m3u8`/`.mpd`）；`.txt` 用于**媒体清单** `…/video/index.txt`，非入口 |
 | S-URL-02 | **Passthrough 例外**：播放地址直接是上游原始 URL，不走 `/{gid}/{cid}` 路由 | D-panel | ⏳ |
-| S-URL-03 | 订阅地址含分组 ID：`http://host:19899/<gid>/playlist.m3u`；改分组 ID 使旧地址失效 | D-fields | ⏳ |
-| S-URL-04 | 开启 Token 后，**导出** M3U 自动附加 token；手工拼地址需自带 token | D-panel | ⏳ |
+| S-URL-03 | 订阅地址含分组 ID：`http://host:19899/<gid>/playlist.m3u`；改分组 ID 使旧地址失效 | D-fields | ✅【观测】分组订阅 200；filename=`<gid>.m3u`（失效分支未测） |
+| S-URL-04 | 开启 Token 后，**导出** M3U 自动附加 token；手工拼地址需自带 token | D-panel | ✅【观测】`?token=<48hex>` 附加于条目（`open` 组例外：不带） |
+| S-URL-07 | `server.m3u_header_lines` 自定义行逐行附加于 `#EXTM3U` 后；总/分组订阅均输出；热重载+重启持久 | 二进制 | ✅ |
 | S-URL-05 | 回看时间戳 `yyyyMMddHHmmss`，**使用本地时间**（依赖 `timezone_offset_hours`） | D-panel | ⏳ |
 | S-URL-06 | 播放 token 参数名为 `token`（`?t=` 无效）；面板 Bearer token 不适用于播放 | 二进制 | ✅ |
 
@@ -128,7 +129,7 @@
 | S-AUTH-02 | Token 验证：开启后所有播放地址需带 token；**随机频道 ID**（6 位）替换真实 ID，与 Token 同步轮转 | D-panel | 🔶【观测】入口需 `?token=`；**随机频道 ID 未观测**（入口路径/切片前缀不变） |
 | S-AUTH-03 | Token 有效期（小时）可配；失效跳转可指向自定义提示页 | D-panel | ✅【观测】`token_ttl_hours=24`；失效→`token_failure_url` |
 | S-AUTH-04 | IP 管控：每 IP 并发会话数、会话超时、频率限制与封禁、白名单；**仅监控播放列表请求** | D-panel | 🔶 开启后 45+60 次突发未触发；触发条件未定 |
-| S-AUTH-05 | 访问范围：公开 / 隐藏（不进总订阅，独立地址可播）/ 归档（整组停用，EPG+台标照常匹配）/ 免验证（跳过 Token） | D-fields | ⏳ |
+| S-AUTH-05 | 访问范围：公开 / 隐藏（不进总订阅，独立地址可播）/ 归档（整组停用，EPG+台标照常匹配）/ 免验证（跳过 Token） | D-fields | ✅【观测】四档全验；**open 亦被排除出总订阅**（仅直链/分组订阅可达），与基线措辞有出入 |
 | S-AUTH-06 | 多 VPS 数据分享：共享 token 与封禁 IP；可开关"同时分享 token" | D-panel | ⏳ |
 | S-AUTH-07 | 自助解封 `/unban` 无需登录，每月限 3 次 | D-panel | 🔶【观测】`/unban` 无需登录 200；每月 3 次未验 |
 | S-AUTH-08 | `iptv-proxy pass <密码> [账号]` 可直接改密码（无需进面板）；改端口/密码均改 `config.toml` 并重启 | RM/D-panel | ⏳ |
@@ -137,7 +138,7 @@
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-EPG-01 | 多源采集→匹配本机频道→生成统一 `/epg.xml.gz`；EPG 关闭时 `/epg*` 全 404 且导出 M3U 不带 `x-tvg-url` | D-panel | ⏳ |
+| S-EPG-01 | 多源采集→匹配本机频道→生成统一 `/epg.xml.gz`；EPG 关闭时 `/epg*` 全 404 且导出 M3U 不带 `x-tvg-url` | D-panel | 🔶【观测】开关 404/200 与 x-tvg-url 注入已验；多源采集已验（单源），匹配算法未解 |
 | S-EPG-02 | 采集节奏：每 4h / 每 6h / 每日 4 点 / 每日 3、5、12 点 / 每 30 分钟 | D-panel | ⏳ |
 | S-EPG-03 | 名称匹配开关（tvg-id 不匹配时按频道名再匹配一次）；脚本源需 python3 | D-panel | ⏳ |
 | S-EPG-04 | EPG 标题可翻译（Google 免费 / Gemini(Key) / MTranServer），14 种目标语言 | D-panel | ⏳ |
@@ -211,8 +212,8 @@ formats = ["jpg","png","gif","bmp","webp"]
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-CFG-01 | 面板改动最终写入 `/opt/iptv-proxy/config.toml`；文件只写最小必要项，其余走默认；保存后回写完整配置 | D-panel | ⏳ |
-| S-CFG-02 | 配置有**热重载监视**（可直接改文件生效，前提是热重载未被关闭） | D-panel | ⏳ |
+| S-CFG-01 | 面板改动最终写入 `/opt/iptv-proxy/config.toml`；文件只写最小必要项，其余走默认；保存后回写完整配置 | D-panel | 🔶【观测】面板改动经 `PUT /panel/api/config` 全量保存、规范化重写（数组多行）；容器内路径映射差异 |
+| S-CFG-02 | 配置有**热重载监视**（可直接改文件生效，前提是热重载未被关闭） | D-panel | ✅【观测】`[server]`/`[auth]` 即时生效；`[epg]` 例外（见 05 §6）；文件直改与面板保存有竞态 |
 | S-CFG-03 | 下列开关**启动时读取，改后须重启**：DASH 会话预启动、配置文件热重载监视、登录失败计数清理 | D-iptv | ⏳ |
 | S-CFG-04 | 顶层键与语义如上表（须由二进制/实测确认键名与默认值） | D-panel | ⏳ |
 
