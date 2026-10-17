@@ -1,0 +1,92 @@
+## [epg] defaults (from /panel/api/config raw) + source schema (from carved panel.html)
+epg.enabled=false cron="0 */4 * * *" keep_days=3 future_days=1 keep_yesterday=true match_by_name=true public_viewer_enabled=true
+epg source keys: id,name,kind(xml|script),enabled,url,script,output_files,cron,timeout_secs,tz_shift_mins
+
+## /panel/api/epg/status (after collect: 2 channels, 2 programmes)
+{
+    "cron": "* * * * *",
+    "cron_error": null,
+    "cron_next": [
+        1792210620,
+        1792210680,
+        1792210740
+    ],
+    "enabled": true,
+    "output": {
+        "channel_count": 2,
+        "error": null,
+        "generated_at": 1792210605,
+        "gz_bytes": 273,
+        "programme_count": 2,
+        "xml_bytes": 588
+    },
+    "public_viewer_enabled": true,
+    "python": null,
+    "sources": [
+        {
+            "channel_count": 2,
+            "cron": "",
+            "enabled": true,
+            "error": null,
+            "id": "src_local",
+            "kind": "xml",
+            "last_run": 1792210605,
+            "log_tail": "",
+            "name": "Local XMLTV",
+            "next_run": 0,
+            "ok": true,
+            "programme_count": 2,
+            "raw_bytes": 343,
+            "running": false,
+            "took_ms": 2
+        }
+    ],
+    "tz_offset_hours": 8
+}
+
+## GET /epg.xml
+  HTTP/1.1 200 OK
+  content-type: application/xml; charset=utf-8
+<?xml version="1.0" encoding="UTF-8"?>
+<tv generator-info-name="iptv-proxy">
+  <channel id="c1">
+    <display-name>C1</display-name>
+  </channel>
+  <channel id="c2">
+    <display-name>C2</display-name>
+  </channel>
+  <programme start="20261017080000 +0800" stop="20261017090000 +0800" channel="c1">
+    <title lang="zh">Morning News</title>
+    <desc lang="zh">today past</desc>
+  </programme>
+  <programme start="20261017180000 +0800" stop="20261017200000 +0800" channel="c2">
+    <title lang="en">Later Today</title>
+    <desc lang="en">kept, lang attr test</desc>
+  </programme>
+</tv>
+
+## GET /epg.xml.gz (gzip) -> decompressed equals epg.xml, count channels/programmes
+  HTTP/1.1 200 OK
+  content-type: application/gzip
+  gz bytes: 273
+  programmes in gz: 2
+
+## GET /epg (HTML viewer)
+  HTTP/1.1 200 OK
+  content-type: text/html; charset=utf-8
+  bytes: 39693  title: <title>节目单</title>
+
+## filtering: keep_days=3 drops 10-days-past; future_days=1 drops 5-days-ahead; missing lang -> lang=zh; explicit lang preserved
+  (see epg.xml above: only 2 programmes kept)
+
+## collection log lines
+   2 INFO 【节目单】开始采集 0 个启用源
+   2 INFO 【节目单】开始采集 1 个启用源
+   1 INFO 【节目单】全局 cron `* * * * *` 命中,采集全部启用源
+   1 INFO 【节目单】已从磁盘缓存恢复 1 个源的频道索引
+   1 INFO 【节目单】已生成 0 频道 / 0 节目 (xml 0KB, gz 0KB, 耗时 2ms;未匹配 10 · 空 0 · 过期 0)
+   1 INFO 【节目单】已生成 2 频道 / 2 节目 (xml 0KB, gz 0KB, 耗时 1ms;未匹配 8 · 空 0 · 过期 1)
+   1 INFO 【节目单】已生成 2 频道 / 3 节目 (xml 0KB, gz 0KB, 耗时 1ms;未匹配 8 · 空 0 · 过期 2)
+   1 INFO 【节目单】已生成 2 频道 / 3 节目 (xml 0KB, gz 0KB, 耗时 2ms;未匹配 8 · 空 0 · 过期 2)
+   2 INFO 【节目单】源 [src_local] Local XMLTV → 2 频道
+   8 WARN 【节目单】未检测到 python3,脚本源不可用(请在 VPS 安装:apt install python3 python3-pip)

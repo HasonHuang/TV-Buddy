@@ -59,7 +59,8 @@
 | D7 六模式行为 | ✅ | proxy/redirect/rewrite/passthrough 实测；dash/remux 失败路径+看门狗；见 F-005 |
 | D8 切片伪装字节级 | 🔶 | **后缀已破解**：`sha256(上游切片绝对URL)[:32]`；16-hex 频道前缀未解 |
 | D9 缓存窗口 | ✅ | 首写 `public,max-age=300` → 命中 `private,max-age=300`（3 次复现）；入口 `public,max-age=5`；见 F-006 |
-| D10 录制/EPG/台标 | ⏳ | 待做（需 ffmpeg） |
+| D10 EPG（采集/下发/裁剪/lang） | ✅ | `/epg.xml[.gz]`、`/epg` 免登录 200；XMLTV 生成 `iptv-proxy`；时间裁剪与 `lang` 处理；见 F-008 |
+| D10b 录制/台标 | ⏳ | 待做（录制需 ffmpeg） |
 | D11 播放 Token 与护栏 | ✅ | 入口需 `?token=<48hex>`（全局/TTL 24h）；失效→302 `token_failure_url`；**切片无 token 也 200**；见 F-007 |
 
 ### Phase 4 · 报告与回填
@@ -89,6 +90,7 @@
 11. **切片缓存窗口**：首写 `public, max-age=300` → 命中 `private, max-age=300`（3 次复现）；入口 `public, max-age=5, s-maxage=5`。
 12. **主/媒体清单伪装**：master 上游 → 主清单 `/{gid}/{cid}.m3u8`（`no-cache`），媒体清单 `/{gid}/{cid}/video/index.txt`（`text/plain`）。切片**忽略 `Range`**。
 13. **播放 Token**（`token_enabled`）：`/playlist.m3u` 入口附 `?token=<48hex>`（全局、稳定、TTL 24h）；无/错 token → 302 `token_failure_url`；**切片不受保护**。`random_id`/`ip_guard` 本次未观测到可测效果。
+14. **EPG**：`[epg].enabled` 关→`/epg*` 全 404；开启后 `/epg.xml`、`/epg.xml.gz`、`/epg` 免登录 200。XMLTV 源经 `POST /panel/api/epg/refresh` 采集，输出根 `generator-info-name="iptv-proxy"`；按 `keep_days`/`future_days` 裁剪；缺 `lang` 补 `zh`。配置为严格 TOML（重复键致启动失败）。
 
 ## 3. 当前状态与下一步
 
@@ -97,9 +99,9 @@
 - 已建：分组 `test1`（proxy）、`g2`、`gdash`（dash）、`gremux`（remux）；频道 `c1`/`c2`（HLS 上游）、`v`（MPD）、`r`（TS）。
 - **下一步**：
   1. 破解 16-hex 频道前缀（已排除 sha256/md5/sha1/sha3/blake2/3/xxh/mmh3/siphash13-24/seahash 常见串）→ 需 **S7 反编译**。
-  2. D10 录制/EPG/台标（需装 ffmpeg）。
+  2. D10b 录制/台标（需装 ffmpeg）。
   3. 用真实媒体源复测 dash/remux 成功路径；回看（timeshift）。
-  4. 深挖 `ip_guard` 触发条件与 `random_id_enabled` 作用域。
+  4. 深挖 `ip_guard` 触发条件与 `random_id_enabled` 作用域；EPG 匹配算法与译制。
 
 ## 4. 进度日志
 
@@ -114,3 +116,4 @@
 | 2026-10-17 | 动态：**六种模式 + 看门狗**；前缀推导仍未解 | ✅（F-005）`6311561` |
 | 2026-10-17 | 动态：**缓存窗口（public→private）+ 缓存布局**；主/媒体清单伪装；切片忽略 Range | ✅（F-006）`74ee89c` |
 | 2026-10-17 | 动态：**播放 Token 与护栏**（入口需 `?token=`，切片不受保护） | ✅（F-007） |
+| 2026-10-17 | 动态：**EPG 采集/下发/裁剪/lang**；严格 TOML 校验 | ✅（F-008） |

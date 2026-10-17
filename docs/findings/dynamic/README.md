@@ -25,6 +25,7 @@
 | D8 | 配置热重载与落盘 | 改配置观测 | S-CFG-01/02 | ✅ [`01`](01-runtime-surface-and-disguise.md) §1/§7 |
 | D9 | 资源占用 | `docker stats` | S-BUG-01 | ⏳ |
 | D10 | 配置全量 schema | `GET /panel/api/config` | S-CFG-04 | ✅ [`01`](01-runtime-surface-and-disguise.md) §4 |
+| D11 | EPG 采集与下发 | 本地 XMLTV 源 | S-EP-05/12/13 | ✅ [`05`](05-epg.md)（时间裁剪、`lang` 处理；录制/台标 ⏳） |
 
 ## 运行期纪律
 
