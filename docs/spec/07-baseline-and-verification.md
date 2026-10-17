@@ -101,6 +101,11 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-DIS-07 | 切片忽略 `Range`，返回 200 全量，无 `Accept-Ranges`/`ETag` | `Range: bytes=100-199` → `200`、`content-length: 1880`、无 `Content-Range` | ✅ |
 | S-DIS-10 | 媒体清单伪装为 `.../video/index.txt`；主清单入口仍 `.m3u8` | master 上游 → 主清单 `.m3u8`（`no-cache`），媒体清单 `video/index.txt`（`text/plain`） | ✅ |
 | S-DIS-14 | 入口/媒体清单以 `text/plain` 下发 | 见上 | ✅ |
+| S-EP-05 | EPG 关闭 404 / 开启 200 | 开启后 `/epg.xml`、`/epg.xml.gz`、`/epg` 均 200 且免登录 | ✅ |
+| S-EP-12 | 面板 `/panel/api/…` EPG 全套 | `/panel/api/epg/status`、`/refresh` 可用（Bearer） | ✅ |
+| S-EPG-01 | 采集源 XMLTV → 生成新版 XMLTV，根 `generator-info-name="iptv-proxy"` | 本地源 2 频道/2 节目；见 `05` | ✅ |
+| S-EPG-02 | 时间裁剪：早于 `keep_days`、晚于 `future_days` 丢弃 | 10 天前/5 天后丢弃；今天未来保留 | ✅ |
+| S-EPG-03 | 缺 `xml:lang` 补 `lang="zh"`；显式 lang 保留 | 缺→`zh`；`lang="en"` 保留 | ✅ |
 
 ## 3. 差异登记
 
