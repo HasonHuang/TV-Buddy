@@ -27,6 +27,7 @@ docs/findings/
 | F-004 | 运行时表面与切片伪装（后缀=sha256(上游切片URL)[:32]） | 动态 | 观测 | S-DIS-02/04/05, S-EP-05/07/10, S-CFG-01/02/04, S-ENV-05 | 2026-10-16 | [`dynamic/01-runtime-surface-and-disguise.md`](dynamic/01-runtime-surface-and-disguise.md) |
 | F-005 | 六种工作模式与看门狗（redirect/passthrough=302，rewrite=绝对化，dash/remux 失败路径） | 动态 | 观测 | S-MODE-01/02/03/08/09 | 2026-10-17 | [`dynamic/02-modes-and-watchdog.md`](dynamic/02-modes-and-watchdog.md) |
 | F-006 | 缓存布局与切片缓存窗口（首写 public→命中 private，max-age=300） | 动态 | 观测 | S-DIS-06/07, S-MODE-13/14 | 2026-10-17 | [`dynamic/03-cache-layout-and-window.md`](dynamic/03-cache-layout-and-window.md) |
+| F-007 | 播放 Token 与安全护栏（入口需 `?token=`，切片不受保护） | 动态 | 观测 | S-AUTH-01/02/03, S-DIS-16, S-URL-06 | 2026-10-17 | [`dynamic/04-auth-token-and-guards.md`](dynamic/04-auth-token-and-guards.md) |
 
 > 每完成一篇发现，在此登记一行；`关联规格 ID` 指向
 > [`../spec/08-target-spec.md`](../spec/08-target-spec.md) 的 `S-*` 条目。

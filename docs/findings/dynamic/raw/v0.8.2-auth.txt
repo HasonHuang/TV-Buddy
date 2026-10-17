@@ -1,0 +1,39 @@
+## [auth] token_enabled=true  (defaults: token_ttl_hours=24, random_id_enabled=false, ip_guard_enabled=false)
+
+### /playlist.m3u (token embedded in entry URLs)
+#EXTM3U
+#EXTINF:-1 tvg-id="c1" tvg-name="C1" tvg-logo="" group-title="test1",C1
+http://127.0.0.1:19899/test1/c1.m3u8?token=5470a750aacd8a9296d402ce8ffbba36add94aa622e57183
+#EXTINF:-1 tvg-id="c2" tvg-name="C2" tvg-logo="" group-title="test1",C2
+http://127.0.0.1:19899/test1/c2.m3u8?token=5470a750aacd8a9296d402ce8ffbba36add94aa622e57183
+#EXTINF:-1 tvg-id="c1" tvg-name="C1x" tvg-logo="" group-title="g2",C1x
+
+token = 5470a750aacd8a9296d402ce8ffbba36add94aa622e57183 (len 48)
+
+### entry WITHOUT token
+HTTP/1.1 302 Found
+location: https://material.yang-1989.eu.org/v/Failure.mp4
+vary: origin, access-control-request-method, access-control-request-headers
+### entry WITH ?token=
+HTTP/1.1 200 OK
+content-type: text/plain; charset=utf-8
+cache-control: public, max-age=5, s-maxage=5
+### entry WITH ?t= (wrong param)
+HTTP/1.1 302 Found
+location: https://material.yang-1989.eu.org/v/Failure.mp4
+vary: origin, access-control-request-method, access-control-request-headers
+### entry WITH Authorization: Bearer <panel token>
+HTTP/1.1 302 Found
+location: https://material.yang-1989.eu.org/v/Failure.mp4
+vary: origin, access-control-request-method, access-control-request-headers
+
+### slice WITHOUT token (segments are NOT token-gated)
+url=http://127.0.0.1:19899/test1/c1/ea8680a1b61c17e4_e4b50304d62739a7b6df027f7cfc3155.jpg
+HTTP/1.1 200 OK
+content-type: image/jpeg
+content-length: 1880
+
+### security log lines
+   1 INFO 【安全】Token 已轮换,新 Token 有效期 24 小时
+   1 INFO 【安全】配置重载后自动生成 Token
+   8 WARN 【安全】Token 验证失败: ip=192.168.215.1 频道=test1/c1
