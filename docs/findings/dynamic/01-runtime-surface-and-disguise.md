@@ -124,13 +124,18 @@ http://127.0.0.1:19899/test1/c1/ea8680a1b61c17e4_4528cb59b78721cf5cba897d6b744f0
 - 佐证：`c1` 与 `c2` 共用同一上游，`<S>` 相同 → `<S>` **只依赖切片**，与频道无关。
 - 重启后 `<S>` 不变 → **确定性**（无进程内随机盐）。
 
-### 5.3 `<P>` 未破解 ⏳
+### 5.3 `<P>` 未破解 ⏳（低影响）
 
-- 16 hex（64 bit）；**每频道固定**；重启不变；与请求 `Host` 无关。
-- 已排除：`md5`/`sha1`/`sha256`/`sha3_256`/`blake2b`/`blake2s` 的前/中/后 16 hex、字节反序；
-  SipHash-1-3（Rust `DefaultHasher`）对 `cid`、`{gid}{cid}`、`{gid}/{cid}` 等常见串。
-- **推断**：为 `(gid,cid)` 的**加盐/键控哈希**，或非上述算法的 64-bit 哈希。**待反编译确认**（见 S7）。
-- 已知样例：`test1/c1 → ea8680a1b61c17e4`，`test1/c2 → 8cb3e469c0dd0aa3`。
+- 16 hex（64 bit）；**每频道固定**；重启不变；与请求 `Host` 无关；仅依赖 `(gid,cid)`。
+- 已排除（对 `(gid,cid)` 的众多拼接/元组/路径形态）：
+  - 摘要 `md5`/`sha1`/`sha256`/`sha512`/`sha3_256`/`blake2b`/`blake2s` 的**任意位置** 16 hex、字节反序、`[:16]`；
+  - 64-bit 哈希：`xxh64`/`xxh3`/`xxh32`、`siphash13`/`siphash24`（含 Rust `DefaultHasher` 的 `\xff` 结尾编码）、`seahash`、`mmh3`(64/128)、`fnv1a64`/`fnv1_64`、`djb2`、`fxhash`（rustc-hash）;
+  - XOR/拆分/哈希之哈希等组合、URL/基路径形态、token 组合。
+- 二进制常量探查：`ahash` PI 常量、`xxh64`/`wyhash`/`murmur` 常量**未出现**；`siphash` 标准键（`somepseudorandomlygeneratedbytes`）**出现**（用途未定）。
+- **推断**：为 `(gid,cid)` 的**键控/加盐哈希**，或非常见算法的 64-bit 哈希；**待反编译确认**（S7）。
+- **功能影响低**：切片 URL 由清单下发，客户端无需自行推导 `<P>`；重建时以**任意确定性 `f(gid,cid)`** 替代即可保持等价行为。
+- 已知样例：`test1/c1 → ea8680a1b61c17e4`、`test1/c2 → 8cb3e469c0dd0aa3`、`g2/c1 → 5ae12330d3e32594`。
+  **动态预言机**：对任意 `(gid,cid)`，拉一次该频道清单即可读出 `<P>`。
 
 ### 5.4 后缀不参与校验（S-DIS-05 行为实证 ✅）
 

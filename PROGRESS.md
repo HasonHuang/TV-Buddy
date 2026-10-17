@@ -57,7 +57,7 @@
 | D5 完整配置 schema | ✅ | `/panel/api/config` 全量（默认值）；见 `findings/dynamic/raw/v0.8.2-config.json` |
 | D6 分组/频道与伪装 | ✅ | 分组 `POST /panel/api/groups {id}`；频道 `POST /panel/api/groups/{gid}/channels`；`PUT …/channels/{cid}` |
 | D7 六模式行为 | ✅ | proxy/redirect/rewrite/passthrough 实测；dash/remux 失败路径+看门狗；见 F-005 |
-| D8 切片伪装字节级 | 🔶 | **后缀已破解**：`sha256(上游切片绝对URL)[:32]`；16-hex 频道前缀未解 |
+| D8 切片伪装字节级 | 🔶 | **后缀已破解**：`sha256(上游切片绝对URL)[:32]`；16-hex 频道前缀未解（已排除多种算法；功能可替代） |
 | D9 缓存窗口 | ✅ | 首写 `public,max-age=300` → 命中 `private,max-age=300`（3 次复现）；入口 `public,max-age=5`；见 F-006 |
 | D10 EPG（采集/下发/裁剪/lang） | ✅ | `/epg.xml[.gz]`、`/epg` 免登录 200；XMLTV 生成 `iptv-proxy`；时间裁剪与 `lang` 处理；见 F-008 |
 | D10b 录制/台标 | 🔶 | 台标 `/logo/<file>`（`cache/logos/`，`public,max-age=86400`）✅；录制 ⏳（需 ffmpeg） |
