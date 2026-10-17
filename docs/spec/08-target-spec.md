@@ -39,7 +39,7 @@
 | S-EP-03 | 频道播放：`GET /{gid}/{cid}.{ext}`（v0.5.1 起路由**不带** `/index.m3u8` 路径段） | D-panel | ⏳ |
 | S-EP-04 | 回看：`GET /{gid}/{cid}?playseek=<start>-<end>` | D-panel | ⏳ |
 | S-EP-05 | EPG：`/epg.xml`、`/epg.xml.gz`、`/epg`；**EPG 总开关关闭时三者全部 404** | D-panel | ✅【观测】开启后三者 200（`application/xml`/`application/gzip`/`text/html`），均无需登录 |
-| S-EP-06 | 台标：`GET /logo/<文件名>` | D-panel | ⏳ |
+| S-EP-06 | 台标：`GET /logo/<文件名>` | D-panel | ✅【观测】200 `image/png`，`public, max-age=86400`；缺→404 |
 | S-EP-07 | 自助解封：`GET /unban`，**无需登录**，每月限 3 次 | D-panel | ⏳ |
 | S-EP-08 | 状态：`/status`（返回 `entry_exts` 等）、`/status/metrics` | D-panel/D-res | ⏳ |
 | S-EP-09 | 多 VPS 数据分享端点 `POST /api/share/pull`（同步 token/封禁；基线路径待确认→已确认） | D-panel/二进制 | ⏳路径✅ |

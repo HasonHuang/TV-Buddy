@@ -106,6 +106,7 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-EPG-01 | 采集源 XMLTV → 生成新版 XMLTV，根 `generator-info-name="iptv-proxy"` | 本地源 2 频道/2 节目；见 `05` | ✅ |
 | S-EPG-02 | 时间裁剪：早于 `keep_days`、晚于 `future_days` 丢弃 | 10 天前/5 天后丢弃；今天未来保留 | ✅ |
 | S-EPG-03 | 缺 `xml:lang` 补 `lang="zh"`；显式 lang 保留 | 缺→`zh`；`lang="en"` 保留 | ✅ |
+| S-EP-06 | 台标 `GET /logo/<file>` 公开可读 | 200 `image/png`、`public, max-age=86400`；缺→404 | ✅ |
 
 ## 3. 差异登记
 
