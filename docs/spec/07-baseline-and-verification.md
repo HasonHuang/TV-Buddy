@@ -79,7 +79,8 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-EP-10 | `/health` | 200 `ok` | ✅ |
 | S-DIS-01 | 伪装默认 `enabled=true`,`playlist=true` | `GET /panel/api/config` 默认值一致 | ✅ |
 | S-DIS-02 | 不改载荷字节 | 切片字节与上游同长同内容 | ✅ |
-| S-DIS-04 | 后缀由 频道ID+切片哈希 推导 | **切片哈希 = `sha256(上游切片绝对URL)[:32]`**；16-hex 频道前缀确定性但推导未解 | 🔶 部分 |
+| S-DIS-04 | 后缀由 频道ID+切片哈希 推导 | **切片哈希 = `sha256(上游切片绝对URL)[:32]`**；16-hex 前缀 `<P>` 仅依赖 `(gid,cid)`，算法未解（F-017） | 🔶 部分 |
+| S-DIS-17 | 切片 ID 参与校验；扩展名不校验 | 错/短/缺 `<P>` 或 `<S>` → 302；`.png` 与 `.jpg` 同字节（F-017） | ✅ |
 | S-DIS-05 | 后缀不参与校验 | 同 ID 换 8 种后缀，字节全同 | ✅ |
 | S-DIS-11 | `obfuscate_filenames` 独立 | 位于 `[cache.dash]`，与 disguise 分区不同 | ✅ |
 | S-CFG-01 | 面板改动落盘 `config.toml` | 建组后文件出现 `[[groups]]` | ✅ |

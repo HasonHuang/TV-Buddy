@@ -70,7 +70,7 @@ clang version 18.1.6 (https://github.com/ziglang/zig-bootstrap 98bc6bf4fc4009888
 ```
 
 - **判定：Rust 编写**（`rustc`、`RUST_BACKTRACE`、`panicked at`、`/rustc/<hash>/`）。
-  故 [`../spec/08-target-spec.md`](../spec/08-target-spec.md) **S-ENV-07 由【推断】升级为【观测】**。
+  故 [`../../spec/08-target-spec.md`](../../spec/08-target-spec.md) **S-ENV-07 由【推断】升级为【观测】**。
 - **静态/交叉构建**：`clang 18.1.6` + `zig-bootstrap` → 典型 **`cargo-zigbuild` 生成 musl 静态二进制**；
   构建路径含 `/root/.cargo/registry/…`（root 容器内构建）。v0.8.8 用 rustc **1.99.0**，zig 同版本。
 - 无 Go build-info（`inspect_go_binary` 未发现 Go 元数据）。
