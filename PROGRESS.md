@@ -68,7 +68,7 @@
 
 | 项 | 状态 | 结果 / 位置 |
 | --- | --- | --- |
-| R1 差异登记 | ✅ | `07` §3.1 `D-001`（已解决） |
+| R1 差异登记 | ✅ | `07` §3.1 `D-001…D-005` |
 | R2 核对矩阵回填 | ✅ | `07` §2.3 动态项覆盖 F-004…F-017（新增 S-DIS-17） |
 | R3 阶段性报告 | ✅ | [`findings/report-stage-01.md`](docs/findings/report-stage-01.md) |
 
@@ -133,6 +133,7 @@
 | 2026-10-18 | 路线图收尾·**S7 伪装前缀**（`<P>` 仅依赖 `(gid,cid)`；参与校验；扩展名不校验；排除 12 类哈希/2 万模板） | ✅（F-017） |
 | 2026-10-18 | 路线图收尾·资产端点（`/assets/ffmpeg-status|list`）+ 全库一致性回填（spec/07、spec/08、两个 README） | ✅ |
 | 2026-10-18 | Phase 4·**R3 阶段性报告**（覆盖矩阵、差异、缺口、复现入口） | ✅ `findings/report-stage-01.md` |
+| 2026-10-18 | 一致性回填：`spec/08` 状态对齐 `07`（27 行）；新增 **`D-005` rewrite+MPD 损坏**；`S-BUG-02` 无分组排序 | ✅ |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 
@@ -143,7 +144,7 @@
 
 | 域 | 代表能力（二进制证据） | 状态 | 路线图项 |
 | --- | --- | --- | --- |
-| ① 反代播放 HLS（proxy/rewrite） | `/{gid}/{cid}/index.m3u8`、【代理】×44、`badge-proxy` | ✅ D7/F-004/F-005 | — |
+| ① 反代播放 HLS（proxy/rewrite） | `/{gid}/{cid}/index.m3u8`、【代理】×44、`badge-proxy` | ✅ D7/F-004/F-005；**rewrite+MPD 损坏**（`D-005`） | — |
 | ② 切片伪装 URL | `<16hex>_<32hex>.<ext>`、`invalid segment hash` | ✅ S=sha256[:32]；`<P>` 依赖/校验已解、算法未解（F-017，低影响） | ~~S7~~ ✅ |
 | ③ 切片缓存/预取 | `m3u8_max_entries`、`segment_cache_max_mb`、`prefetch.*`、`/cache/flush`、`/cache/stats` | ✅ 容量上限**均未生效**；flush 保留 `dash/`；memory 后端统计恒 0（F-015） | ~~D12~~ ✅ |
 | ④ 302 直连 redirect | `redirect_mode`(direct/default+best 解析)、`redirect_ttl`、`redirect_url_…` 缓存 | ✅ direct + **best 已验**：选最高 `BANDWIDTH` 变体（F-016） | ~~D17a~~ ✅ |

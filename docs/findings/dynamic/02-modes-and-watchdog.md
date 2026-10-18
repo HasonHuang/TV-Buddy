@@ -156,7 +156,26 @@ WARN 【看门狗】连续重建仍未恢复,转入冷却,到点后自动再试 
 - 入口缓存键的 `__{32hex}` 推导**未解**（形同伪装切片：疑 `sha256(...)`，输入未定）。
 - 仅 **arm64 + 单容器 + 特制假源**。
 
-## 9. 复现
+## 9. Rewrite + MPD 的行为差异（`D-005`）
+
+【观测】`rewrite` 模式对 **MPD** 的改写是**损坏的**：正文每一行都被当作相对 URL
+拼到上游 origin 后，返回 200 `application/dash+xml`。
+
+```text
+GET /grew/v.mpd            （mode=rewrite, url=http://host.docker.internal:9999/s.mpd）
+200
+http://host.docker.internal:9999/%3C?xml%20version=%221.0%22...?%3E
+http://host.docker.internal:9999/%3CMPD%20xmlns=%22urn:mpeg:dash...%3E
+http://host.docker.internal:9999/%3CPeriod%20id=%220%22...%3E
+```
+
+`redirect` + MPD 正常：`302 location=http://host.docker.internal:9999/s.mpd`。
+
+- 结论：`rewrite` 的绝对化逻辑只适用于 HLS 文本清单，**未对 MPD 做分支**。
+- 影响：`rewrite` 分组不能承载 DASH 频道（`proxy`/`dash`/`redirect` 可）。
+- 规格对照：`S-MODE-10`（原述“直连 CDN”）→ ⚠️，差异登记 `D-005`。
+
+## 10. 复现
 
 ```bash
 # 假源：宿主 samples/work/origin（x.m3u8/segN.ts/live.ts/s.mpd）由 python3 -m http.server 9999 提供

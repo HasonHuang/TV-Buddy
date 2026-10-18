@@ -25,7 +25,7 @@ docs/findings/
 | F-002 | 版本判定：v0.8.2 = `d302316fb8`；main = v0.8.8 | 静态 | 观测 | S-ENV-01 | 2026-10-15 | [`static/01-sample-packing-and-toolchain.md`](static/01-sample-packing-and-toolchain.md) §5 |
 | F-003 | 内嵌面板前端与 HTTP 接口表面 | 静态 | 观测 | S-MODE-01, S-DIS-01, S-DIS-11, S-EP-07/08, S-AUTH-01, S-CFG-04 | 2026-10-16 | [`static/02-embedded-panel-frontend.md`](static/02-embedded-panel-frontend.md) |
 | F-004 | 运行时表面与切片伪装（后缀=sha256(上游切片URL)[:32]） | 动态 | 观测 | S-DIS-02/04/05, S-EP-05/07/10, S-CFG-01/02/04, S-ENV-05 | 2026-10-16 | [`dynamic/01-runtime-surface-and-disguise.md`](dynamic/01-runtime-surface-and-disguise.md) |
-| F-005 | 六种工作模式与看门狗（redirect/passthrough=302，rewrite=绝对化，dash/remux 失败路径） | 动态 | 观测 | S-MODE-01/02/03/08/09 | 2026-10-17 | [`dynamic/02-modes-and-watchdog.md`](dynamic/02-modes-and-watchdog.md) |
+| F-005 | 六种工作模式与看门狗（redirect/passthrough=302，rewrite=绝对化，dash/remux 失败路径；**rewrite+MPD 损坏 → D-005**） | 动态 | 观测 | S-MODE-01/02/03/08/09/10 | 2026-10-17 | [`dynamic/02-modes-and-watchdog.md`](dynamic/02-modes-and-watchdog.md) |
 | F-006 | 缓存布局与切片缓存窗口（首写 public→命中 private，max-age=300） | 动态 | 观测 | S-DIS-06/07, S-MODE-13/14 | 2026-10-17 | [`dynamic/03-cache-layout-and-window.md`](dynamic/03-cache-layout-and-window.md) |
 | F-007 | 播放 Token 与安全护栏（入口需 `?token=`，切片不受保护） | 动态 | 观测 | S-AUTH-01/02/03, S-DIS-16, S-URL-06 | 2026-10-17 | [`dynamic/04-auth-token-and-guards.md`](dynamic/04-auth-token-and-guards.md) |
 | F-008 | EPG 采集与下发（`/epg.xml[.gz]`、`/epg`；时间裁剪、`lang` 处理） | 动态 | 观测 | S-EP-05/06/12/13 | 2026-10-17 | [`dynamic/05-epg.md`](dynamic/05-epg.md) |
