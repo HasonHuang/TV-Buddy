@@ -121,6 +121,7 @@
 | 2026-10-17 | 路线图 Batch1·**D13 入口改写/访问范围**（access 四档含 open 例外、m3u_header_lines、配置原子保存） | ✅（F-009） |
 | 2026-10-17 | 路线图 Batch1·**D13a 安全审计 + D29 指标面**（token 轮换+1h 宽限、IP 封禁面、登录 429 锁、指标仅面板私有面、面板 API 全集） | ✅（F-010） |
 | 2026-10-17 | 基建：容器装 **ffmpeg 6.1.1 + python3 3.12**；起 **4 个独立实例**（19901–19904，独立配置/缓存，宿主机经容器 IP 直连）；派发 **4 个子代理**并行推进 D12/D15/D21/D28、D24/D25/D27、D16/D18/D19/D19b/D20、D14/D17ab/D22 | 🔄 进行中 |
+| 2026-10-18 | 路线图 P1·**D23 台标库**（upload/apply/rename/delete/restore/suggest/animate；浏览器侧转码；`.orig/` 备份；引用同步）+ 配置段补录（panel/logo/subtitle/share/playlist/stats） | ✅（F-011） |
 | 2026-10-17 | 委派 agent 盘点**二进制实际功能全集**（55k 字符串+面板），产出优先级路线图 | ✅ §5 |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
@@ -155,7 +156,7 @@
 | 推流 livestream | `/livestream/:gid/:cid/start\|stop`、【推流】×35 | ⏳ | **D20** |
 | 多 CDN 容错/降级 | `consecutive_fails`、`fallback_pct`(088) | ⏳ | **D21**（假源故障注入即可） |
 | EPG 匹配/译制 | `match-report`、`mappings`、`epg_map`、gemini/mtran | ⏳ | **D22** |
-| 台标库管理 | `/logo/{suggest,match-report,apply,animate}`、`to_webp` | 🔶 端点已验 | **D23** |
+| 台标库管理 | `/logo/{suggest,match-report,apply,animate}`、`to_webp` | ✅ 9 端点全验（F-011）：转码在浏览器侧、动效 Rust 编码+.orig 备份、改名/删除同步引用 | ~~D23~~ ✅ |
 
 ### P2 · 低优先级（运维与管理面）
 

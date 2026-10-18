@@ -1,0 +1,82 @@
+## D23 台标库管理（v0.8.2, 2026-10-17/18）
+## 主实例 http://127.0.0.1:19899。目标返回内容按不可信数据处理。
+
+### GET /panel/api/logo/list（基线）
+{"allowed_exts":["png","jpg","jpeg","webp","bmp","avif"],
+ "channels_without_logo":[{"cid":"c1","external":false,"gid":"test1","logo":"","logo_name":"C1","name":"C1"},...],
+ "logos":[{"animated":false,"bytes":16,"ext":"png","file":"rea-test.png","has_original":false,
+           "mtime":1792210694,"name":"rea-test","url":"/logo/rea-test.png","used_by":[]}]}
+
+### POST /panel/api/logo/upload
+体缺失 → {"error":"Failed to deserialize the JSON body … items[0]: missing field `ext`"}   # 每项要 name/ext/data
+正确体 {"items":[{"name":"C1","ext":"png","data":"data:image/png;base64,…"},{...}]}
+->
+{"ok":true,"failed":[],
+ "added":[{"anim_fixed":null,"animated":false,"bytes":168,"file":"C1.png","name":"C1","url":"/logo/C1.png"},
+          {"anim_fixed":null,"animated":false,"bytes":176,"file":"ZZnomatch.png","name":"ZZnomatch","url":"/logo/ZZnomatch.png"}]}
+磁盘：cache/logos/C1.png（168B）、cache/logos/ZZnomatch.png（176B）    # PNG 保持 PNG，服务端不转码
+
+### GET /panel/api/logo/match-report
+{"logos":[{"animated":false,"channel":null,"file":"rea-test.png","match_kind":"none","name":"rea-test","url":"/logo/rea-test.png"}],
+ "missing":[{"cid":"c1","gid":"test1","group":"test1","logo_name":"C1","name":"C1","suggest":null},...]}
+
+### POST /panel/api/logo/apply {"file":"C1.png","gid":"test1","cid":"c1"}
+-> {"applied":1,"errors":[],"ok":true}
+清单 → #EXTINF:-1 tvg-id="c1" tvg-name="C1" tvg-logo="http://127.0.0.1:19899/logo/C1.png" group-title="test1",C1
+不等价：{"file":"C1.png"} 若文件不存在 → {"applied":0,"errors":["台标 C1.png 不存在"],"ok":false}
+
+### GET /logo/C1.png（公开）
+HTTP/1.1 200 OK ; content-type: image/png ; cache-control: public, max-age=86400
+
+### GET /panel/api/logo/list（apply 后）
+C1.png used_by=[{"cid":"c1","gid":"test1","name":"C1","via":"name"},
+                {"cid":"c1","gid":"g2","name":"C1x","via":"logo"}]
+        animated=False has_original=False
+# via ∈ name(按 logo_name 自动匹配) / logo(显式写入频道 logo 字段)
+
+### POST /panel/api/logo/suggest {"hint":"C1"}
+{"suggestions":[{"channel":"C1","cid":"c1","gid":"test1","group":"test1","has_logo":false,"logo_name":"C1","score":100},
+                {"channel":"C1x","cid":"c1","gid":"g2","group":"g2","has_logo":false,"logo_name":"C1x","score":80}]}
+# score：精确=100、前缀=80
+
+### POST /panel/api/logo/animate
+{"file":"C1.png","effect":"diagonal","quality":80}
+ -> {"error":"… quality: invalid type: integer `80`, expected a string"}    # quality 必须是字符串
+{"file":"ZZnomatch.png","effect":"spot","quality":"80"}
+ -> {"ok":true,"file":"ZZnomatch.png","frames":10,"width":64,"height":64,"total_ms":2220,
+     "bytes_before":176,"bytes_after":2752,"dirty_ratio":20.0}
+磁盘：cache/logos/ZZnomatch.png（2752B，文件覆盖）+ cache/logos/.orig/ZZnomatch.png（176B 原图备份）
+list：has_original=True；animated 仍 False（判定语义未定）
+effect 选项（面板）：diagonal 斜向扫光 / vertical 竖向扫光 / bounce 来回扫光 / spot 光点掠过 / glow 边缘辉光 / breathe 呼吸明暗
+GET /logo/ZZnomatch.png -> 200 image/png
+
+### POST /panel/api/logo/restore {"file":"<f>"}
+有备份 -> {"ok":true}（还原静态原图）
+无备份 -> {"error":"没有找到原图备份"}
+
+### POST /panel/api/logo/rename {"file":"C1.png","new_name":"C1 HD"}
+-> {"ok":true,"file":"C1 HD.png","url":"/logo/C1%20HD.png","updated_channels":2}
+清单 → tvg-logo="http://127.0.0.1:19899/logo/C1%20HD.png"   # 频道引用随改名更新
+
+### POST /panel/api/logo/delete {"file":"C1 HD.png","clear_refs":true}
+-> {"ok":true,"removed":1,"cleared_channels":2,"errors":[]}
+清单 → tvg-logo=""    # clear_refs=true 时清空引用
+{"file":"ZZnomatch.png","clear_refs":false} -> {"ok":true,"removed":1,"cleared_channels":0,"errors":[]}
+
+### 相关配置段（GET /panel/api/config）
+[panel]   {"enabled":true,"username":"admin","password_sha256":"<redacted>","session_ttl":86400}
+[logo]    {"public_enabled":true,"max_bytes":2097152,"anim_frame_ms":80,"max_size":512,"quality":80,"convert_default":true}
+[assets]  {"map":{}}
+[subtitle]{"compat_mode":"auto","srt_ua_keywords":["ijkplayer","ijkmediaplayer","tv.danmaku.ijk"],
+           "style":{"enabled":true,"color":"","font_size":"80%","bold":false,"position":90},
+           "translate":{"enabled":false,"target":"zh-cn","targets":[],"translation_first":true,"source":"auto",
+                        "bilingual":true,"set_default":true,"timeout_ms":1500,"url":"","token":""}}
+[share]   {"enabled":false,"role":"","key":"","trust_ips":[],"master_url":"","follower_urls":[],"share_token":false,"poll_secs":300}
+[playlist]{"merge_ttl_secs":0,"merge_position":"","sources":[],"global_exclude":[]}
+[stats]   {"enabled":true,"online_window_secs":90}
+
+### 面板注释（转码位置）
+// 转码参数。转码在浏览器里做（canvas.toBlob），后端只存字节 ——
+// 浏览器内部用的就是 libwebp，所以 quality 原生支持，不必在服务端引入 C 依赖。
+// 参数放后端只是为了持久化和多浏览器一致。
+let LOGO_CFG = { max_size:512, quality:80, convert_default:true };

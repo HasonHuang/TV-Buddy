@@ -144,7 +144,10 @@
 | S-EPG-02 | 采集节奏：每 4h / 每 6h / 每日 4 点 / 每日 3、5、12 点 / 每 30 分钟 | D-panel | ⏳ |
 | S-EPG-03 | 名称匹配开关（tvg-id 不匹配时按频道名再匹配一次）；脚本源需 python3 | D-panel | ⏳ |
 | S-EPG-04 | EPG 标题可翻译（Google 免费 / Gemini(Key) / MTranServer），14 种目标语言 | D-panel | ⏳ |
-| S-LOGO-01 | 台标本地托管，`tvg-logo` 与 EPG `icon` 指向本地；支持上传转码与动效生成 | D-panel | ⏳ |
+| S-LOGO-01 | 台标本地托管，`tvg-logo` 与 EPG `icon` 指向本地；支持上传转码与动效生成 | D-panel | ✅【观测】9 端点全验（见 12）；转码在**浏览器侧**，服务端只存字节 |
+| S-LOGO-02 | 台标库端点：`GET /logo/{list,match-report}`、`POST /logo/{upload,apply,rename,delete,restore,suggest,animate}` | D-panel | ✅【观测】`upload` 需 `name/ext/data`；`animate.quality` 为**字符串** |
+| S-LOGO-03 | 动效纯 Rust 无损编码，覆盖原文件、原图备份到 `logos/.orig/`；6 种效果 | D-panel/二进制 | ✅【观测】`frames/total_ms/bytes_before/after/dirty_ratio`；`restore` 还原 |
+| S-LOGO-04 | 改名同步刷新频道引用（`updated_channels`）；删除可选清引用（`clear_refs`） | 二进制 | ✅【观测】引用随改名更新（URL 编码），清引用后 `tvg-logo=""` |
 | S-REC-01 | 定时录制：Proxy / DASH 频道；**必须 ffmpeg**，否则任务失败；录制合成 MKV（多音轨，中断可播）；存 `cache/recordings/` | D-panel | ⏳ |
 | S-CAP-01 | 回看播放地址随「回看格式」变化：国产 `${start}-${end}` / 国外 `${start}-${end}` / Kodi `{utc}-{utcend}` / both | D-panel | ⏳ |
 | S-CAP-02 | 回看切片存 `cache/livestream/`；时间偏移可调（录进时间戳与播出时间差） | D-panel/D-mode-proxy | ⏳ |
@@ -217,7 +220,10 @@ formats = ["jpg","png","gif","bmp","webp"]
 | S-CFG-01 | 面板改动最终写入 `/opt/iptv-proxy/config.toml`；文件只写最小必要项，其余走默认；保存后回写完整配置 | D-panel | 🔶【观测】面板改动经 `PUT /panel/api/config` 全量保存、规范化重写（数组多行）；容器内路径映射差异 |
 | S-CFG-02 | 配置有**热重载监视**（可直接改文件生效，前提是热重载未被关闭） | D-panel | ✅【观测】`[server]`/`[auth]` 即时生效；`[epg]` 例外（见 05 §6）；文件直改与面板保存有竞态 |
 | S-CFG-03 | 下列开关**启动时读取，改后须重启**：DASH 会话预启动、配置文件热重载监视、登录失败计数清理 | D-iptv | ⏳ |
-| S-CFG-04 | 顶层键与语义如上表（须由二进制/实测确认键名与默认值） | D-panel | ⏳ |
+| S-CFG-04 | 顶层键与语义如上表（须由二进制/实测确认键名与默认值） | D-panel | 🔶【观测】顶层段：`server,panel,cache,prefetch,auth,subtitle,assets,health,stats,epg,logo,share,playlist,groups`；已录 `panel/logo/assets/subtitle/share/playlist/stats`（见 12 §4） |
+| S-CFG-05 | `[playlist]` 段：`merge_ttl_secs,merge_position,sources[],global_exclude[]`（订阅聚合输出面） | 二进制 | 🔶【观测】键面已录；行为未验（→ D24） |
+| S-CFG-06 | `[share]` 段：`enabled,role,key,trust_ips[],master_url,follower_urls[],share_token,poll_secs=300`（多 VPS 分享） | 二进制 | 🔶【观测】键面已录；行为未验（→ D26） |
+| S-CFG-07 | `[stats]` 段：`enabled,online_window_secs=90`（在线统计窗口） | 二进制 | ✅【观测】键面已录 |
 
 ## 12. 命令行与运维
 
