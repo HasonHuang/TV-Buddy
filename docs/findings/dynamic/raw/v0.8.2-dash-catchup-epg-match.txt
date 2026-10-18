@@ -109,3 +109,345 @@
 # init: $ curl -i .../video_180p/init.webp → 200 content-type: image/webp content-length: 807
 #       （字节为 ftyp/moov 的 fMP4 init，非 WebP）
 # 用清单外的扩展名请求同一片：.../0_998553983e0e525d.png → 200（扩展名不校验）
+
+# ============================================================================
+# 2. D14 变体：MPD 级显式 <BaseURL>
+# ============================================================================
+# 自定义 MPD（worktmp/burl.mpd）：MPD 根下 <BaseURL>http://host.docker.internal:9973/</BaseURL>，
+# SegmentTemplate media="chunk-stream$RepresentationID$-$Number%05d$.m4s"，SegmentTimeline。
+#   $ curl -s -X PUT -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+#         http://192.168.215.4:19904/panel/api/groups/gmpd/channels/m \
+#         -d '{"url":"http://host.docker.internal:9973/burl.mpd"}'
+#   {"ok":true}
+#
+# --- $ curl -s -H "Authorization: Bearer $T" .../panel/api/dash/status ---
+# gmpd_m  url=http://host.docker.internal:9973/burl.mpd  phase=ready  segment_count=30  last_error=None
+#
+# --- $ curl -s http://192.168.215.4:19904/gmpd/m.mpd ---
+# #EXTM3U
+# #EXT-X-VERSION:7
+# #EXT-X-INDEPENDENT-SEGMENTS
+# #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="und",NAME="audio-0 (Mono)",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="1",URI="http://192.168.215.4:19904/gmpd/m/audio-0/index.txt"
+# #EXT-X-STREAM-INF:BANDWIDTH=649832,CODECS="avc1.42c00c,mp4a.40.2",RESOLUTION=320x180,FRAME-RATE=25.000,AUDIO="audio"
+# http://192.168.215.4:19904/gmpd/m/video_180p/index.txt
+#
+# 结论：MPD 级 BaseURL 生效（30 片全部取回，phase=ready）。
+#
+# ============================================================================
+# 3. D14 $Number$ 语义：static MPD + SegmentTemplate@duration（无 SegmentTimeline）
+# ============================================================================
+# 素材 harness/durdash/dur.mpd：
+#   type="static" mediaPresentationDuration="PT30.0S"
+#   SegmentTemplate timescale="12800" duration="25600" startNumber="1"
+#                    media="chunk-stream$RepresentationID$-$Number%05d$.m4s"
+#   无 SegmentTimeline；无 BaseURL（与 MPD 同目录）。
+# 源站为自建日志源站（9980），记录目标实际请求的切片名。
+#
+# --- 源站日志（目标请求的切片） ---
+# 2026-10-18T12:26:27Z	GET	/durdash/chunk-stream1-896163185.m4s	...
+# 2026-10-18T12:26:27Z	GET	/durdash/chunk-stream1-896163186.m4s	...
+# 2026-10-18T12:26:27Z	GET	/durdash/chunk-stream1-896163193.m4s	...
+#   （Number 约 896163185..896163193；896163185*2 ≈ 1792326370，即当前 epoch 秒）
+#
+# --- run.log ---
+# WARN 【DASH】轨道下载失败,跳过 stream=gmpd_m track=video_180p error=Segment fetch failed: track video_180p all segments failed
+# WARN 【DASH】轨道下载失败,跳过 stream=gmpd_m track=audio-0 error=Segment fetch failed: track audio-0 all segments failed
+# WARN 【DASH】切片失败(含音频) → 视为 MPD 失效,清空缓存让下一轮强制重新拉 stream=gmpd_m failed=2 total=2 failed_audio=1 total_audio=1
+# WARN 【DASH】常驻频道连续失败,停止(看门狗将在 60s 内重建) stream=gmpd_m fails=1
+#
+# --- 客户端 ---
+# $ curl -s -o /dev/null -w '%{http_code}' http://192.168.215.4:19904/gmpd/m.mpd
+# 503
+#
+# 结论：缺少 SegmentTimeline 时，目标按“墙钟 / duration”推算 Number，
+#       不采用 startNumber=1。静态 MPD 必须给 SegmentTimeline（或显式 Number 基）。
+#
+# ============================================================================
+# 4. D14 DRM / ClearKey
+# ============================================================================
+# 素材 harness/cencdash/cenc2.mpd：手工切分 CENC 加密 fMP4（tenc/sinf/schm/senc），
+# MPD 带 ContentProtection，KID=11112222333344445555666677778888。
+# 频道 gmpd/m 配置 license_key="11112222333344445555666677778888:00112233445566778899aabbccddeeff"。
+#
+# --- run.log（KID 检测与比对） ---
+# DEBUG 【DASH】KID 对比 MPD vs 用户配置(不一致时 init.mp4 内 KID 会被用作匹配键) stream=gmpd_m mpd_kids=["11112222333344445555666677778888"] configured_kids=["11112222333344445555666677778888"]
+# DEBUG 【DASH】多 KID: KID 匹配成功 (标准 UUID) track=video_180p kid=11112222333344445555666677778888
+# DEBUG 【DASH】KID 对比 MPD vs 用户配置(...) stream=gdash_v mpd_kids=[] configured_kids=[]
+#
+# DASH → HLS 出口（gmpd/m，format=mpd）不含密钥标签：
+# --- $ curl -s http://192.168.215.4:19904/gmpd/m.mpd ---
+# #EXTM3U
+# #EXT-X-VERSION:7
+# #EXT-X-INDEPENDENT-SEGMENTS
+# #EXT-X-STREAM-INF:BANDWIDTH=650000,CODECS="avc1.42c00c",RESOLUTION=320x180
+# http://192.168.215.4:19904/gmpd/m/video_180p/index.txt
+#
+# --- $ curl -s http://192.168.215.4:19904/gmpd/m/video_180p/index.txt | grep -ci 'EXT-X-KEY|KODIPROP|license' ---
+# 0
+#
+# 订阅 M3U 的 #KODIPROP 只在 mode=passthrough + license_key 时出现。
+# 把 gpt 组改为 passthrough：
+#   $ curl -s -X PUT -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+#         http://192.168.215.4:19904/panel/api/groups/gpt -d '{"mode":"passthrough"}'
+#   {"ok":true}
+#
+# --- $ curl -s http://192.168.215.4:19904/playlist.m3u | sed -n '24,28p' ---
+# #EXTINF:-1 tvg-id="p" tvg-name="P" tvg-logo="" group-title="gpt",P
+# #KODIPROP:inputstream.adaptive.manifest_type=mpd
+# #KODIPROP:inputstream.adaptive.license_type=clearkey
+# #KODIPROP:inputstream.adaptive.license_key=11112222333344445555666677778888:00112233445566778899aabbccddeeff
+# http://host.docker.internal:9980/cencdash/cenc2.mpd
+#
+# license_key 不做校验，原样输出：
+#   $ PUT .../groups/gpt/channels/p -d '{"license_key":"not-a-kid:nothex"}'
+#   → #KODIPROP:inputstream.adaptive.license_key=not-a-kid:nothex
+#
+# 对照：mode=dash 的 gmpd 条目无任何 #KODIPROP（第 22-23 行）。
+#
+# 结论：
+#  - KID 来源双路：MPD ContentProtection + fMP4 box（tenc/sinf/schm/senc/encv/enca）。
+#  - 录制/转封装链路（dash/remux/proxy）不解密也不下发密钥标签。
+#  - #KODIPROP 仅 passthrough + license_key；manifest_type 硬编码 mpd。
+#
+# ============================================================================
+# 5. D14 看门狗（死 MPD）
+# ============================================================================
+# 把 gmpd/m 指向不存在 MPD：
+#   $ PUT .../groups/gmpd/channels/m -d '{"url":"http://host.docker.internal:9980/nope/missing.mpd"}'
+#   {"ok":true}
+#
+# --- 客户端（每次约 30s 后失败） ---
+# $ curl -s -o /dev/null -w '%{http_code}' http://192.168.215.4:19904/gmpd/m.m3u8
+# 503            （体：timeout waiting for master playlist）
+#
+# --- run.log ---
+# DEBUG 【DASH】会话启动中 stream=gmpd_m url=http://host.docker.internal:9980/nope/missing.mpd
+# DEBUG 【DASH】重定向拉取瞬时失败,300ms 后重试 ... attempt=1 error=MPD fetch failed: HTTP 404 Not Found
+# DEBUG 【DASH】重定向拉取瞬时失败,300ms 后重试 ... attempt=2 error=MPD fetch failed: HTTP 404 Not Found
+# WARN 【DASH】候选 URL 失败(已快速重试) ... error=MPD fetch failed: HTTP 404 Not Found
+# DEBUG 【DASH】本轮失败(MPD 停更/拉取失败 或 切片大量失效) ... attempt=1
+# WARN 【DASH】常驻频道连续失败,停止(看门狗将在 60s 内重建) stream=gmpd_m fails=1
+# WARN 【DASH】主播放列表 30s 内未就绪 stream=gmpd_m
+# WARN 【看门狗】常驻频道卡死/停止,销毁重建 stream=gmpd_m attempt=5 stalled_secs=0
+# WARN 【看门狗】连续重建仍未恢复,转入冷却,到点后自动再试 stream=gmpd_m fails=5 cooldown_secs=3600
+#
+# 状态（冷却期）：
+#   $ curl -s .../panel/api/dash/status  → gmpd_m phase=stopped uptime=0 last_error=None
+# 冷却期内 19:32:16 后无新重启日志。
+#
+# 恢复：改回可用 URL 立即重建（不等冷却）：
+#   $ PUT .../groups/gmpd/channels/m -d '{"url":"http://host.docker.internal:9980/cencdash/cenc2.mpd"}'
+#   → 8s 后 gmpd_m phase=ready
+#   DEBUG 【DASH】会话就绪 stream=gmpd_m
+#
+# 结论：主清单 30s 超时 → 503；常驻看门狗每轮失败即销毁重建；
+#       连续 5 次重建失败 → 冷却 3600s；配置变更可立即解除冷却。
+#
+# ============================================================================
+# 6. D14 DASH 时移（dash_timeshift）
+# ============================================================================
+# 频道 gdash/v：dash_timeshift=true，dash_timeshift_hours=4，dash_timeshift_offset_secs=60。
+# 上游为 ffmpeg -re 生成的 live MPD（420s，窗口 12s）。
+#
+# --- $ curl -s -H "Authorization: Bearer $T" .../panel/api/dash-timeshift/status ---
+# {
+#     "gdash:v": {
+#         "audio_count": 1, "dir_bytes": 37539591, "last_error": null, "max_gb": 0,
+#         "mode": "dash", "offset_secs": 60, "oldest_age_secs": 605,
+#         "retain_hours": 4, "running": true, "segment_count": 416, "target_duration": 2
+#     }
+# }
+#
+# 回看清单路由：/{gid}/{cid}/dash-timeshift/{track}/playlist.txt?playseek=<b>-<e>
+# --- $ curl -s -i "http://192.168.215.4:19904/gdash/v/dash-timeshift/video_180p/playlist.txt?playseek=20261018192500-20261018192600" ---
+# HTTP/1.1 200 OK
+# content-type: text/plain; charset=utf-8
+# cache-control: public, max-age=3600, s-maxage=3600
+#
+# #EXTM3U
+# #EXT-X-VERSION:7
+# #EXT-X-PLAYLIST-TYPE:VOD
+# #EXT-X-TARGETDURATION:2
+# #EXT-X-MEDIA-SEQUENCE:149
+# #EXT-X-PROGRAM-DATE-TIME:2026-10-18T11:25:02Z
+# #EXT-X-MAP:URI="/gdash/v/dash-timeshift/video_180p/init.gif"
+# #EXTINF:2.000,
+# /gdash/v/dash-timeshift/video_180p/149.jpg
+# #EXTINF:2.000,
+# /gdash/v/dash-timeshift/video_180p/150.jpg
+# #EXT-X-DISCONTINUITY
+# #EXT-X-PROGRAM-DATE-TIME:2026-10-18T11:25:06Z
+# #EXTINF:2.000,
+# /gdash/v/dash-timeshift/video_180p/151.jpg
+# ... （切片名 = 录制序号；扩展名在 jpg/png/gif/bmp/webp 间随机）
+#
+# 参数与边界：
+#   缺 playseek → 400 "missing playseek"
+#   窗口与录制区间不重叠 → 404 "no segments in range"
+#   实测（墙钟 11:30:09Z，录制区间 11:20:00Z..11:26:55Z）：
+#     start=11:26:19Z → 200
+#     start=11:26:59Z → 404
+#   故时间窗 = [最旧录制切片, 最新录制切片]；不是“墙钟 now-offset”。
+#   PROGRAM-DATE-TIME 取录制到达时间（上游停更后不再前进）。
+#
+# 对比：本地回看（livestream）忽略 playseek 区间，始终返回全部录制片段：
+#   $ curl -s ".../gcu/cu2.m3u8?playseek=20261018180000-20261018181000" → 200，3 个 EXTINF
+#   $ curl -s ".../gcu/cu2.m3u8?playseek=20261018192219-20261018192230" → 200，3 个 EXTINF
+#
+# ============================================================================
+# 7. D17a 回看（catchup）
+# ============================================================================
+# 模板（[server].catchup_tpl，默认 guonei）生成订阅 M3U 的 catchup 属性：
+#
+# --- $ curl -s http://192.168.215.4:19904/playlist.m3u | grep catchup ---
+# #EXTINF:-1 tvg-id="v"  ... group-title="gdash" catchup="append" catchup-days="1" catchup-source="?playseek=${(b)yyyyMMddHHmmss}-${(e)yyyyMMddHHmmss}",V
+# #EXTINF:-1 tvg-id="cu" ... group-title="gcu"   catchup="append" catchup-days="7" catchup-source="?playseek=${(b)yyyyMMddHHmmss}-${(e)yyyyMMddHHmmss}",CU
+# #EXTINF:-1 tvg-id="cu2"... group-title="gcu"   catchup="append" catchup-days="1" catchup-source="?playseek=${(b)yyyyMMddHHmmss}-${(e)yyyyMMddHHmmss}",CU2
+# #EXTINF:-1 tvg-id="cu3"... group-title="gcu"   catchup="append" catchup-days="3" catchup-source="?playseek=${(b)yyyyMMddHHmmss}-${(e)yyyyMMddHHmmss}",CU3
+# #EXTINF:-1 tvg-id="cu4"... group-title="gcu"   catchup="append" catchup-days="3" catchup-source="?playseek=${(b)yyyyMMddHHmmss}-${(e)yyyyMMddHHmmss}",CU4
+#
+# 由来：
+#   cu  : resolver_catchup=true, catchup_days=7            → days=7
+#   cu2 : livestream=true, timeshift_hours=4               → days=1（4h 折算）
+#   cu3 : resolver_catchup=true, catchup_days=3            → days=3
+#   v   : dash_timeshift=true, dash_timeshift_hours=4      → days=1（4h 折算）
+#
+# playseek 原样透传；其余时间参数丢弃：
+#   $ curl -s ".../gcu/cu.m3u8?playseek=20261018100000-20261018103000&start=111&end=222&utc=333&utcend=444"
+# --- 源站日志 ---
+# GET /cusrc/live.m3u8?playseek=20261018100000-20261018103000
+#   （无 start/end/utc/utcend）
+#
+# 本地回看（cu2，livestream=true）落盘：
+#   cache/livestream/gcu_cu2/index.json
+#   { "segments": [ {"sequence":0,"duration":5.0,"start_ts":1792322539,"end_ts":1792322544,
+#                    "filename":"1eaef887f3a406cb.ts",
+#                    "original_url":"http://host.docker.internal:9980/cusrc/seg0.ts"}, ... ],
+#     "init_url": null }
+#   cache/livestream/gcu_cu2/*.ts（每条分片 1880 B）
+#
+# --- $ curl -s http://192.168.215.4:19904/gcu/cu2.m3u8 ---
+# #EXTM3U
+# #EXT-X-VERSION:3
+# #EXT-X-TARGETDURATION:5
+# #EXT-X-MEDIA-SEQUENCE:0
+# #EXTINF:5.0,
+# http://192.168.215.4:19904/gcu/cu2/13e010ba5610eafa_e283552cb37de7377bc8e30b7befe512.jpg
+# ...（3 片，图片后缀伪装）
+# #EXT-X-ENDLIST
+#
+# ============================================================================
+# 8. D17b redirect（direct / best）
+# ============================================================================
+# 素材 harness/redirsrc/master2.m3u8：
+#   #EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=320x180 → low/index.m3u8
+#   #EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1920x1080 → high/index.m3u8
+#
+# best：
+#   $ curl -s -i http://192.168.215.4:19904/gred/rd.m3u8
+#   HTTP/1.1 302 Found
+#   location: http://host.docker.internal:9980/redirsrc/high/index.m3u8
+#   --- 源站日志（只取 master）---
+#   GET /redirsrc/master2.m3u8
+#   （未请求 low/ 或 high/ 清单）
+#
+# direct（需先清缓存，否则命中旧值）：
+#   $ rm -f inst/04/cache/m3u8/redirect_url_gred_rd__*
+#   $ curl -s -i http://192.168.215.4:19904/gred/rd.m3u8
+#   HTTP/1.1 302 Found
+#   location: http://host.docker.internal:9980/redirsrc/master2.m3u8
+#   --- 源站日志 ---
+#   GET /redirsrc/master2.m3u8
+#
+# 缓存：
+#   cache/m3u8/redirect_url_gred_rd__4837b52a61b2d4d1c011d7911ca5c6cb
+#     → http://host.docker.internal:9980/redirsrc/master2.m3u8
+#   …meta → {"ttl_secs":300,"created_at":1792323454}
+#   redirect_ttl=0 → 默认 300s。
+#   二次请求：无源站 GET，直接 302（命中缓存）。
+#
+# ============================================================================
+# 9. D22 EPG 匹配
+# ============================================================================
+# 数据源 harness/epgsrc/epg.xml（自建，15 源频道），[epg] keep_days=3 future_days=3
+# match_by_name=true；分组 gepg 的频道名/tvg-id 覆盖匹配边界。
+#
+# --- $ curl -s -H "Authorization: Bearer $T" .../panel/api/epg/match-report ---
+# matched_count=20 empty_count=7 extra_count=0
+# gid    cid  name                   out_id       via       src_id     pc
+# gepg   e1   CCTV-1 综合              cctv1        tvg-id    cctv1      0
+# gepg   e2   cctv-2                 CCTV2        tvg-id    CCTV2      1
+# gepg   e3   CCTV-3 综艺              e3           name      cctv3      0
+# gepg   e4   新闻频道                   nonexist     name      news       1
+# gepg   e5   ＣＣＴＶ－５                 e5           name      full       1
+# gepg   e6   CCTV-1                 e6           none                 0
+# gepg   e7   别的名字                   cctv1        duplicate            0
+# gepg   e8   CCTV-1  综合             e8           name      cctv1      0
+# gepg   e9   cctv-1 综合              e9           name      cctv1      0
+# gepg   e10  CCTV-1综合               e10          name      cctv1      0
+# gepg   e11    CCTV-1 综合            e11          name      cctv1      0
+# gepg   e12  CCTV_1 综合              e12          none                 0
+# gepg   e13  CCTV-1 综合频道            e13          none                 0
+# gepg   e14  CCTV1                  e14          none                 0
+# gepg   e15  CCTV－１ 综合              e15          name      full2      1
+# gepg   e16  cctv-3　综艺              e16          name      cctv3      1
+# gepg   n1   x1综合                   n1           name      x1         0
+# gepg   n2   X2-全角                  n2           name      x2         1
+# gepg   n3   X3,标点                  n3           name      x3         1
+# gepg   n4   X4双空                  n4           name      x4         1
+# gepg   n5   X5(括号)                 n5           name      x5         1
+# gepg   n6   X1 综合                  n6           name      x1         1
+# gepg   n7   x1-综 合                 n7           name      x7         1
+# gepg   e17  CCTV-1 综合              e17          name      cctv1      1
+# gt     g1   TRIM                   g1           name      t1         6
+#
+# 规则（由上表归纳）：
+#  - out_id = tvg_id || channel.id；先按 tvg_id（大小写不敏感）匹配源 channel/@id → via=tvg-id。
+#  - tvg_id 未命中 → 回退名称匹配源 display-name（任一别名）→ via=name。
+#  - 名称规范化：删空白（含 U+3000）+ 转小写；不做全角↔半角折叠；连字符保留；无子串匹配。
+#  - 同一源频道被多个服务频道命中 → 配置顺序最后一个获得节目，其余 programme_count=0。
+#  - 同一 out_id 冲突 → via=duplicate，丢弃。
+#
+# match_by_name=false（热重载）：
+#   via counts: {'none': 39, 'tvg-id': 2, 'duplicate': 1}
+#   e1/e2 仍 tvg-id；e3/e4/e5/n1..n7 全部 none。
+#
+# 手工映射：
+#   $ POST /panel/api/epg/mapping {"gid":"gepg","cid":"e6","source_id":"d22","source_channel_id":"only"}
+#   → via=manual, programme_count=1, source_channel_name="ONLY-UNUSED", last_stop=1792327608
+#   $ GET /panel/api/epg/mappings
+#   {"mappings":{"gepg/e6":{"source_id":"d22","source_channel_id":"only",
+#     "source_name":"D22 XMLTV","source_display_name":"ONLY-UNUSED"}},"extra":[]}
+#   清除（source 为空）→ 再次 refresh → e6 via=none
+#
+# 裁剪边界（墙钟 2026-10-18 19:39 +0800）：
+#   keep_days=3 → 保留 10-15 01:39，丢弃 10-14 19:39
+#                  → 下界 = (今天 - keep_days) 本地 00:00
+#   future_days=3 → 保留 10-21 23:39，丢弃 10-22 01:39
+#                  → 上界 = (今天 + future_days) 本地 23:59:59
+#   keep_days=1 → 保留 10-17 19:39，丢弃 10-16 19:39
+#   keep_days=7 → 保留 10-14 19:39（全部）
+#   keep_days=10 → 行为等同 7（API 接受 10，内部上限 7）
+#   keep_yesterday=true → 与 false 无差异（14 条不变；语义未验证）
+#
+# 日志：
+# INFO 【节目单】源 [d22] D22 XMLTV → 15 频道
+# DEBUG 【节目单】源 [d22] 抽取 26 条节目(跳过未使用频道的 2 条)
+# INFO 【节目单】已生成 20 频道 / 26 节目 (xml 5KB, gz 0KB, 耗时 1ms;未匹配 22 · 空 7 · 过期 0)
+#
+# 输出根节点：<tv generator-info-name="iptv-proxy">；channel/@id = out_id。
+#
+# ============================================================================
+# 10. 未验证 / 受限
+# ============================================================================
+#  - 看门狗冷却 3600s 未等待到期验证自动恢复（只验证了配置变更立即恢复）。
+#  - dash_timeshift_offset_secs 的精确作用未分离（录制前沿落后墙钟受上游停更影响）。
+#  - DASH 时移多音轨同步回看未测（仅单轨 video_180p）。
+#  - catchup_tpl 的 dollar/unix/both 三种模板本次未逐一取输出（仅 guonei 实测）。
+#    历史会话记录（未在本次复核）：
+#      dollar: ?playseek=${start}-${end}
+#      unix:   ?playseek={utc}-{utcend}
+#      both:   ?playseek=${(b)yyyyMMddHHmmss}-${(e)yyyyMMddHHmmss}&start=${start}&end=${end}&utc={utc}&utcend={utcend}
+#  - keep_yesterday 语义未定（开/关无差异）。
+#  - EPG 源 kind="script"、翻译、tz_shift_mins 未测。
+#  - redirect 仅测 HLS 清单；redirect+MPD 未测。

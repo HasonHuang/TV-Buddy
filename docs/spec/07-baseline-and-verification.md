@@ -127,6 +127,10 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-TS-01 | 本地回看 | `?start/end`、`?playseek`；VOD 清单；`timeshift/<hex>.<ext>` | ✅ |
 | S-SUB-09 | 字幕透传 | 保留 SUBTITLES 组；`.vtt`/`text/vtt` 不改写 | ✅ |
 | S-RES-01 | 上游解析脚本 | `python3 <cache>/resolvers/<脚本> <arg>`，stdout=URL；TTL/SWR | ✅ |
+| S-CACHE-03 | 缓存容量上限 | 四项上限均未生效（条目/字节超限不淘汰） | 🔶 |
+| S-CACHE-06 | cache flush | 清普通缓存，保留 `dash/` | ✅ |
+| S-HEALTH-01..06 | 健康探测 | GET+`Range: bytes=0-1`；失败 +1、成功归零；周期非 `interval_secs` 单独决定；仅展示 | ✅ |
+| S-URL-08 | 多 URL 不支持 | 多分隔符→整串路径→404→302 | ✅ |
 | S-LOGO-01/02 | 台标库 9 端点 + 上传不转码 | `name/ext/data`；PNG 存 PNG；`animate.quality` 字符串 | ✅ |
 | S-LOGO-03/04 | 动效 + 改名/删除同步引用 | `.orig/` 备份；`updated_channels`/`cleared_channels` | ✅ |
 
@@ -146,6 +150,7 @@ HasonHuang/sontv/docs/iptv-proxy/
 | `D-001` | 基线 **v0.8.2** 与上游 `main`（**v0.8.8**）不同 | **版本差异** | ✅ 已解决（取 v0.8.2 产物） |
 | `D-002` | `S-SUB-03`：聚合频道 `group-title` 的取值与基线不符 | 实现差异（文档描述） | 🔶 已澄清（以观测为准） |
 | `D-003` | Remux 的 `503` 被误归因于缺少 ffmpeg | 结论更正 | ✅ 已更正（为预热态） |
+| `D-004` | DASH「多 CDN 故障切换」未观测到 | 实现差异（文档描述） | 🔶 已记录（见 07） |
 
 **`D-002` 详情**
 
