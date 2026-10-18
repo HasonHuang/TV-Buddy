@@ -28,6 +28,7 @@
 | D11 | EPG 采集与下发 | 本地 XMLTV 源 | S-EP-05/12/13 | ✅ [`05`](05-epg.md)（时间裁剪、`lang` 处理；录制/台标 ⏳） |
 | D12 | 安全审计 / Token 轮换 / 指标面 | 端点矩阵 | S-AUTH-03/09/10, S-OPS-01/02/03 | ✅ [`11`](11-security-and-metrics.md)（限流触发条件未定） |
 | D13 | 台标库管理 | 端点矩阵 + 上载/动效 | S-LOGO-01/02/03/04, S-EP-06 | ✅ [`12`](12-logo-library.md)（`animated` 判定语义未定） |
+| D14 | 多 VPS 数据分享 | 双实例主从 | S-EP-09, S-AUTH-06, S-CFG-06 | ✅ [`13`](13-multi-vps-share.md)（unban 传播/三节点未测） |
 
 ## 运行期纪律
 

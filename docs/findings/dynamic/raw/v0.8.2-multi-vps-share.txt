@@ -1,0 +1,66 @@
+## D26 多 VPS 数据分享（v0.8.2, 2026-10-18）
+## 拓扑：inst/05 = master(:19905)、inst/06 = follower(:19906)，同容器，容器 IP 192.168.215.4
+## 配置（[share]）：enabled=true, key="REAKEY", trust_ips=["127.0.0.1","::1"], share_token=true, poll_secs=20
+##   master: follower_urls=["http://127.0.0.1:19906"]
+##   follower: master_url="http://127.0.0.1:19905"
+## 目标返回内容按不可信数据处理。
+
+### 启动日志
+[05 master] 【共享】同步任务运行中(角色=master, 间隔=20s)
+[05 master] 【共享】拉取从机失败 http://127.0.0.1:19906: error sending request for url (http://127.0.0.1:19906/api/share/pull?key=REAKEY)   # 启动竞态
+[06 follower] 【共享】本机为 follower,token 由主机接管,已禁用本地轮换
+[06 follower] 【共享】同步任务运行中(角色=follower, 间隔=20s)
+
+### 端点方法与门禁
+POST /api/share/pull          -> 405（allow: GET,HEAD）
+GET  /api/share/pull          -> 403（缺 key）
+GET  /api/share/pull?key=WRONG-> 403
+GET  /api/share/pull?key=REAKEY（来自宿主机 192.168.215.0）
+                              -> 403，日志：【共享】分享请求被拒:源 IP 不在白名单 来源=192.168.215.0
+GET  /api/share/pull?key=REAKEY（容器内 127.0.0.1）
+                              -> 200 载荷
+
+### 载荷（两角色同形）
+{"token":null,"token_old":null,"bans":[],"unbans":[]}
+同步后（master 轮换 token + 封禁 203.0.113.9）：
+master 轮换 → {"ok":true,"new_token":"2debefe848fd97507b9619fe1d85f4875e950d49800ece1a","expires_in_hours":24}
+master 封禁 → {"ok":true,"results":[{"ip":"203.0.113.9","ok":true}],"secs":2592000}
+
+### 一个周期（25s）后
+master   GET /panel/api/security/token  -> current_value 2debefe848fd9750…（2deb****ce1a）
+follower GET /panel/api/security/token  -> current_value 2debefe848fd9750…（2deb****ce1a）   # token 已同步
+follower GET /panel/api/security/ip/stats -> {"unique_ips":1,"active_sessions":0,
+                                              "banned_ips":[{"ip":"203.0.113.9","remaining_secs":2591974}]}  # 封禁已同步
+
+### 机制（观测推断）
+- master 每 poll_secs 轮询每个 follower_urls：GET <follower>/api/share/pull?key=<share.key>（用于汇总 follower 的 bans/unbans）。
+- follower 从 master_url 取 token 与封禁；follower 禁用本地 token 轮换（“token 由主机接管”）。
+- 门禁：share.key 必须匹配 + 源 IP 必须在 share.trust_ips（否则 403 并记日志）。
+
+### 静态补录：二进制内路由表（strings 提取，v0.8.2 unpacked arm64）
+/api/share/pull
+/config /link-info /groups /groups/:gid /groups/:gid/channels /groups/:gid/channels/:cid
+/cache/stats /cache/flush /reload /status /status/metrics /health /stats /logs
+/groups/export /groups/:gid/export /groups/import /groups/import/force /groups/import/m3u
+/security/token /security/token/rotate /security/ip/stats /security/ip/unban /security/ip/unban-batch
+/epg/status /epg/refresh /epg/regenerate /epg/cron-preview /epg/match-report /epg/suggest/:gid/:cid
+/epg/search /epg/viewer-channels /epg/mappings /epg/mapping /epg/extra /epg/source-channels/:id
+/epg/tz-preview/:id /epg/programmes/:channel /epg/scripts /epg/script /epg/script-delete
+/epg/translate/{status,run,clear,probe,models,mtran/test,clear-engine}
+/subtitle/mtran/test /subtitle/translate/clear
+/backup
+/logo/list /logo/upload /logo/rename /logo/delete /logo/suggest /logo/match-report /logo/apply /logo/animate /logo/restore
+/subs/groups /subs/preview /subs/status
+/resolver/scripts /resolver/script-delete
+/dash/status /dash/tracks/:gid/:cid /dash/scan-url /dash-timeshift/status
+/livestream /livestream/:gid/:cid/start /livestream/:gid/:cid/stop
+/assets/list /assets/convert /assets/remove /assets/ffmpeg-status
+/schedule /schedule/from-epg /schedule/download/:filename /schedule/:idx/stop /schedule/:idx
+/login /logout
+公开面：/playlist.m3u /:group_id/playlist.m3u /epg.xml.gz /epg /epg/api/channels /epg/api/programmes/:channel
+        /epg/api/search /logo /logo/api/list /logo/:file /__assets/*path /unban /unban/whoami /whoami
+        /:group_id/:channel_id/index.m3u8 /:group_id/:channel_id /:group_id/:channel_id/timeshift/:filename
+        /:group_id/:channel_id/dash-timeshift/:track/{playlist.m3u8,playlist.txt,playlist,:filename}
+        /:group_id/:channel_id/*segment /panel /panel/ /panel/epg /panel/api
+请求头：x-forwarded-for / x-real-ip / x-ipp-edge-secret / X-IPP-Edge-Secret,Value / x-ipp-master
+错误串：Group not found / Group archived / Rate Limited / Upstream Error / Invalid channel / Segment not found / Master M3U8

@@ -41,14 +41,15 @@
 | S-EP-05 | EPG：`/epg.xml`、`/epg.xml.gz`、`/epg`；**EPG 总开关关闭时三者全部 404** | D-panel | ✅【观测】开启后三者 200（`application/xml`/`application/gzip`/`text/html`），均无需登录 |
 | S-EP-06 | 台标：`GET /logo/<文件名>` | D-panel | ✅【观测】200 `image/png`，`public, max-age=86400`；缺→404 |
 | S-EP-07 | 自助解封：`GET /unban`，**无需登录**，每月限 3 次 | D-panel | ⏳ |
-| S-EP-08 | 状态：`/status`（返回 `entry_exts` 等）、`/status/metrics` | D-panel/D-res | ⏳ |
-| S-EP-09 | 多 VPS 数据分享端点 `POST /api/share/pull`（同步 token/封禁；基线路径待确认→已确认） | D-panel/二进制 | ⏳路径✅ |
+| S-EP-08 | 状态：`/status`（返回 `entry_exts` 等）、`/status/metrics` | D-panel/D-res | ✅【观测】**均非路由**：`/status` 404、`/status/metrics` 302 假路由；实际在 `/panel/api/status` |
+| S-EP-09 | 多 VPS 数据分享端点 `GET /api/share/pull?key=`（**仅 GET/HEAD**）；同步 token/封禁 | 二进制 | ✅【观测】key+`trust_ips` 双门禁（否则 403）；载荷 `{token,token_old,bans,unbans}`；master 轮询从机、follower 禁用本地轮换（见 13） |
 | S-EP-10 | 健康检查：`GET /health`（安装脚本用于就绪探测） | 安装脚本 | ⏳ |
-| S-EP-11 | 运维 API：`/api/reload`、`/api/backup`、`/api/restore`、`/whoami` | 二进制 | ⏳ |
+| S-EP-11 | 运维 API：`/api/reload`、`/api/backup`、`/api/restore`、`/whoami` | 二进制 | 🔶【观测】实际为 `/panel/api/{reload,backup}`；`/whoami`、`/unban/whoami` 存在（路由表见 13 §3） |
 | S-EP-12 | 面板接口前缀 `/panel/api/…`（备份/恢复、EPG 全套） | 二进制 | ✅【观测】`/panel/api/epg/{status,refresh,regenerate,mappings,programmes,scripts,match-report,mapping,extra,script,script-delete,cron-preview}` |
 | S-EP-13 | EPG 翻译接口 `/epg/translate/{run,status,clear,probe,models,mtran/test}` | 二进制 | 🔶【观测】端点存在（前缀 `/panel/api`）；默认关，未触发 |
-| S-EP-14 | DASH 接口 `/dash/…`、`/dash-timeshift/status` | 二进制 | ⏳ |
-| S-EP-15 | 解封辅助 `/unban/whoami` | 二进制 | ⏳ |
+| S-EP-14 | DASH 接口 `/dash/…`、`/dash-timeshift/status` | 二进制 | 🔶【观测】路由表：`/panel/api/dash/{status,scan-url,tracks/:gid/:cid}`、`/panel/api/dash-timeshift/status` |
+| S-EP-15 | 解封辅助 `/unban/whoami` | 二进制 | 🔶【观测】路由存在（路由表见 13 §3）；响应未测 |
+| S-EP-16 | 完整路由表（静态补录）：公开面含 `/epg/api/{channels,programmes/:channel,search}`、`/logo/api/list`、`/__assets/*path`、`/whoami`、`/{gid}/{cid}/{timeshift,dash-timeshift,segment}…`；私有面新增 `/groups/{import,import/force,:gid/export}`、`/cache/flush`、`/backup`、`/assets/ffmpeg-status`、`/dash/scan-url`、`/dash/tracks/:gid/:cid`、`/livestream/:gid/:cid/{start,stop}`、`/schedule/{from-epg,download/:filename,:idx/stop}` | 二进制 | ✅【观测】见 13 §3 |
 
 ## 3. 播放地址与扩展名规则
 
@@ -130,7 +131,7 @@
 | S-AUTH-03 | Token 有效期（小时）可配；失效跳转可指向自定义提示页 | D-panel | ✅【观测】`token_ttl_hours=24`；失效→`token_failure_url`；面板登录失败锁 429（见 11 §4） |
 | S-AUTH-04 | IP 管控：每 IP 并发会话数、会话超时、频率限制与封禁、白名单；**仅监控播放列表请求** | D-panel | 🔶 键面已全（l1/l2 双窗口等 20+）；8 次突发（含 token）未触发；仅 token 播放使 `active_sessions/online_viewers`+1；触发条件未定（见 11 §5） |
 | S-AUTH-05 | 访问范围：公开 / 隐藏（不进总订阅，独立地址可播）/ 归档（整组停用，EPG+台标照常匹配）/ 免验证（跳过 Token） | D-fields | ✅【观测】四档全验；**open 亦被排除出总订阅**（仅直链/分组订阅可达），与基线措辞有出入 |
-| S-AUTH-06 | 多 VPS 数据分享：共享 token 与封禁 IP；可开关"同时分享 token" | D-panel | ⏳ |
+| S-AUTH-06 | 多 VPS 数据分享：共享 token 与封禁 IP；可开关"同时分享 token" | D-panel | ✅【观测】token+封禁同步已验证（见 13）；`share_token` 开关行为未测 |
 | S-AUTH-07 | 自助解封 `/unban` 无需登录，每月限 3 次 | D-panel | 🔶【观测】`/unban` 无需登录 200；每月 3 次未验 |
 | S-AUTH-08 | `iptv-proxy pass <密码> [账号]` 可直接改密码（无需进面板）；改端口/密码均改 `config.toml` 并重启 | RM/D-panel | ⏳ |
 | S-AUTH-09 | Token 可**轮换**：`POST /panel/api/security/token/rotate` → 新 48-hex；**旧 token 宽限 ≈1h**；`GET /security/token` 给掩码与剩余秒 | D-panel/二进制 | ✅【观测】轮换即生效于订阅；旧 token 3598s 内仍 200 |

@@ -116,6 +116,8 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-AUTH-10 | IP 封禁/解封 API 面 | ban `{"ips":[…]}`（默认 30 天）/unban `{"ip":…}`/stats；字段不对称 | ✅ |
 | S-OPS-01 | 指标出口 | 仅 `/panel/api/{status,cache/stats,health}` | ✅ |
 | S-OPS-02 | 公开指标端点 | `/status`、`/metrics`、`/version` 404；`/status/metrics` → 302 占位 | ✅ |
+| S-EP-09 | 多 VPS 分享端点 | `GET /api/share/pull?key=`（POST 405）；key+trust_ips 门禁；token/封禁同步 | ✅ |
+| S-EP-16 | 完整路由表（静态） | 公开面 + `/panel/api` 私有面补录 | ✅ |
 | S-LOGO-01/02 | 台标库 9 端点 + 上传不转码 | `name/ext/data`；PNG 存 PNG；`animate.quality` 字符串 | ✅ |
 | S-LOGO-03/04 | 动效 + 改名/删除同步引用 | `.orig/` 备份；`updated_channels`/`cleared_channels` | ✅ |
 
