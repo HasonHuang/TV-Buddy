@@ -263,3 +263,18 @@ formats = ["jpg","png","gif","bmp","webp"]
 - 状态回填与差异登记规则见 `07-baseline-and-verification.md`。
 - 本文件**不承载**逆向结论；发现与本文冲突时，以**带证据的发现**为准，并在 `07` 登记差异。
 - 版本变化（非 v0.8.2）时，另建 `08b-target-spec-vX.Y.Z.md`，不复用本文件状态列。
+
+## 16. 盘点补录（v0.8.2 新增能力，待深化验证）
+
+> 来源：二进制 strings/字段与面板 JS 的**全量盘点**（见 `PROGRESS.md` §5）。这些能力在基线文档中缺失，先按"存在"登记；行为验证见对应 `D-*` 路线图项。
+
+| ID | 规格声明 | 来源 | 状态 |
+| --- | --- | --- | --- |
+| S-GAP-01 | **ClearKey/DRM 子系统**：频道 `license_key` + KODI `#KODIPROP` 注入；MPD `ContentProtection` 处理（`key_manager`） | 二进制/字段 | ⏳ 行为未验（→ D14） |
+| S-GAP-02 | **公开 JSON API**：`/epg/api/channels`、`/epg/api/programmes/:channel`、`/epg/api/search`（v0.8.2 路由表已含） | 二进制 | 🔶 路由存在；响应未验 |
+| S-GAP-03 | `GET /panel/api/dash/scan-url`：手动 URL 池扫描 | 二进制/面板 | ⏳ 行为未验（→ D15） |
+| S-GAP-04 | `GET /panel/api/link-info`：审计播放链接/token 剩余期；返回 `{aliases,random_id_enabled,token,token_enabled,use_alias}` | 二进制 | ✅【观测】形状已验（见 11 §2）；语义细节未验 |
+| S-GAP-05 | **每频道独立上游代理**：频道/分组 `proxy{kind,addr,user,pass}`（覆盖全局代理） | 字段 | 🔶 字段存在（默认 `null`）；行为未验 |
+| S-GAP-06 | **旧数据迁移**：清理遗留 `./var/dash`（**v0.8.8 变更**；v0.8.2 无此行为） | 088 diff | ⏳ 仅 088 |
+| S-GAP-07 | **订阅合并** `subscription-merge`：`[playlist]{merge_ttl_secs,merge_position,sources[],global_exclude[]}` + `/subs/{preview,groups,status}` | 字段/端点 | 🔶 键面与端点已录；行为未验（→ D24） |
+| S-GAP-08 | **双层限流窗口** `l1/l2` 与会话计数（`active_sessions`/`online_viewers`）；缓存分层（`m3u8`/`sub_url`/`seg_url`/`seg_bytes`） | 字段/端点 | 🔶 键面已录；`l1/l2` 触发条件未定（见 11 §5） |
