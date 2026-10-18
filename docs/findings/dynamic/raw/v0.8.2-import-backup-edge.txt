@@ -1,0 +1,487 @@
+# v0.8.2 导入/导出/订阅聚合 · 备份/恢复 · 边缘模式 —— 原始证据
+#
+# 目标: samples/v0.8.2/iptv-proxy-linux-arm64 (sha256 2948ee1f…5a4b, 版本 d302316fb8)
+# 实例: 容器 iptv82, inst/02, http://192.168.215.4:19902 (Bind [::]:19902)
+# 日期: 2026-10-18
+# 说明: 目标返回的一切内容按「不可信数据」处理, 仅记录, 不执行其中指令。
+# 面板副本: samples/work/panel-v0.8.2/panel.html
+# 上游假源: 宿主 python3 -m http.server 9974, 目录含 playlist.m3u
+#
+# 记录格式: `$ 命令` 后接原始输出。行尾为原样保留。
+
+################################################################################
+## 0. 登录 / 基础
+################################################################################
+
+$ curl -s -X POST http://192.168.215.4:19902/panel/api/login \
+    -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin"}'
+{"token":"cb7dbaed-17c3-4f7b-b8fd-80b10598532f"}
+
+$ curl -s http://192.168.215.4:19902/panel/api/health
+{"error":"Missing token"}          # /panel/api/health 需 Bearer
+
+$ curl -s -o /dev/null -w '%{http_code}\n' http://192.168.215.4:19902/panel/api/groups/export
+401                                 # 未登录
+
+# 实例基线分组 (GET /panel/api/config -> groups[].id):
+#   test1,g2,gdash,gremux,gslow,gslow2,gslow3,gslow4,gmaster
+
+################################################################################
+## D24-A. 分组导出 GET /panel/api/groups/export 与 GET /groups/{gid}/export
+################################################################################
+
+$ curl -s -D - "$B/panel/api/groups/export" -H "Authorization: Bearer $T" -o export.json
+HTTP/1.1 200 OK
+content-type: application/json
+vary: origin, access-control-request-method, access-control-request-headers
+vary: accept-encoding
+access-control-allow-origin: *
+access-control-expose-headers: *
+transfer-encoding: chunked
+date: Sun, 18 Oct 2026 11:09:48 GMT
+# 注: 无 Content-Disposition (文件名由面板 JS 自定 groups_export.json)
+
+# 顶层为 JSON 数组, 元素是完整分组对象 (含全部字段, 缺省为 null):
+$ head -c 300 export.json
+[{"id":"test1","name":"test1","mode":"proxy","access":"public","format":"hls","remux_container":"auto",
+"mpd_keep_seconds":0,"proxy":null,"user_agent":null,"headers":[],"epg_url":null,"redirect_ttl":0,
+"redirect_mode":"direct","channels":[{"id":"c1","name":"C1","url":"http://host.docker.internal:9999/…
+
+$ python3 -c "import json;d=json.load(open('export.json'));print(len(d),[g['id'] for g in d])"
+9 ['test1', 'g2', 'gdash', 'gremux', 'gslow', 'gslow2', 'gslow3', 'gslow4', 'gmaster']
+
+# 分组字段全集 (导出对象键序):
+#   id,name,mode,access,format,remux_container,mpd_keep_seconds,proxy,user_agent,headers,epg_url,
+#   redirect_ttl,redirect_mode,channels
+# 频道字段全集:
+#   id,name,url,tvg_id,tvg_name,logo,proxy,user_agent,remux_container,headers,license_key,
+#   selected_tracks,dash_mode,livestream,timeshift_hours,timeshift_max_gb,timeshift_offset_secs,
+#   dash_timeshift,dash_timeshift_hours,dash_timeshift_max_gb,dash_timeshift_offset_secs,
+#   resolver_script,resolver_arg,resolver_catchup,catchup_days,resolver_ttl,url_pool_size
+# 注意: 导出**不含** segment_cache_max / retain_count (面板 payload 中存在, 但导出对象没有)。
+
+$ curl -s "$B/panel/api/groups/test1/export" -H "Authorization: Bearer $T"
+HTTP/1.1 200 OK
+content-type: application/json
+{"id": "test1", "name": "test1", "mode": "proxy", "access": "public", "format": "hls",
+ "remux_container": "auto", "mpd_keep_seconds": 0, "proxy": null, "user_agent": null, "headers": [],
+ "epg_url": null, "redirect_ttl": 0, "redirect_mode": "direct", "channels": []}
+# 单组导出 = 单个 JSON 对象 (非数组)。
+
+################################################################################
+## D24-B. M3U 导入 POST /panel/api/groups/import/m3u
+################################################################################
+
+# 请求体为 **JSON 文本** (非 multipart 上传):
+#   { "text": "<M3U 全文>", "mode": "append|merge|replace", "group_mode": "auto|redirect|rewrite|proxy|dash|passthrough" }
+# 面板代码: api('POST','/groups/import/m3u',{ text, mode, group_mode: groupMode })
+#   面板把「频道模式」select 的 id 写成 #m3u-group-mode, 把「导入策略」写成 #m3u-mode,
+#   发送时却是 mode=导入策略 / group_mode=频道模式 —— 字段名与面板文案交叉, 已实测确认语义:
+#     mode       = 导入策略 (append/merge/replace)
+#     group_mode = 频道/分组模式 (auto/redirect/rewrite/proxy/dash/passthrough)
+
+# 测试 M3U (import1.m3u):
+#   #EXTM3U
+#   #EXTINF:-1 tvg-id="news.hd" tvg-name="新闻 HD" tvg-logo="http://logo.example/news.png" group-title="导入组A",新闻一台
+#   #EXTVLCOPT:http-user-agent=Mozilla/5.0 ImportUA
+#   #EXTHTTP:{"Referer":"http://ref.example/a","Origin":"http://org.example"}
+#   http://origin.example/live/news1.m3u8
+#   #EXTINF:-1 tvg-id="sports.hd" group-title="导入组A",体育一台
+#   #EXTVLCOPT:http-user-agent=ImportUA2
+#   #EXTHTTP:{"Referer":"http://ref.example/b"}
+#   http://origin.example/live/sports1.m3u8
+#   #EXTINF:-1 group-title="导入组B",电影台
+#   #KODIPROP:inputstream.adaptive.license_type=clearkey
+#   #KODIPROP:inputstream.adaptive.license_key=11112222333344445555666677778888:9999aaaabbbbccccddddeeeeffff0000
+#   http://origin.example/live/movie1.mpd
+#   #EXTINF:-1 group-title="导入组B" http-user-agent="InlineUA/9.9" http-referer="http://inline.example/",测试台
+#   http://origin.example/live/tv1.ts
+
+$ curl -s -X POST "$B/panel/api/groups/import/m3u" -H "Authorization: Bearer $T" \
+    -H 'Content-Type: application/json' -d '{"text":"…","mode":"append","group_mode":"auto"}'
+{"added_groups":2,"group_mode":"auto","merged_channels":0,"ok":true,"parsed_channels":4,
+ "parsed_groups":2,"replaced_groups":0,"skipped_groups":0}
+
+# 落库结果 (GET /config -> 新分组):
+GROUP: {"id":"A","name":"导入组A","mode":"rewrite","access":"public","format":"hls","user_agent":null,"headers":[],"proxy":null}
+  CH: id=news.hd name=新闻一台 url=http://origin.example/live/news1.m3u8
+      tvg_id=news.hd tvg_name=新闻 HD logo=http://logo.example/news.png
+      user_agent="Mozilla/5.0 ImportUA"
+      headers=[{"name":"Origin","value":"http://org.example"},{"name":"Referer","value":"http://ref.example/a"}]
+      license_key=null
+  CH: id=sports.hd name=体育一台 tvg_id=sports.hd tvg_name=null logo=null
+      user_agent="ImportUA2" headers=[{"name":"Referer","value":"http://ref.example/b"}]
+GROUP: {"id":"B","name":"导入组B","mode":"dash","access":"public","format":"mpd",...}
+  CH: id=g-1f227e name=电影台 url=…/movie1.mpd license_key="11112222333344445555666677778888:9999aaaabbbbccccddddeeeeffff0000"
+  CH: id=g-163574 name=测试台 url=…/tv1.ts user_agent="InlineUA/9.9"
+      headers=[{"name":"Referer","value":"http://inline.example/"}]
+
+# 观察:
+#  - 分组 id = group-title 去掉非 ASCII 后的结果: "导入组A"->"A", "导入组B"->"B";
+#    纯中文 group-title -> 回退 id 形如 "g-146ec3"。
+#  - 频道 id: 有 tvg-id 时用 tvg-id; 无 tvg-id 时生成随机 "g-<6hex>" (每次导入都不同)。
+#  - group_mode=auto: 分组内 .mpd 源 -> 该组 mode=dash/format=mpd; 其余 -> mode=rewrite/format=hls。
+#  - 元数据保留: tvg-id, tvg-name, tvg-logo 分别落到 tvg_id/tvg_name/logo。
+#  - UA/Referer/Origin 解析: #EXTVLCOPT:http-user-agent, #EXTHTTP:{...JSON...}, 以及
+#    #EXTINF 行内 http-user-agent / http-referer 均被解析。headers 数组按名排序 (Origin 在 Referer 前)。
+#  - #KODIPROP clearkey -> license_key (取 license_key 值)。license_type 行被忽略。
+
+# 导入策略对照 (同一名分组重复导入, import2.m3u 含 导入组A/纯中文组/导入组C):
+mode=append : {"added_groups":2,"merged_channels":0,"replaced_groups":0,"skipped_groups":1,...}
+              # 同名分组「导入组A」跳过; 纯中文组 / 导入组C 新建
+mode=merge  : {"added_groups":0,"merged_channels":1,"replaced_groups":0,"skipped_groups":0,...}
+              # 同名分组保留, 仅**新增** id 不存在的频道; 已存在 id 的频道**不更新**
+mode=replace: {"added_groups":0,"merged_channels":0,"replaced_groups":3,"skipped_groups":0,...}
+              # 同名分组整体替换为新数据 (旧频道被丢弃)
+
+# merge 语义细节 (import3.m3u: 已有 news.hd 改名+换 url, 新增 new.chan):
+$ (mode=merge) {"added_groups":0,"merged_channels":1,...}
+  group A channels after merge:
+    news.hd  | 新闻一台 | http://origin.example/live/news1.m3u8 | ua=Mozilla/5.0 ImportUA   # 未更新
+    sports.hd| 体育一台 | …                                       | ua=ImportUA2
+    new.chan | 新增合并台| http://origin.example/live/newchan.m3u8 | ua=None                 # 新增
+$ (mode=merge 再跑一次) {"merged_channels":0,...}   # 幂等, 不重复加
+
+# 无 group-title -> 落到分组 "Default" (id=Default):
+$ (import4.m3u mode=append group_mode=proxy)
+{"added_groups":2,"group_mode":"proxy","merged_channels":0,"parsed_channels":3,"parsed_groups":3,
+ "skipped_groups":1,"replaced_groups":0,"ok":true}
+GROUPS: A(rewrite,hls), B(dash,mpd), Default(proxy,hls), g-5107bf(显式代理组,proxy,hls)
+# group_mode=proxy 使新建分组 mode=proxy; 被跳过(append 同名)的 A 组保持原 mode。
+
+# 错误分支:
+$ -d '{"text":"hello","mode":"append","group_mode":"auto"}'
+{"error":"M3U 中没有解析到任何频道(请检查格式)"}   HTTP 400
+$ -d '{}'
+{"error":"M3U 文本为空"}                            HTTP 400
+
+################################################################################
+## D24-C. 手工建组 / 删除
+################################################################################
+
+$ curl -s -X POST "$B/panel/api/groups" -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+    -d '{"id":"man1","name":"手工组","mode":"redirect","access":"hidden","format":"hls","redirect_ttl":5,
+         "redirect_mode":"direct","user_agent":"ManualUA","headers":[{"name":"X-Test","value":"1"}]}'
+{"ok":true}   HTTP 200
+
+$ (同 id 再建)
+{"error":"Group id already exists"}   HTTP 409
+
+$ curl -s -X PUT "$B/panel/api/groups/man1" -H "Authorization: Bearer $T" \
+    -H 'Content-Type: application/json' -d '{"access":"open"}'
+{"ok":true}   HTTP 200      # PUT 为局部更新 (仅改 access)
+
+$ GET /config -> man1 = {"id":"man1","name":"手工组","mode":"redirect","access":"open","format":"hls",
+    "remux_container":"auto","mpd_keep_seconds":0,"proxy":null,"user_agent":"ManualUA",
+    "headers":[{"name":"X-Test","value":"1"}],"epg_url":null,"redirect_ttl":5,"redirect_mode":"direct","channels":[]}
+
+$ curl -s -X DELETE "$B/panel/api/groups/B/channels/g-163574" -H "Authorization: Bearer $T"
+{"ok":true}   HTTP 200
+$ curl -s -X DELETE "$B/panel/api/groups/C" -H "Authorization: Bearer $T"
+{"ok":true}   HTTP 200
+$ curl -s -X DELETE "$B/panel/api/groups/NOPE" -H "Authorization: Bearer $T"
+{"error":"Group not found"}    HTTP 404
+$ curl -s -X DELETE "$B/panel/api/groups/A/channels/nope" -H "Authorization: Bearer $T"
+{"error":"Channel not found"}  HTTP 404
+
+# 副作用: 上述建组/删组/删频道**均立即重写**宿主 config.toml
+#   (inst/02/config.toml 行数/大小随之变化; [[groups]] 段落同步增删)。
+
+# 另: PUT /panel/api/config 为**全量替换**。用不含 man1/man2 的完整 config PUT 之后,
+#     man1/man2 从 groups 中消失 (后续 DELETE 返回 "Group not found")。
+
+################################################################################
+## D24-D. JSON 分组导入 POST /groups/import, /groups/import/force
+################################################################################
+
+# 用 GET /groups/export 的结果改名后回灌:
+$ -d '[{"id":"man2","name":"手工组二号", …man1 的完整字段… }]'
+POST /groups/import        : {"added":1,"ok":true,"skipped":0}                 HTTP 200
+POST /groups/import (重复) : {"added":0,"msg":"所有分组ID已存在，未导入","ok":true,"skipped":1}  HTTP 200
+POST /groups/import/force  : {"added":0,"ok":true,"replaced":1,"skipped":[]}    HTTP 200
+
+################################################################################
+## D24-E. 订阅聚合 (上游原始地址, 不做反代)
+################################################################################
+
+# 自建上游 M3U (宿主 9974/playlist.m3u), 5 分组 7 频道, 地址形如 http://upstream.example:9000/…:
+#EXTM3U
+#EXTINF:-1 tvg-id="cn.bj" group-title="央视",CCTV-1 综合        -> http://upstream.example:9000/cctv1/index.m3u8
+#EXTINF:-1 tvg-id="cn.js" group-title="央视",CCTV-2 财经        -> …/cctv2/index.m3u8
+#EXTINF:-1 tvg-id="sh.drag" group-title="上海",上海卫视        -> …/shtv/index.m3u8
+#EXTINF:-1 tvg-id="mov.1" group-title="电影",电影-动作         -> …/movie1/index.m3u8
+#EXTINF:-1 tvg-id="mov.2" group-title="电影",电影-喜剧         -> …/movie2/index.m3u8
+#EXTINF:-1 tvg-id="shop.1" group-title="购物",购物频道1        -> …/shop1/index.m3u8
+#EXTINF:-1 tvg-id="test.1" group-title="测试",测试频道1        -> …/test1/index.m3u8
+
+# 读取上游分组 (只读, 不落库):
+$ curl -s -X POST "$B/panel/api/subs/groups" -H "Authorization: Bearer $T" \
+    -H 'Content-Type: application/json' -d '{"url":"http://host.docker.internal:9974/playlist.m3u","ttl_secs":0,"force":true}'
+{"groups":[{"count":2,"name":"央视"},{"count":2,"name":"电影"},{"count":1,"name":"上海"},
+ {"count":1,"name":"测试"},{"count":1,"name":"购物"}],"total":7}
+# 调用前后 config.playlist.sources 数量不变 (1 -> 1), 证明 /subs/groups 无落库副作用。
+
+# 订阅源结构 (面板 -> PUT /config playlist.sources[]):
+{ "id":"subsrc1","name":"上游测试源","url":"http://host.docker.internal:9974/playlist.m3u",
+  "enabled":true,"ttl_secs":0,"group_map":{},"group_mode":"keep","merge_group":"",
+  "unlisted_groups":"keep","include":[],"exclude":[] }
+
+$ curl -s "$B/panel/api/subs/status" -H "Authorization: Bearer $T"
+# 首次抓取前:
+{"sources":[{"channels":0,"enabled":true,"error":null,"id":"subsrc1","last_ok":0,"last_try":0,
+ "name":"上游测试源","ttl":3600}]}
+# 抓取成功后 (请求过 /playlist.m3u 触发):
+{"sources":[{"channels":7,"enabled":true,"error":null,"id":"subsrc1","last_ok":1792321934,
+ "last_try":1792321934,"name":"上游测试源","ttl":3600}]}
+# 字段: id,name,enabled,error,channels,last_ok,last_try,ttl (ttl 秒, 未设时为 3600)
+
+# 总订阅输出 (merge_position=bottom, group_mode=keep, unlisted_groups=keep):
+$ curl -s "$B/playlist.m3u"
+…本地组条目 (http://192.168.215.4:19902/<gid>/<cid>.m3u8)…
+#EXTINF:-1 tvg-id="cn.bj" group-title="央视",CCTV-1 综合
+http://upstream.example:9000/cctv1/index.m3u8
+#EXTINF:-1 tvg-id="cn.js" group-title="央视",CCTV-2 财经
+http://upstream.example:9000/cctv2/index.m3u8
+#EXTINF:-1 tvg-id="sh.drag" group-title="上海",上海卫视
+http://upstream.example:9000/shtv/index.m3u8
+#EXTINF:-1 tvg-id="mov.1" group-title="电影",电影-动作
+http://upstream.example:9000/movie1/index.m3u8
+#EXTINF:-1 tvg-id="mov.2" group-title="电影",电影-喜剧
+http://upstream.example:9000/movie2/index.m3u8
+#EXTINF:-1 tvg-id="shop.1" group-title="购物",购物频道1
+http://upstream.example:9000/shop1/index.m3u8
+#EXTINF:-1 tvg-id="test.1" group-title="测试",测试频道1
+http://upstream.example:9000/test1/index.m3u8
+
+# 结论:
+#  - 聚合条目 URL = **上游原始地址**, 不经本服务 (无 /{gid}/{cid} 反代, 无 token)。
+#  - 聚合条目 group-title = **上游 group-title 字符串**; 不是本地分组 ID。
+#    (对照: 本地/导入频道条目 URL 为 http://<host>/<gid>/<cid>.m3u8, group-title=显示名。)
+#  - 聚合条目无 proxy/缓存/模式/托管, 仅拼进总订阅。
+
+# merge_position=top 时聚合条目排在本地组之前。
+
+################################################################################
+## D24-E2. /subs/preview 试算 (source 对象须含 id 字段)
+################################################################################
+
+$ -d '{"source":{"url":"…","group_map":{},"group_mode":"keep","unlisted_groups":"keep","include":[],"exclude":[]}}'
+HTTP 422：Failed to deserialize the JSON body into the target type: source: missing field `id`
+# -> 该结构体必填 id (SubPreviewReq)。
+
+# 试算矩阵 (keep 模式):
+P1 group_map={} unlisted_groups=drop :
+   kept=0 trace={total:7,after_group:0,dropped_groups:[上海,央视,测试,电影,购物]}
+P2 group_map={} unlisted_groups=keep :
+   kept=7 out_groups=[央视(2),电影(2),上海(1),测试(1),购物(1)]
+P3 group_map={"央视":""} drop               : kept=2 out=[央视(2)] dropped=[上海,测试,电影,购物]
+P4 group_mode=merge merge_group="聚合" keep : kept=7 out=[聚合(7)]
+P5 group_mode=map {"央视":"CN","电影":"MOV"} drop : kept=4 out=[CN(2),MOV(2)]
+# 分组处理: keep=各自保留原名; merge=全部合并到一个组; map=逐个改名(同名=合并)。
+# 无论哪种 group_mode, 输出 URL 仍是上游原始地址 -> 只改输出分组标题。
+
+################################################################################
+## D24-F. include / exclude (per-source 与 global_exclude)
+################################################################################
+
+include/exclude 匹配 **频道名** (不区分大小写, 子串); 支持前缀语法:
+  group:<名> / id:<tvg-id> / /正则/  —— 在 **per-source include 与 exclude 均有效**
+  (与 spec S-SUB-07「仅全局排除支持」不一致, 见发现文档)
+
+$ include ["CCTV"]                     -> kept=2 (CCTV-1/2)
+$ include ["cctv"]                     -> kept=2 (大小写不敏感)
+$ include ["电影"]                     -> kept=2 (游戏名子串匹配 电影-动作/电影-喜剧)
+$ include ["group:央视"]               -> kept=2
+$ include ["group:央"]                 -> kept=2 (group: 亦为子串匹配)
+$ include ["id:mov.1"]                 -> kept=1 (电影-动作)
+$ include ["/电影/"]                   -> kept=2 (正则)
+$ include ["央视","CCTV"]              -> kept=2 (多词 OR)
+$ exclude ["CCTV-2"]                   -> kept=6
+$ exclude ["id:mov.2"]                 -> kept=6
+$ exclude ["/CCTV-./"]                 -> kept=5
+$ exclude ["group:电影"]               -> kept=5
+
+global_exclude (config.playlist.global_exclude, 值同语法) 全源生效:
+$ global_exclude ["购物"]        -> 上游条目 7->6 (去 购物频道1)
+$ global_exclude ["group:电影"]  -> 7->5
+$ global_exclude ["id:sh.drag"]  -> 7->6
+$ global_exclude ["/CCTV-./"]    -> 7->5
+
+# 管道顺序 (trace 字段): total -> after_group -> after_global_exclude -> after_include -> after_exclude
+
+# 错误分支:
+$ preview url=http://127.0.0.1:1/none.m3u
+{"error":"抓取失败，且没有可用缓存"}   HTTP 400
+
+################################################################################
+## D25. 备份 / 恢复
+################################################################################
+
+# 端点 (面板 downloadBackup/uploadRestore):
+#   GET  /panel/api/backup?include=all|epg-scripts|resolver
+#   POST /panel/api/restore   (Content-Type: application/gzip, body = tar.gz 原文)
+
+$ curl -s -D - "$B/panel/api/backup?include=all" -H "Authorization: Bearer $T" -o bk_all.tar.gz
+HTTP/1.1 200 OK
+content-type: application/gzip
+content-disposition: attachment; filename="iptv-proxy-backup-20261018-1913.tar.gz"
+vary: origin, access-control-request-method, access-control-request-headers
+vary: accept-encoding
+access-control-allow-origin: *
+access-control-expose-headers: *
+transfer-encoding: chunked
+
+$ curl -s -D - "$B/panel/api/backup?include=epg-scripts" … -o bk_epg-scripts.tar.gz
+content-disposition: attachment; filename="iptv-proxy-epg-scripts-20261018-1913.tar.gz"
+$ curl -s -D - "$B/panel/api/backup?include=resolver" … -o bk_resolver.tar.gz
+content-disposition: attachment; filename="iptv-proxy-resolvers-20261018-1913.tar.gz"
+
+$ file bk_all.tar.gz
+bk_all.tar.gz: gzip compressed data, original size modulo 2^32 13312
+
+# 包内结构 (scope=all, 早期无脚本/台标时):
+$ tar tzvf bk_all.tar.gz
+-rw-r--r--  0 0  0  10677 iptv-proxy-backup/config.toml
+-rw-r--r--  0 0  0    146 iptv-proxy-backup/manifest.json
+$ tar xzf bk_all.tar.gz -O iptv-proxy-backup/manifest.json
+{
+  "kind": "iptv-proxy-backup",
+  "version": 1,
+  "app_version": "0.8.2",
+  "created_at": "2026-10-18 19:13:29",
+  "scope": "all",
+  "files": 1
+}
+# config.toml 与实例 config.toml sha1 一致 (c94319465b28167565196d972c581cfefba7917c)。
+
+# scope=epg-scripts 只含 epg/scripts/*.py; scope=resolver 只含 resolvers/*.py:
+$ tar tzvf bk_epg-scripts.tar.gz   -> (空脚本时) 仅 manifest.json, files:0
+$ tar tzvf bk_resolver.tar.gz      -> (空脚本时) 仅 manifest.json, files:0
+
+# 制造 content 后再备份 (all 包完整内容):
+#   - POST /panel/api/epg/script      {"name":"rea_test_epg.py","content":"print(\"hello epg\")\n"}
+#   - POST /panel/api/resolver/script {"name":"rea_test_res.py","content":"print(\"hello resolver\")\n"}
+#   - POST /panel/api/logo/upload     {"items":[{"name":"rea-logo","ext":"png","data":"<base64>","gid":null,"cid":null}]}
+#   - POST /panel/api/epg/mapping     {"gid":"test1","cid":"c1","source_id":"src_local","source_channel_id":"c1"}
+$ tar tzvf bk_all2.tar.gz
+-rw-r--r--  0 0  0  10677 iptv-proxy-backup/config.toml
+-rw-r--r--  0 0  0    195 iptv-proxy-backup/epg/epg_map.json
+-rw-r--r--  0 0  0     19 iptv-proxy-backup/epg/scripts/rea_test_epg.py
+-rw-r--r--  0 0  0     24 iptv-proxy-backup/resolvers/rea_test_res.py
+-rw-r--r--  0 0  0     73 iptv-proxy-backup/logos/rea-logo.png
+-rw-r--r--  0 0  0    146 iptv-proxy-backup/manifest.json
+$ manifest: scope=all, files=5
+# 注意: 生成的 epg.xml / epg.xml.gz **不**入包; epg_map.json 入包 (路径 epg/epg_map.json)。
+
+# include=epg (非面板取值) 与 include=bogus 均**回退为 all** (filename 无 scope 后缀, manifest.scope="all")。
+# include 只识别 all / epg-scripts / resolver 三个值。
+
+$ (未鉴权) GET /panel/api/backup?include=all   -> HTTP 401
+$ (未鉴权) POST /panel/api/restore             -> HTTP 401 {"error":"Missing token"}
+
+# ---- 恢复: 改配置 -> 回滚 ----
+$ PUT /config  (home_url=https://marker.example/changed/, log_level=debug)
+after change: home_url= https://marker.example/changed/ log_level= debug
+
+$ curl -s -X POST "$B/panel/api/restore" -H "Authorization: Bearer $T" \
+    -H 'Content-Type: application/gzip' --data-binary @bk_all.tar.gz
+HTTP/1.1 200 OK
+content-type: application/json
+{"config_reloaded":true,"ok":true,
+ "report":{"config":true,"epg_map":false,"epg_scripts":0,"logos":0,"resolvers":0,"skipped":[]}}
+
+after restore: home_url= https://yang-1989.eu.org/ log_level= info     # 已回滚
+
+# 原 config.toml 自动另存 .bak (含恢复前内容, 即 marker 值):
+/app/inst/02/config.toml.bak:
+  home_url = "https://marker.example/changed/"
+  log_level = "debug"
+
+# 完整包恢复 (含 1 脚本/1 台标/1 映射):
+$ --data-binary @bk_all2.tar.gz
+{"config_reloaded":true,"ok":true,
+ "report":{"config":true,"epg_map":true,"epg_scripts":1,"logos":1,"resolvers":1,"skipped":[]}}
+# 恢复后文件: inst/02/cache/epg/scripts/rea_test_epg.py, cache/resolvers/rea_test_res.py, cache/logos/rea-logo.png
+
+# 单类包恢复:
+$ --data-binary @bk2_epg-scripts.tar.gz
+{"config_reloaded":false,"ok":true,"report":{"config":false,"epg_map":false,"epg_scripts":1,"logos":0,"resolvers":0,"skipped":[]}}
+$ --data-binary @bk2_resolver.tar.gz
+{"config_reloaded":false,"ok":true,"report":{"config":false,"epg_map":false,"epg_scripts":0,"logos":0,"resolvers":1,"skipped":[]}}
+
+# 错误分支:
+$ --data-binary @bad.bin (非 gzip)
+{"error":"恢复失败: invalid gzip header"}   HTTP 400
+
+################################################################################
+## D27. 边缘模式 (server.edge_mode / edge_secret / edge_reject / edge_refresh)
+################################################################################
+
+# 面板 v0.8.2 无 edge 设置 UI (panel.html 仅有一处 CSS 注释含 "edge")。配置只能改文件 / API。
+# server 默认: edge_mode="off", edge_secret="", edge_reject=true, edge_refresh=true, trust_proxy=[]
+
+# 启动日志 (off):
+10-18 19:07:56  INFO 【启动】边缘来源校验模式: Off(拒绝非边缘来源=true)
+# 启动日志 (cloudflare):
+10-18 19:19:03  INFO 【启动】边缘来源校验模式: Cloudflare(拒绝非边缘来源=true)
+
+# 二进制字符串 (samples/v0.8.2/unpacked/iptv-proxy-arm64):
+#   server.edge_mode = "off":转发头(X-Forwarded-For / CF-Connecting-IP)可被任意伪造,…
+#   套了 Cloudflare 请设 edge_mode = "cloudflare" 并配 edge_secret;自建反代请设 edge_mode = "proxy" 并把反代出口 IP 写进 trust_proxy。
+#   【安全】edge_mode = "proxy" 但 trust_proxy 为空:没有任何对端会被判为可信,所有管控将退回按 TCP 源 IP 记账。
+#   需要**复制到两处、保持一致**:(a) config.toml 的 server.edge_secret;
+#     (b) Cloudflare → Rules → Transform Rules → Modify Request Header → Set static,
+#         Header name 填 X-IPP-Edge-Secret,Value 填同一个值。建议先设 edge_reject = false 观察日志,…
+#   【安全】拒绝非边缘来源的请求: peer=… path=…
+#   【边缘·观察模式】过去一段时间有 N 次来源不可信的请求(edge_reject=false,已放行)。最近一次: peer=… path=…
+#   【边缘】已更新 Cloudflare IP 段(N 条)
+#   【边缘】更新 Cloudflare IP 段失败(…),保留现有列表
+#   【边缘】拉到的 Cloudflare IP 段为空,保留现有列表  (+ 内嵌默认 CF 段列表, v4/v6)
+#   URL: https://www.cloudflare.com/ips-v4 , https://www.cloudflare.com/ips-v6
+#   探测头名: x-ipp-edge-secret / X-IPP-Edge-Secret (另见 x-forwarded-for, x-real-ip)
+
+# edge_mode 取值: off / cloudflare / proxy
+
+# ---- 实验 1: mode=cloudflare, edge_reject=false (观察模式) ----
+$ PUT /config {"edge_mode":"cloudflare","edge_secret":"reaEdgeSecret123","edge_reject":false}
+请求 /playlist.m3u 后日志:
+10-18 19:14:39  WARN 【边缘·观察模式】过去一段时间有 1 次来源不可信的请求(edge_reject=false,已放行)。
+                最近一次: peer=192.168.215.0 path=/playlist.m3u。…
+# 观察到的不可信请求 = 带转发头的请求; 无转发头的直连请求不计入也不拦截。
+
+# ---- 实验 2: mode=cloudflare, edge_reject=true ----
+# (需重启进程让 startup 日志确认 Cloudflare; 运行中热重载同样生效)
+probe (GET /playlist.m3u):
+  none                                        : 200
+  secret-correct (X-IPP-Edge-Secret)          : 200
+  secret-wrong                                : 200
+  xff-public     (X-Forwarded-For: 1.2.3.4)   : 403   text/plain "Forbidden"
+  realip-public  (X-Real-IP: 1.2.3.4)         : 403
+  cfip-only      (CF-Connecting-IP: 1.2.3.4)  : 403
+  xff-public + secret-correct                 : 200
+  cfip-CFrange (173.245.48.5) only            : 403
+  cfip-CFrange + secret-correct               : 200
+  xff-public + secret-wrong                   : 403
+日志: 【安全】拒绝非边缘来源的请求: peer=192.168.215.0 path=/playlist.m3u
+# 判定模型 (实测): 请求**带转发头** (X-Forwarded-For / X-Real-IP / CF-Connecting-IP) 时进入边缘校验;
+#   仅当 X-IPP-Edge-Secret 等于 edge_secret 才放行, 否则 403。**无转发头**的直连请求一律放行。
+#   edge_secret 值本身不用于"认来源", 只作为是否经过边缘(CF Transform Rule)的凭据。
+#   CF 网段命中与否不改变结论 (cfip-CFrange only 仍 403)。
+
+# ---- 实验 3: mode=proxy, trust_proxy=[192.168.215.0,192.168.215.1,127.0.0.1], edge_reject=true ----
+  none / xff-public / xff-public+secret / realip-public : 全部 200
+# proxy 模式不拦截; 仅决定客户端 IP 取值 (trust_proxy 命中时采信转发头)。
+# (edge_mode=proxy 且 trust_proxy 为空时, 日志警告所有管控退回按 TCP 源 IP。)
+
+# ---- 实验 4: mode=off ----
+  none / xff-public / xff-public+secret-wrong : 全部 200 (不校验)
+
+# 注: 运行中改 [server] edge_* 经热重载即时生效 (无需重启);
+#     但 edge_refresh 的周期刷新间隔未验证 (仅观测到启动时拉取 22 条 CF 段)。
+
+################################################################################
+## 清理 (实验后已还原实例)
+################################################################################
+# groups 还原为基线 9 组; playlist.sources=[] 且 global_exclude=[]; merge_position="";
+# server.edge_mode="off", edge_secret="", edge_reject=true, edge_refresh=true, trust_proxy=[];
+# 已删除测试脚本/台标, epg_map 置空; 删除 config.toml.bak。

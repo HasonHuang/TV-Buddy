@@ -113,14 +113,14 @@
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-SUB-01 | **M3U 导入**：只接受粘贴内容或上传文件（**不填地址**）；频道落地成分组/频道，获得**代理地址**，支持模式/缓存/录制/Token | D-iptv | ⏳ |
-| S-SUB-02 | **订阅聚合**：接受订阅地址；输出**上游原始地址**，**不做反向代理**，不具分组归属，套不上模式/Token/缓存/录制 | D-iptv | ⏳ |
-| S-SUB-03 | 输出可区分两类：手动/导入频道 `group-title=<显示名>`；聚合频道 `group-title=<分组ID>`（不同代码路径） | D-iptv | ⏳ |
-| S-SUB-04 | M3U 导入 `频道模式`= 自动识别（`.mpd`→DASH，其余→Rewrite）/ Redirect / Rewrite / Proxy / DASH / Passthrough | D-panel | ⏳ |
-| S-SUB-05 | 导入`策略`：追加（默认，同名跳过）/ 合并 / 覆盖 | D-panel | ⏳ |
-| S-SUB-06 | 导入保留 `tvg-id`/`group-title` 等元数据；自动抓取 UA/Referer/Origin（含 `#EXTVLCOPT`/`#KODIPROP`/`#EXTHTTP`）；ClearKey 自动填入 `license_key` | D-panel | ⏳ |
-| S-SUB-07 | 订阅聚合的 include/exclude 按**频道名称**匹配（不区分大小写、子串、多词 OR）；`group:`/`id:`/`/正则/` 仅用于**全局排除** | D-iptv | ⏳ |
-| S-SUB-08 | 分组处理：各自保留原名 / 逐个指定 / 全部合并到一个组；**只改输出分组标题，不改代理规则** | D-iptv | ⏳ |
+| S-SUB-01 | **M3U 导入**：只接受粘贴内容或上传文件（**不填地址**）；频道落地成分组/频道，获得**代理地址**，支持模式/缓存/录制/Token | D-iptv | ✅【观测】`POST /groups/import/m3u` body 为 JSON 文本 `{text,mode,group_mode}`（非 multipart）；落地获本地反代地址（见 08 §2） |
+| S-SUB-02 | **订阅聚合**：接受订阅地址；输出**上游原始地址**，**不做反向代理**，不具分组归属，套不上模式/Token/缓存/录制 | D-iptv | ✅【观测】条目 URL 即上游原始地址；`merge_position`(top/bottom) 决定拼接位置 |
+| S-SUB-03 | 输出可区分两类：手动/导入频道 `group-title=<显示名>`；聚合频道 `group-title=<分组ID>`（不同代码路径） | D-iptv | ❌【观测】**聚合或为上游分组名**（非本地分组 ID）；两类差异在 URL（本地反代 vs 上游原始）——见 07 差异登记 |
+| S-SUB-04 | M3U 导入 `频道模式`= 自动识别（`.mpd`→DASH，其余→Rewrite）/ Redirect / Rewrite / Proxy / DASH / Passthrough | D-panel | ✅【观测】`auto`：`.mpd`→组 `dash/mpd`，其余→`rewrite/hls`；字段名 `group_mode` |
+| S-SUB-05 | 导入`策略`：追加（默认，同名跳过）/ 合并 / 覆盖 | D-panel | ✅【观测】`mode`∈append/merge/replace；**merge 仅新增 id 不存在者、已存在不更新**；replace 整组替换 |
+| S-SUB-06 | 导入保留 `tvg-id`/`group-title` 等元数据；自动抓取 UA/Referer/Origin（含 `#EXTVLCOPT`/`#KODIPROP`/`#EXTHTTP`）；ClearKey 自动填入 `license_key` | D-panel | ✅【观测】另解析行内 `http-user-agent`/`http-referer`；组 id 去非 ASCII（纯中文→`g-<6hex>`）；无 tvg-id 则频道 id 非幂等 |
+| S-SUB-07 | 订阅聚合的 include/exclude 按**频道名称**匹配（不区分大小写、子串、多词 OR）；`group:`/`id:`/`/正则/` 仅用于**全局排除** | D-iptv | 🔶【观测】`group:`/`id:`/`/正则/` **per-source 过滤同样可用**（非仅全局排除） |
+| S-SUB-08 | 分组处理：各自保留原名 / 逐个指定 / 全部合并到一个组；**只改输出分组标题，不改代理规则** | D-iptv | ✅【观测】`group_mode`∈keep/merge/map |
 
 ## 7. 认证与安全
 
@@ -136,6 +136,9 @@
 | S-AUTH-08 | `iptv-proxy pass <密码> [账号]` 可直接改密码（无需进面板）；改端口/密码均改 `config.toml` 并重启 | RM/D-panel | ⏳ |
 | S-AUTH-09 | Token 可**轮换**：`POST /panel/api/security/token/rotate` → 新 48-hex；**旧 token 宽限 ≈1h**；`GET /security/token` 给掩码与剩余秒 | D-panel/二进制 | ✅【观测】轮换即生效于订阅；旧 token 3598s 内仍 200 |
 | S-AUTH-10 | IP 封禁面：`POST /security/ip/ban {"ips":[…]}`（默认 30 天）、`unban {"ip":…}`、`unban-batch`、`GET /security/ip/stats` | D-panel/二进制 | ✅【观测】字段不对称（ips/ip）；`unique_ips` 解封后不回落 |
+| S-EDGE-01 | 边缘校验 `edge_mode`∈{`off`,`cloudflare`,`proxy`}；探测头 **`X-IPP-Edge-Secret`** | D-panel/二进制 | ✅【观测】见 08 §5 |
+| S-EDGE-02 | `edge_reject=true`：**带转发头**（XFF/`X-Real-IP`/`CF-Connecting-IP`）而密钥不符 → **403**；无转发头直连放行；`false`=观察模式（放行+周期日志） | 二进制 | ✅【观测】见 08 §5 |
+| S-EDGE-03 | `edge_refresh`：启动拉取 `cloudflare.com/ips-v4|v6` 作为可信边缘段 | 二进制 | ✅【观测】拉取 22 条 |
 
 ## 8. EPG / 台标 / 录制 / 回看
 
@@ -235,6 +238,8 @@ formats = ["jpg","png","gif","bmp","webp"]
 | S-OPS-01 | 指标出口仅面板私有面：`GET /panel/api/status`（uptime/会话/在线/流量/whole_file_*）/`cache/stats`/`health` | 二进制 | ✅【观测】字段已列（见 11 §6）；`traffic_in_bytes` 恒 0（S-BUG-01） |
 | S-OPS-02 | **无**公开指标端点：`/status`、`/metrics`、`/version` → 404；`/status/metrics` → 假路由 302 占位 | 二进制 | ✅【观测】 |
 | S-OPS-03 | 面板 API 全集 80+ 端点（分组/EPG/台标/录制/订阅/解析/字幕/资源/安全） | D-panel | ✅【观测】枚举见 11 §1 |
+| S-BAK-01 | 备份：`GET /panel/api/backup?include=all|epg-scripts|resolver` → `application/gzip` + 时间戳文件名；**仅识别三个 scope，其它回退 `all`** | D-panel/二进制 | ✅【观测】`all` 包 = `config.toml`+`epg/epg_map.json`+`epg/scripts/*.py`+`resolvers/*.py`+`logos/*`+`manifest.json`（生成物 `epg.xml*` 不入包） |
+| S-BAK-02 | 恢复：`POST /panel/api/restore`（raw `application/gzip`）→ `{ok,config_reloaded,report}`；原配置另存 `config.toml.bak`；非 gzip→400 | D-panel/二进制 | ✅【观测】已实测回滚 |
 
 ## 13. 可选依赖
 

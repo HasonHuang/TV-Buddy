@@ -33,6 +33,7 @@ docs/findings/
 | F-010 | 安全审计面、Token 轮换、IP 封禁、指标与健康出口（含面板 API 全集枚举） | 动态 | 观测 | S-AUTH-03/04/09/10, S-OPS-01/02/03 | 2026-10-17 | [`dynamic/11-security-and-metrics.md`](dynamic/11-security-and-metrics.md) |
 | F-011 | 台标库管理（9 端点、动效、改名/删除同步引用、配置段） | 动态 | 观测 | S-LOGO-01..04, S-CFG-04/05/06/07 | 2026-10-18 | [`dynamic/12-logo-library.md`](dynamic/12-logo-library.md) |
 | F-012 | 多 VPS 数据分享（主从、token/封禁同步、门禁）+ 完整路由表静态补录 | 动态 | 观测 | S-EP-09/11/14/15/16, S-AUTH-06, S-CFG-06 | 2026-10-18 | [`dynamic/13-multi-vps-share.md`](dynamic/13-multi-vps-share.md) |
+| F-013 | 分组导入/导出、订阅聚合、备份恢复、边缘模式 | 动态 | 观测 | S-SUB-01..08, S-BAK-01/02, S-EDGE-01..03 | 2026-10-18 | [`dynamic/08-import-backup-edge.md`](dynamic/08-import-backup-edge.md) |
 
 > 每完成一篇发现，在此登记一行；`关联规格 ID` 指向
 > [`../spec/08-target-spec.md`](../spec/08-target-spec.md) 的 `S-*` 条目。
