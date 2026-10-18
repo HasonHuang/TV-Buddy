@@ -127,12 +127,14 @@
 | --- | --- | --- | --- |
 | S-AUTH-01 | 面板密码在配置中存 **SHA-256**（明文不落盘）；改密码后旧会话立即失效 | RM/D-panel | ✅【观测】`password_sha256`；SHA-256("admin") |
 | S-AUTH-02 | Token 验证：开启后所有播放地址需带 token；**随机频道 ID**（6 位）替换真实 ID，与 Token 同步轮转 | D-panel | 🔶【观测】入口需 `?token=`；**随机频道 ID 未观测**（入口路径/切片前缀不变） |
-| S-AUTH-03 | Token 有效期（小时）可配；失效跳转可指向自定义提示页 | D-panel | ✅【观测】`token_ttl_hours=24`；失效→`token_failure_url` |
-| S-AUTH-04 | IP 管控：每 IP 并发会话数、会话超时、频率限制与封禁、白名单；**仅监控播放列表请求** | D-panel | 🔶 开启后 45+60 次突发未触发；触发条件未定 |
+| S-AUTH-03 | Token 有效期（小时）可配；失效跳转可指向自定义提示页 | D-panel | ✅【观测】`token_ttl_hours=24`；失效→`token_failure_url`；面板登录失败锁 429（见 11 §4） |
+| S-AUTH-04 | IP 管控：每 IP 并发会话数、会话超时、频率限制与封禁、白名单；**仅监控播放列表请求** | D-panel | 🔶 键面已全（l1/l2 双窗口等 20+）；8 次突发（含 token）未触发；仅 token 播放使 `active_sessions/online_viewers`+1；触发条件未定（见 11 §5） |
 | S-AUTH-05 | 访问范围：公开 / 隐藏（不进总订阅，独立地址可播）/ 归档（整组停用，EPG+台标照常匹配）/ 免验证（跳过 Token） | D-fields | ✅【观测】四档全验；**open 亦被排除出总订阅**（仅直链/分组订阅可达），与基线措辞有出入 |
 | S-AUTH-06 | 多 VPS 数据分享：共享 token 与封禁 IP；可开关"同时分享 token" | D-panel | ⏳ |
 | S-AUTH-07 | 自助解封 `/unban` 无需登录，每月限 3 次 | D-panel | 🔶【观测】`/unban` 无需登录 200；每月 3 次未验 |
 | S-AUTH-08 | `iptv-proxy pass <密码> [账号]` 可直接改密码（无需进面板）；改端口/密码均改 `config.toml` 并重启 | RM/D-panel | ⏳ |
+| S-AUTH-09 | Token 可**轮换**：`POST /panel/api/security/token/rotate` → 新 48-hex；**旧 token 宽限 ≈1h**；`GET /security/token` 给掩码与剩余秒 | D-panel/二进制 | ✅【观测】轮换即生效于订阅；旧 token 3598s 内仍 200 |
+| S-AUTH-10 | IP 封禁面：`POST /security/ip/ban {"ips":[…]}`（默认 30 天）、`unban {"ip":…}`、`unban-batch`、`GET /security/ip/stats` | D-panel/二进制 | ✅【观测】字段不对称（ips/ip）；`unique_ips` 解封后不回落 |
 
 ## 8. EPG / 台标 / 录制 / 回看
 
@@ -223,6 +225,9 @@ formats = ["jpg","png","gif","bmp","webp"]
 | --- | --- | --- | --- |
 | S-CLI-01 | 安装后脚本软链到 `PATH`，命令 `iptv-proxy`：`update`/`reinstall`/`port <N>`/`pass <密码> [账号]`/`restart`/`log`/`url`/`uninstall` | RM/D-panel | ⏳ |
 | S-CLI-02 | `uninstall` 询问是否删 `/opt/iptv-proxy`，选 N 仅停服务保留数据 | RM | ⏳ |
+| S-OPS-01 | 指标出口仅面板私有面：`GET /panel/api/status`（uptime/会话/在线/流量/whole_file_*）/`cache/stats`/`health` | 二进制 | ✅【观测】字段已列（见 11 §6）；`traffic_in_bytes` 恒 0（S-BUG-01） |
+| S-OPS-02 | **无**公开指标端点：`/status`、`/metrics`、`/version` → 404；`/status/metrics` → 假路由 302 占位 | 二进制 | ✅【观测】 |
+| S-OPS-03 | 面板 API 全集 80+ 端点（分组/EPG/台标/录制/订阅/解析/字幕/资源/安全） | D-panel | ✅【观测】枚举见 11 §1 |
 
 ## 13. 可选依赖
 

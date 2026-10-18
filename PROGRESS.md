@@ -119,6 +119,8 @@
 | 2026-10-17 | 动态：**EPG 采集/下发/裁剪/lang**；严格 TOML 校验 | ✅（F-008）`14fbe5e` |
 | 2026-10-17 | 动态：**台标** `/logo/<file>`（`cache/logos/`，公开可读） | ✅（补 F-008） |
 | 2026-10-17 | 路线图 Batch1·**D13 入口改写/访问范围**（access 四档含 open 例外、m3u_header_lines、配置原子保存） | ✅（F-009） |
+| 2026-10-17 | 路线图 Batch1·**D13a 安全审计 + D29 指标面**（token 轮换+1h 宽限、IP 封禁面、登录 429 锁、指标仅面板私有面、面板 API 全集） | ✅（F-010） |
+| 2026-10-17 | 基建：容器装 **ffmpeg 6.1.1 + python3 3.12**；起 **4 个独立实例**（19901–19904，独立配置/缓存，宿主机经容器 IP 直连）；派发 **4 个子代理**并行推进 D12/D15/D21/D28、D24/D25/D27、D16/D18/D19/D19b/D20、D14/D17ab/D22 | 🔄 进行中 |
 | 2026-10-17 | 委派 agent 盘点**二进制实际功能全集**（55k 字符串+面板），产出优先级路线图 | ✅ §5 |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
@@ -132,10 +134,10 @@
 | --- | --- | --- | --- |
 | ① 反代播放 HLS（proxy/rewrite） | `/{gid}/{cid}/index.m3u8`、【代理】×44、`badge-proxy` | ✅ D7/F-004/F-005 | — |
 | ② 切片伪装 URL | `<16hex>_<32hex>.<ext>`、`invalid segment hash` | 🔶 S 已破解；P 未解（低影响） | 随 S7 |
-| ③ 切片缓存/预取 | `m3u8_max_entries`、`segment_cache_max_mb`、`prefetch.*`、`/cache/flush`、`/cache/stats` | 🔶 盘面已验；容量/淘汰/GC 未验 | **D12** |
+| ③ 切片缓存/预取 | `m3u8_max_entries`、`segment_cache_max_mb`、`prefetch.*`、`/cache/flush`、`/cache/stats` | 🔶 盘面已验；容量/淘汰/GC 未验 | 🔄 **D12**（子代理） |
 | ④ 302 直连 redirect | `redirect_mode`(direct/default+best 解析)、`redirect_ttl`、`redirect_url_…` 缓存 | 🔶 direct ✅；best 未触发 | **D17a** |
 | ⑤ passthrough 直链透传 | `badge-passthrough`、直链不套 token | ✅ D7 | — |
-| ⑥ Token 鉴权 | `token_enabled/ttl/rotate`、`/security/token{,/rotate}`、`/link-info` | 🔶 主体 ✅；轮换 API 未测 | **D13a** |
+| ⑥ Token 鉴权 | `token_enabled/ttl/rotate`、`/security/token{,/rotate}`、`/link-info` | ✅ 轮换+1h 宽限+封禁面已验（F-010） | ~~D13a~~ ✅ |
 | ⑦ 入口清单改写/聚合 | `m3u_header_lines`、`x-tvg-url`、`subscription-merge`、`access`(public/hidden/archived/免验证) | 🔶 access/头行已验；导入与聚合入口未测 | ~~D13~~ ✅；余项 D24 |
 | ⑧ MPD/ClearKey 反代 | `mpd_keep_seconds`、`license_key`、`#KODIPROP clearkey`、`key_manager.rs`(088) | ⏳（需 MPD 样本） | **D14** |
 | ⑨ URL 池多上游轮询 | `url_pool_size`、`pool[0..n]`、`/dash/scan-url`、`final_url` | ⏳ | **D15** |
@@ -163,9 +165,9 @@
 | 备份/恢复 | `/panel/api/backup?include=`、`restore`（tar/flate2） | ⏳ | **D25** |
 | 多 VPS 分享 | `share.{role,master_url,trust_ips}`、`x-ipp-master`、`/api/share/pull` | ⏳ | **D26**（需双容器） |
 | 边缘校验 | `edge_mode(off/proxy/cloudflare)`、`x-ipp-edge-secret`、观察模式 | ⏳ | **D27** |
-| 健康检查 | 【健康】、`health{interval,timeout,concurrency}` | ⏳ | **D28** |
-| IP 封禁/解封 | `/security/ip/{ban,stats,unban}`、`/unban` 每月 3 次 | 🔶（unban 200 已验） | 随 D13a |
-| 指标/资源 | `/metrics`、`requests_total`、`mem_rss_mb`；`/status/metrics` 302 之谜 | ⏳ | **D29** |
+| 健康检查 | 【健康】、`health{interval,timeout,concurrency}` | 🔶 出口形已验；探测行为进行中 | 🔄 **D28**（子代理） |
+| IP 封禁/解封 | `/security/ip/{ban,stats,unban}`、`/unban` 每月 3 次 | ✅ 面已验（F-010/11 §3）；`/unban` 限次未验 | ~~随 D13a~~ ✅ |
+| 指标/资源 | `/metrics`、`requests_total`、`mem_rss_mb`；`/status/metrics` 302 之谜 | ✅ `/status/metrics`＝假路由；指标仅面板私有面（F-010/11 §6） | ~~D29~~ ✅ |
 | 资产/ffmpeg 检测 | `/assets/{convert,list,ffmpeg-status}` | ⏳ | 随 D18 |
 | EPG 公开 JSON API | `/epg/api/channels\|programmes\|search` | 🔶 仅 088，记录不测 | spec 登记 |
 

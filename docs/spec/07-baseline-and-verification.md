@@ -112,6 +112,10 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-URL-04 | Token 开启后导出 M3U 自动附加 token | public 条目 `?token=<48hex>`；open 组条目不带 | ✅ |
 | S-URL-07 | `server.m3u_header_lines` 自定义 M3U 头 | 自定义行附加于 `#EXTM3U` 后，热重载+重启持久 | ✅ |
 | S-CFG-02 | 配置热重载监视 | `[server]`/`[auth]` 文件直改即时生效；`[epg]` 例外；文件直改与面板保存有竞态 | ✅ |
+| S-AUTH-09 | Token 轮换 + 旧 token 宽限 | `POST /security/token/rotate` 即生效；旧 token ≈1h 内仍 200 | ✅ |
+| S-AUTH-10 | IP 封禁/解封 API 面 | ban `{"ips":[…]}`（默认 30 天）/unban `{"ip":…}`/stats；字段不对称 | ✅ |
+| S-OPS-01 | 指标出口 | 仅 `/panel/api/{status,cache/stats,health}` | ✅ |
+| S-OPS-02 | 公开指标端点 | `/status`、`/metrics`、`/version` 404；`/status/metrics` → 302 占位 | ✅ |
 
 ## 3. 差异登记
 
