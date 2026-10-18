@@ -21,12 +21,12 @@
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-ENV-01 | 产品名 IPTV Proxy，作者 YanG，上游 `YanG-1989/rust` 子目录 `IPTV Proxy/`；**源码未公开** | RM | ⏳ |
-| S-ENV-02 | 发布形态：预编译二进制 `iptv-proxy-linux-{amd64,arm64,armv7}` + 安装脚本 | RM | ⏳ |
+| S-ENV-01 | 产品名 IPTV Proxy，作者 YanG，上游 `YanG-1989/rust` 子目录 `IPTV Proxy/`；**源码未公开** | RM || ✅ 见 F-002 / `artifact.md` §2.1 |
+| S-ENV-02 | 发布形态：预编译二进制 `iptv-proxy-linux-{amd64,arm64,armv7}` + 安装脚本 | RM | ✅（见 `07` §2.3） |
 | S-ENV-03 | 安装目录 `/opt/iptv-proxy/`：`iptv-proxy`、`config.toml`、`iptv-proxy.log`、`cache/`、`iptv-proxy.sh` | RM/D-panel | ⏳ |
 | S-ENV-04 | 服务常驻：systemd（Alpine 用 OpenRC），开机自启 | RM | ⏳ |
-| S-ENV-05 | 默认面板端口 `19899`，默认监听 `[::]`（双栈） | RM/D-panel | ⏳ |
-| S-ENV-06 | 启动命令形如 `./iptv-proxy config.toml`（配置以参数传入） | D-panel | ⏳ |
+| S-ENV-05 | 默认面板端口 `19899`，默认监听 `[::]`（双栈） | RM/D-panel | ✅（见 `07` §2.3） |
+| S-ENV-06 | 启动命令形如 `./iptv-proxy config.toml`（配置以参数传入） | D-panel | ✅（见 `07` §2.3） |
 | S-ENV-07 | 依赖语言/工具链为 **Rust** | RM | ✅【观测】`rustc version 1.98.1`（v0.8.2） |
 | S-ENV-08 | 分发产物经 **UPX 4.24** 加壳；脱壳后静态、非 PIE、已 strip | 二进制 | ✅【观测】 |
 
@@ -34,16 +34,16 @@
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-EP-01 | 面板：`GET /panel` | D-panel | ⏳ |
-| S-EP-02 | 分组订阅：`GET /{gid}/playlist.m3u`；总订阅：`GET /playlist.m3u` | D-panel | ⏳ |
-| S-EP-03 | 频道播放：`GET /{gid}/{cid}.{ext}`（v0.5.1 起路由**不带** `/index.m3u8` 路径段） | D-panel | ⏳ |
+| S-EP-01 | 面板：`GET /panel` | D-panel || ✅【观测】200 HTML |
+| S-EP-02 | 分组订阅：`GET /{gid}/playlist.m3u`；总订阅：`GET /playlist.m3u` | D-panel || ✅【观测】总订阅与分组订阅均 200（F-004/F-009） |
+| S-EP-03 | 频道播放：`GET /{gid}/{cid}.{ext}`（v0.5.1 起路由**不带** `/index.m3u8` 路径段） | D-panel || ✅【观测】`/{gid}/{cid}.m3u8`；`/…/index.m3u8` 无独立路径段（F-004） |
 | S-EP-04 | 回看：`GET /{gid}/{cid}?playseek=<start>-<end>` | D-panel | ✅【观测】只取 `playseek` 原样追加到上游；`start/end/utc/utcend` 丢弃；本地回看忽略该区间 |
 | S-EP-05 | EPG：`/epg.xml`、`/epg.xml.gz`、`/epg`；**EPG 总开关关闭时三者全部 404** | D-panel | ✅【观测】开启后三者 200（`application/xml`/`application/gzip`/`text/html`），均无需登录 |
 | S-EP-06 | 台标：`GET /logo/<文件名>` | D-panel | ✅【观测】200 `image/png`，`public, max-age=86400`；缺→404 |
-| S-EP-07 | 自助解封：`GET /unban`，**无需登录**，每月限 3 次 | D-panel | ⏳ |
+| S-EP-07 | 自助解封：`GET /unban`，**无需登录**，每月限 3 次 | D-panel | ✅（见 `07` §2.3） |
 | S-EP-08 | 状态：`/status`（返回 `entry_exts` 等）、`/status/metrics` | D-panel/D-res | ✅【观测】**均非路由**：`/status` 404、`/status/metrics` 302 假路由；实际在 `/panel/api/status` |
 | S-EP-09 | 多 VPS 数据分享端点 `GET /api/share/pull?key=`（**仅 GET/HEAD**）；同步 token/封禁 | 二进制 | ✅【观测】key+`trust_ips` 双门禁（否则 403）；载荷 `{token,token_old,bans,unbans}`；master 轮询从机、follower 禁用本地轮换（见 13） |
-| S-EP-10 | 健康检查：`GET /health`（安装脚本用于就绪探测） | 安装脚本 | ⏳ |
+| S-EP-10 | 健康检查：`GET /health`（安装脚本用于就绪探测） | 安装脚本 | ✅（见 `07` §2.3） |
 | S-EP-11 | 运维 API：`/api/reload`、`/api/backup`、`/api/restore`、`/whoami` | 二进制 | 🔶【观测】实际为 `/panel/api/{reload,backup}`；`/whoami`、`/unban/whoami` 存在（路由表见 13 §3） |
 | S-EP-12 | 面板接口前缀 `/panel/api/…`（备份/恢复、EPG 全套） | 二进制 | ✅【观测】`/panel/api/epg/{status,refresh,regenerate,mappings,programmes,scripts,match-report,mapping,extra,script,script-delete,cron-preview}` |
 | S-EP-13 | EPG 翻译接口 `/epg/translate/{run,status,clear,probe,models,mtran/test}` | 二进制 | 🔶【观测】端点存在（前缀 `/panel/api`）；默认关，未触发 |
@@ -56,7 +56,7 @@
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
 | S-URL-01 | 播放地址扩展名由**后端**计算（`/status.entry_exts`），前端只查表：HLS→`.m3u8`，MPEG-DASH→`.mpd`，**开启切片伪装→`.txt`** | D-panel | 🔶【观测】入口=按 `format`（`.m3u8`/`.mpd`）；`.txt` 用于**媒体清单** `…/video/index.txt`，非入口 |
-| S-URL-02 | **Passthrough 例外**：播放地址直接是上游原始 URL，不走 `/{gid}/{cid}` 路由 | D-panel | ⏳ |
+| S-URL-02 | **Passthrough 例外**：播放地址直接是上游原始 URL，不走 `/{gid}/{cid}` 路由 | D-panel || ✅【观测】passthrough 302 上游原始 URL（F-005） |
 | S-URL-03 | 订阅地址含分组 ID：`http://host:19899/<gid>/playlist.m3u`；改分组 ID 使旧地址失效 | D-fields | ✅【观测】分组订阅 200；filename=`<gid>.m3u`（失效分支未测） |
 | S-URL-04 | 开启 Token 后，**导出** M3U 自动附加 token；手工拼地址需自带 token | D-panel | ✅【观测】`?token=<48hex>` 附加于条目（`open` 组例外：不带） |
 | S-URL-07 | `server.m3u_header_lines` 自定义行逐行附加于 `#EXTM3U` 后；总/分组订阅均输出；热重载+重启持久 | 二进制 | ✅ |
@@ -71,13 +71,13 @@
 | S-MODE-01 | 面板提供**六种**模式：`proxy`/`remux`/`dash`/`redirect`/`rewrite`/`passthrough`（公开 README 只写四种） | D-README | ✅【观测】面板 `<select id="mg-mode">` 六项 |
 | S-MODE-02 | 模式属于**分组**；同组频道共用 | D-README | ✅【观测】 |
 | S-MODE-03 | Proxy：反代 + 切片缓存；内容格式 HLS / MPD；`MPD 裁剪保留秒数` 仅在格式=MPD 时出现 | D-mode-proxy | 🔶 反代+伪装切片已验；MPD 分支未验 |
-| S-MODE-04 | Proxy + 内容格式=MPD 时，频道多出 **ClearKey 密钥** 字段（`kid_hex:key_hex`，每行一对）；行为为"反代穿透本服务" | D-mode-proxy | ⏳ |
+| S-MODE-04 | Proxy + 内容格式=MPD 时，频道多出 **ClearKey 密钥** 字段（`kid_hex:key_hex`，每行一对）；行为为"反代穿透本服务" | D-mode-proxy || ✅【观测】频道 `license_key` 字段；`#KODIPROP` 仅 passthrough（F-016） |
 | S-MODE-05 | Remux：连续流（FLV / 裸 TS / MMT-TLV）→ HLS；**不解码**，CPU 低；`源容器类型`= 自动识别 / TS / FLV / MMT-TLV；**无**内容格式字段 | D-mode-remux | 🔶【观测】容器自动识别（`【remux】自动识别容器: Ts`） |
 | S-MODE-06 | DASH：`.mpd`→HLS 实时转封装，支持 CENC ClearKey 解密；自动 304 增量刷新 / 多 CDN 故障切换 / 防断流备份 / 片段级容错；**无**内容格式字段 | D-mode-dash | ✅【观测】MPD→HLS 成功；track 名 `video_{高}p`/`audio-{n}`；**需 `SegmentTimeline`**；支持 MPD 级 `<BaseURL>`；**未观测到多 CDN 故障切换**（→ D-004） |
 | S-MODE-07 | DASH 频道级 `URL 池`（池大小 2–6，默认 3）：视频固定 `pool[0]`，音频/字幕在 `pool[1..]` 轮询 | D-mode-dash | 🔶【观测】**仅 DASH**；`pool≥2` 本环境只拉 MPD N 次后零切片、入口 503；取用方式受限未验证 |
 | S-MODE-08 | Redirect：客户端 302 直连上游，本服务仅调度；`跳转方式`= 直接跳转（默认）/ 解析最佳画质；`上游缓存时长` 默认 300s（缓存的是解析出的上游地址，非切片） | D-mode-redirect | ✅【观测】302 + `redirect_url_…` TTL=300；补充：失败不缓存，成功清单缓存 ≈5s |
 | S-MODE-09 | Rewrite：仅取一次清单并把相对地址改绝对；切片客户端直连；**请求头只作用于取清单**（源站要求切片带 Referer 时会失败） | D-mode-rewrite | ✅【观测】绝对化清单；Referer 分支未复现 |
-| S-MODE-10 | Rewrite + MPD / Redirect + MPD → **直连 CDN**（不转封装）；Proxy + MPD → 反代穿透本服务 | D-mode-rewrite | ⏳ |
+| S-MODE-10 | Rewrite + MPD / Redirect + MPD → **直连 CDN**（不转封装）；Proxy + MPD → 反代穿透本服务 | D-mode-rewrite | ⚠️【观测】redirect+MPD → 302 上游 ✅；**rewrite+MPD → 200 但正文损坏**（逐行被绝对化，`D-005`） |
 | S-MODE-11 | Passthrough：原样导出上游 URL，**不套 Token**；有密钥时按 MPD 形式下发（但**不解密**） | D-mode-passthrough | ✅【观测】302 `location=上游`；有 `license_key` 时追加 3 行 `#KODIPROP`（`manifest_type=mpd` 硬编码 / `license_type=clearkey` / 密钥原样不校验） |
 | S-MODE-12 | 仅 Proxy / Remux / DASH 支持**本地回看与定时录制**；Rewrite / Redirect / Passthrough 只有**源站回看**（`上游支持回看`+`回看天数`，追加 `playseek`） | D-iptv/D-mode-* | ✅【观测】Proxy 与 DASH 本地回看/录制已验（09/10）；Remux 录制未测 |
 | S-MODE-13 | Redirect 上游地址缓存键 `redirect_url_{gid}_{cid短}__{hex}`，TTL=`redirect_ttl`（默认 300s） | 二进制 | ✅ |
@@ -106,11 +106,11 @@
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-MODEL-01 | **分组级**字段：分组 ID、显示名称、工作模式、EPG 地址、访问范围、内容格式、网络配置（分组默认，频道可覆盖） | D-fields/D-panel | ⏳ |
-| S-MODEL-02 | **频道级**字段：频道 ID、名称、上游 URL、Logo URL、tvg-id、tvg-name、上游解析（静态/脚本 PY）、源站回看、网络配置 | D-fields/D-panel | ⏳ |
-| S-MODEL-03 | 工作模式/访问范围/网络配置**属于分组**；频道级网络配置覆盖分组，自定义请求头**合并**、同名以频道级为准 | D-iptv/D-fields | ⏳ |
-| S-MODEL-04 | `tvg-id` 缺省则用频道 ID；`tvg-name` 缺省则用频道名称（EPG 匹配） | D-fields | ⏳ |
-| S-MODEL-05 | 上游 URL 支持**脚本解析（PY）**，每次播放前算地址，需 `python3`；有解析缓存时长（须小于签名有效期） | D-fields | ⏳ |
+| S-MODEL-01 | **分组级**字段：分组 ID、显示名称、工作模式、EPG 地址、访问范围、内容格式、网络配置（分组默认，频道可覆盖） | D-fields/D-panel || ✅【观测】`GET /panel/api/config` 全量字段（S-CFG-04） |
+| S-MODEL-02 | **频道级**字段：频道 ID、名称、上游 URL、Logo URL、tvg-id、tvg-name、上游解析（静态/脚本 PY）、源站回看、网络配置 | D-fields/D-panel || ✅【观测】同上（含 `resolver_script`/`catchup`/`proxy`） |
+| S-MODEL-03 | 工作模式/访问范围/网络配置**属于分组**；频道级网络配置覆盖分组，自定义请求头**合并**、同名以频道级为准 | D-iptv/D-fields || ✅【观测】模式属分组（S-MODE-02）；频道级 `proxy`/头覆盖字段存在 |
+| S-MODEL-04 | `tvg-id` 缺省则用频道 ID；`tvg-name` 缺省则用频道名称（EPG 匹配） | D-fields || ✅【观测】EPG 匹配 `out_id=tvg_id||id`（F-016） |
+| S-MODEL-05 | 上游 URL 支持**脚本解析（PY）**，每次播放前算地址，需 `python3`；有解析缓存时长（须小于签名有效期） | D-fields || ✅【观测】`python3 <cache>/resolvers/<脚本>`，TTL/SWR（F-014） |
 
 ## 6. 订阅来源：M3U 导入 vs 订阅聚合
 
@@ -149,7 +149,7 @@
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
 | S-EPG-01 | 多源采集→匹配本机频道→生成统一 `/epg.xml.gz`；EPG 关闭时 `/epg*` 全 404 且导出 M3U 不带 `x-tvg-url` | D-panel | ✅【观测】匹配算法已解：`out_id = tvg_id \|\| channel.id`；先 `tvg_id`（大小写不敏感）再名称；规范化=删空白（含 U+3000）+小写 |
-| S-EPG-02 | 采集节奏：每 4h / 每 6h / 每日 4 点 / 每日 3、5、12 点 / 每 30 分钟 | D-panel | ⏳ |
+| S-EPG-02 | 采集节奏：每 4h / 每 6h / 每日 4 点 / 每日 3、5、12 点 / 每 30 分钟 | D-panel | ✅（见 `07` §2.3） |
 | S-EPG-03 | 名称匹配开关（tvg-id 不匹配时按频道名再匹配一次）；脚本源需 python3 | D-panel | ✅【观测】不做全角折叠、保留连字符、**无子串匹配** |
 | S-EPG-04 | EPG 标题可翻译（Google 免费 / Gemini(Key) / MTranServer），14 种目标语言 | D-panel | ⏳ |
 | S-EPG-05 | 同源多命中 → **配置顺序最后一个**得节目；同 `out_id` → `via=duplicate` 丢弃 | 二进制 | ✅【观测】 |
@@ -160,7 +160,7 @@
 | S-LOGO-02 | 台标库端点：`GET /logo/{list,match-report}`、`POST /logo/{upload,apply,rename,delete,restore,suggest,animate}` | D-panel | ✅【观测】`upload` 需 `name/ext/data`；`animate.quality` 为**字符串** |
 | S-LOGO-03 | 动效纯 Rust 无损编码，覆盖原文件、原图备份到 `logos/.orig/`；6 种效果 | D-panel/二进制 | ✅【观测】`frames/total_ms/bytes_before/after/dirty_ratio`；`restore` 还原 |
 | S-LOGO-04 | 改名同步刷新频道引用（`updated_channels`）；删除可选清引用（`clear_refs`） | 二进制 | ✅【观测】引用随改名更新（URL 编码），清引用后 `tvg-logo=""` |
-| S-REC-01 | 定时录制：Proxy / DASH 频道；**必须 ffmpeg**，否则任务失败；录制合成 MKV（多音轨，中断可播）；存 `cache/recordings/` | D-panel | ⏳ |
+| S-REC-01 | 定时录制：Proxy / DASH 频道；**必须 ffmpeg**，否则任务失败；录制合成 MKV（多音轨，中断可播）；存 `cache/recordings/` | D-panel || ✅【观测】MKV + `ffmpeg -c copy`；`recordings/`；缺 ffmpeg 失败（F-014） |
 | S-REC-02 | 录制成功路径：产物 MKV，`ffmpeg -y -i <merged> -map … -c copy`；proxy 先并 `_merged_video.ts`，DASH 并 `_merged_video_<name>.mp4`+`_merged_audio-<n>.mp4` | 二进制 | ✅【观测】`{idx}` 为列表下标（u64）；静态 MPD 报「录制区间内无可用切片」 |
 | S-TS-01 | 本地回看：`?start=<unix>&end=<unix>` 或 `?playseek=<本地 yyyyMMddHHMMSS-…>`；返回 `#EXT-X-PLAYLIST-TYPE:VOD` 清单；分片 `/{gid}/{cid}/timeshift/<hex>.<ext>` | 二进制 | ✅【观测】本地回看**忽略 `playseek` 区间**、返回全部已录片段；DASH 时移 `/dash-timeshift/{track}/playlist.txt?playseek=<b>-<e>`（缺参 400、区间不重叠 404；窗=已录制区间） |
 | S-CAP-01 | 回看播放地址随「回看格式」变化：国产 `${start}-${end}` / 国外 `${start}-${end}` / Kodi `{utc}-{utcend}` / both | D-panel | ✅【观测】四模板字符串；`catchup-days` 由 `catchup_days` 或 `timeshift_hours/24` 推导（4h→1） |
@@ -170,17 +170,17 @@
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-DIS-01 | 配置段 `[cache.disguise]`：`enabled`/`playlist`/`subtitle`/`master`/`formats`；**出厂默认 `enabled=true` + `playlist=true`** | D-panel/D-disg | ⏳ |
-| S-DIS-02 | **不改切片载荷字节**：只改 URL 后缀与 Content-Type；四种后缀同一切片前 32 字节相同，首字节 `0x47` | D-disg | ⏳ |
-| S-DIS-03 | 切片为原始 MPEG-TS：每 188 字节 `0x47`，文件大小 188 倍数；无 FLV/图片/fMP4 特征 | D-disg | ⏳ |
+| S-DIS-01 | 配置段 `[cache.disguise]`：`enabled`/`playlist`/`subtitle`/`master`/`formats`；**出厂默认 `enabled=true` + `playlist=true`** | D-panel/D-disg | ✅【观测】`GET /panel/api/config` 默认值一致 |
+| S-DIS-02 | **不改切片载荷字节**：只改 URL 后缀与 Content-Type；四种后缀同一切片前 32 字节相同，首字节 `0x47` | D-disg | ✅【观测】切片与上游 `seg0.ts` MD5 相同（F-004） |
+| S-DIS-03 | 切片为原始 MPEG-TS：每 188 字节 `0x47`，文件大小 188 倍数；无 FLV/图片/fMP4 特征 | D-disg | ✅【观测】1880 B、`188×10`、全部 `0x47`（伪源 10 包，PID `0x747`） |
 | S-DIS-04 | 后缀**轮换稳定且按频道独立**：同一频道重复拉清单序列不变；同一切片哈希在不同频道后缀不同（由 频道ID+切片哈希 推导） | D-disg | ✅【观测】切片后缀=`sha256(上游切片绝对URL)[:32]`；16-hex 前缀 `<P>` **仅依赖 `(gid,cid)`**（与 `name`/`url`/`Host`/缓存/重启无关），算法未解（F-017） |
 | S-DIS-05 | 后缀**不参与校验**：清单写 `.png`，请求 `.jpg` 得同字节（MD5 相同） | D-disg | ✅【观测】 |
 | S-DIS-06 | `Cache-Control` 切换：切片刚写入短暂 `public, max-age=300`，之后 `private, max-age=300` | D-disg | ✅【观测】3 次复现 |
 | S-DIS-07 | 切片不支持 `Range`（忽略，返回 200 全量）；无 `Accept-Ranges`/`ETag`/`Last-Modified` | D-disg | ✅【观测】 |
-| S-DIS-08 | 每切片自包含 MPEG-TS（PAT/SDT/PMT + ~10s）；PID 布局非 ffmpeg 默认（PMT `0x100`、视频 `0x102`、音频 `0x101`） | D-disg | ⏳ |
-| S-DIS-09 | 每切片第 0 个包为 SDT，描述符载荷 ASCII `lumberjack`（两次）——来源水印，与伪装无关 | D-disg | ⏳ |
+| S-DIS-08 | 每切片自包含 MPEG-TS（PAT/SDT/PMT + ~10s）；PID 布局非 ffmpeg 默认（PMT `0x100`、视频 `0x102`、音频 `0x101`） | D-disg | ⚠️ 未验：本地伪源仅 10 个 PID `0x747` 填充包，无 PAT/SDT/PMT；需真实上游 TS |
+| S-DIS-09 | 每切片第 0 个包为 SDT，描述符载荷 ASCII `lumberjack`（两次）——来源水印，与伪装无关 | D-disg | ⚠️ 未验：伪源无 SDT、无 `lumberjack`（依赖真实上游切片） |
 | S-DIS-10 | 媒体清单伪装成 `.txt`（`.../video/index.txt`），主清单入口仍为 `.m3u8`；媒体清单无 `#EXT-X-MAP` | D-disg | ✅【观测】 |
-| S-DIS-11 | 文件名混淆由独立的 `cache.dash.obfuscate_filenames` 控制，**与伪装无关** | D-panel | ⏳ |
+| S-DIS-11 | 文件名混淆由独立的 `cache.dash.obfuscate_filenames` 控制，**与伪装无关** | D-panel | ✅【观测】位于 `[cache.dash]`，与 `[cache.disguise]` 分区不同 |
 | S-DIS-12 | 伪装切片 URL 形状 `/{gid}/{cid}/<16hex>_<32hex>.<ext>` | 二进制 | ✅ |
 | S-DIS-13 | 切片 `Content-Type` 由后缀映射（图片→图片类型；其余→`video/mp2t`） | 二进制 | ✅ |
 | S-DIS-14 | 频道入口清单以 `text/plain` 下发（`[cache.disguise].playlist=true`） | 二进制 | ✅ |
@@ -193,7 +193,7 @@
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
 | S-CACHE-01 | 后端 `disk`（持久，重启不丢）/ `memory` | D-panel | 🔶【观测】memory 后端 `disk_bytes:null`、各 `*_entries` 恒 0；播放仍 200；磁盘旧文件不清理 |
-| S-CACHE-02 | 缓存目录 `./cache`，结构：`epg/` `logos/` `m3u8/` `recordings/` `seg_bytes/` `seg_url/` `sub_url/`（+ `livestream/`） | D-panel | ⏳ |
+| S-CACHE-02 | 缓存目录 `./cache`，结构：`epg/` `logos/` `m3u8/` `recordings/` `seg_bytes/` `seg_url/` `sub_url/`（+ `livestream/`） | D-panel || ✅【观测】目录结构与启动时创建（F-006） |
 | S-CACHE-03 | 条目上限：`m3u8_max_entries`(默认 500)、`segment_max_entries`(默认 2000)；`disk_max_mb`(0=不限) | D-panel | 🔶【观测】**四项上限均未观测到生效**：`m3u8_max_entries=2`→6–7 条；`segment_max_entries=2`→17 条；`disk_max_mb=2`→2.79MB；`segment_cache_max_mb=1`→2.7MB |
 | S-CACHE-04 | **预载仅 Proxy 生效**：预载开关 / 拉取并发 / 拉取超时 / HLS 预载 / MPD 预载；无人观看仍回源 | D-mode-proxy | ⏳ |
 | S-CACHE-05 | 日志 `iptv-proxy.log` 最大 **5MB** | D-panel | ⏳ |
@@ -265,17 +265,17 @@ formats = ["jpg","png","gif","bmp","webp"]
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
 | S-DEP-01 | `ffmpeg`（可选）：视频素材 MP4→HLS、定时录制合成 MKV；**不装则录制失败** | D-panel | 🔶【观测】仅**定时录制**需要（`-c copy`）；**remux 不使用 ffmpeg**（缺 ffmpeg 仍成功） |
-| S-DEP-02 | `python3`（可选）：EPG 脚本源、频道脚本解析 | D-panel | ⏳ |
+| S-DEP-02 | `python3`（可选）：EPG 脚本源、频道脚本解析 | D-panel || ✅【观测】解析脚本依赖 `python3`（F-014） |
 | S-DEP-03 | `MTranServer`（可选）：字幕机翻（离线自部署） | D-panel | ⏳ |
-| S-DEP-04 | 装依赖后需**重启** iptv-proxy 才被检测 | D-panel | ⏳ |
+| S-DEP-04 | 装依赖后需**重启** iptv-proxy 才被检测 | D-panel || ✅【观测】装 ffmpeg 后重启容器，`/assets/ffmpeg-status` 变为 `installed:true` |
 
 ## 14. 已知缺陷 / 局限（v0.8.2）
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-BUG-01 | 面板累计**回源流量统计失效**（恒为 0）；CPU 累计秒数与内存准确 | D-README/D-res | ⏳ |
-| S-BUG-02 | 面板未提供**分组排序**功能 | D-README | ⏳ |
-| S-BUG-03 | 伪装切片不支持 `Range`，影响部分按需起播播放器 | D-disg | ⏳ |
+| S-BUG-01 | 面板累计**回源流量统计失效**（恒为 0）；CPU 累计秒数与内存准确 | D-README/D-res || ✅【观测】`traffic_in_bytes` 恒 0（F-010 §6） |
+| S-BUG-02 | 面板未提供**分组排序**功能 | D-README | ✅【观测】面板无排序/拖拽控件；路由表无 `move`/`order` 端点 |
+| S-BUG-03 | 伪装切片不支持 `Range`，影响部分按需起播播放器 | D-disg || ✅【观测】切片忽略 `Range`（S-DIS-07） |
 | S-BUG-04 | 本环境容器**无挂载卷**，重建即丢配置与缓存 | D-panel | ⏳ |
 
 ---

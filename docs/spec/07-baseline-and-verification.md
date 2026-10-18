@@ -157,6 +157,7 @@ HasonHuang/sontv/docs/iptv-proxy/
 | `D-002` | `S-SUB-03`：聚合频道 `group-title` 的取值与基线不符 | 实现差异（文档描述） | 🔶 已澄清（以观测为准） |
 | `D-003` | Remux 的 `503` 被误归因于缺少 ffmpeg | 结论更正 | ✅ 已更正（为预热态） |
 | `D-004` | DASH「多 CDN 故障切换」未观测到 | 实现差异（文档描述） | 🔶 已记录（见 07） |
+| `D-005` | `rewrite` + MPD：输出被逐行当作相对 URL 绝对化，结果不可播放（非基线所述「直连 CDN」） | 实现缺陷/文档不符 | 🔶 已记录（v0.8.2） |
 
 **`D-002` 详情**
 
@@ -176,6 +177,16 @@ HasonHuang/sontv/docs/iptv-proxy/
 - 差异范围：**版本差异**（非架构/环境）。上游**无 tag/release**，须以**提交 SHA**锚定。
 - 处置：**已解决**——主分析对象改用 **v0.8.2 = `d302316fb8`**（与基线一致），登记于
   [`../findings/artifact.md`](../findings/artifact.md) §2.1。`main`(v0.8.8) 仅作**差异对照**，不作主分析对象。
+
+**`D-005` 详情**
+
+- 基线原文（`08` §5 `S-MODE-10`）：`Rewrite + MPD` / `Redirect + MPD` → **直连 CDN**（不转封装）。
+- 证据（v0.8.2，主实例，2026-10-18）：`redirect` + MPD → **302 上游**（符合）；`rewrite` + MPD →
+  **200 `application/dash+xml` 但正文损坏**：每一行被当作相对 URL 拼接为
+  `http://host.docker.internal:9999/<URL 编码后的整行>`（连 `<?xml…?>` 也被拼上）。
+  见 [`../findings/dynamic/02-modes-and-watchdog.md`](../findings/dynamic/02-modes-and-watchdog.md) §9。
+- 差异范围：**实现缺陷**（HLS 绝对化逻辑被套用到 MPD），非版本/架构差异。
+- 处置：**已记录**；`S-MODE-10` 标记 ⚠️（redirect 部分 ✅、rewrite 部分 ❌）。
 
 ## 4. 收敛条件
 
