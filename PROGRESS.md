@@ -124,6 +124,7 @@
 | 2026-10-18 | 路线图 P1·**D23 台标库**（upload/apply/rename/delete/restore/suggest/animate；浏览器侧转码；`.orig/` 备份；引用同步）+ 配置段补录（panel/logo/subtitle/share/playlist/stats） | ✅（F-011） |
 | 2026-10-18 | 路线图 P2·**D26 多 VPS 分享**（master/follower 双实例；`/api/share/pull` GET-only；key+trust_ips；token/封禁同步）+ **完整路由表静态补录** | ✅（F-012） |
 | 2026-10-18 | 子代理 SA-2 完成路线图 **D24/D25/D27**（组导入导出、订阅聚合、备份恢复、边缘模式） | ✅（F-013） |
+| 2026-10-18 | 子代理 SA-3 完成路线图 **D16/D18/D19/D19b/D20**（remux 仅连续流且**不用 ffmpeg**；录制 MKV；字幕透传；解析脚本；直播回看） | ✅（F-014） |
 | 2026-10-17 | 委派 agent 盘点**二进制实际功能全集**（55k 字符串+面板），产出优先级路线图 | ✅ §5 |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
@@ -144,18 +145,18 @@
 | ⑦ 入口清单改写/聚合 | `m3u_header_lines`、`x-tvg-url`、`subscription-merge`、`access`(public/hidden/archived/免验证) | 🔶 access/头行已验；导入与聚合入口未测 | ~~D13~~ ✅；余项 D24 |
 | ⑧ MPD/ClearKey 反代 | `mpd_keep_seconds`、`license_key`、`#KODIPROP clearkey`、`key_manager.rs`(088) | ⏳（需 MPD 样本） | **D14** |
 | ⑨ URL 池多上游轮询 | `url_pool_size`、`pool[0..n]`、`/dash/scan-url`、`final_url` | ⏳ | **D15** |
-| ⑩ 解析器最佳画质 | `/resolver/scripts`、`resolver_script/ttl/catchup`（Python） | ⏳（容器无 python3） | **D19b** |
+| ⑩ 解析器最佳画质 | `/resolver/scripts`、`resolver_script/ttl/catchup`（Python） | ✅ 契约已验（F-014）：`python3 <cache>/resolvers/<脚本> <arg>`；TTL/SWR；超时转 `error_url` | ~~D19b~~ ✅ |
 
 ### P1 · 中优先级（流处理与增值）
 
 | 域 | 代表能力 | 状态 | 路线图项 |
 | --- | --- | --- | --- |
-| Remux（TS/FLV/MMT） | `remux_container(auto/ts/flv/mmt)`、`libx264…aac` | 🔶 容器识别已验；成功路径未验 | **D16**（需 ffmpeg） |
+| Remux（TS/FLV/MMT） | `remux_container(auto/ts/flv/mmt)`、`libx264…aac` | ✅ 成功路径已验（F-014）：**仅连续流**、输出 HLS/5s/TS/伪装、**不用 ffmpeg**（503 是预热态） | ~~D16~~ ✅ |
 | DASH 时移/解密 | `/dash-timeshift/:track/…`、`dash_timeshift_hours/max_gb` | ⏳ | 随 D14 |
 | 回看 catchup | `playseek=`、`catchup_days`、`catchup_tpl`、本地/上游双模式 | ⏳ | **D17b** |
-| 定时录制 | 【录制】×49、`/schedule{,/from-epg,/:idx/stop}`、`recordings/` | ⏳ | **D18**（需 ffmpeg） |
-| 字幕 | `WebVTT` 转换、样式注入、`srt_ua_keywords`、`.vtt` 伪装 | ⏳ | **D19** |
-| 推流 livestream | `/livestream/:gid/:cid/start\|stop`、【推流】×35 | ⏳ | **D20** |
+| 定时录制 | 【录制】×49、`/schedule{,/from-epg,/:idx/stop}`、`recordings/` | ✅ 成功路径 MKV + `ffmpeg -c copy`（F-014）；`{idx}`=u64 下标 | ~~D18~~ ✅ |
+| 字幕 | `WebVTT` 转换、样式注入、`srt_ua_keywords`、`.vtt` 伪装 | ✅ SUBTITLES 组保留 + `.vtt`/`text/vtt` 透传（F-014） | ~~D19~~ ✅ |
+| 推流 livestream | `/livestream/:gid/:cid/start\|stop`、【推流】×35 | ✅ `?start/end`/`?playseek` 回看 + VOD 清单 + `timeshift/<hex>.<ext>`（F-014） | ~~D20~~ ✅ |
 | 多 CDN 容错/降级 | `consecutive_fails`、`fallback_pct`(088) | ⏳ | **D21**（假源故障注入即可） |
 | EPG 匹配/译制 | `match-report`、`mappings`、`epg_map`、gemini/mtran | ⏳ | **D22** |
 | 台标库管理 | `/logo/{suggest,match-report,apply,animate}`、`to_webp` | ✅ 9 端点全验（F-011）：转码在浏览器侧、动效 Rust 编码+.orig 备份、改名/删除同步引用 | ~~D23~~ ✅ |
