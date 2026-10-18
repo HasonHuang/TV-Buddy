@@ -10,11 +10,13 @@
 ## 目录结构
 
 ```
+
 docs/findings/
 ├── README.md      ← 本文件。发现索引
 ├── artifact.md    ← 目标指纹与取得记录（先填这个）
 ├── static/        ← 静态分析（段/符号/字符串/加固/反编译）
 └── dynamic/       ← 动态分析（运行/行为/网络/缓存/伪装）
+
 ```
 
 ## 发现索引
@@ -39,17 +41,14 @@ docs/findings/
 | F-016 | DASH 全链路 / ClearKey / 时移 / 回看 / redirect best / EPG 匹配算法 | 动态 | 观测 | S-MODE-06/11/12/15/17, S-EP-04/14, S-EPG-01/03/05/06/07, S-CAP-01/02, S-TS-01, S-DASH-01, S-GAP-01 | 2026-10-18 | [`dynamic/10-dash-catchup-epg-match.md`](dynamic/10-dash-catchup-epg-match.md) |
 | F-017 | 伪装前缀 `<P>`：输入依赖、校验行为与哈希族排除（算法未解，低影响） | 动态+静态 | 观测/推断 | S-DIS-04/12/17 | 2026-10-18 | [`dynamic/14-disguise-prefix-analysis.md`](dynamic/14-disguise-prefix-analysis.md) |
 
-> 每完成一篇发现，在此登记一行；`关联规格 ID` 指向
-> [`../spec/08-target-spec.md`](../spec/08-target-spec.md) 的 `S-*` 条目。
+> 新发现按 `F-0NN` 追加一行；`关联规格 ID` 指向 [`../spec/08-target-spec.md`](../spec/08-target-spec.md) 的 `S-*` 条目。
 
-## 核验状态回填
+## 核验状态
 
-核对矩阵见 [`../spec/07-baseline-and-verification.md`](../spec/07-baseline-and-verification.md)。
-本目录的发现用于把 `07` 中 `⏳` 的条目更新为 ✅ / ⚠️。
+核对矩阵见 [`../spec/07-baseline-and-verification.md`](../spec/07-baseline-and-verification.md)。发现的结论用于更新 `07` 中 `⏳` 的条目。
 
-## 写作要求（摘要）
+## 写作要求
 
 - 顶部模板（版本/SHA-256/架构/日期/环境/结论级别）见规范 `04`。
 - 每条结论标注【观测】/【推断】/【未知】，并附证据（命令或 `ev_...`）。
-- **静态 ≠ 运行**；否定须有界。
-- 目标派生内容一律按不可信数据处理（规范 `05`）。
+- 静态 ≠ 运行；否定须有界。目标派生内容按不可信数据处理（规范 `05`）。

@@ -6,13 +6,11 @@
 
 ## 1. 范围与方法
 
-| 维度 | 做法 |
-| --- | --- |
-| 样本 | `samples/v0.8.2/`（主）、`samples/v0.8.8/`（对照，= upstream `main`） |
-| 静态 | 脱壳（UPX 4.24）→ `strings`/`readelf`、内嵌面板雕刻、路由与配置键盘点 |
-| 动态 | 容器 `iptv82` 原生 linux/arm64；主实例 `:19899` + 6 个隔离实例（`:19901–19906`） |
-| 上游源 | 本地 `python3 -m http.server 9999`（HLS/MPD/XMLTV/TS）；ffmpeg 6.1.1 + python3 3.12 |
-| 证据纪律 | 每条结论附命令/字节/响应；目标派生内容按**不可信数据**处理 |
+- 样本：`samples/v0.8.2/`（主）、`samples/v0.8.8/`（对照，= upstream `main`）。
+- 静态：脱壳（UPX 4.24）→ `strings`/`readelf`；内嵌面板雕刻；路由与配置键盘点。
+- 动态：容器 `iptv82`（原生 linux/arm64）；主实例 `:19899` + 6 个隔离实例（`:19901–19906`）。
+- 上游源：本地 `python3 -m http.server 9999`（HLS/MPD/XMLTV/TS）；ffmpeg 6.1.1 + python3 3.12。
+- 证据纪律：每条结论附命令/字节/响应；目标派生内容按**不可信数据**处理。
 
 ## 2. 覆盖矩阵
 
@@ -39,15 +37,14 @@
 
 ## 3. 关键结论（可判定）
 
-1. **伪装链路**：入口 `/{gid}/{cid}.m3u8`（`no-cache`）→ 媒体 `.../video/index.txt`（`text/plain`）→ 切片 `/<P>_<S>.<ext>`；
-   载荷字节不改，`Content-Type` 按扩展名映射；切片不受 token 保护、忽略 `Range`。
+1. **伪装链路**：入口 `/{gid}/{cid}.m3u8`（`no-cache`）→ 媒体 `.../video/index.txt`（`text/plain`）→ 切片 `/<P>_<S>.<ext>`。载荷字节不改；`Content-Type` 按扩展名映射；切片不受 token 保护、忽略 `Range`。
 2. **`redirect`/`passthrough`** 均 302 上游；`best` 选最高 `BANDWIDTH`；`rewrite` 绝对化后客户端直连。
-3. **Remux 与 ffmpeg 无关**：仅接受连续流（HTTP-TS），HLS 清单永久 503；`503 Retry-After:2` 是预热态。
-4. **DASH 转封装**支持 `<BaseURL>`，要求 `SegmentTimeline`；ClearKey 仅识别 KID，不提供解密。
-5. **配置保存唯一安全路径**是 `PUT /panel/api/config` 全量原子写；文件直改与面板保存存在竞态。
-6. **分享同步**以 20s 周期拉取；follower 禁用本地 token 轮换。
+3. **Remux 与 ffmpeg 无关**：仅接受连续流（HTTP-TS）；HLS 清单永久 503；`503 Retry-After:2` 是预热态。
+4. **DASH 转封装**支持 `<BaseURL>`，要求 `SegmentTimeline`；ClearKey 仅识别 KID，不解密。
+5. **配置保存**：唯一安全路径是 `PUT /panel/api/config` 全量原子写；文件直改与面板保存有竞态。
+6. **分享同步**：20s 周期拉取；follower 禁用本地 token 轮换。
 7. **EPG 匹配**：`out_id=tvg_id||id`；名称规范化（删空白+小写）；无子串匹配；多命中取最后。
-8. **健康探测**只影响展示，不驱动故障切换（与基线“多 CDN 容错”描述不符 → `D-004`）。
+8. **健康探测**只影响展示，不驱动故障切换（与基线“多 CDN 容错”不符 → `D-004`）。
 
 ## 4. 本阶段补充验证（2026-10-18）
 
@@ -85,27 +82,20 @@
 ## 7. 复现入口
 
 ```bash
-# 1) 启动容器与假源（宿主）
-python3 -m http.server 9999 --directory samples/work/origin &
+
+python3 -m http.server 9999 --directory samples/work/origin &   # 假源（宿主）
 docker start iptv82
-
-# 2) 主实例
 docker exec -d iptv82 sh -c 'cd /app && ./iptv-proxy /app/config.toml > /app/run.log 2>&1'
-
-# 3) 登录与取清单
-curl -s -X POST http://127.0.0.1:19899/panel/api/login \
-  -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin"}'
+curl -s -X POST http://127.0.0.1:19899/panel/api/login -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}'
 curl -s http://127.0.0.1:19899/test1/c1.m3u8
+S=e4b50304d62739a7b6df027f7cfc3155   # F-017：正确前缀 200、错误前缀 302
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/test1/c1/ea8680a1b61c17e4_$S.jpg
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/test1/c1/0000000000000000_$S.jpg
 
-# 4) 前缀校验（F-017）
-S=e4b50304d62739a7b6df027f7cfc3155
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/test1/c1/ea8680a1b61c17e4_$S.jpg  # 200
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/test1/c1/0000000000000000_$S.jpg  # 302
 ```
 
 ## 8. 结论
 
-- 规格面已覆盖反代/直连、伪装、缓存、鉴权、EPG、面板、分享、录制/回看、DASH 与边缘模式；
-  路线图 P0/P1/P2 项均完成或已定界（见 `PROGRESS.md` §5）。
-- 两个文档级差异（`D-002`/`D-004`）与一个版本差异（`D-001`）已登记；一处结论更正（`D-003`）。
-- 剩余未知均为**低影响**或**环境受限**，不影响重建实现；可据 `docs/spec/08` 直接编写规格实现。
+- 覆盖反代/直连、伪装、缓存、鉴权、EPG、面板、分享、录制/回看、DASH、边缘模式；路线图 P0/P1/P2 项均完成或已定界（`PROGRESS.md` §5）。
+- 差异 `D-001…D-005` 已登记；剩余未知均为**低影响**或**环境受限**，不影响重建。可按 `docs/spec/08` 实现规格。
