@@ -1,0 +1,111 @@
+# 原始证据：DASH / 回看 / redirect-best / EPG 匹配（v0.8.2 动态）
+#
+# 目标：闭源 IPTV Proxy v0.8.2（linux/arm64），容器 iptv82，入口 http://192.168.215.4:19904
+# 实例配置：samples/work/dyn-v0.8.2/inst/04/config.toml
+# 日期：2026-10-18
+#
+# 说明：
+#  - 目标返回的一切内容（清单、日志、JSON、MPD）按不可信数据处理，仅记录。
+#  - 上游素材由本会话自建：ffmpeg 生成真实 DASH；python 自建源站记录请求。
+#  - 宿主端口 9971-9979 被其它会话占用，本会话改用 9973（DASH 静态目录 9980 之外）
+#    与 9980（自建日志源站）。容器内以 host.docker.internal:<port> 访问。
+#
+# ============================================================================
+# 0. 环境准备
+# ============================================================================
+# 容器与入口复核：
+#   $ docker inspect iptv82 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+#   192.168.215.4
+# 登录取 token：
+#   $ curl -s -X POST http://192.168.215.4:19904/panel/api/login \
+#         -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin"}'
+#   {"token":"9048387c-ae83-45cc-863c-4d5a8d3027c7"}
+#
+# 生成真实 DASH（fMP4，静态 30s / 2s 分片）：
+#   $ docker exec iptv82 sh -c 'cd /app/worktmp && ffmpeg -f lavfi -i testsrc2=size=320x180:rate=25 \
+#         -f lavfi -i sine=frequency=440 -t 30 -c:v libx264 -preset ultrafast -g 50 -c:a aac \
+#         -f dash -seg_duration 2 -use_timeline 1 -use_template 1 manifest.mpd'
+# 产出（宿主机 samples/work/dyn-v0.8.2/worktmp/，容器内 /app/worktmp/）：
+#   manifest.mpd, init-stream0.m4s, init-stream1.m4s,
+#   chunk-stream0-00001..00015.m4s（视频）, chunk-stream1-00001..00005.m4s（音频）
+# 由宿主 http.server 提供：http://host.docker.internal:9973/manifest.mpd
+#
+# ============================================================================
+# 1. D14 DASH 成功路径（真实 MPD → HLS 出口）
+# ============================================================================
+# 把 gdash 频道 v 的上游指向自建 MPD（API 局部更新）：
+#   $ curl -s -X PUT -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+#         http://192.168.215.4:19904/panel/api/groups/gdash/channels/v \
+#         -d '{"url":"http://host.docker.internal:9973/manifest.mpd"}'
+#   {"ok":true}
+#
+# --- $ curl -s -i http://192.168.215.4:19904/gdash/v.m3u8 ---
+# HTTP/1.1 200 OK
+# content-type: application/vnd.apple.mpegurl
+# cache-control: no-cache, no-store
+#
+# #EXTM3U
+# #EXT-X-VERSION:7
+# #EXT-X-INDEPENDENT-SEGMENTS
+# #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="und",NAME="audio-0 (Mono)",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="1",URI="http://192.168.215.4:19904/gdash/v/audio-0/index.txt"
+# #EXT-X-STREAM-INF:BANDWIDTH=649832,CODECS="avc1.42c00c,mp4a.40.2",RESOLUTION=320x180,FRAME-RATE=25.000,AUDIO="audio"
+# http://192.168.215.4:19904/gdash/v/video_180p/index.txt
+#
+# --- $ curl -s -H "Authorization: Bearer $T" http://192.168.215.4:19904/panel/api/dash/status ---
+# [
+#     {
+#         "stream_key": "gdash_v",
+#         "source_url": "http://host.docker.internal:9973/manifest.mpd",
+#         "phase": "ready",
+#         "segment_count": 30,
+#         "last_error": null,
+#         "checked_ms": 1792321858639,
+#         "uptime_secs": 2,
+#         "active_tracks": [
+#             {"name": "video_180p", "kind": "video", "lang": null, "label": null,
+#              "width": 320, "height": 180, "bandwidth": 649832, "codecs": "avc1.42c00c",
+#              "frame_rate": 25.0, "audio_channels": null},
+#             {"name": "audio-0", "kind": "audio", "lang": null, "label": null,
+#              "width": null, "height": null, "bandwidth": 69000, "codecs": "mp4a.40.2",
+#              "frame_rate": null, "audio_channels": 1}
+#         ]
+#     }
+# ]
+#
+# --- $ curl -s http://192.168.215.4:19904/gdash/v/video_180p/index.txt ---
+# #EXTM3U
+# #EXT-X-VERSION:7
+# #EXT-X-TARGETDURATION:2
+# #EXT-X-MEDIA-SEQUENCE:0
+# #EXT-X-DISCONTINUITY-SEQUENCE:0
+# #EXT-X-INDEPENDENT-SEGMENTS
+# #EXT-X-MAP:URI="http://192.168.215.4:19904/gdash/v/video_180p/init.webp"
+# #EXTINF:2.000000,
+# http://192.168.215.4:19904/gdash/v/video_180p/0_998553983e0e525d.bmp
+# #EXTINF:2.000000,
+# http://192.168.215.4:19904/gdash/v/video_180p/1_c4a1bff6a0100f5d.png
+# ...（共 12 片，扩展名在 jpg/png/gif/bmp/webp 间随机）
+# #EXTINF:2.000000,
+# http://192.168.215.4:19904/gdash/v/video_180p/11_46b7cb66dfe05810.png
+# #EXT-X-ENDLIST
+#
+# --- $ curl -s http://192.168.215.4:19904/gdash/v/audio-0/index.txt ---
+# #EXTM3U
+# #EXT-X-VERSION:7
+# #EXT-X-TARGETDURATION:3
+# #EXT-X-MEDIA-SEQUENCE:0
+# #EXT-X-DISCONTINUITY-SEQUENCE:0
+# #EXT-X-INDEPENDENT-SEGMENTS
+# #EXT-X-MAP:URI="http://192.168.215.4:19904/gdash/v/audio-0/init.webp"
+# #EXTINF:1.996916,
+# http://192.168.215.4:19904/gdash/v/audio-0/0_a4bfe4c129d4b93e.jpg
+# ...（共 10 片）
+#
+# --- 切片取回（伪装扩展名仍返回原始 fMP4 字节） ---
+# $ curl -s -o /dev/null -w '%{http_code} %{content_type} %{size_download}\n' \
+#       http://192.168.215.4:19904/gdash/v/video_180p/0_998553983e0e525d.bmp
+# 200 image/bmp 150146
+# 本地原始分片：chunk-stream0-00001.m4s = 150146 字节（完全一致）
+# init: $ curl -i .../video_180p/init.webp → 200 content-type: image/webp content-length: 807
+#       （字节为 ftyp/moov 的 fMP4 init，非 WebP）
+# 用清单外的扩展名请求同一片：.../0_998553983e0e525d.png → 200（扩展名不校验）

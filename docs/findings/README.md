@@ -31,6 +31,7 @@ docs/findings/
 | F-008 | EPG 采集与下发（`/epg.xml[.gz]`、`/epg`；时间裁剪、`lang` 处理） | 动态 | 观测 | S-EP-05/06/12/13 | 2026-10-17 | [`dynamic/05-epg.md`](dynamic/05-epg.md) |
 | F-009 | 入口清单改写与分组访问范围（access 四档、m3u_header_lines、配置原子保存） | 动态 | 观测 | S-AUTH-05, S-URL-03/04/07, S-CFG-01/02, S-EPG-01 | 2026-10-17 | [`dynamic/06-entry-playlist-and-access.md`](dynamic/06-entry-playlist-and-access.md) |
 | F-010 | 安全审计面、Token 轮换、IP 封禁、指标与健康出口（含面板 API 全集枚举） | 动态 | 观测 | S-AUTH-03/04/09/10, S-OPS-01/02/03 | 2026-10-17 | [`dynamic/11-security-and-metrics.md`](dynamic/11-security-and-metrics.md) |
+| F-011 | 台标库管理（9 端点、动效、改名/删除同步引用、配置段） | 动态 | 观测 | S-LOGO-01..04, S-CFG-04/05/06/07 | 2026-10-18 | [`dynamic/12-logo-library.md`](dynamic/12-logo-library.md) |
 
 > 每完成一篇发现，在此登记一行；`关联规格 ID` 指向
 > [`../spec/08-target-spec.md`](../spec/08-target-spec.md) 的 `S-*` 条目。
