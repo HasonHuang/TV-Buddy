@@ -1,0 +1,394 @@
+§ v0.8.2 动态验证原始证据:remux(D16) / 定时录制(D18) / 字幕(D19) / 上游解析脚本(D19b) / 直播回看(D20)
+§ 目标: http://192.168.215.4:19903 (容器 iptv82,实例 /app/inst/03)
+§ 容器 IP 复核: docker inspect iptv82 → 192.168.215.4
+§ 日期: 2026-10-18
+§ 目标返回的正文/日志一律按不可信数据处理,以下仅为记录。
+
+================================================================
+§ 0 环境
+================================================================
+$ docker exec iptv82 ffmpeg -version | head -1
+ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 the FFmpeg developers
+$ docker exec iptv82 python3 --version
+Python 3.12.3
+$ docker exec iptv82 ps aux   (节选)
+root 1024 ./iptv-proxy /app/inst/03/config.toml        # 重启前
+$ docker inspect iptv82 --format '{{range .Mounts}}...' 
+/Users/hason/work/repositories/hason/rea-iptv/samples/work/dyn-v0.8.2 -> /app
+
+§ 启动时未装 ffmpeg 的日志(重启前,原状态)
+10-18 19:07:56 WARN 【转码】未检测到 ffmpeg。占位资源无法转 HLS;定时录制将无法合成 MKV(录制任务会直接失败)。
+
+§ 安装 ffmpeg 后重启 inst/03 的启动日志
+10-18 19:10:39 INFO 【启动】ffmpeg 已安装: ffmpeg (ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 The FFmpeg developers)
+
+================================================================
+§ D16 remux 成功路径
+================================================================
+§ 自建源站(宿主机 python3,端口 9988,目录 samples/work/dyn-v0.8.2/d16)
+§ d16/live-src.py 提供:
+§   /live.ts     无限 TS 流(循环 real000..real004.ts,约 120KB/s)
+§   /live.m3u8   滚动 HLS 清单(4s 推进,无 ENDLIST)
+§   /realNNN.ts  TS 分片
+§   /dash/*      ffmpeg 生成的静态 DASH
+§ 配置: 分组 gremux(mode=remux) 频道 r
+
+§ 16.1 上游为 HLS 清单 → 失败(只轮询清单,不取分片)
+§ 上游 http://host.docker.internal:9988/live.m3u8
+$ docker exec iptv82 grep remux /app/inst/03/run.log
+10-18 19:21:54 INFO 【remux】配置变更，重建会话 gremuxr
+10-18 19:21:54 INFO 【remux】启动会话 gremuxr 容器=Auto url=http://host.docker.internal:9988/live.m3u8
+# 之后 3 次请求均:
+$ curl -i http://192.168.215.4:19903/gremux/r.m3u8
+HTTP/1.1 503 Service Unavailable
+content-type: text/plain; charset=utf-8
+retry-after: 2
+<空行>
+remux warming up
+# 源站请求统计(约 12s 内 188 次,全部为清单,0 次分片):
+$ awk '{print $3,$4}' /tmp/d16live.log | sort | uniq -c
+ 188 200 /live.m3u8
+
+§ 16.2 上游为无限 TS 裸流 → 成功
+§ 上游 http://host.docker.internal:9988/live.ts, remux_container=auto
+$ docker exec iptv82 grep remux /app/inst/03/run.log | tail -3
+10-18 19:20:21 INFO 【remux】启动会话 gremuxr 容器=Ts url=http://host.docker.internal:9988/live.ts
+10-18 19:21:54 INFO 【remux】配置变更，重建会话 gremuxr
+10-18 19:21:54 INFO 【remux】启动会话 gremuxr 容器=Auto url=http://host.docker.internal:9988/live.m3u8
+# 静态 TS(live.ts 单文件)会 EOF 重连,现象(节选):
+#   10-18 19:14:43 INFO 【remux】自动识别容器: Ts      (每秒数次,持续循环)
+# 冷启动第一次:
+$ curl -i http://192.168.215.4:19903/gremux/r.m3u8
+HTTP/1.1 503 Service Unavailable
+retry-after: 2
+remux warming up
+# 约 10s 后:
+$ curl -i http://192.168.215.4:19903/gremux/r.m3u8
+HTTP/1.1 200 OK
+content-type: text/plain; charset=utf-8
+cache-control: no-cache
+<空行>
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:5
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:5.000,
+/gremux/r/seg_000000000000.png
+
+§ 16.2.1 清单增长(滑动窗口)
+$ for i in 1..4; do curl -s .../gremux/r.m3u8; sleep 6; done
+--- poll #1 19:20:21 --- 503 remux warming up
+--- poll #2 19:20:35 ---
+#EXTM3U / #EXT-X-VERSION:3 / #EXT-X-TARGETDURATION:5 / #EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:5.000, /gremux/r/seg_000000000000.png
+--- poll #3 19:20:41 --- MEDIA-SEQUENCE:0; seg_...000.png, 001.gif
+--- poll #4 19:20:47 --- MEDIA-SEQUENCE:0; 000.png, 001.gif, 002.gif, 003.jpg(5.641)
+$ (继续到 19:21:35) 滑动窗口: MEDIA-SEQUENCE 5→6→8→9→10,每次约 4 条可见
+#EXT-X-MEDIA-SEQUENCE:10
+#EXTINF:5.000, /gremux/r/seg_000000000010.webp
+#EXTINF:5.628, /gremux/r/seg_000000000011.png
+#EXTINF:5.000, /gremux/r/seg_000000000012.gif
+#EXTINF:5.000, /gremux/r/seg_000000000013.png
+
+§ 16.2.2 分片(伪装扩展名/content-type)
+$ curl -D - -o /tmp/s12.bin http://192.168.215.4:19903/gremux/r/seg_000000000012.gif
+HTTP/1.1 200 OK
+content-type: image/gif
+cache-control: public, max-age=30
+$ ffprobe /tmp/s12.bin
+stream 0: h264 video; stream 1: aac audio; format_name=mpegts; duration=5.032466
+$ ls -la /tmp/s12.bin → 488988 字节
+$ (seg ...000.png) content-type: image/png, 487108 字节; 首字节 0x47(TS 同步字节)
+
+§ 16.2.3 容器识别日志
+§ remux_container=auto + TS 输入 → 【remux】自动识别容器: Ts
+§ remux_container=ts   → 【remux】启动会话 gremuxr 容器=Ts url=... (不再打印自动识别)
+§ 面板选项 mg-remux-container: auto / ts / flv / mmt
+§ 面板帮助 'mg-container': "源容器类型...仅 Remux 模式用,默认自动识别。TS 是 HTTP-TS 裸流,
+§   FLV 是 HTTP-FLV,MMT 是 ARIB STD-B32 / BS4K。"
+
+§ 16.3 remux 是否调用 ffmpeg —— 否(shim 实证)
+§ 用 PATH 前置 shim 包装 ffmpeg,记录所有调用:
+$ cat /app/d16/bin/ffmpeg
+#!/bin/sh
+echo "$(date +%s.%N) cwd=$(pwd) argv: $*" >> /tmp/ffmpeg-calls.log
+exec /usr/bin/ffmpeg "$@"
+$ docker exec iptv82 cat /tmp/ffmpeg-calls.log
+1792322320.751601355 cwd=/app argv: -version
+1792322412.580667957 cwd=/app argv: -version
+§ → 整个 remux 过程(含分片产出)只有启动时的 ffmpeg -version 探测,无其它调用。
+$ docker exec iptv82 ps aux | grep "[f]fmpeg"   → 无输出
+
+§ 16.4 缺 ffmpeg 时 remux 仍可用(隔离验证)
+§ 手法: 临时 mv /usr/bin/ffmpeg /usr/bin/ffmpeg.d16bak,重启 inst/03,测完立即恢复。
+§ 启动日志:
+10-18 19:19:45 WARN 【转码】未检测到 ffmpeg。占位资源无法转 HLS;定时录制将无法合成 MKV(录制任务会直接失败)。
+$ curl -i .../gremux/r.m3u8   # 冷启动
+HTTP/1.1 503 Service Unavailable        ← 预热态,非 ffmpeg 缺失导致
+$ sleep 6; curl -i .../gremux/r.m3u8
+HTTP/1.1 200 OK                          ← 无 ffmpeg 也能出清单
+§ 恢复: mv /usr/bin/ffmpeg.d16bak /usr/bin/ffmpeg → ffmpeg version 6.1.1-3ubuntu5
+§ 注: 二进制在 PATH 之外还会探测绝对路径 /usr/bin/ffmpeg(设 PATH=/tmp/nobin 仍找到)。
+
+§ 16.5 入口订阅(gremux)
+$ curl -s http://192.168.215.4:19903/gremux/playlist.m3u
+#EXTM3U
+#EXTINF:-1 tvg-id="r" tvg-name="R" tvg-logo="" group-title="gremux",R
+http://192.168.215.4:19903/gremux/r.m3u8
+
+================================================================
+§ D18 定时录制
+================================================================
+§ 面板提交字段(panel.html submitSchedule):
+§   name, group_id, channel_id, start_time, end_time, format("mkv"), status("pending")
+§   POST /schedule (新增) PUT /schedule/{idx}(改) DELETE /schedule/{idx} POST /schedule/{idx}/stop
+§   {idx} 为**列表下标(整数)**,不是任务 id。
+
+§ 18.1 创建任务
+$ POST /panel/api/schedule {"name":"d18-proxy","group_id":"test1","channel_id":"c1",
+    "start_time":"2026-10-18T19:24:29","end_time":"2026-10-18T19:25:49","format":"mkv","status":"pending"}
+→ 200 {"id":"5715c5dc-29cc-4124-8294-40f77a709cda","ok":true}
+$ POST /panel/api/schedule {"name":"d18-dash","group_id":"gdash","channel_id":"v", ...}
+→ 200 {"id":"9f5aaaff-7533-42cc-8925-708fef4c77f7","ok":true}
+
+§ 18.2 GET /schedule 任务字段
+[{"id","name","group_id","channel_id","start_time","end_time","format","status",
+  "output_file","extra_files":[],"note","error","created_at","file_size","record_secs"}]
+
+§ 18.3 调度与执行日志
+10-18 19:24:00 INFO 【录制】新建录制任务 id=5715c5dc-...
+10-18 19:24:12 INFO 【录制】开始执行任务「d18-proxy」[test1/c1] 区间 1792322669~1792322749
+10-18 19:24:12 WARN 【录制】schedule.json rename 失败: No such file or directory (os error 2)
+10-18 19:24:12 INFO 【录制】livestream 频道由录制点亮 [test1/c1]
+10-18 19:24:13 INFO 【录制】livestream 推流冷启动完成,可开始收集 [test1/c1]
+10-18 19:24:12 INFO 【录制】DASH 频道临时升级为 continuous+timeshift 以供录制 [gdash/v]
+10-18 19:24:12 INFO 【录制】DASH 频道已点亮 [gdash/v]
+10-18 19:24:12 INFO 【录制】提前点亮完成,等待 27 秒到达开始时间
+
+§ 18.4 proxy 频道录制成功
+10-18 19:25:49 INFO 【录制】livestream 频道由录制熄灭并清除记录 [test1/c1] forgotten=true
+10-18 19:25:49 INFO 【录制】TS 录制完成 → d18-proxy_1792322749.mkv
+10-18 19:25:49 INFO 【录制】任务「d18-proxy」完成 → d18-proxy_1792322749.mkv
+10-18 19:25:49 INFO 【录制】任务「d18-proxy」产物 7812786 字节,录制耗时 96 秒
+§ ffmpeg 命令行(shim 原文):
+1792322749.201834673 cwd=/app argv: -y -i ./inst/03/cache/recordings/5715c5dc-29cc-4124-8294-40f77a709cda/_merged_video.ts -map 0 -c copy ./inst/03/cache/recordings/d18-proxy_1792322749.mkv
+§ 产物校验:
+$ ffprobe d18-proxy_1792322749.mkv
+format_name=matroska,webm; duration=84.005; size=7812786; bit_rate=744030
+stream0 h264 320x180; stream1 aac 44100Hz mono
+
+§ 18.5 DASH 频道录制:静态 MPD → 失败
+10-18 19:26:00 INFO 【录制】DASH 频道已恢复原始配置 [gdash/v]
+10-18 19:26:00 INFO 【录制】已清理录制临时回看目录 [gdash/v]
+10-18 19:26:00 ERROR 【录制】任务「d18-dash」失败: 录制区间内无可用切片(频道未产生切片,或回看历史已被淘汰)
+§ GET /schedule 该任务: status=failed, output_file=null,
+§   error="录制区间内无可用切片(频道未产生切片,或回看历史已被淘汰)"
+
+§ 18.6 DASH 频道录制:直播 MPD(type=dynamic) → 成功
+§ 源: ffmpeg -re 持续生成 /app/d16/dashlive/out.mpd (type=dynamic, timeShiftBufferDepth=PT20.0S)
+10-18 19:27:12 INFO 【录制】DASH 频道临时升级为 continuous+timeshift 以供录制 [gdash/v]
+10-18 19:28:12 INFO 【录制】录制完成(1 视频 + 1 音轨,mkv)→ d18-dash2_1792322892.mkv
+10-18 19:28:12 INFO 【录制】任务「d18-dash2」完成 → d18-dash2_1792322892.mkv
+10-18 19:28:12 INFO 【录制】任务「d18-dash2」产物 4494705 字节,录制耗时 60 秒
+§ ffmpeg 命令行(shim 原文):
+1792322892.758275331 cwd=/app argv: -y -i ./inst/03/cache/recordings/cc225d73-a6ca-46b2-9222-9016bfb49e4f/_merged_video_180p.mp4 -i ./inst/03/cache/recordings/cc225d73-a6ca-46b2-9222-9016bfb49e4f/_merged_audio-0.mp4 -map 0:v:0 -map 1:a:0 -c copy ./inst/03/cache/recordings/d18-dash2_1792322892.mkv
+$ ffprobe d18-dash2_1792322892.mkv
+format_name=matroska,webm; duration=48.023; size=4494705; stream0 h264; stream1 aac
+
+§ 18.7 产物目录与状态文件
+$ ls -la samples/work/dyn-v0.8.2/inst/03/cache/recordings/
+-rw-r--r-- 4494705 d18-dash2_1792322892.mkv
+-rw-r--r-- 7812786 d18-proxy_1792322749.mkv
+-rw-r--r-- 1515 schedule.json
+§ 录制中另有以任务 id 命名的临时目录(<taskid>/_merged_video.ts 等),完成后清除。
+§ cache/recordings/schedule.json = {"version":1,"tasks":[ ... 与 GET /schedule 同字段 ... ]}
+
+§ 18.8 DELETE 语义
+$ DELETE /panel/api/schedule/9f5aaaff-7533-42cc-8925-708fef4c77f7
+→ 400 Invalid URL: Cannot parse `"9f5aaaff-..."` to a `u64`
+$ DELETE /panel/api/schedule/1
+→ 200 {"ok":true,"was_running":false}
+$ DELETE /panel/api/schedule/9
+→ 404 {"error":"Schedule task not found"}
+
+================================================================
+§ D19 字幕
+================================================================
+§ 素材: samples/work/dyn-v0.8.2/d16/multi/multi.m3u8 (手写主清单: 2 音轨组 aud + 2 字幕组 subs)
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="a_en.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="中文",LANGUAGE="zh",DEFAULT=NO,AUTOSELECT=YES,URI="a_zh.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="subs_en.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="中文",LANGUAGE="zh",DEFAULT=NO,AUTOSELECT=YES,URI="subs_zh.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=320x180,CODECS="avc1.42c015",AUDIO="aud",SUBTITLES="subs"
+vid.m3u8
+§ 频道: g2/c1 (proxy), selected_tracks=[]
+
+§ 19.1 出口主清单(改写后)
+$ curl -D - http://192.168.215.4:19903/g2/c1.m3u8
+HTTP/1.1 200 OK ; content-type: application/vnd.apple.mpegurl
+#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-INDEPENDENT-SEGMENTS
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="http://192.168.215.4:19903/g2/c1/audio0/index.txt"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="中文",LANGUAGE="zh",DEFAULT=NO,AUTOSELECT=YES,URI="http://192.168.215.4:19903/g2/c1/audio1/index.txt"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,URI="http://192.168.215.4:19903/g2/c1/subs0/index.txt"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="中文",LANGUAGE="zh",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="http://192.168.215.4:19903/g2/c1/subs1/index.txt"
+#EXT-X-STREAM-INF:BANDWIDTH=800000,CODECS="avc1.42c015",RESOLUTION=320x180,AUDIO="audio",SUBTITLES="subs"
+http://192.168.215.4:19903/g2/c1/video/index.txt
+
+§ 19.2 字幕轨道清单与分片
+$ curl http://192.168.215.4:19903/g2/c1/subs0/index.txt
+HTTP/1.1 200 OK ; content-type: text/plain; charset=utf-8
+#EXTM3U / #EXT-X-VERSION:3 / #EXT-X-TARGETDURATION:4 / #EXT-X-MEDIA-SEQUENCE:0 / #EXT-X-PLAYLIST-TYPE:VOD
+#EXTINF:4.000000,
+http://192.168.215.4:19903/g2/c1/5ae12330d3e32594_675f0afe5f925f787cdc880c0a3ebe89.vtt
+... (共 5 条, 结尾 #EXT-X-ENDLIST)
+$ curl -D - <first .vtt>
+HTTP/1.1 200 OK ; content-type: text/vtt ; content-length: 47 ; cache-control: private, max-age=300
+WEBVTT
+
+00:00:00.000 --> 00:00:04.000
+EN cue 0
+§ 字幕分片保留 .vtt 扩展名(不算"伪装");视频/音轨分片扩展名仍为随机伪装(.gif/.png/.bmp)。
+$ curl -A ijkplayer <first .vtt>  → 同上(本例 upstream 已是 WebVTT,无改写)
+
+§ 19.3 DASH 频道出口(HLS 改写)
+$ curl http://192.168.215.4:19903/gdash/v.m3u8
+#EXTM3U / #EXT-X-VERSION:7 / #EXT-X-INDEPENDENT-SEGMENTS
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="und",NAME="audio-0 (Mono)",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="1",URI="http://192.168.215.4:19903/gdash/v/audio-0/index.txt"
+#EXT-X-STREAM-INF:BANDWIDTH=660004,CODECS="avc1.42c00c",RESOLUTION=320x180,FRAME-RATE=25.000,AUDIO="audio"
+http://192.168.215.4:19903/gdash/v/video_180p/index.txt
+$ curl http://192.168.215.4:19903/gdash/v/video_180p/index.txt
+#EXT-X-MAP:URI="http://192.168.215.4:19903/gdash/v/video_180p/init.webp"
+#EXTINF:4.000000,
+http://192.168.215.4:19903/gdash/v/video_180p/0_998553983e0e525d.bmp
+
+§ 19.4 selected_tracks(DASH) 实测
+$ GET /panel/api/dash/tracks/gdash/v
+{"tracks":[{... name:"video_180p", kind:"video", selected:true},
+           {... name:"audio-0", kind:"audio", selected:true}]}
+§ 设 selected_tracks=["audio-0"] 后:
+$ GET /panel/api/dash/tracks/gdash/v → video_180p selected:false, audio-0 selected:true
+$ curl /gdash/v.m3u8 → 仍输出 video_180p 变体(未从清单剔除)
+§ 日志:
+10-18 19:30:54 ERROR 【DASH】选中集合里一条视轨都没匹配上！已强制补入最高分辨率视轨,
+    否则会静默输出只有音轨的 playlist。请到面板重新选择轨道。 stream=gdash_v fallback=video_180p selected=["audio-0"]
+
+§ 19.5 字幕机翻自检 POST /subtitle/mtran/test
+§ (未配置 url 时)
+$ POST /panel/api/subtitle/mtran/test {"text":"hello"}
+→ 400 {"error":"请先填写 MTranServer 地址(字幕机翻只支持本地 MTranServer)"}
+§ 设 [subtitle].translate.url="http://127.0.0.1:9/mtran" 后重启生效:
+$ POST /panel/api/subtitle/mtran/test {"text":"hello"}
+→ 200 {"base":"http://127.0.0.1:9/mtran","ok":false,
+       "targets":[{"code":"zh-Hans","lang":"zh-cn","ok":false,
+         "error":"请求失败: 连接失败: error sending request for url (http://127.0.0.1:9/mtran/translate/batch) ← client error (Connect) ← tcp connect error ← Connection refused (os error 111)"}],
+       "version":null}
+§ → 自检会 POST <base>/translate/batch;失败原文如上。
+
+================================================================
+§ D19b 上游解析脚本
+================================================================
+§ 面板字段(mc-resolver 区): resolver_script / resolver_arg / resolver_ttl / resolver_catchup / catchup_days
+§ 上传: POST /panel/api/resolver/script {"name":"probe.py","content":"<py 源码>"} → {"ok":true}
+$ GET /panel/api/resolver/scripts
+{"scripts":[{"name":"fail.py","size":168},{"name":"json.py","size":225},
+            {"name":"probe.py","size":733},{"name":"slow.py","size":199}]}
+§ 脚本落盘: <cache>/resolvers/<name>.py (+ __pycache__)
+
+§ 19b.1 调用契约(calls.log 原文)
+§ probe.py 在模块顶层把上下文写文件后 print 上游地址。
+$ cat /app/inst/03/cache/resolvers/probe.py   (摘要)
+$ docker exec iptv82 cat /app/d16/resolver/calls.log
+call t=1792323116.709 argv=['/app/inst/03/cache/resolvers/probe.py', 'myarg42']
+cwd='/app/inst/03/cache/resolvers'
+env=[('   ', '/app/iptv-proxy'), ('HOME', '/root'), ('HOSTNAME', 'd60c58150d19'),
+     ('LC_CTYPE', 'C.UTF-8'), ('OLDPWD', '/app'),
+     ('PATH', '/app/d16/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'),
+     ('PWD', '/app')]
+stdin_tty=False
+__file__='/app/inst/03/cache/resolvers/probe.py' __name__='__main__'
+§ → 直接以 `python3 /app/inst/<n>/cache/resolvers/<脚本> <resolver_arg>` 执行;
+§   argv[1]=resolver_arg; cwd=脚本目录; 无自定义环境变量; stdout 内容当作上游 URL。
+§ 频道 url 设为无效值(http://host.docker.internal:1/unused.m3u8),
+§ 目标仍用脚本返回的 http://host.docker.internal:9988/live.m3u8 拉流(源站日志见 real*.ts 请求)。
+
+§ 19b.2 TTL 缓存(resolver_ttl=30)
+§ before=1; 3 次请求(间隔 3s,均在 TTL 内) → 仍=1; 等 31s 再请求一次 → =2
+$ (after 3 fetches (cached): 1) / (after ttl expiry: 2)
+
+§ 19b.3 失败路径 fail.py(退出码 3,stderr "boom: cannot resolve upstream")
+§ 有旧值时(热态,SWR 语义):
+10-18 19:33:38 WARN 【代理】resolver SWR 刷新失败 [resolver:g2:c1]: 退出码 3: boom: cannot resolve upstream
+$ curl -i .../g2/c1.m3u8 → HTTP/1.1 200(仍输出上一次成功的清单)
+§ 无旧值时(冷启动,清空 cache/m3u8 后重启):
+$ curl -i .../g2/c1.m3u8
+HTTP/1.1 302 Found
+location: https://material.yang-1989.eu.org/v/mistake.mp4     ← server.error_url
+
+§ 19b.4 超时 slow.py(睡 40s 再输出)
+$ curl -w '%{http_code} %{time_total}' .../g2/c1.m3u8
+302 30.008396      ← 固定约 30s 超时后转 error_url;日志无对应提示行
+
+§ 19b.5 非 URL 输出 json.py(打印 JSON)
+$ curl -w '%{http_code} %{time_total}' .../g2/c1.m3u8
+302 0.019243       ← 视为无效地址,立即 302 error_url;日志无提示
+
+§ 19b.6 resolver_catchup(proxy 模式)
+§ 设 resolver_catchup=true, catchup_days=5:
+$ curl /g2/playlist.m3u
+#EXTINF:-1 ... catchup="append" catchup-days="5" catchup-source="?playseek=${(b)yyyyMMddHHmmss}-${(e)yyyyMMddHHmmss}",C1x
+$ curl ".../g2/c1.m3u8?playseek=20261018113000-20261018113100"
+§ 源站日志仅见 GET /live.m3u8,**未见** playseek 追加(proxy 模式不追加;面板说明该功能"仅 redirect/直链场景")。
+
+================================================================
+§ D20 直播 / 回看
+================================================================
+§ 配置: test1/c1 livestream=true, timeshift_hours=1, timeshift_offset_secs=60, timeshift_max_gb=0
+§ 手动重启/pull 后日志:
+10-18 19:29:39 INFO 【推流】热重载: 自动启动推流 [test1/c1]
+10-18 19:29:39 INFO 【推流】任务启动: test1:c1
+§ (录制期间也复用同一机制: 【推流】任务启动: test1:c1 / 【录制】livestream 频道由录制点亮 ...)
+
+§ 20.1 GET /panel/api/livestream
+{"test1:c1":{"audio_count":0,"dir_bytes":13401322,"last_error":null,"max_gb":0,
+ "mode":"proxy","oldest_age_secs":335,"retain_hours":1,"running":true,
+ "segment_count":36,"target_duration":4}}
+
+§ 20.2 磁盘目录
+$ find cache -maxdepth 2 -type d
+cache/livestream/test1_c1
+cache/dash_timeshift                 ← DASH 回看
+cache/dash/gdash_v
+
+§ 20.3 入口订阅 catchup 标签
+#EXTINF:-1 tvg-id="c1" ... catchup="append" catchup-days="1" catchup-source="?playseek=${(b)yyyyMMddHHmmss}-${(e)yyyyMMddHHmmss}",C1
+
+§ 20.4 回看清单
+§ playseek(本地时区 yyyymmddHHMMSS,在保留窗口内):
+$ curl ".../test1/c1.m3u8?playseek=20261018192808-20261018192908"
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-PLAYLIST-TYPE:VOD
+#EXT-X-TARGETDURATION:4
+#EXT-X-ALLOW-CACHE:YES
+#EXT-X-MEDIA-SEQUENCE:448080744
+#EXT-X-PROGRAM-DATE-TIME:2026-10-18T11:28:39Z
+#EXTINF:4.000,
+/test1/c1/timeshift/c95daa3cf2f25682.png
+§ 同一 playseek 用 UTC 时间(112759-112859)则落回实时清单(参数按本地 +08 解析)。
+§ start/end(unix 秒)等价:
+$ curl ".../test1/c1.m3u8?start=<now-120>&end=<now-60>"
+#EXT-X-PLAYLIST-TYPE:VOD ... #EXT-X-PROGRAM-DATE-TIME:2026-10-18T11:28:39Z
+.../test1/c1/timeshift/<16hex>.bmp|png ... #EXT-X-ENDLIST
+§ 越界(2 小时前,超出 retain 1h)→ 落回实时清单,无报错。
+
+§ 20.5 回看分片
+$ curl -D - http://192.168.215.4:19903/test1/c1/timeshift/c95daa3cf2f25682.png
+HTTP/1.1 200 OK
+content-type: image/png
+content-length: 406456
+cache-control: private, max-age=3600
+$ ffprobe → format_name=mpegts; duration=4.000

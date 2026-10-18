@@ -211,3 +211,90 @@ $ docker exec iptv82 sed 's/\x1b\[[0-9;]*m//g' /app/inst/01/run.log | grep gd4_
 → **pool≥2 时目标只拉 MPD `pool_size` 次（错峰 ~200ms），随后不请求任何切片，入口 503**。
 对“正文恒定/每次变 token/双 BaseURL/repeated query/token 列表”等形态**一致失败**。
 因此**池的实际取用方式（pool[0]=视频、pool[1..]=音频轮询）在本环境无法观测**。
+
+> **日志工具说明（v2）**：D15 早期证据中同一路径出现 `200` 与 `404` **两行**，那是旧版
+> `origin-probe.py` 的写法（处理前先记 200，缺文件时 `send_error` 再记 404）。**同一个时间戳组合 =
+> 一次请求**（真实状态以 404 行为准）。后续版本每个请求只记一行、状态码取实际响应码。
+
+---
+
+# D21 上游失败 / 多 CDN 故障转移（proxy 模式）
+
+源站新增主清单（9975）：`multi_badfirst.m3u8`、`multi_goodfirst.m3u8`、`multi_two.m3u8`、
+`multi_low_first.m3u8`、`multi_deadmax.m3u8`、`multi_ab.m3u8`（变体指向 9975/9977/9979）。
+
+## D21.1 失败入口 → 302 占位
+
+```console
+$ curl -s -o /dev/null -w '%{http_code}\n' "$B/gfm/m5.m3u8"   # 上游拒绝连接(9969 无监听)
+302
+$ curl -s -D - -o /dev/null "$B/gfm/m5.m3u8" | grep -i location
+location: https://material.yang-1989.eu.org/v/mistake.mp4
+$ curl -s -o /dev/null -w '%{http_code}\n' "$B/gfm/m6.m3u8"   # 上游 404(/low.m3u8 不存在)
+302
+```
+
+## D21.2 多 CDN：主清单变体**不故障转移**
+
+```console
+$ curl -s "$B/gfm/m7.m3u8"      # 坏源 9979 BW=900000 在前, 好源 9975 BW=800000 在后
+#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-INDEPENDENT-SEGMENTS
+#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360
+http://<容器IP>:19901/gfm/m7/video/index.txt      # 选中「带宽最高」的变体(=坏源)
+$ curl -s -o /dev/null -w '%{http_code}\n' "$B/gfm/m7/video/index.txt"
+302                                                # 坏源 404 → 直接占位
+$ cat 9975.log
+1792322715.730 GET 200 /multi_deadmax.m3u8  ua='Mozilla/5.0 …' range='-'   # 只拉了主清单
+$ cat 9979.log
+1792322715.767 GET 200 /low.m3u8  ua='Mozilla/5.0 …' range='-'             # 变体只取一次
+1792322715.767 GET 404 /low.m3u8  ua='Mozilla/5.0 …' range='-'
+```
+
+- 9975（次高带宽的**好**源）**全程未被访问** → **不做变体级故障转移，不重试其它变体**。
+- 选择规则 = **BANDWIDTH 最大**（对照 `m1`（坏 100000 / 好 800000）→ 选中 800000；`m2` 反之同）。
+- `m3`（9975 800000 / 9977 100000）跟随变体时只访问 9975：`9977` 日志为空。
+
+```console
+$ curl -s "$B/gfm/m3.m3u8"
+#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-INDEPENDENT-SEGMENTS
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+http://<容器IP>:19901/gfm/m3/video/index.txt
+$ curl -s -o /dev/null -w '%{http_code}\n' "$B/gfm/m3/video/index.txt"
+200
+$ cat 9975.log   # 9977 无记录
+1792322698.312 GET 200 /low.m3u8
+1792322698.316 GET 200 /seg1.ts
+1792322698.316 GET 200 /seg2.ts
+```
+
+## D21.3 上游恢复 / 上游再故障（同频道，不清缓存）
+
+频道 `gfm/m5` → `9969/x.m3u8`。
+
+| 步骤 | 上游状态 | 入口 HTTP |
+| --- | --- | --- |
+| 1 | 9969 无监听（拒连） | **302** |
+| 2 | 9969 有服务但无 `x.m3u8`（404） | **302** |
+| 3 | 放入 `x.m3u8`（未清缓存） | **200**（同一秒内恢复，切片 200/262144） |
+| 4 | 移走 `x.m3u8` 后第 1 次 | 200（旧清单缓存仍在） |
+| 5 | 移走后第 2 次（+3s） | 200 |
+| 6 | 移走后第 3 次（+6s） | **302** |
+
+```console
+$ cat 9969.log
+1792322741.677 GET 200 /x.m3u8 …    # 步骤 2 的失败探测
+1792322741.680 GET 404 /x.m3u8 …    # (同一个请求，见日志工具说明)
+1792322741.718 GET 200 /x.m3u8 …    # 步骤 3
+1792322741.723 GET 200 /seg2.ts …
+1792322741.723 GET 200 /seg1.ts …
+$ for i in 1 2 3; do curl -s -o /dev/null -w "第${i}次 entry HTTP %{http_code}\n" "$B/gfm/m5.m3u8"; sleep 3; done
+第1次 entry HTTP 200
+第2次 entry HTTP 200
+第3次 entry HTTP 302
+```
+
+→ **失败不缓存，恢复立即生效；成功清单缓存 ~5s**（与入口 `cache-control: max-age=5` 一致）。
