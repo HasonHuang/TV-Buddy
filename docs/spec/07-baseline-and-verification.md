@@ -118,6 +118,10 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-OPS-02 | 公开指标端点 | `/status`、`/metrics`、`/version` 404；`/status/metrics` → 302 占位 | ✅ |
 | S-EP-09 | 多 VPS 分享端点 | `GET /api/share/pull?key=`（POST 405）；key+trust_ips 门禁；token/封禁同步 | ✅ |
 | S-EP-16 | 完整路由表（静态） | 公开面 + `/panel/api` 私有面补录 | ✅ |
+| S-SUB-01/04/05/06/08 | M3U 导入 | JSON 文本 `{text,mode,group_mode}`；组 id 去非 ASCII；merge 仅新增 | ✅ |
+| S-SUB-02 | 订阅聚合 | 上游原始地址；`merge_position` top/bottom | ✅ |
+| S-BAK-01/02 | 备份/恢复 | 三 scope；`all` 包含 config/epg_map/scripts/logos/manifest；restore 另存 `.bak` | ✅ |
+| S-EDGE-01/02/03 | 边缘校验 | `X-IPP-Edge-Secret`；带转发头且密钥不符→403；`edge_refresh` 拉 CF 段 | ✅ |
 | S-LOGO-01/02 | 台标库 9 端点 + 上传不转码 | `name/ext/data`；PNG 存 PNG；`animate.quality` 字符串 | ✅ |
 | S-LOGO-03/04 | 动效 + 改名/删除同步引用 | `.orig/` 备份；`updated_channels`/`cleared_channels` | ✅ |
 
@@ -135,6 +139,15 @@ HasonHuang/sontv/docs/iptv-proxy/
 | ID | 差异 | 范围 | 状态 |
 | --- | --- | --- | --- |
 | `D-001` | 基线 **v0.8.2** 与上游 `main`（**v0.8.8**）不同 | **版本差异** | ✅ 已解决（取 v0.8.2 产物） |
+| `D-002` | `S-SUB-03`：聚合频道 `group-title` 的取值与基线不符 | 实现差异（文档描述） | 🔶 已澄清（以观测为准） |
+
+**`D-002` 详情**
+
+- 基线原文（`08` §6 `S-SUB-03`）：输出可区分两类——手动/导入频道 `group-title=<显示名>`；**聚合频道 `group-title=<分组ID>`**。
+- 证据（v0.8.2，实例 `inst/02`）：聚合条目 `group-title` 为**上游分组名字符串**（或 `map`/`merge` 后的名），**不是本地分组 ID**；两类的真正差异在 **URL**（本地反代 `/<gid>/<cid>.m3u8` vs 上游原始地址）。
+  见 [`../findings/dynamic/08-import-backup-edge.md`](../findings/dynamic/08-import-backup-edge.md) §4。
+- 差异范围：**文档描述与实际实现不符**（非版本/架构差异）。
+- 处置：**已澄清**——`S-SUB-03` 标记 ❌ 并按观测修正；建议上游文档同步修订。
 
 **`D-001` 详情**
 

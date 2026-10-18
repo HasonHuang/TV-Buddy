@@ -36,3 +36,178 @@ $ curl -s -o /dev/null -w '9972 seg1.ts %{http_code} %{size_download}\n' http://
 $ cat samples/work/dyn-v0.8.2/origin/logs/9971.log
 1792321777.055 GET 200 /pool.m3u8 ua='curl/8.15.0' range='-'
 ```
+
+---
+
+# D15 URL 池（`channel.url_pool_size`）
+
+## D15.0 目标自述（面板 HTML，服务端下发）
+
+```console
+$ curl -s http://<容器IP>:19901/panel -o /tmp/panel.html
+$ grep -n -i pool /tmp/panel.html
+3188:      <div id="dash-urlpool-block" ... style="...;display:none">
+3192:            <div ...>多 token 错峰拉切片,绕过 CDN 限流</div>
+3196:        <div id="dash-urlpool-options" style="...">
+3199:            <input type="number" id="mc-url-pool-size" placeholder="3" min="2" max="6" value="3">
+3202:            <b style="color:var(--yellow)">⚠</b> 部分平台多 token 并发会判定多设备登录 <b style="color:var(--red)">→ 封号</b>,请按平台测试后启用
+4379:  const upSize = ch?.url_pool_size ?? 1;
+4380:  const upEnabled = upSize >= 2;
+4470:    // [v0.3.8] URL 池 UI 已隐藏:保存时保留频道原有 url_pool_size,不再读隐藏的开关
+4472:    url_pool_size: existingCh?.url_pool_size ?? 1,
+4761:  'mc-pool': {t:'URL 池大小', d:'用多个 token 错峰拉切片，绕开 CDN 的单连接限流。视频固定用
+pool[0]，音频字幕在 pool[1..] 轮询。部分平台会把多 token 并发判定为多设备登录并封号。'},
+6321:  // [v0.3.8] URL 池功能暂时隐藏(不再展示入口)。后端逻辑保留,频道已存的 url_pool_size
+6322:  //   仍生效;仅在面板上不显示该设置块。
+6323:  const upBlock=q('#dash-urlpool-block');
+6324:  if(upBlock) upBlock.style.display='none';
+```
+
+要点（目标自述，按不可信数据记录）：池大小范围 **2–6**（输入框 `min=2 max=6`）；
+池属于 **DASH 专属区块**（`#mc-dash-only`，仅 `mode=dash` 显示）；
+`url_pool_size >= 2` 即“开启”；自述取用规则：**视频固定用 pool[0]，音频/字幕在 pool[1..] 轮询**。
+
+## D15.1 本地二进制不可读字符串
+
+```console
+$ shasum -a 256 samples/work/dyn-v0.8.2/iptv-proxy
+2948ee1f0eff22a48a351653f2df9f29dc424708bacd670f34378476efab5a4b
+$ strings -n 6 samples/work/dyn-v0.8.2/iptv-proxy | grep -c pool
+0
+$ python3 -c "...熵..."   # 单字节熵
+size 3803420 entropy 8.0
+```
+
+→ 副本为**加壳/加密**（熵 8.0，无明文字符串），**静态字符串路径不可用**，只能动态观测。
+
+## D15.2 proxy 模式：池大小不产生可观测差异
+
+频道 `gp/p1`（`url_pool_size=1`）与 `gp/p2`（`url_pool_size=3`），同源 `9975/pool.m3u8`（3 切片，256 KiB/片）。
+每频道：先拉入口，再逐个拉 3 个切片。
+
+```console
+$ : > orig/9975.log; for c in p1 p2; do curl -s "$B/gp/$c.m3u8" -o /tmp/e_$c;
+    for i in 1 2 3; do curl -s -o /dev/null "${URL_i}"; done; sleep 1; done
+$ cat orig/9975.log
+1792321939.396 GET 200 /pool.m3u8  ua='Mozilla/5.0 (Windows NT...' range='-'
+1792321939.400 GET 200 /seg2.ts    ua='Mozilla/5.0 (Windows NT...' range='-'
+1792321939.400 GET 200 /seg1.ts    ua='Mozilla/5.0 (Windows NT...' range='-'
+1792321939.477 GET 200 /seg3.ts    ua='Mozilla/5.0 (Windows NT...' range='-'
+1792321940.509 GET 200 /pool.m3u8  ua='Mozilla/5.0 (Windows NT...' range='-'
+1792321940.512 GET 200 /seg1.ts    ua='Mozilla/5.0 (Windows NT...' range='-'
+1792321940.513 GET 200 /seg2.ts    ua='Mozilla/5.0 (Windows NT...' range='-'
+1792321940.593 GET 200 /seg3.ts    ua='Mozilla/5.0 (Windows NT...' range='-'
+```
+
+同一步骤序列，无 `?token=`、无随机 query、无 URL 轮换。`cache/seg_url/` 亦只有 1 条映射/切片：
+
+```console
+$ ls inst/01/cache/seg_url | grep -c '^735e1a8b12de2227'   # p2 频道前缀
+6        # 3 切片 × (内容 + .meta)，无池副本
+$ for f in inst/01/cache/seg_url/735e1a8b12de2227_*; do case $f in *.meta) ;; *)
+    echo "$(basename $f) = $(cat $f)";; esac; done
+735e1a8b12de2227_1e1__92aae8c580d351ef86ee7e9e5566c119 = http://host.docker.internal:9975/seg2.ts
+735e1a8b12de2227_7b9__02726e4c69986f258c778acae31915a5 = http://host.docker.internal:9975/seg3.ts
+735e1a8b12de2227_d78__9d602b24c9b1a97fa38f10dca92be428(略) = http://host.docker.internal:9975/seg1.ts
+```
+
+## D15.3 `channel.url` 多 URL 分隔符：全部不支持
+
+4 个频道各把两个完整 URL 用分隔符连接（`p3`=`\n`、`p4`=`|`、`p5`=`,`、`p6`=空格），`url_pool_size=2`。
+
+```console
+$ for c in p3 p4 p5 p6; do curl -s -o /tmp/e_$c -w "$c HTTP %{http_code}\n" "$B/gp/$c.m3u8"; done
+p3 HTTP 302
+p4 HTTP 302
+p5 HTTP 302
+p6 HTTP 302
+$ curl -s -D - -o /dev/null "$B/gp/p3.m3u8" | grep -i '^location'
+location: https://material.yang-1989.eu.org/v/mistake.mp4
+$ cat orig/9975.log   # 目标把整串当作**一个路径**
+... GET 200 /pool.m3u8http://host.docker.internal:9977/pool.m3u8         (换行, 归一为空)
+... GET 404 /pool.m3u8http://host.docker.internal:9977/pool.m3u8
+... GET 200 /pool.m3u8|http://host.docker.internal:9977/pool.m3u8
+... GET 404 /pool.m3u8|http://host.docker.internal:9977/pool.m3u8
+... GET 200 /pool.m3u8,http://host.docker.internal:9977/pool.m3u8
+... GET 404 /pool.m3u8,http://host.docker.internal:9977/pool.m3u8
+... GET 200 /pool.m3u8%20http://host.docker.internal:9977/pool.m3u8   (空格 → %20)
+... GET 404 /pool.m3u8%20http://host.docker.internal:9977/pool.m3u8
+```
+
+- `\n` 在请求行被**抹掉**；`|`/`,`/空格 被当作路径字符（空格百分号编码）。
+- run.log：`ERROR 【代理】Proxy 模式处理失败 [gp/p3]: 拉取上游 M3U8 失败`。
+- → **`channel.url` 不支持多 URL 分隔符；无法用 URL 列表构成池。**
+
+## D15.4 DASH 模式：池大小 ≥2 → 只做 N 次 MPD 拉取，然后必定失败
+
+自建 DASH 源（9970，`origin-dash.py`）：`/live.mpd`（每次响应换 `tk`）、`/liveS.mpd`（正文恒定）、
+`/liveT.mpd?…`（分片 URL 继承频道 query）、`/liveB.mpd`（每 Representation 两个 `<BaseURL>`）。
+任意分片号均返回 200。`[health].enabled=false` 以排除健康探测干扰。
+
+对照组（`url_pool_size=1`）可用：
+
+```console
+$ : > 9978dash.log; curl -s -o /dev/null -w '%{http_code}\n' "$B/gd2/d1.m3u8"   # pool=1
+200
+$ python3 dashsum.py 9978dash.log
+总请求 10 / MPD 拉取 2
+  mpd t=1792322226.721 status=200 query=-
+  mpd t=1792322230.726 status=200 query=-
+每 token 轨道计数 (token 号 = 该源站第 N 次 MPD 响应):
+  tk=40   窗口 0.2s  {'video-init': 1, 'audio-init': 1, 'video': 1, 'audio': 1}
+  tk=41   窗口 0.2s  {'audio-init': 1, 'video-init': 1, 'audio': 1, 'video': 1}
+切片/初始化请求总数: 4  (404: 0)
+```
+
+→ pool=1：一个刷新周期内**视频与音频用同一个 token**；MPD 每 ~4s 重拉一次（`mpd_refresh_min_secs=4.0`）。
+
+试验组（`url_pool_size=2/3`）矩阵：
+
+| 频道 | 频道 URL | 池大小 | 入口 HTTP | MPD 拉取 | 切片请求 |
+| --- | --- | --- | --- | --- | --- |
+| gd2/d2 | `/live.mpd`（正文每次变） | 3 | 503 | 3（间隔 ~200ms） | **0** |
+| gd3/d2a | `/live.mpd?token=A\|B\|C` | 3 | 503 | 3 | 0 |
+| gd3/d2b | `/live.mpd?token=A,B,C` | 3 | 503 | 3 | 0 |
+| gd3/d2c | `/live.mpd?token=A&token=B&token=C` | 3 | 503 | 3 | 0 |
+| gd3/d2d | `/live.mpd?token=A;B;C` | 3 | 503 | 3 | 0 |
+| gd4/e1 | `/liveS.mpd`（正文恒定） | 2 | 503 | 2 | 0 |
+| gd4/e2 | `/liveT.mpd?token=A` | 2 | 503 | 2 | 0 |
+| gd4/e3 | `/liveT.mpd?token=A` | 1 | **200** | 周期重拉 | 正常（分片带 `?tk=A`） |
+| gd4/e4 | `/liveT.mpd?token=A` | 3 | 503 | 3 | 0 |
+| gd5/f1 | `/liveT.mpd?token=A&token=B&token=C` | 3 | 503 | 3 | 0 |
+| gd5/f2 | `/liveT.mpd?token=A\|B\|C` | 3 | 503 | 3 | 0 |
+| gd5/f3 | `/liveT.mpd?token=A&token=B` | 2 | 503 | 2 | 0 |
+| gd5/f4 | `/liveB.mpd`（双 BaseURL） | 2 | 503 | 2 | 0 |
+| gd5/f5 | `/liveT.mpd?tokens=A,B,C` | 3 | 503 | 3 | 0 |
+
+原始日志（节选）：池大小 = MPD 拉取次数，间隔 ≈200ms（= `cache.dash.retry_initial_ms`）：
+
+```console
+$ cat 9970dash.log   # gd4，health=off
+1792322449.091 GET 200 /liveS.mpd                 # e5 pool=1 → 立刻出片
+1792322449.092 GET 200 /init-0.m4s
+1792322449.094 GET 200 /chunk-0-448080606.m4s
+1792322459.120 GET 200 /liveS.mpd                 # e1 pool=2 第 1 次
+1792322459.331 GET 200 /liveS.mpd                 # e1 pool=2 第 2 次（+211ms）→ 之后无任何切片
+1792322469.133 GET 200 /liveT.mpd?token=A         # e2 pool=2
+1792322469.341 GET 200 /liveT.mpd?token=A         # +208ms → 无切片
+1792322479.148 GET 200 /liveT.mpd?token=A         # e3 pool=1 → 出片
+1792322479.149 GET 200 /init-0.m4s?tk=A
+1792322479.152 GET 200 /chunk-1-448080615.m4s?tk=A
+1792322479.153 GET 200 /chunk-0-448080613.m4s?tk=A
+1792322489.159 GET 200 /liveT.mpd?token=A         # e4 pool=3 第 1 次
+1792322489.361 GET 200 /liveT.mpd?token=A         # +202ms
+1792322489.565 GET 200 /liveT.mpd?token=A         # +204ms → 无切片
+```
+
+```console
+$ docker exec iptv82 sed 's/\x1b\[[0-9;]*m//g' /app/inst/01/run.log | grep gd4_
+19:21:29 WARN 【DASH】主播放列表 30s 内未就绪 stream=gd4_e1
+19:21:39 WARN 【DASH】主播放列表 30s 内未就绪 stream=gd4_e2
+19:21:59 WARN 【DASH】主播放列表 30s 内未就绪 stream=gd4_e4
+19:23:11 WARN 【看门狗】按需会话卡在启动中从未出片,销毁并移出(下次请求重新冷启动) stream=gd4_e1 stuck_secs=132
+```
+
+→ **pool≥2 时目标只拉 MPD `pool_size` 次（错峰 ~200ms），随后不请求任何切片，入口 503**。
+对“正文恒定/每次变 token/双 BaseURL/repeated query/token 列表”等形态**一致失败**。
+因此**池的实际取用方式（pool[0]=视频、pool[1..]=音频轮询）在本环境无法观测**。

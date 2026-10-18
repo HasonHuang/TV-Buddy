@@ -123,6 +123,7 @@
 | 2026-10-17 | 基建：容器装 **ffmpeg 6.1.1 + python3 3.12**；起 **4 个独立实例**（19901–19904，独立配置/缓存，宿主机经容器 IP 直连）；派发 **4 个子代理**并行推进 D12/D15/D21/D28、D24/D25/D27、D16/D18/D19/D19b/D20、D14/D17ab/D22 | 🔄 进行中 |
 | 2026-10-18 | 路线图 P1·**D23 台标库**（upload/apply/rename/delete/restore/suggest/animate；浏览器侧转码；`.orig/` 备份；引用同步）+ 配置段补录（panel/logo/subtitle/share/playlist/stats） | ✅（F-011） |
 | 2026-10-18 | 路线图 P2·**D26 多 VPS 分享**（master/follower 双实例；`/api/share/pull` GET-only；key+trust_ips；token/封禁同步）+ **完整路由表静态补录** | ✅（F-012） |
+| 2026-10-18 | 子代理 SA-2 完成路线图 **D24/D25/D27**（组导入导出、订阅聚合、备份恢复、边缘模式） | ✅（F-013） |
 | 2026-10-17 | 委派 agent 盘点**二进制实际功能全集**（55k 字符串+面板），产出优先级路线图 | ✅ §5 |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
@@ -163,10 +164,10 @@
 
 | 域 | 代表能力 | 状态 | 路线图项 |
 | --- | --- | --- | --- |
-| 面板配置/组导入导出 | `/groups/{export,import,/m3u}`、`channels/:cid/purge`(088) | ⏳ | **D24** |
-| 备份/恢复 | `/panel/api/backup?include=`、`restore`（tar/flate2） | ⏳ | **D25** |
+| 面板配置/组导入导出 | `/groups/{export,import,/m3u}`、`channels/:cid/purge`(088) | ✅ 全验（F-013）：JSON 文本导入、组 id 去非 ASCII、merge 仅新增、聚合输出上游原始地址 | ~~D24~~ ✅ |
+| 备份/恢复 | `/panel/api/backup?include=`、`restore`（tar/flate2） | ✅ 全验（F-013）：三 scope、`all` 包结构、restore 另存 `.bak` | ~~D25~~ ✅ |
 | 多 VPS 分享 | `share.{role,master_url,trust_ips}`、`x-ipp-master`、`/api/share/pull` | ✅ 双实例验证（F-012）：GET-only、key+trust_ips 双门禁、token/封禁 20s 内同步、follower 禁本地轮换 | ~~D26~~ ✅ |
-| 边缘校验 | `edge_mode(off/proxy/cloudflare)`、`x-ipp-edge-secret`、观察模式 | ⏳ | **D27** |
+| 边缘校验 | `edge_mode(off/proxy/cloudflare)`、`x-ipp-edge-secret`、观察模式 | ✅ 全验（F-013）：头名 `X-IPP-Edge-Secret`、带转发头+密钥不符→403、`edge_refresh` 拉 CF 段 | ~~D27~~ ✅ |
 | 健康检查 | 【健康】、`health{interval,timeout,concurrency}` | 🔶 出口形已验；探测行为进行中 | 🔄 **D28**（子代理） |
 | IP 封禁/解封 | `/security/ip/{ban,stats,unban}`、`/unban` 每月 3 次 | ✅ 面已验（F-010/11 §3）；`/unban` 限次未验 | ~~随 D13a~~ ✅ |
 | 指标/资源 | `/metrics`、`requests_total`、`mem_rss_mb`；`/status/metrics` 302 之谜 | ✅ `/status/metrics`＝假路由；指标仅面板私有面（F-010/11 §6） | ~~D29~~ ✅ |

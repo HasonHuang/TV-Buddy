@@ -21,7 +21,7 @@
 | D4 | 切片伪装（字节级复现） | 下载+比对+哈希 | S-DIS-* | 🔶 后缀已破解；前缀未解 [`01`](01-runtime-surface-and-disguise.md) §5 |
 | D5 | 缓存窗口与响应头 | 时序采样 | S-DIS-06/07 | ✅ [`03`](03-cache-layout-and-window.md)（首写 public→命中 private） |
 | D6 | Token / 随机频道 ID / IP 管控 | 请求矩阵 | S-AUTH-* | ✅ Token 已验；随机 ID/IP 管控部分 [`04`](04-auth-token-and-guards.md) |
-| D7 | 订阅聚合 vs M3U 导入 | 两条路径对比 | S-SUB-* | 🔶 出口侧已验 [`06`](06-entry-playlist-and-access.md)（总/分组订阅、x-tvg-url、access）；导入/聚合入口侧未测 |
+| D7 | 订阅聚合 vs M3U 导入 | 两条路径对比 | S-SUB-* | ✅ [`08`](08-import-backup-edge.md)（两路径全验；S-SUB-03 与原描述不符） |
 | D8 | 配置热重载与落盘 | 改配置观测 | S-CFG-01/02 | ✅ [`01`](01-runtime-surface-and-disguise.md) §1/§7 |
 | D9 | 资源占用 | `docker stats` | S-BUG-01 | 🔶 [`11`](11-security-and-metrics.md) §6（`/panel/api/status` 的 `mem_rss_mb`/`cpu_seconds`；`traffic_in_bytes` 恒 0） |
 | D10 | 配置全量 schema | `GET /panel/api/config` | S-CFG-04 | ✅ [`01`](01-runtime-surface-and-disguise.md) §4 |
@@ -29,6 +29,7 @@
 | D12 | 安全审计 / Token 轮换 / 指标面 | 端点矩阵 | S-AUTH-03/09/10, S-OPS-01/02/03 | ✅ [`11`](11-security-and-metrics.md)（限流触发条件未定） |
 | D13 | 台标库管理 | 端点矩阵 + 上载/动效 | S-LOGO-01/02/03/04, S-EP-06 | ✅ [`12`](12-logo-library.md)（`animated` 判定语义未定） |
 | D14 | 多 VPS 数据分享 | 双实例主从 | S-EP-09, S-AUTH-06, S-CFG-06 | ✅ [`13`](13-multi-vps-share.md)（unban 传播/三节点未测） |
+| D15 | 分组导入导出/备份恢复/边缘模式 | 端点矩阵 | S-SUB-*, S-BAK-*, S-EDGE-* | ✅ [`08`](08-import-backup-edge.md) |
 
 ## 运行期纪律
 
