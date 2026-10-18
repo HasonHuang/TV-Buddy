@@ -36,6 +36,7 @@ docs/findings/
 | F-013 | 分组导入/导出、订阅聚合、备份恢复、边缘模式 | 动态 | 观测 | S-SUB-01..08, S-BAK-01/02, S-EDGE-01..03 | 2026-10-18 | [`dynamic/08-import-backup-edge.md`](dynamic/08-import-backup-edge.md) |
 | F-014 | 录制 / 直播回看 / Remux / 字幕 / 上游解析脚本（含 remux 与 ffmpeg 无关的更正） | 动态 | 观测 | S-MODE-12/16/18, S-REC-02, S-TS-01, S-SUB-09, S-RES-01, S-DEP-01 | 2026-10-18 | [`dynamic/09-recording-livestream-remux-subtitle.md`](dynamic/09-recording-livestream-remux-subtitle.md) |
 | F-015 | URL 池 / 多 CDN / 健康探测 / 缓存容量与淘汰 | 动态 | 观测 | S-MODE-06/07/08, S-CACHE-01/03/06/07, S-HEALTH-01..06, S-URL-08 | 2026-10-18 | [`dynamic/07-upstream-health-cache.md`](dynamic/07-upstream-health-cache.md) |
+| F-016 | DASH 全链路 / ClearKey / 时移 / 回看 / redirect best / EPG 匹配算法 | 动态 | 观测 | S-MODE-06/11/12/15/17, S-EP-04/14, S-EPG-01/03/05/06/07, S-CAP-01/02, S-TS-01, S-DASH-01, S-GAP-01 | 2026-10-18 | [`dynamic/10-dash-catchup-epg-match.md`](dynamic/10-dash-catchup-epg-match.md) |
 
 > 每完成一篇发现，在此登记一行；`关联规格 ID` 指向
 > [`../spec/08-target-spec.md`](../spec/08-target-spec.md) 的 `S-*` 条目。

@@ -32,6 +32,7 @@
 | D15 | 分组导入导出/备份恢复/边缘模式 | 端点矩阵 | S-SUB-*, S-BAK-*, S-EDGE-* | ✅ [`08`](08-import-backup-edge.md) |
 | D16 | 录制/回看/Remux/字幕/解析脚本 | 媒体链路实测 | S-REC-02, S-TS-01, S-MODE-18, S-SUB-09, S-RES-01 | ✅ [`09`](09-recording-livestream-remux-subtitle.md) |
 | D17 | URL 池/多 CDN/健康/缓存容量 | 故障注入 + 容量压测 | S-MODE-06/07, S-HEALTH-*, S-CACHE-03/06 | ✅ [`07`](07-upstream-health-cache.md)（池取用受限、未观察到故障切换） |
+| D18 | DASH/ClearKey/时移/回看/EPG 匹配 | 自建 MPD/CENC/XMLTV | S-MODE-06/11, S-CAP-*, S-EPG-*, S-DASH-01 | ✅ [`10`](10-dash-catchup-epg-match.md)（多音轨时移、keep_yesterday 未定） |
 
 ## 运行期纪律
 

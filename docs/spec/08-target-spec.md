@@ -37,7 +37,7 @@
 | S-EP-01 | 面板：`GET /panel` | D-panel | ⏳ |
 | S-EP-02 | 分组订阅：`GET /{gid}/playlist.m3u`；总订阅：`GET /playlist.m3u` | D-panel | ⏳ |
 | S-EP-03 | 频道播放：`GET /{gid}/{cid}.{ext}`（v0.5.1 起路由**不带** `/index.m3u8` 路径段） | D-panel | ⏳ |
-| S-EP-04 | 回看：`GET /{gid}/{cid}?playseek=<start>-<end>` | D-panel | ⏳ |
+| S-EP-04 | 回看：`GET /{gid}/{cid}?playseek=<start>-<end>` | D-panel | ✅【观测】只取 `playseek` 原样追加到上游；`start/end/utc/utcend` 丢弃；本地回看忽略该区间 |
 | S-EP-05 | EPG：`/epg.xml`、`/epg.xml.gz`、`/epg`；**EPG 总开关关闭时三者全部 404** | D-panel | ✅【观测】开启后三者 200（`application/xml`/`application/gzip`/`text/html`），均无需登录 |
 | S-EP-06 | 台标：`GET /logo/<文件名>` | D-panel | ✅【观测】200 `image/png`，`public, max-age=86400`；缺→404 |
 | S-EP-07 | 自助解封：`GET /unban`，**无需登录**，每月限 3 次 | D-panel | ⏳ |
@@ -47,7 +47,7 @@
 | S-EP-11 | 运维 API：`/api/reload`、`/api/backup`、`/api/restore`、`/whoami` | 二进制 | 🔶【观测】实际为 `/panel/api/{reload,backup}`；`/whoami`、`/unban/whoami` 存在（路由表见 13 §3） |
 | S-EP-12 | 面板接口前缀 `/panel/api/…`（备份/恢复、EPG 全套） | 二进制 | ✅【观测】`/panel/api/epg/{status,refresh,regenerate,mappings,programmes,scripts,match-report,mapping,extra,script,script-delete,cron-preview}` |
 | S-EP-13 | EPG 翻译接口 `/epg/translate/{run,status,clear,probe,models,mtran/test}` | 二进制 | 🔶【观测】端点存在（前缀 `/panel/api`）；默认关，未触发 |
-| S-EP-14 | DASH 接口 `/dash/…`、`/dash-timeshift/status` | 二进制 | 🔶【观测】路由表：`/panel/api/dash/{status,scan-url,tracks/:gid/:cid}`、`/panel/api/dash-timeshift/status` |
+| S-EP-14 | DASH 接口 `/dash/…`、`/dash-timeshift/status` | 二进制 | ✅【观测】`/dash/status` 字段 `stream_key/source_url/phase/segment_count/last_error/checked_ms/uptime_secs/active_tracks`；`/dash-timeshift/status` 键 `{gid}:{cid}` |
 | S-EP-15 | 解封辅助 `/unban/whoami` | 二进制 | 🔶【观测】路由存在（路由表见 13 §3）；响应未测 |
 | S-EP-16 | 完整路由表（静态补录）：公开面含 `/epg/api/{channels,programmes/:channel,search}`、`/logo/api/list`、`/__assets/*path`、`/whoami`、`/{gid}/{cid}/{timeshift,dash-timeshift,segment}…`；私有面新增 `/groups/{import,import/force,:gid/export}`、`/cache/flush`、`/backup`、`/assets/ffmpeg-status`、`/dash/scan-url`、`/dash/tracks/:gid/:cid`、`/livestream/:gid/:cid/{start,stop}`、`/schedule/{from-epg,download/:filename,:idx/stop}` | 二进制 | ✅【观测】见 13 §3 |
 
@@ -61,7 +61,7 @@
 | S-URL-04 | 开启 Token 后，**导出** M3U 自动附加 token；手工拼地址需自带 token | D-panel | ✅【观测】`?token=<48hex>` 附加于条目（`open` 组例外：不带） |
 | S-URL-07 | `server.m3u_header_lines` 自定义行逐行附加于 `#EXTM3U` 后；总/分组订阅均输出；热重载+重启持久 | 二进制 | ✅ |
 | S-URL-08 | `channel.url` **不支持**多 URL（换行/`|`/`,`/空格分隔均被当作整串路径 → 上游 404 → 入口 302） | 二进制 | ✅【观测】 |
-| S-URL-05 | 回看时间戳 `yyyyMMddHHmmss`，**使用本地时间**（依赖 `timezone_offset_hours`） | D-panel | ⏳ |
+| S-URL-05 | 回看时间戳 `yyyyMMddHHmmss`，**使用本地时间**（依赖 `timezone_offset_hours`） | D-panel | ✅【观测】按 `timezone_offset_hours` 解析 |
 | S-URL-06 | 播放 token 参数名为 `token`（`?t=` 无效）；面板 Bearer token 不适用于播放 | 二进制 | ✅ |
 
 ## 4. 六种工作模式
@@ -73,18 +73,18 @@
 | S-MODE-03 | Proxy：反代 + 切片缓存；内容格式 HLS / MPD；`MPD 裁剪保留秒数` 仅在格式=MPD 时出现 | D-mode-proxy | 🔶 反代+伪装切片已验；MPD 分支未验 |
 | S-MODE-04 | Proxy + 内容格式=MPD 时，频道多出 **ClearKey 密钥** 字段（`kid_hex:key_hex`，每行一对）；行为为"反代穿透本服务" | D-mode-proxy | ⏳ |
 | S-MODE-05 | Remux：连续流（FLV / 裸 TS / MMT-TLV）→ HLS；**不解码**，CPU 低；`源容器类型`= 自动识别 / TS / FLV / MMT-TLV；**无**内容格式字段 | D-mode-remux | 🔶【观测】容器自动识别（`【remux】自动识别容器: Ts`） |
-| S-MODE-06 | DASH：`.mpd`→HLS 实时转封装，支持 CENC ClearKey 解密；自动 304 增量刷新 / 多 CDN 故障切换 / 防断流备份 / 片段级容错；**无**内容格式字段 | D-mode-dash | 🔶【观测】解析 MPD 轨道、按 track 取段、失败清缓存；**未观测到多 CDN 故障切换**：主清单按 BANDWIDTH 最大选变体，所选失败不重试其它变体 → 302（见 07 §D21，与声明不符 → D-004） |
+| S-MODE-06 | DASH：`.mpd`→HLS 实时转封装，支持 CENC ClearKey 解密；自动 304 增量刷新 / 多 CDN 故障切换 / 防断流备份 / 片段级容错；**无**内容格式字段 | D-mode-dash | ✅【观测】MPD→HLS 成功；track 名 `video_{高}p`/`audio-{n}`；**需 `SegmentTimeline`**；支持 MPD 级 `<BaseURL>`；**未观测到多 CDN 故障切换**（→ D-004） |
 | S-MODE-07 | DASH 频道级 `URL 池`（池大小 2–6，默认 3）：视频固定 `pool[0]`，音频/字幕在 `pool[1..]` 轮询 | D-mode-dash | 🔶【观测】**仅 DASH**；`pool≥2` 本环境只拉 MPD N 次后零切片、入口 503；取用方式受限未验证 |
 | S-MODE-08 | Redirect：客户端 302 直连上游，本服务仅调度；`跳转方式`= 直接跳转（默认）/ 解析最佳画质；`上游缓存时长` 默认 300s（缓存的是解析出的上游地址，非切片） | D-mode-redirect | ✅【观测】302 + `redirect_url_…` TTL=300；补充：失败不缓存，成功清单缓存 ≈5s |
 | S-MODE-09 | Rewrite：仅取一次清单并把相对地址改绝对；切片客户端直连；**请求头只作用于取清单**（源站要求切片带 Referer 时会失败） | D-mode-rewrite | ✅【观测】绝对化清单；Referer 分支未复现 |
 | S-MODE-10 | Rewrite + MPD / Redirect + MPD → **直连 CDN**（不转封装）；Proxy + MPD → 反代穿透本服务 | D-mode-rewrite | ⏳ |
-| S-MODE-11 | Passthrough：原样导出上游 URL，**不套 Token**；有密钥时按 MPD 形式下发（但**不解密**） | D-mode-passthrough | ✅【观测】302 `location=上游` |
-| S-MODE-12 | 仅 Proxy / Remux / DASH 支持**本地回看与定时录制**；Rewrite / Redirect / Passthrough 只有**源站回看**（`上游支持回看`+`回看天数`，追加 `playseek`） | D-iptv/D-mode-* | 🔶【观测】Proxy/DASH 本地回看与录制已验（见 09）；Remux 录制未测 |
+| S-MODE-11 | Passthrough：原样导出上游 URL，**不套 Token**；有密钥时按 MPD 形式下发（但**不解密**） | D-mode-passthrough | ✅【观测】302 `location=上游`；有 `license_key` 时追加 3 行 `#KODIPROP`（`manifest_type=mpd` 硬编码 / `license_type=clearkey` / 密钥原样不校验） |
+| S-MODE-12 | 仅 Proxy / Remux / DASH 支持**本地回看与定时录制**；Rewrite / Redirect / Passthrough 只有**源站回看**（`上游支持回看`+`回看天数`，追加 `playseek`） | D-iptv/D-mode-* | ✅【观测】Proxy 与 DASH 本地回看/录制已验（09/10）；Remux 录制未测 |
 | S-MODE-13 | Redirect 上游地址缓存键 `redirect_url_{gid}_{cid短}__{hex}`，TTL=`redirect_ttl`（默认 300s） | 二进制 | ✅ |
 | S-MODE-14 | 入口清单缓存键：Proxy=`{gid}_{cid}__{hex}`；Rewrite=`rw_{gid}_{cid}__{hex}` | 二进制 | ✅ |
-| S-MODE-15 | DASH 主清单就绪超时 **30s**；未就绪 → `503 timeout waiting for master playlist` | 二进制 | ✅ |
+| S-MODE-15 | DASH 主清单就绪超时 **30s**；未就绪 → `503 timeout waiting for master playlist` | 二进制 | ✅【观测】客户端同时收到该 503 |
 | S-MODE-16 | Remux 预热期 → `503` + `Retry-After: 2`，体 `remux warming up` | 二进制 | ✅【观测】预热态**与 ffmpeg 无关**（缺 ffmpeg 仍 `503→200`） |
-| S-MODE-17 | 看门狗：常驻频道卡死/停止 → 销毁重建（attempt 递增）；连续 5 次失败 → **冷却 3600s** | 二进制 | ✅ |
+| S-MODE-17 | 看门狗：常驻频道卡死/停止 → 销毁重建（attempt 递增）；连续 5 次失败 → **冷却 3600s** | 二进制 | ✅【观测】改配置可**立即解除**冷却 |
 | S-MODE-18 | Remux **只接受连续流**（HTTP-TS 裸流）；HLS 清单上游只重复拉清单、不取分片 → 永久 `503 remux warming up` | 二进制 | ✅【观测】输出 HLS（`target_duration`=5s、滑动窗、TS 分片、图片后缀伪装）；`remux_container` 描述**源**容器（auto/ts/flv/mmt），不改变输出 |
 | S-RES-01 | 上游解析脚本：`python3 <cache>/resolvers/<脚本> <resolver_arg>`，stdout 即上游 URL；`resolver_ttl` SWR；失败保旧值、冷启动/超时转 `error_url`（约 30s） | 二进制 | 🔶【观测】见 09 §5 |
 
@@ -148,19 +148,23 @@
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-EPG-01 | 多源采集→匹配本机频道→生成统一 `/epg.xml.gz`；EPG 关闭时 `/epg*` 全 404 且导出 M3U 不带 `x-tvg-url` | D-panel | 🔶【观测】开关 404/200 与 x-tvg-url 注入已验；多源采集已验（单源），匹配算法未解 |
+| S-EPG-01 | 多源采集→匹配本机频道→生成统一 `/epg.xml.gz`；EPG 关闭时 `/epg*` 全 404 且导出 M3U 不带 `x-tvg-url` | D-panel | ✅【观测】匹配算法已解：`out_id = tvg_id \|\| channel.id`；先 `tvg_id`（大小写不敏感）再名称；规范化=删空白（含 U+3000）+小写 |
 | S-EPG-02 | 采集节奏：每 4h / 每 6h / 每日 4 点 / 每日 3、5、12 点 / 每 30 分钟 | D-panel | ⏳ |
-| S-EPG-03 | 名称匹配开关（tvg-id 不匹配时按频道名再匹配一次）；脚本源需 python3 | D-panel | ⏳ |
+| S-EPG-03 | 名称匹配开关（tvg-id 不匹配时按频道名再匹配一次）；脚本源需 python3 | D-panel | ✅【观测】不做全角折叠、保留连字符、**无子串匹配** |
 | S-EPG-04 | EPG 标题可翻译（Google 免费 / Gemini(Key) / MTranServer），14 种目标语言 | D-panel | ⏳ |
+| S-EPG-05 | 同源多命中 → **配置顺序最后一个**得节目；同 `out_id` → `via=duplicate` 丢弃 | 二进制 | ✅【观测】 |
+| S-EPG-06 | 节目裁剪区间 = `[(今天−keep_days) 00:00, (今天+future_days) 23:59:59]`；`keep_days` **内部上限 7**（API 接受 10 但按 7 裁剪） | 二进制 | ✅【观测】`keep_yesterday` 开/关无差异，语义未定 |
+| S-EPG-07 | `match-report` 的 `via`∈`tvg-id` / `name` / `manual` / `duplicate` / `none` | 二进制 | ✅【观测】 |
+| S-DASH-01 | `SegmentTemplate@duration` 缺 `SegmentTimeline` → 按墙钟/duration 推算 `$Number$`（实测 896163185），切片段全 404 | 二进制 | ✅【观测】 |
 | S-LOGO-01 | 台标本地托管，`tvg-logo` 与 EPG `icon` 指向本地；支持上传转码与动效生成 | D-panel | ✅【观测】9 端点全验（见 12）；转码在**浏览器侧**，服务端只存字节 |
 | S-LOGO-02 | 台标库端点：`GET /logo/{list,match-report}`、`POST /logo/{upload,apply,rename,delete,restore,suggest,animate}` | D-panel | ✅【观测】`upload` 需 `name/ext/data`；`animate.quality` 为**字符串** |
 | S-LOGO-03 | 动效纯 Rust 无损编码，覆盖原文件、原图备份到 `logos/.orig/`；6 种效果 | D-panel/二进制 | ✅【观测】`frames/total_ms/bytes_before/after/dirty_ratio`；`restore` 还原 |
 | S-LOGO-04 | 改名同步刷新频道引用（`updated_channels`）；删除可选清引用（`clear_refs`） | 二进制 | ✅【观测】引用随改名更新（URL 编码），清引用后 `tvg-logo=""` |
 | S-REC-01 | 定时录制：Proxy / DASH 频道；**必须 ffmpeg**，否则任务失败；录制合成 MKV（多音轨，中断可播）；存 `cache/recordings/` | D-panel | ⏳ |
 | S-REC-02 | 录制成功路径：产物 MKV，`ffmpeg -y -i <merged> -map … -c copy`；proxy 先并 `_merged_video.ts`，DASH 并 `_merged_video_<name>.mp4`+`_merged_audio-<n>.mp4` | 二进制 | ✅【观测】`{idx}` 为列表下标（u64）；静态 MPD 报「录制区间内无可用切片」 |
-| S-TS-01 | 本地回看：`?start=<unix>&end=<unix>` 或 `?playseek=<本地 yyyyMMddHHMMSS-…>`；返回 `#EXT-X-PLAYLIST-TYPE:VOD` 清单；分片 `/{gid}/{cid}/timeshift/<hex>.<ext>` | 二进制 | ✅【观测】`livestream=true` 按 `timeshift_hours` 缓冲（见 09 §6） |
-| S-CAP-01 | 回看播放地址随「回看格式」变化：国产 `${start}-${end}` / 国外 `${start}-${end}` / Kodi `{utc}-{utcend}` / both | D-panel | ⏳ |
-| S-CAP-02 | 回看切片存 `cache/livestream/`；时间偏移可调（录进时间戳与播出时间差） | D-panel/D-mode-proxy | ⏳ |
+| S-TS-01 | 本地回看：`?start=<unix>&end=<unix>` 或 `?playseek=<本地 yyyyMMddHHMMSS-…>`；返回 `#EXT-X-PLAYLIST-TYPE:VOD` 清单；分片 `/{gid}/{cid}/timeshift/<hex>.<ext>` | 二进制 | ✅【观测】本地回看**忽略 `playseek` 区间**、返回全部已录片段；DASH 时移 `/dash-timeshift/{track}/playlist.txt?playseek=<b>-<e>`（缺参 400、区间不重叠 404；窗=已录制区间） |
+| S-CAP-01 | 回看播放地址随「回看格式」变化：国产 `${start}-${end}` / 国外 `${start}-${end}` / Kodi `{utc}-{utcend}` / both | D-panel | ✅【观测】四模板字符串；`catchup-days` 由 `catchup_days` 或 `timeshift_hours/24` 推导（4h→1） |
+| S-CAP-02 | 回看切片存 `cache/livestream/`；时间偏移可调（录进时间戳与播出时间差） | D-panel/D-mode-proxy | ✅【观测】`cache/livestream/{gid}_{cid}/index.json` + `*.ts` |
 
 ## 9. 切片伪装（disguise）
 
@@ -289,7 +293,7 @@ formats = ["jpg","png","gif","bmp","webp"]
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-GAP-01 | **ClearKey/DRM 子系统**：频道 `license_key` + KODI `#KODIPROP` 注入；MPD `ContentProtection` 处理（`key_manager`） | 二进制/字段 | ⏳ 行为未验（→ D14） |
+| S-GAP-01 | **ClearKey/DRM 子系统**：频道 `license_key` + KODI `#KODIPROP` 注入；MPD `ContentProtection` 处理（`key_manager`） | 二进制/字段 | ✅【观测】KID 双路检测（MPD `ContentProtection` + fMP4 `tenc/sinf/schm/senc`）；转封装**不解密**；`#KODIPROP` 仅 passthrough |
 | S-GAP-02 | **公开 JSON API**：`/epg/api/channels`、`/epg/api/programmes/:channel`、`/epg/api/search`（v0.8.2 路由表已含） | 二进制 | 🔶 路由存在；响应未验 |
 | S-GAP-03 | `GET /panel/api/dash/scan-url`：手动 URL 池扫描 | 二进制/面板 | ⏳ 行为未验（→ D15） |
 | S-GAP-04 | `GET /panel/api/link-info`：审计播放链接/token 剩余期；返回 `{aliases,random_id_enabled,token,token_enabled,use_alias}` | 二进制 | ✅【观测】形状已验（见 11 §2）；语义细节未验 |
