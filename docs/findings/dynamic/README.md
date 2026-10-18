@@ -17,7 +17,7 @@
 | --- | --- | --- | --- | --- |
 | D1 | 端点探测 | `curl` | S-EP-* | ✅ [`01`](01-runtime-surface-and-disguise.md) §2 |
 | D2 | 扩展名规则 | 对照 `/status.entry_exts` | S-URL-01 | ✅ [`01`](01-runtime-surface-and-disguise.md)（format→hls=.m3u8/mpd=.mpd） |
-| D3 | 六种模式行为 | 各模式实测 | S-MODE-* | ✅ [`02`](02-modes-and-watchdog.md)（proxy/redirect/rewrite/passthrough 实测；dash/remux 仅失败路径） |
+| D3 | 六种模式行为 | 各模式实测 | S-MODE-* | ✅ [`02`](02-modes-and-watchdog.md)（proxy/redirect/rewrite/passthrough 实测）；remux 成功路径见 [`09`](09-recording-livestream-remux-subtitle.md) |
 | D4 | 切片伪装（字节级复现） | 下载+比对+哈希 | S-DIS-* | 🔶 后缀已破解；前缀未解 [`01`](01-runtime-surface-and-disguise.md) §5 |
 | D5 | 缓存窗口与响应头 | 时序采样 | S-DIS-06/07 | ✅ [`03`](03-cache-layout-and-window.md)（首写 public→命中 private） |
 | D6 | Token / 随机频道 ID / IP 管控 | 请求矩阵 | S-AUTH-* | ✅ Token 已验；随机 ID/IP 管控部分 [`04`](04-auth-token-and-guards.md) |
@@ -30,6 +30,7 @@
 | D13 | 台标库管理 | 端点矩阵 + 上载/动效 | S-LOGO-01/02/03/04, S-EP-06 | ✅ [`12`](12-logo-library.md)（`animated` 判定语义未定） |
 | D14 | 多 VPS 数据分享 | 双实例主从 | S-EP-09, S-AUTH-06, S-CFG-06 | ✅ [`13`](13-multi-vps-share.md)（unban 传播/三节点未测） |
 | D15 | 分组导入导出/备份恢复/边缘模式 | 端点矩阵 | S-SUB-*, S-BAK-*, S-EDGE-* | ✅ [`08`](08-import-backup-edge.md) |
+| D16 | 录制/回看/Remux/字幕/解析脚本 | 媒体链路实测 | S-REC-02, S-TS-01, S-MODE-18, S-SUB-09, S-RES-01 | ✅ [`09`](09-recording-livestream-remux-subtitle.md) |
 
 ## 运行期纪律
 

@@ -122,6 +122,11 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-SUB-02 | 订阅聚合 | 上游原始地址；`merge_position` top/bottom | ✅ |
 | S-BAK-01/02 | 备份/恢复 | 三 scope；`all` 包含 config/epg_map/scripts/logos/manifest；restore 另存 `.bak` | ✅ |
 | S-EDGE-01/02/03 | 边缘校验 | `X-IPP-Edge-Secret`；带转发头且密钥不符→403；`edge_refresh` 拉 CF 段 | ✅ |
+| S-MODE-18 | Remux 仅接受连续流 | TS 裸流 200；HLS 清单永久 503；输出 HLS/5s/TS/伪装 | ✅ |
+| S-REC-02 | 录制成功路径 | MKV + `ffmpeg -c copy`；`{idx}` 为 u64 下标；静态 MPD 失败 | ✅ |
+| S-TS-01 | 本地回看 | `?start/end`、`?playseek`；VOD 清单；`timeshift/<hex>.<ext>` | ✅ |
+| S-SUB-09 | 字幕透传 | 保留 SUBTITLES 组；`.vtt`/`text/vtt` 不改写 | ✅ |
+| S-RES-01 | 上游解析脚本 | `python3 <cache>/resolvers/<脚本> <arg>`，stdout=URL；TTL/SWR | ✅ |
 | S-LOGO-01/02 | 台标库 9 端点 + 上传不转码 | `name/ext/data`；PNG 存 PNG；`animate.quality` 字符串 | ✅ |
 | S-LOGO-03/04 | 动效 + 改名/删除同步引用 | `.orig/` 备份；`updated_channels`/`cleared_channels` | ✅ |
 
@@ -140,6 +145,7 @@ HasonHuang/sontv/docs/iptv-proxy/
 | --- | --- | --- | --- |
 | `D-001` | 基线 **v0.8.2** 与上游 `main`（**v0.8.8**）不同 | **版本差异** | ✅ 已解决（取 v0.8.2 产物） |
 | `D-002` | `S-SUB-03`：聚合频道 `group-title` 的取值与基线不符 | 实现差异（文档描述） | 🔶 已澄清（以观测为准） |
+| `D-003` | Remux 的 `503` 被误归因于缺少 ffmpeg | 结论更正 | ✅ 已更正（为预热态） |
 
 **`D-002` 详情**
 

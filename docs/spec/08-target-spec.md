@@ -78,12 +78,14 @@
 | S-MODE-09 | Rewrite：仅取一次清单并把相对地址改绝对；切片客户端直连；**请求头只作用于取清单**（源站要求切片带 Referer 时会失败） | D-mode-rewrite | ✅【观测】绝对化清单；Referer 分支未复现 |
 | S-MODE-10 | Rewrite + MPD / Redirect + MPD → **直连 CDN**（不转封装）；Proxy + MPD → 反代穿透本服务 | D-mode-rewrite | ⏳ |
 | S-MODE-11 | Passthrough：原样导出上游 URL，**不套 Token**；有密钥时按 MPD 形式下发（但**不解密**） | D-mode-passthrough | ✅【观测】302 `location=上游` |
-| S-MODE-12 | 仅 Proxy / Remux / DASH 支持**本地回看与定时录制**；Rewrite / Redirect / Passthrough 只有**源站回看**（`上游支持回看`+`回看天数`，追加 `playseek`） | D-iptv/D-mode-* | ⏳ |
+| S-MODE-12 | 仅 Proxy / Remux / DASH 支持**本地回看与定时录制**；Rewrite / Redirect / Passthrough 只有**源站回看**（`上游支持回看`+`回看天数`，追加 `playseek`） | D-iptv/D-mode-* | 🔶【观测】Proxy/DASH 本地回看与录制已验（见 09）；Remux 录制未测 |
 | S-MODE-13 | Redirect 上游地址缓存键 `redirect_url_{gid}_{cid短}__{hex}`，TTL=`redirect_ttl`（默认 300s） | 二进制 | ✅ |
 | S-MODE-14 | 入口清单缓存键：Proxy=`{gid}_{cid}__{hex}`；Rewrite=`rw_{gid}_{cid}__{hex}` | 二进制 | ✅ |
 | S-MODE-15 | DASH 主清单就绪超时 **30s**；未就绪 → `503 timeout waiting for master playlist` | 二进制 | ✅ |
-| S-MODE-16 | Remux 预热期 → `503` + `Retry-After: 2`，体 `remux warming up` | 二进制 | ✅ |
+| S-MODE-16 | Remux 预热期 → `503` + `Retry-After: 2`，体 `remux warming up` | 二进制 | ✅【观测】预热态**与 ffmpeg 无关**（缺 ffmpeg 仍 `503→200`） |
 | S-MODE-17 | 看门狗：常驻频道卡死/停止 → 销毁重建（attempt 递增）；连续 5 次失败 → **冷却 3600s** | 二进制 | ✅ |
+| S-MODE-18 | Remux **只接受连续流**（HTTP-TS 裸流）；HLS 清单上游只重复拉清单、不取分片 → 永久 `503 remux warming up` | 二进制 | ✅【观测】输出 HLS（`target_duration`=5s、滑动窗、TS 分片、图片后缀伪装）；`remux_container` 描述**源**容器（auto/ts/flv/mmt），不改变输出 |
+| S-RES-01 | 上游解析脚本：`python3 <cache>/resolvers/<脚本> <resolver_arg>`，stdout 即上游 URL；`resolver_ttl` SWR；失败保旧值、冷启动/超时转 `error_url`（约 30s） | 二进制 | 🔶【观测】见 09 §5 |
 
 ### 4.1 模式 × 字段显隐矩阵
 
@@ -121,6 +123,7 @@
 | S-SUB-06 | 导入保留 `tvg-id`/`group-title` 等元数据；自动抓取 UA/Referer/Origin（含 `#EXTVLCOPT`/`#KODIPROP`/`#EXTHTTP`）；ClearKey 自动填入 `license_key` | D-panel | ✅【观测】另解析行内 `http-user-agent`/`http-referer`；组 id 去非 ASCII（纯中文→`g-<6hex>`）；无 tvg-id 则频道 id 非幂等 |
 | S-SUB-07 | 订阅聚合的 include/exclude 按**频道名称**匹配（不区分大小写、子串、多词 OR）；`group:`/`id:`/`/正则/` 仅用于**全局排除** | D-iptv | 🔶【观测】`group:`/`id:`/`/正则/` **per-source 过滤同样可用**（非仅全局排除） |
 | S-SUB-08 | 分组处理：各自保留原名 / 逐个指定 / 全部合并到一个组；**只改输出分组标题，不改代理规则** | D-iptv | ✅【观测】`group_mode`∈keep/merge/map |
+| S-SUB-09 | 字幕出口：保留 `TYPE=SUBTITLES`/`SUBTITLES="…"`（补 `FORCED=NO`）；`.vtt` 分片与 `text/vtt` 原样透传，不改写 | 二进制 | ✅【观测】`selected_tracks` 为 **DASH 轨道**选择（见 09 §4） |
 
 ## 7. 认证与安全
 
@@ -153,6 +156,8 @@
 | S-LOGO-03 | 动效纯 Rust 无损编码，覆盖原文件、原图备份到 `logos/.orig/`；6 种效果 | D-panel/二进制 | ✅【观测】`frames/total_ms/bytes_before/after/dirty_ratio`；`restore` 还原 |
 | S-LOGO-04 | 改名同步刷新频道引用（`updated_channels`）；删除可选清引用（`clear_refs`） | 二进制 | ✅【观测】引用随改名更新（URL 编码），清引用后 `tvg-logo=""` |
 | S-REC-01 | 定时录制：Proxy / DASH 频道；**必须 ffmpeg**，否则任务失败；录制合成 MKV（多音轨，中断可播）；存 `cache/recordings/` | D-panel | ⏳ |
+| S-REC-02 | 录制成功路径：产物 MKV，`ffmpeg -y -i <merged> -map … -c copy`；proxy 先并 `_merged_video.ts`，DASH 并 `_merged_video_<name>.mp4`+`_merged_audio-<n>.mp4` | 二进制 | ✅【观测】`{idx}` 为列表下标（u64）；静态 MPD 报「录制区间内无可用切片」 |
+| S-TS-01 | 本地回看：`?start=<unix>&end=<unix>` 或 `?playseek=<本地 yyyyMMddHHMMSS-…>`；返回 `#EXT-X-PLAYLIST-TYPE:VOD` 清单；分片 `/{gid}/{cid}/timeshift/<hex>.<ext>` | 二进制 | ✅【观测】`livestream=true` 按 `timeshift_hours` 缓冲（见 09 §6） |
 | S-CAP-01 | 回看播放地址随「回看格式」变化：国产 `${start}-${end}` / 国外 `${start}-${end}` / Kodi `{utc}-{utcend}` / both | D-panel | ⏳ |
 | S-CAP-02 | 回看切片存 `cache/livestream/`；时间偏移可调（录进时间戳与播出时间差） | D-panel/D-mode-proxy | ⏳ |
 
@@ -245,7 +250,7 @@ formats = ["jpg","png","gif","bmp","webp"]
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-DEP-01 | `ffmpeg`（可选）：视频素材 MP4→HLS、定时录制合成 MKV；**不装则录制失败** | D-panel | ⏳ |
+| S-DEP-01 | `ffmpeg`（可选）：视频素材 MP4→HLS、定时录制合成 MKV；**不装则录制失败** | D-panel | 🔶【观测】仅**定时录制**需要（`-c copy`）；**remux 不使用 ffmpeg**（缺 ffmpeg 仍成功） |
 | S-DEP-02 | `python3`（可选）：EPG 脚本源、频道脚本解析 | D-panel | ⏳ |
 | S-DEP-03 | `MTranServer`（可选）：字幕机翻（离线自部署） | D-panel | ⏳ |
 | S-DEP-04 | 装依赖后需**重启** iptv-proxy 才被检测 | D-panel | ⏳ |
