@@ -125,6 +125,7 @@
 | 2026-10-18 | 路线图 P2·**D26 多 VPS 分享**（master/follower 双实例；`/api/share/pull` GET-only；key+trust_ips；token/封禁同步）+ **完整路由表静态补录** | ✅（F-012） |
 | 2026-10-18 | 子代理 SA-2 完成路线图 **D24/D25/D27**（组导入导出、订阅聚合、备份恢复、边缘模式） | ✅（F-013） |
 | 2026-10-18 | 子代理 SA-3 完成路线图 **D16/D18/D19/D19b/D20**（remux 仅连续流且**不用 ffmpeg**；录制 MKV；字幕透传；解析脚本；直播回看） | ✅（F-014） |
+| 2026-10-18 | 子代理 SA-1 完成路线图 **D12/D15/D21/D28**（缓存上限未生效、池仅 DASH 且本环境受限、无多 CDN 切换、健康探测契约） | ✅（F-015） |
 | 2026-10-17 | 委派 agent 盘点**二进制实际功能全集**（55k 字符串+面板），产出优先级路线图 | ✅ §5 |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
@@ -138,13 +139,13 @@
 | --- | --- | --- | --- |
 | ① 反代播放 HLS（proxy/rewrite） | `/{gid}/{cid}/index.m3u8`、【代理】×44、`badge-proxy` | ✅ D7/F-004/F-005 | — |
 | ② 切片伪装 URL | `<16hex>_<32hex>.<ext>`、`invalid segment hash` | 🔶 S 已破解；P 未解（低影响） | 随 S7 |
-| ③ 切片缓存/预取 | `m3u8_max_entries`、`segment_cache_max_mb`、`prefetch.*`、`/cache/flush`、`/cache/stats` | 🔶 盘面已验；容量/淘汰/GC 未验 | 🔄 **D12**（子代理） |
+| ③ 切片缓存/预取 | `m3u8_max_entries`、`segment_cache_max_mb`、`prefetch.*`、`/cache/flush`、`/cache/stats` | ✅ 容量上限**均未生效**；flush 保留 `dash/`；memory 后端统计恒 0（F-015） | ~~D12~~ ✅ |
 | ④ 302 直连 redirect | `redirect_mode`(direct/default+best 解析)、`redirect_ttl`、`redirect_url_…` 缓存 | 🔶 direct ✅；best 未触发 | **D17a** |
 | ⑤ passthrough 直链透传 | `badge-passthrough`、直链不套 token | ✅ D7 | — |
 | ⑥ Token 鉴权 | `token_enabled/ttl/rotate`、`/security/token{,/rotate}`、`/link-info` | ✅ 轮换+1h 宽限+封禁面已验（F-010） | ~~D13a~~ ✅ |
 | ⑦ 入口清单改写/聚合 | `m3u_header_lines`、`x-tvg-url`、`subscription-merge`、`access`(public/hidden/archived/免验证) | 🔶 access/头行已验；导入与聚合入口未测 | ~~D13~~ ✅；余项 D24 |
 | ⑧ MPD/ClearKey 反代 | `mpd_keep_seconds`、`license_key`、`#KODIPROP clearkey`、`key_manager.rs`(088) | ⏳（需 MPD 样本） | **D14** |
-| ⑨ URL 池多上游轮询 | `url_pool_size`、`pool[0..n]`、`/dash/scan-url`、`final_url` | ⏳ | **D15** |
+| ⑨ URL 池多上游轮询 | `url_pool_size`、`pool[0..n]`、`/dash/scan-url`、`final_url` | 🔶 仅 DASH；`pool≥2` 本环境 503；取用受限（F-015） | ~~D15~~ 🔶 |
 | ⑩ 解析器最佳画质 | `/resolver/scripts`、`resolver_script/ttl/catchup`（Python） | ✅ 契约已验（F-014）：`python3 <cache>/resolvers/<脚本> <arg>`；TTL/SWR；超时转 `error_url` | ~~D19b~~ ✅ |
 
 ### P1 · 中优先级（流处理与增值）
@@ -157,7 +158,7 @@
 | 定时录制 | 【录制】×49、`/schedule{,/from-epg,/:idx/stop}`、`recordings/` | ✅ 成功路径 MKV + `ffmpeg -c copy`（F-014）；`{idx}`=u64 下标 | ~~D18~~ ✅ |
 | 字幕 | `WebVTT` 转换、样式注入、`srt_ua_keywords`、`.vtt` 伪装 | ✅ SUBTITLES 组保留 + `.vtt`/`text/vtt` 透传（F-014） | ~~D19~~ ✅ |
 | 推流 livestream | `/livestream/:gid/:cid/start\|stop`、【推流】×35 | ✅ `?start/end`/`?playseek` 回看 + VOD 清单 + `timeshift/<hex>.<ext>`（F-014） | ~~D20~~ ✅ |
-| 多 CDN 容错/降级 | `consecutive_fails`、`fallback_pct`(088) | ⏳ | **D21**（假源故障注入即可） |
+| 多 CDN 容错/降级 | `consecutive_fails`、`fallback_pct`(088) | ❌ 未观测到故障切换：按 BANDWIDTH 选变体，失败不重试（F-015 / D-004） | ~~D21~~ ⚠️ |
 | EPG 匹配/译制 | `match-report`、`mappings`、`epg_map`、gemini/mtran | ⏳ | **D22** |
 | 台标库管理 | `/logo/{suggest,match-report,apply,animate}`、`to_webp` | ✅ 9 端点全验（F-011）：转码在浏览器侧、动效 Rust 编码+.orig 备份、改名/删除同步引用 | ~~D23~~ ✅ |
 
@@ -169,7 +170,7 @@
 | 备份/恢复 | `/panel/api/backup?include=`、`restore`（tar/flate2） | ✅ 全验（F-013）：三 scope、`all` 包结构、restore 另存 `.bak` | ~~D25~~ ✅ |
 | 多 VPS 分享 | `share.{role,master_url,trust_ips}`、`x-ipp-master`、`/api/share/pull` | ✅ 双实例验证（F-012）：GET-only、key+trust_ips 双门禁、token/封禁 20s 内同步、follower 禁本地轮换 | ~~D26~~ ✅ |
 | 边缘校验 | `edge_mode(off/proxy/cloudflare)`、`x-ipp-edge-secret`、观察模式 | ✅ 全验（F-013）：头名 `X-IPP-Edge-Secret`、带转发头+密钥不符→403、`edge_refresh` 拉 CF 段 | ~~D27~~ ✅ |
-| 健康检查 | 【健康】、`health{interval,timeout,concurrency}` | 🔶 出口形已验；探测行为进行中 | 🔄 **D28**（子代理） |
+| 健康检查 | 【健康】、`health{interval,timeout,concurrency}` | ✅ GET+`Range: bytes=0-1`；失败 +1/成功归零；周期非 interval 单独决定；仅展示（F-015） | ~~D28~~ ✅ |
 | IP 封禁/解封 | `/security/ip/{ban,stats,unban}`、`/unban` 每月 3 次 | ✅ 面已验（F-010/11 §3）；`/unban` 限次未验 | ~~随 D13a~~ ✅ |
 | 指标/资源 | `/metrics`、`requests_total`、`mem_rss_mb`；`/status/metrics` 302 之谜 | ✅ `/status/metrics`＝假路由；指标仅面板私有面（F-010/11 §6） | ~~D29~~ ✅ |
 | 资产/ffmpeg 检测 | `/assets/{convert,list,ffmpeg-status}` | ⏳ | 随 D18 |

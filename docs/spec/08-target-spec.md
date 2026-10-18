@@ -60,6 +60,7 @@
 | S-URL-03 | 订阅地址含分组 ID：`http://host:19899/<gid>/playlist.m3u`；改分组 ID 使旧地址失效 | D-fields | ✅【观测】分组订阅 200；filename=`<gid>.m3u`（失效分支未测） |
 | S-URL-04 | 开启 Token 后，**导出** M3U 自动附加 token；手工拼地址需自带 token | D-panel | ✅【观测】`?token=<48hex>` 附加于条目（`open` 组例外：不带） |
 | S-URL-07 | `server.m3u_header_lines` 自定义行逐行附加于 `#EXTM3U` 后；总/分组订阅均输出；热重载+重启持久 | 二进制 | ✅ |
+| S-URL-08 | `channel.url` **不支持**多 URL（换行/`|`/`,`/空格分隔均被当作整串路径 → 上游 404 → 入口 302） | 二进制 | ✅【观测】 |
 | S-URL-05 | 回看时间戳 `yyyyMMddHHmmss`，**使用本地时间**（依赖 `timezone_offset_hours`） | D-panel | ⏳ |
 | S-URL-06 | 播放 token 参数名为 `token`（`?t=` 无效）；面板 Bearer token 不适用于播放 | 二进制 | ✅ |
 
@@ -72,9 +73,9 @@
 | S-MODE-03 | Proxy：反代 + 切片缓存；内容格式 HLS / MPD；`MPD 裁剪保留秒数` 仅在格式=MPD 时出现 | D-mode-proxy | 🔶 反代+伪装切片已验；MPD 分支未验 |
 | S-MODE-04 | Proxy + 内容格式=MPD 时，频道多出 **ClearKey 密钥** 字段（`kid_hex:key_hex`，每行一对）；行为为"反代穿透本服务" | D-mode-proxy | ⏳ |
 | S-MODE-05 | Remux：连续流（FLV / 裸 TS / MMT-TLV）→ HLS；**不解码**，CPU 低；`源容器类型`= 自动识别 / TS / FLV / MMT-TLV；**无**内容格式字段 | D-mode-remux | 🔶【观测】容器自动识别（`【remux】自动识别容器: Ts`） |
-| S-MODE-06 | DASH：`.mpd`→HLS 实时转封装，支持 CENC ClearKey 解密；自动 304 增量刷新 / 多 CDN 故障切换 / 防断流备份 / 片段级容错；**无**内容格式字段 | D-mode-dash | 🔶【观测】解析 MPD 轨道、按 track 取段、失败清缓存 |
-| S-MODE-07 | DASH 频道级 `URL 池`（池大小 2–6，默认 3）：视频固定 `pool[0]`，音频/字幕在 `pool[1..]` 轮询 | D-mode-dash | ⏳ |
-| S-MODE-08 | Redirect：客户端 302 直连上游，本服务仅调度；`跳转方式`= 直接跳转（默认）/ 解析最佳画质；`上游缓存时长` 默认 300s（缓存的是解析出的上游地址，非切片） | D-mode-redirect | ✅【观测】302 + `redirect_url_…` TTL=300 |
+| S-MODE-06 | DASH：`.mpd`→HLS 实时转封装，支持 CENC ClearKey 解密；自动 304 增量刷新 / 多 CDN 故障切换 / 防断流备份 / 片段级容错；**无**内容格式字段 | D-mode-dash | 🔶【观测】解析 MPD 轨道、按 track 取段、失败清缓存；**未观测到多 CDN 故障切换**：主清单按 BANDWIDTH 最大选变体，所选失败不重试其它变体 → 302（见 07 §D21，与声明不符 → D-004） |
+| S-MODE-07 | DASH 频道级 `URL 池`（池大小 2–6，默认 3）：视频固定 `pool[0]`，音频/字幕在 `pool[1..]` 轮询 | D-mode-dash | 🔶【观测】**仅 DASH**；`pool≥2` 本环境只拉 MPD N 次后零切片、入口 503；取用方式受限未验证 |
+| S-MODE-08 | Redirect：客户端 302 直连上游，本服务仅调度；`跳转方式`= 直接跳转（默认）/ 解析最佳画质；`上游缓存时长` 默认 300s（缓存的是解析出的上游地址，非切片） | D-mode-redirect | ✅【观测】302 + `redirect_url_…` TTL=300；补充：失败不缓存，成功清单缓存 ≈5s |
 | S-MODE-09 | Rewrite：仅取一次清单并把相对地址改绝对；切片客户端直连；**请求头只作用于取清单**（源站要求切片带 Referer 时会失败） | D-mode-rewrite | ✅【观测】绝对化清单；Referer 分支未复现 |
 | S-MODE-10 | Rewrite + MPD / Redirect + MPD → **直连 CDN**（不转封装）；Proxy + MPD → 反代穿透本服务 | D-mode-rewrite | ⏳ |
 | S-MODE-11 | Passthrough：原样导出上游 URL，**不套 Token**；有密钥时按 MPD 形式下发（但**不解密**） | D-mode-passthrough | ✅【观测】302 `location=上游` |
@@ -186,11 +187,13 @@
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
-| S-CACHE-01 | 后端 `disk`（持久，重启不丢）/ `memory` | D-panel | ⏳ |
+| S-CACHE-01 | 后端 `disk`（持久，重启不丢）/ `memory` | D-panel | 🔶【观测】memory 后端 `disk_bytes:null`、各 `*_entries` 恒 0；播放仍 200；磁盘旧文件不清理 |
 | S-CACHE-02 | 缓存目录 `./cache`，结构：`epg/` `logos/` `m3u8/` `recordings/` `seg_bytes/` `seg_url/` `sub_url/`（+ `livestream/`） | D-panel | ⏳ |
-| S-CACHE-03 | 条目上限：`m3u8_max_entries`(默认 500)、`segment_max_entries`(默认 2000)；`disk_max_mb`(0=不限) | D-panel | ⏳ |
+| S-CACHE-03 | 条目上限：`m3u8_max_entries`(默认 500)、`segment_max_entries`(默认 2000)；`disk_max_mb`(0=不限) | D-panel | 🔶【观测】**四项上限均未观测到生效**：`m3u8_max_entries=2`→6–7 条；`segment_max_entries=2`→17 条；`disk_max_mb=2`→2.79MB；`segment_cache_max_mb=1`→2.7MB |
 | S-CACHE-04 | **预载仅 Proxy 生效**：预载开关 / 拉取并发 / 拉取超时 / HLS 预载 / MPD 预载；无人观看仍回源 | D-mode-proxy | ⏳ |
 | S-CACHE-05 | 日志 `iptv-proxy.log` 最大 **5MB** | D-panel | ⏳ |
+| S-CACHE-06 | `POST /panel/api/cache/flush` 清 `m3u8/seg_url/seg_bytes/sub_url`，**保留 `dash/`** | 二进制 | ✅【观测】 |
+| S-CACHE-07 | `whole_file_budget` 回读异常：配置 0 → 回读 536870912；非 0 → 回读 0 | 二进制 | 🔶【观测】 |
 
 ## 11. 配置项（config.toml）规格
 
@@ -243,6 +246,12 @@ formats = ["jpg","png","gif","bmp","webp"]
 | S-OPS-01 | 指标出口仅面板私有面：`GET /panel/api/status`（uptime/会话/在线/流量/whole_file_*）/`cache/stats`/`health` | 二进制 | ✅【观测】字段已列（见 11 §6）；`traffic_in_bytes` 恒 0（S-BUG-01） |
 | S-OPS-02 | **无**公开指标端点：`/status`、`/metrics`、`/version` → 404；`/status/metrics` → 假路由 302 占位 | 二进制 | ✅【观测】 |
 | S-OPS-03 | 面板 API 全集 80+ 端点（分组/EPG/台标/录制/订阅/解析/字幕/资源/安全） | D-panel | ✅【观测】枚举见 11 §1 |
+| S-HEALTH-01 | 健康探测请求 = `GET <channel url>` + `Range: bytes=0-1`（UA 为内置 Chrome 串） | 二进制 | ✅【观测】 |
+| S-HEALTH-02 | 结果字段：成功 `{http_status,latency_ms,ok:true}`；HTTP 失败 `error:"HTTP 404"`+`http_status`；超时 `error:"超时"`+`http_status/latency_ms:null` | 二进制 | ✅【观测】 |
+| S-HEALTH-03 | `consecutive_fails` 每轮失败 +1；一次成功立即归零 | 二进制 | ✅【观测】 |
+| S-HEALTH-04 | 探测周期**不由 `interval_secs` 单独决定**（配置 5s → 实测轮次间隔 12s） | 二进制 | ✅【观测】 |
+| S-HEALTH-05 | 健康状态**仅展示**：不影响导出清单、入口播放、缓存、订阅；`/panel/api/status` 无健康字段 | 二进制 | ✅【观测】 |
+| S-HEALTH-06 | `concurrency` 控制并行度：6 → 6 条 3ms 内并发；1 → ≈0.4s 串行 | 二进制 | ✅【观测】 |
 | S-BAK-01 | 备份：`GET /panel/api/backup?include=all|epg-scripts|resolver` → `application/gzip` + 时间戳文件名；**仅识别三个 scope，其它回退 `all`** | D-panel/二进制 | ✅【观测】`all` 包 = `config.toml`+`epg/epg_map.json`+`epg/scripts/*.py`+`resolvers/*.py`+`logos/*`+`manifest.json`（生成物 `epg.xml*` 不入包） |
 | S-BAK-02 | 恢复：`POST /panel/api/restore`（raw `application/gzip`）→ `{ok,config_reloaded,report}`；原配置另存 `config.toml.bak`；非 gzip→400 | D-panel/二进制 | ✅【观测】已实测回滚 |
 
