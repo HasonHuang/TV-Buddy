@@ -44,7 +44,7 @@
 | S4 版本判定 | ✅ | `findings/static/01` §5（F-002） |
 | S5 端点/配置键预扫描 | ✅ | `findings/static/01` §6–§7 |
 | S6 内嵌面板前端 | ✅ 4 页（管理面板 622KB / 节目单 / 台标库 / 自助解封） | `findings/static/02`（F-003） |
-| S7 关键算法反编译 | ⏳ | 待做（切片伪装后缀推导、缓存窗口） |
+| S7 关键算法反编译 | ✅ 范围内完成（F-017） | 切片伪装后缀=`sha256(上游切片URL)[:32]` ✅；缓存窗口 ✅（F-006）；前缀 `<P>` 仅依赖 `(gid,cid)`、参与校验，**算法未解**（排除 12 类哈希 + 2 万模板；低影响） |
 
 ### Phase 3 · 动态分析（容器 `iptv82`，v0.8.2）
 
@@ -57,10 +57,10 @@
 | D5 完整配置 schema | ✅ | `/panel/api/config` 全量（默认值）；见 `findings/dynamic/raw/v0.8.2-config.json` |
 | D6 分组/频道与伪装 | ✅ | 分组 `POST /panel/api/groups {id}`；频道 `POST /panel/api/groups/{gid}/channels`；`PUT …/channels/{cid}` |
 | D7 六模式行为 | ✅ | proxy/redirect/rewrite/passthrough 实测；dash/remux 失败路径+看门狗；见 F-005 |
-| D8 切片伪装字节级 | 🔶 | **后缀已破解**：`sha256(上游切片绝对URL)[:32]`；16-hex 频道前缀未解（已排除多种算法；功能可替代） |
+| D8 切片伪装字节级 | 🔶 | **后缀已破解**：`sha256(上游切片绝对URL)[:32]`；前缀 **仅依赖 `(gid,cid)`**（name/url/Host/缓存/重启无关）、参与校验、扩展名不校验；算法未解（排除 12 类哈希；F-017） |
 | D9 缓存窗口 | ✅ | 首写 `public,max-age=300` → 命中 `private,max-age=300`（3 次复现）；入口 `public,max-age=5`；见 F-006 |
 | D10 EPG（采集/下发/裁剪/lang） | ✅ | `/epg.xml[.gz]`、`/epg` 免登录 200；XMLTV 生成 `iptv-proxy`；时间裁剪与 `lang` 处理；见 F-008 |
-| D10b 录制/台标 | 🔶 | 台标 `/logo/<file>`（`cache/logos/`，`public,max-age=86400`）✅；录制 ⏳（需 ffmpeg） |
+| D10b 录制/台标 | ✅ | 台标 `/logo/<file>`（`cache/logos/`，`public,max-age=86400`）；录制 MKV + `ffmpeg -c copy`、`/assets/ffmpeg-status`→`installed:true`（F-014） |
 | D11 播放 Token 与护栏 | ✅ | 入口需 `?token=<48hex>`（全局/TTL 24h）；失效→302 `token_failure_url`；**切片无 token 也 200**；见 F-007 |
 | D13 入口清单改写/访问范围 | ✅ | access 四档（open 例外：不进总订阅）；`m3u_header_lines`；`x-tvg-url` 自动注入；配置经 `PUT /panel/api/config` 全量原子保存（规范化重写、与文件直改有竞态）；见 F-009 |
 
@@ -69,8 +69,8 @@
 | 项 | 状态 | 结果 / 位置 |
 | --- | --- | --- |
 | R1 差异登记 | ✅ | `07` §3.1 `D-001`（已解决） |
-| R2 核对矩阵回填 | 🔶 进行中 | `07` §2.2 已填静态项 |
-| R3 阶段性报告 | ⏳ | 待做 |
+| R2 核对矩阵回填 | ✅ | `07` §2.3 动态项覆盖 F-004…F-017（新增 S-DIS-17） |
+| R3 阶段性报告 | ✅ | [`findings/report-stage-01.md`](docs/findings/report-stage-01.md) |
 
 ## 2. 关键结论（截至目前）
 
@@ -82,8 +82,9 @@
 6. 未知频道 → **302** 到占位视频 `material.yang-1989.eu.org/v/{404,mistake,Failure,limit,Ban}.mp4`。
 7. 面板认证：登录换取 **UUID token**，`Authorization: Bearer` 或 `X-Token` 二选一。
 8. **切片伪装（实测）**：切片 URL `/{gid}/{cid}/<16hex>_<32hex>.<ext>`；
-   **`<32hex> = sha256(上游切片绝对 URL) 前 32 位**（已复现）；`<16hex>` 每频道固定（推导未解）。
-   后缀**不校验**（换任意后缀字节相同）；`Content-Type` 由后缀映射。
+   **`<32hex> = sha256(上游切片绝对 URL) 前 32 位**（已复现）；`<16hex>` = `<P>`，**仅依赖 `(gid,cid)`**
+   （与 `name`/`url`/`Host`/缓存/重启无关），**参与校验**（错→302），算法未解（F-017）。
+   扩展名**不校验**（换任意后缀字节相同）；`Content-Type` 由后缀映射。
 9. **六种模式**（面板 `mg-mode`）：`proxy`/`remux`/`redirect`/`rewrite`/`dash`/`passthrough`（README 只写四种）。
    `redirect`、`passthrough` → **302 直连上游**；`rewrite` → 清单**绝对化**、客户端直连；
    `proxy` → 反代+伪装切片。模式属**分组**级。`redirect` 缓存上游地址（TTL 300s）。
@@ -97,11 +98,12 @@
 
 ## 3. 当前状态与下一步
 
-- 容器 `iptv82` **运行中**（`samples/work/dyn-v0.8.2`）；宿主假源 `python3 -m http.server 9999`
-  于 `samples/work/origin`（**注意**：后台进程，重启终端后需重开）。
+- **路线图已收敛**：§5 的 P0/P1/P2 项均已完成或登记为环境受限/仅 088（见各行状态）。
 - 已建：分组 `test1`（proxy）、`g2`、`gdash`（dash）、`gremux`（remux）；频道 `c1`/`c2`（HLS 上游）、`v`（MPD）、`r`（TS）。
-- **下一步**：见 **§5 功能全集路线图**（Batch 1 起）。
-- 快速遗留：16-hex 频道前缀（低影响，功能可替代）→ 归入 S7 反编译批次。
+- **未解项（已定界）**：`<P>` 生成算法（F-017，低影响）；`S-DIS-08/09`（切片 TS 结构/水印）仅部分核验；
+  多 CDN 故障切换未观测到（`D-004`）；`epg/api/*` 仅 088 未测。
+- **收尾**：主实例配置已还原默认；停 6 个测试实例与容器；`samples/work/` 下运行产物不纳入版本控制。
+- 阶段报告：[`docs/findings/report-stage-01.md`](docs/findings/report-stage-01.md)。
 
 ## 4. 进度日志
 
@@ -120,14 +122,17 @@
 | 2026-10-17 | 动态：**台标** `/logo/<file>`（`cache/logos/`，公开可读） | ✅（补 F-008） |
 | 2026-10-17 | 路线图 Batch1·**D13 入口改写/访问范围**（access 四档含 open 例外、m3u_header_lines、配置原子保存） | ✅（F-009） |
 | 2026-10-17 | 路线图 Batch1·**D13a 安全审计 + D29 指标面**（token 轮换+1h 宽限、IP 封禁面、登录 429 锁、指标仅面板私有面、面板 API 全集） | ✅（F-010） |
-| 2026-10-17 | 基建：容器装 **ffmpeg 6.1.1 + python3 3.12**；起 **4 个独立实例**（19901–19904，独立配置/缓存，宿主机经容器 IP 直连）；派发 **4 个子代理**并行推进 D12/D15/D21/D28、D24/D25/D27、D16/D18/D19/D19b/D20、D14/D17ab/D22 | 🔄 进行中 |
+| 2026-10-17 | 基建：容器装 **ffmpeg 6.1.1 + python3 3.12**；起 **4 个独立实例**（19901–19904，独立配置/缓存，宿主机经容器 IP 直连）；派发 **4 个子代理**并行推进 D12/D15/D21/D28、D24/D25/D27、D16/D18/D19/D19b/D20、D14/D17ab/D22 | ✅ 全部回收（F-013…F-016） |
+| 2026-10-17 | 委派 agent 盘点**二进制实际功能全集**（55k 字符串+面板），产出优先级路线图 | ✅ §5 |
 | 2026-10-18 | 路线图 P1·**D23 台标库**（upload/apply/rename/delete/restore/suggest/animate；浏览器侧转码；`.orig/` 备份；引用同步）+ 配置段补录（panel/logo/subtitle/share/playlist/stats） | ✅（F-011） |
 | 2026-10-18 | 路线图 P2·**D26 多 VPS 分享**（master/follower 双实例；`/api/share/pull` GET-only；key+trust_ips；token/封禁同步）+ **完整路由表静态补录** | ✅（F-012） |
 | 2026-10-18 | 子代理 SA-2 完成路线图 **D24/D25/D27**（组导入导出、订阅聚合、备份恢复、边缘模式） | ✅（F-013） |
 | 2026-10-18 | 子代理 SA-3 完成路线图 **D16/D18/D19/D19b/D20**（remux 仅连续流且**不用 ffmpeg**；录制 MKV；字幕透传；解析脚本；直播回看） | ✅（F-014） |
 | 2026-10-18 | 子代理 SA-1 完成路线图 **D12/D15/D21/D28**（缓存上限未生效、池仅 DASH 且本环境受限、无多 CDN 切换、健康探测契约） | ✅（F-015） |
 | 2026-10-18 | 子代理 SA-4 完成路线图 **D14/D17ab/D22**（DASH 成功路径/ClearKey 不解密/时移、回看模板、redirect best、EPG 匹配算法） | ✅（F-016） |
-| 2026-10-17 | 委派 agent 盘点**二进制实际功能全集**（55k 字符串+面板），产出优先级路线图 | ✅ §5 |
+| 2026-10-18 | 路线图收尾·**S7 伪装前缀**（`<P>` 仅依赖 `(gid,cid)`；参与校验；扩展名不校验；排除 12 类哈希/2 万模板） | ✅（F-017） |
+| 2026-10-18 | 路线图收尾·资产端点（`/assets/ffmpeg-status|list`）+ 全库一致性回填（spec/07、spec/08、两个 README） | ✅ |
+| 2026-10-18 | Phase 4·**R3 阶段性报告**（覆盖矩阵、差异、缺口、复现入口） | ✅ `findings/report-stage-01.md` |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 
@@ -139,14 +144,14 @@
 | 域 | 代表能力（二进制证据） | 状态 | 路线图项 |
 | --- | --- | --- | --- |
 | ① 反代播放 HLS（proxy/rewrite） | `/{gid}/{cid}/index.m3u8`、【代理】×44、`badge-proxy` | ✅ D7/F-004/F-005 | — |
-| ② 切片伪装 URL | `<16hex>_<32hex>.<ext>`、`invalid segment hash` | 🔶 S 已破解；P 未解（低影响） | 随 S7 |
+| ② 切片伪装 URL | `<16hex>_<32hex>.<ext>`、`invalid segment hash` | ✅ S=sha256[:32]；`<P>` 依赖/校验已解、算法未解（F-017，低影响） | ~~S7~~ ✅ |
 | ③ 切片缓存/预取 | `m3u8_max_entries`、`segment_cache_max_mb`、`prefetch.*`、`/cache/flush`、`/cache/stats` | ✅ 容量上限**均未生效**；flush 保留 `dash/`；memory 后端统计恒 0（F-015） | ~~D12~~ ✅ |
-| ④ 302 直连 redirect | `redirect_mode`(direct/default+best 解析)、`redirect_ttl`、`redirect_url_…` 缓存 | 🔶 direct ✅；best 未触发 | **D17a** |
+| ④ 302 直连 redirect | `redirect_mode`(direct/default+best 解析)、`redirect_ttl`、`redirect_url_…` 缓存 | ✅ direct + **best 已验**：选最高 `BANDWIDTH` 变体（F-016） | ~~D17a~~ ✅ |
 | ⑤ passthrough 直链透传 | `badge-passthrough`、直链不套 token | ✅ D7 | — |
 | ⑥ Token 鉴权 | `token_enabled/ttl/rotate`、`/security/token{,/rotate}`、`/link-info` | ✅ 轮换+1h 宽限+封禁面已验（F-010） | ~~D13a~~ ✅ |
-| ⑦ 入口清单改写/聚合 | `m3u_header_lines`、`x-tvg-url`、`subscription-merge`、`access`(public/hidden/archived/免验证) | 🔶 access/头行已验；导入与聚合入口未测 | ~~D13~~ ✅；余项 D24 |
+| ⑦ 入口清单改写/聚合 | `m3u_header_lines`、`x-tvg-url`、`subscription-merge`、`access`(public/hidden/archived/免验证) | ✅ access/头行/导入/聚合/订阅合并全验（F-009/F-013/§4） | ~~D13~~ ✅ |
 | ⑧ MPD/ClearKey 反代 | `mpd_keep_seconds`、`license_key`、`#KODIPROP clearkey`、`key_manager.rs`(088) | ✅ MPD→HLS 成功；KID 双路检测；**不解密**；`#KODIPROP` 仅 passthrough（F-016） | ~~D14~~ ✅ |
-| ⑨ URL 池多上游轮询 | `url_pool_size`、`pool[0..n]`、`/dash/scan-url`、`final_url` | 🔶 仅 DASH；`pool≥2` 本环境 503；取用受限（F-015） | ~~D15~~ 🔶 |
+| ⑨ URL 池多上游轮询 | `url_pool_size`、`pool[0..n]`、`/dash/scan-url`、`final_url` | ✅ 契约已验（F-015/§4）：仅 DASH；`pool≥2` 本环境 503（**环境受限**）；`scan-url` 可列轨道 | ~~D15~~ ✅ |
 | ⑩ 解析器最佳画质 | `/resolver/scripts`、`resolver_script/ttl/catchup`（Python） | ✅ 契约已验（F-014）：`python3 <cache>/resolvers/<脚本> <arg>`；TTL/SWR；超时转 `error_url` | ~~D19b~~ ✅ |
 
 ### P1 · 中优先级（流处理与增值）
@@ -174,16 +179,16 @@
 | 健康检查 | 【健康】、`health{interval,timeout,concurrency}` | ✅ GET+`Range: bytes=0-1`；失败 +1/成功归零；周期非 interval 单独决定；仅展示（F-015） | ~~D28~~ ✅ |
 | IP 封禁/解封 | `/security/ip/{ban,stats,unban}`、`/unban` 每月 3 次 | ✅ 面已验（F-010/11 §3）；`/unban` 限次未验 | ~~随 D13a~~ ✅ |
 | 指标/资源 | `/metrics`、`requests_total`、`mem_rss_mb`；`/status/metrics` 302 之谜 | ✅ `/status/metrics`＝假路由；指标仅面板私有面（F-010/11 §6） | ~~D29~~ ✅ |
-| 资产/ffmpeg 检测 | `/assets/{convert,list,ffmpeg-status}` | ⏳ | 随 D18 |
-| EPG 公开 JSON API | `/epg/api/channels\|programmes\|search` | 🔶 仅 088，记录不测 | spec 登记 |
+| 资产/ffmpeg 检测 | `/assets/{convert,list,ffmpeg-status}` | ✅ `ffmpeg-status`→`{"installed":true,"path":"ffmpeg"}`；`assets/list` 返回配置项清单（F-014） | ~~D18~~ ✅ |
+| EPG 公开 JSON API | `/epg/api/channels\|programmes\|search` | ⏭ 仅 088，已在 spec 登记，不测 | spec 登记 |
 
 ### 执行批次
 
 - **Batch 1（无 ffmpeg 即可）**：D13 入口改写/访问范围 → D13a Token 轮换与 IP 封禁面 → D15 URL 池 → D21 多 CDN 故障注入 → D24 组导入导出 → D25 备份恢复 → D27 边缘模式 → D29 指标。
 - **Batch 2（容器装 ffmpeg）**：D18 录制 → D16 remux 成功路径 → D19 字幕 → D20 推流 → D19b 解析器（同时装 python3）。
-- **Batch 3（样本/深层静态）**：D14 ✅ → D17ab ✅ → D22 ✅ → **S7 反编译（唯一未做）**：伪装 `<P>` 生成、热重载边界。
+- **Batch 3（样本/深层静态）**：D14 ✅ → D17ab ✅ → D22 ✅ → **S7 ✅**（后缀/缓存窗口完成；前缀 `<P>` 输入依赖+校验已定，算法未解 → F-017）。
 
-### spec 缺口登记（盘点新发现，待补入 spec/08）
+### spec 缺口登记（已录入 `spec/08` §16）
 
 1. ClearKey/DRM 完整子系统（`license_key` + KODI 注入 + 088 `key_manager.rs`/AES-GCM）
 2. `/panel/api/epg/api/*` 公开 JSON API（088）

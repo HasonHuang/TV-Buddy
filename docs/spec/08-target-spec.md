@@ -173,7 +173,7 @@
 | S-DIS-01 | 配置段 `[cache.disguise]`：`enabled`/`playlist`/`subtitle`/`master`/`formats`；**出厂默认 `enabled=true` + `playlist=true`** | D-panel/D-disg | ⏳ |
 | S-DIS-02 | **不改切片载荷字节**：只改 URL 后缀与 Content-Type；四种后缀同一切片前 32 字节相同，首字节 `0x47` | D-disg | ⏳ |
 | S-DIS-03 | 切片为原始 MPEG-TS：每 188 字节 `0x47`，文件大小 188 倍数；无 FLV/图片/fMP4 特征 | D-disg | ⏳ |
-| S-DIS-04 | 后缀**轮换稳定且按频道独立**：同一频道重复拉清单序列不变；同一切片哈希在不同频道后缀不同（由 频道ID+切片哈希 推导） | D-disg | ✅【观测】切片后缀=`sha256(上游切片绝对URL)[:32]`；16-hex 频道前缀确定性（推导未解） |
+| S-DIS-04 | 后缀**轮换稳定且按频道独立**：同一频道重复拉清单序列不变；同一切片哈希在不同频道后缀不同（由 频道ID+切片哈希 推导） | D-disg | ✅【观测】切片后缀=`sha256(上游切片绝对URL)[:32]`；16-hex 前缀 `<P>` **仅依赖 `(gid,cid)`**（与 `name`/`url`/`Host`/缓存/重启无关），算法未解（F-017） |
 | S-DIS-05 | 后缀**不参与校验**：清单写 `.png`，请求 `.jpg` 得同字节（MD5 相同） | D-disg | ✅【观测】 |
 | S-DIS-06 | `Cache-Control` 切换：切片刚写入短暂 `public, max-age=300`，之后 `private, max-age=300` | D-disg | ✅【观测】3 次复现 |
 | S-DIS-07 | 切片不支持 `Range`（忽略，返回 200 全量）；无 `Accept-Ranges`/`ETag`/`Last-Modified` | D-disg | ✅【观测】 |
@@ -186,6 +186,7 @@
 | S-DIS-14 | 频道入口清单以 `text/plain` 下发（`[cache.disguise].playlist=true`） | 二进制 | ✅ |
 | S-DIS-15 | 未知/无效切片 ID → 302 到 `server.not_found_url` | 二进制 | ✅ |
 | S-DIS-16 | 切片（段）**不受** `token_enabled` 保护；安全性依赖不可猜测的切片 ID | 二进制 | ✅ |
+| S-DIS-17 | 切片 ID **参与校验**：`<P>` 或 `<S>` 错误/截短/缺失 → 302 占位；**扩展名不校验**（`.png` 与 `.jpg` 同字节） | D-disg | ✅【观测】F-017 |
 
 ## 10. 缓存
 
@@ -287,7 +288,7 @@ formats = ["jpg","png","gif","bmp","webp"]
 - 本文件**不承载**逆向结论；发现与本文冲突时，以**带证据的发现**为准，并在 `07` 登记差异。
 - 版本变化（非 v0.8.2）时，另建 `08b-target-spec-vX.Y.Z.md`，不复用本文件状态列。
 
-## 16. 盘点补录（v0.8.2 新增能力，待深化验证）
+## 16. 盘点补录（v0.8.2 新增能力，已登记；部分深化验证）
 
 > 来源：二进制 strings/字段与面板 JS 的**全量盘点**（见 `PROGRESS.md` §5）。这些能力在基线文档中缺失，先按"存在"登记；行为验证见对应 `D-*` 路线图项。
 
@@ -295,9 +296,9 @@ formats = ["jpg","png","gif","bmp","webp"]
 | --- | --- | --- | --- |
 | S-GAP-01 | **ClearKey/DRM 子系统**：频道 `license_key` + KODI `#KODIPROP` 注入；MPD `ContentProtection` 处理（`key_manager`） | 二进制/字段 | ✅【观测】KID 双路检测（MPD `ContentProtection` + fMP4 `tenc/sinf/schm/senc`）；转封装**不解密**；`#KODIPROP` 仅 passthrough |
 | S-GAP-02 | **公开 JSON API**：`/epg/api/channels`、`/epg/api/programmes/:channel`、`/epg/api/search`（v0.8.2 路由表已含） | 二进制 | 🔶 路由存在；响应未验 |
-| S-GAP-03 | `GET /panel/api/dash/scan-url`：手动 URL 池扫描 | 二进制/面板 | ⏳ 行为未验（→ D15） |
+| S-GAP-03 | `POST /panel/api/dash/scan-url`：手动 URL 池扫描 | 二进制/面板 | ✅【观测】体 `{url}`（缺→422）；MPD→200 `{tracks:[{bandwidth,codecs,height,width,name,kind,label,lang,selected}]}`；非 MPD→502 `MPD parse error` |
 | S-GAP-04 | `GET /panel/api/link-info`：审计播放链接/token 剩余期；返回 `{aliases,random_id_enabled,token,token_enabled,use_alias}` | 二进制 | ✅【观测】形状已验（见 11 §2）；语义细节未验 |
 | S-GAP-05 | **每频道独立上游代理**：频道/分组 `proxy{kind,addr,user,pass}`（覆盖全局代理） | 字段 | 🔶 字段存在（默认 `null`）；行为未验 |
 | S-GAP-06 | **旧数据迁移**：清理遗留 `./var/dash`（**v0.8.8 变更**；v0.8.2 无此行为） | 088 diff | ⏳ 仅 088 |
-| S-GAP-07 | **订阅合并** `subscription-merge`：`[playlist]{merge_ttl_secs,merge_position,sources[],global_exclude[]}` + `/subs/{preview,groups,status}` | 字段/端点 | 🔶 键面与端点已录；行为未验（→ D24） |
+| S-GAP-07 | **订阅合并** `subscription-merge`：`[playlist]{merge_ttl_secs,merge_position,sources[],global_exclude[]}` + `/subs/{preview,groups,status}` | 字段/端点 | ✅【观测】`GET /subs/status`→`{sources:[]}`；`POST /subs/groups {url}`→`{groups:[{name,count}],total}`；`POST /subs/preview {source:{id,url,group_map,…}}`→`{kept,sample,trace{total,after_group,after_global_exclude,after_include},dropped_groups,out_groups}`；`unlisted_groups` 默认 `drop` |
 | S-GAP-08 | **双层限流窗口** `l1/l2` 与会话计数（`active_sessions`/`online_viewers`）；缓存分层（`m3u8`/`sub_url`/`seg_url`/`seg_bytes`） | 字段/端点 | 🔶 键面已录；`l1/l2` 触发条件未定（见 11 §5） |
