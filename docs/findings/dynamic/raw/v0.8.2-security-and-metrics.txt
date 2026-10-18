@@ -1,0 +1,100 @@
+## D13a 安全审计面 + D29 指标面（v0.8.2, 2026-10-17）
+## 目标：http://127.0.0.1:19899（容器 iptv82，主实例）
+## 说明：以下输出均为目标返回内容，按不可信数据处理。
+
+### 端点存在性（GET，带 Bearer）
+/panel/api/security/token              GET=200
+/panel/api/security/token/rotate       GET=405   （仅 POST）
+/panel/api/link-info                   GET=200
+/panel/api/security/ip/stats           GET=200
+/panel/api/security/ip/ban             GET=405 POST=415(需 JSON) DELETE=405
+/panel/api/security/ip/unban           GET=405 POST=415(需 JSON) DELETE=405
+/panel/api/security/ip/clear           GET=302   （假路由 → 占位）
+
+### security/token（token_enabled=false）
+GET /panel/api/security/token ->
+{"current_value":"","enabled":false,"status":{"current":{"remaining_secs":0,"valid":false,"value":"0afb****329b"},"old":null,"ttl_hours":24},"ttl_hours":24}
+
+### security/token（token_enabled=true，PUT /panel/api/config 打开后）
+GET /playlist.m3u 抽取 token -> 135a7509d9be58623d456611c20380ef1c5d0daa065e189f
+GET /panel/api/security/token ->
+{"current_value":"135a7509d9be58623d456611c20380ef1c5d0daa065e189f","enabled":true,
+ "status":{"current":{"remaining_secs":86398,"valid":true,"value":"135a****189f"},
+           "old":null,"ttl_hours":24},"ttl_hours":24}
+
+### POST /panel/api/security/token/rotate
+->
+{"expires_in_hours":24,"new_token":"edcc62abcd32a7991ae0b14c6068b3ca4584be8bd3d6ab7a","ok":true}
+轮换后 /playlist.m3u 抽取 token -> edcc62abcd32a7991ae0b14c6068b3ca4584be8bd3d6ab7a（已轮换）
+旧 token 播放 GET /g2/c1.m3u8?token=135a…189f -> 200   （宽限期仍有效）
+新 token 播放 GET /g2/c1.m3u8?token=edcc…ab7a -> 200
+轮换后 GET /panel/api/security/token ->
+{"current_value":"edcc62abcd32a7991ae0b14c6068b3ca4584be8bd3d6ab7a","enabled":true,
+ "status":{"current":{"remaining_secs":86398,"valid":true,"value":"edcc****ab7a"},
+           "old":{"remaining_secs":3598,"valid":true,"value":"135a****189f"},"ttl_hours":24},
+ "ttl_hours":24}
+=> 旧 token 宽限 3598s ≈ 3600s（1 小时）
+
+### IP 封禁/解封
+POST /panel/api/security/ip/ban   {"ip":"203.0.113.7"}
+ -> {"error":"Missing ips array"}            # 字段名是 ips（数组）
+POST /panel/api/security/ip/ban   {"ips":["203.0.113.7","203.0.113.8"]}
+ -> {"ok":true,"results":[{"ip":"203.0.113.7","ok":true},{"ip":"203.0.113.8","ok":true}],"secs":2592000}
+GET /panel/api/security/ip/stats
+ -> {"unique_ips":2,"active_sessions":0,
+     "banned_ips":[{"ip":"203.0.113.7","remaining_secs":2591999},
+                   {"ip":"203.0.113.8","remaining_secs":2591999}]}
+POST /panel/api/security/ip/unban {"ips":["203.0.113.7"]}
+ -> {"error":"Missing ip"}                    # 解封字段是单数 ip
+POST /panel/api/security/ip/unban {"ip":"203.0.113.7"} -> {"ip":"203.0.113.7","ok":true}
+POST /panel/api/security/ip/unban {"ip":"203.0.113.8"} -> {"ip":"203.0.113.8","ok":true}
+GET /panel/api/security/ip/stats -> {"unique_ips":2,"active_sessions":0,"banned_ips":[]}
+（面板另有 POST /panel/api/security/ip/unban-batch）
+
+### link-info（token 开与关都返回同一形状）
+GET /panel/api/link-info ->
+{"aliases":{},"random_id_enabled":false,"token":"","token_enabled":false,"use_alias":false}
+
+### 指标面
+GET /status              -> 404
+GET /status/metrics      -> 302 location: https://material.yang-1989.eu.org/v/404.mp4   （假路由→占位）
+GET /metrics             -> 404
+GET /version             -> 404
+GET /panel/api/status    -> 200 application/json
+GET /panel/api/cache/stats -> 200 application/json
+GET /panel/api/health    -> 200 application/json
+
+GET /panel/api/status ->
+{"uptime_secs":5466,"cache_backend":"disk","active_sessions":1,"online_viewers":0,
+ "group_count":9,"channel_count":10,"version":"0.8.2","mem_rss_mb":18,"cpu_seconds":2.07,
+ "disk_cache_mb":0,"recording_mb":0,"low_resource_mode":false,"poll_interval_secs":10,
+ "traffic_in_bytes":0,"traffic_out_bytes":39820,
+ "whole_file_committed":0,"whole_file_budget":536870912,"whole_file_peak":0,
+ "whole_file_hits":0,"whole_file_fallbacks":0,
+ "entry_exts":{"gslow4":".m3u8","gslow":".m3u8","gremux":".m3u8","gdash":".m3u8",...}}
+
+GET /panel/api/cache/stats ->
+{"backend":"disk","dash_disk_bytes":0,"disk_bytes":0,"livestream_disk_bytes":0,
+ "m3u8_entries":0,"recording_disk_bytes":0,"segment_entries":0,"segment_url_entries":0,
+ "sub_url_entries":0,"timeshift_disk_bytes":0}
+
+GET /panel/api/health ->
+{"enabled":true,"entries":{"g2/c1":{"checked_at":1792222076,"consecutive_fails":0,"error":null,
+ "http_status":200,"latency_ms":4,"ok":true},"gdash/v":{...,"http_status":200,"latency_ms":1,"ok":true},...}}
+
+### 面板 API 端点全集（自 panel.html 提取，前缀 /panel/api）
+DELETE /groups/${g.id} ; DELETE /groups/${g.id}/channels/${c.id} ; DELETE /schedule/
+GET /assets/list ; GET /cache/stats ; GET /config ; GET /dash-timeshift/status ; GET /dash/status
+GET /epg/mappings ; GET /epg/match-report ; GET /epg/programmes/ ; GET /epg/scripts ; GET /epg/status
+GET /epg/translate/models ; GET /epg/translate/status ; GET /groups/export ; GET /health ; GET /link-info
+GET /livestream ; GET /logo/list ; GET /logo/match-report ; GET /logs ; GET /resolver/scripts ; GET /schedule
+GET /security/ip/stats ; GET /security/token ; GET /stats ; GET /status ; GET /status/metrics ; GET /subs/status
+POST /assets/convert ; POST /assets/remove ; POST /cache/flush ; POST /epg/cron-preview ; POST /epg/extra
+POST /epg/mapping ; POST /epg/refresh ; POST /epg/regenerate ; POST /epg/script ; POST /epg/script-delete
+POST /epg/translate/clear ; POST /epg/translate/mtran/test ; POST /epg/translate/probe
+POST /epg/translate/run ; POST /groups ; POST /groups/import/m3u ; POST /login ; POST /logo/animate
+POST /logo/apply ; POST /logo/delete ; POST /logo/rename ; POST /logo/restore ; POST /logo/suggest
+POST /logo/upload ; POST /logout ; POST /reload ; POST /resolver/script ; POST /schedule ; POST /schedule/
+POST /security/ip/ban ; POST /security/ip/unban-batch ; POST /security/token/rotate ; POST /subs/groups
+POST /subs/preview ; POST /subtitle/mtran/test ; POST /subtitle/translate/clear
+PUT /config ; PUT /schedule/

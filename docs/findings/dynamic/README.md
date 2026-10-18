@@ -23,9 +23,10 @@
 | D6 | Token / 随机频道 ID / IP 管控 | 请求矩阵 | S-AUTH-* | ✅ Token 已验；随机 ID/IP 管控部分 [`04`](04-auth-token-and-guards.md) |
 | D7 | 订阅聚合 vs M3U 导入 | 两条路径对比 | S-SUB-* | 🔶 出口侧已验 [`06`](06-entry-playlist-and-access.md)（总/分组订阅、x-tvg-url、access）；导入/聚合入口侧未测 |
 | D8 | 配置热重载与落盘 | 改配置观测 | S-CFG-01/02 | ✅ [`01`](01-runtime-surface-and-disguise.md) §1/§7 |
-| D9 | 资源占用 | `docker stats` | S-BUG-01 | ⏳ |
+| D9 | 资源占用 | `docker stats` | S-BUG-01 | 🔶 [`11`](11-security-and-metrics.md) §6（`/panel/api/status` 的 `mem_rss_mb`/`cpu_seconds`；`traffic_in_bytes` 恒 0） |
 | D10 | 配置全量 schema | `GET /panel/api/config` | S-CFG-04 | ✅ [`01`](01-runtime-surface-and-disguise.md) §4 |
 | D11 | EPG 采集与下发 | 本地 XMLTV 源 | S-EP-05/12/13 | ✅ [`05`](05-epg.md)（时间裁剪、`lang` 处理；录制/台标 ⏳） |
+| D12 | 安全审计 / Token 轮换 / 指标面 | 端点矩阵 | S-AUTH-03/09/10, S-OPS-01/02/03 | ✅ [`11`](11-security-and-metrics.md)（限流触发条件未定） |
 
 ## 运行期纪律
 
