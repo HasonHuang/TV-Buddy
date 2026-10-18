@@ -1,21 +1,8 @@
 # 08 · 目标功能规格（iptv-proxy v0.8.2）
-
 > 规范版本 v1.0 ｜ 2026-10-15 ｜ 目标：**IPTV Proxy v0.8.2**（YanG，闭源 Rust，linux-arm64/amd64）
->
-> **本文是"待验证的功能规格"（Normative Spec），不是逆向发现。**
-> 内容由**公开 README** 与**基线文档**（`HasonHuang/sontv/docs/iptv-proxy/`，实测于 2026-10-02/03）
-> 整理而成。每条声明都用 `规格 ID` 标注，供 `07-baseline-and-verification.md` 逐条核验。
-> **级别**：本文所有条目默认为 **【基线观测】**（来自基线实测）；逆向未复位前，状态列默认为 `⏳`。
-> 核验结果（观测/推断/未知）由逆向产出回填，**不得**在此文件直接改写结论。
->
-> **版本说明**：上游**无 tag/release**，`main` 随构建变动。主分析对象为 **v0.8.2**
-> （提交 `d302316fb8`，与本文基线一致）；`main` 实为 **v0.8.8**，仅作差异对照。
-> 锚点与判定见 [`../findings/artifact.md`](../findings/artifact.md) §5 与 [`07`](07-baseline-and-verification.md) §3.1 `D-001`。
-> 本文状态列的 `✅` 只表示**静态存在性**一致；**行为**待动态核验。
-
-来源缩写：`RM`=公开 README ｜ `D-README`/`D-iptv`/`D-fields`/`D-panel`/`D-disg`/`D-res`/`D-mode-*`=基线各文档。
-
----
+> **本文是"待验证的功能规格"（Normative Spec），不是逆向发现**：内容由**公开 README** 与**基线文档**（`HasonHuang/sontv/docs/iptv-proxy/`，实测于 2026-10-02/03）整理；每条声明用 `规格 ID` 标注，供 `07-baseline-and-verification.md` 逐条核验。所有条目默认 **【基线观测】**（来自基线实测），状态列默认 `⏳`；核验结果（观测/推断/未知）由逆向产出回填，**不得**在此文件直接改写结论。
+> **版本说明**：上游**无 tag/release**，`main` 随构建变动。主分析对象为 **v0.8.2**（提交 `d302316fb8`，与本文基线一致）；`main` 实为 **v0.8.8**，仅作差异对照。锚点与判定见 [`../findings/artifact.md`](../findings/artifact.md) §5 与 [`07`](07-baseline-and-verification.md) §3.1 `D-001`；状态列的 `✅` 只表示**静态存在性**一致，**行为**待动态核验。
+> 来源缩写：`RM`=公开 README ｜ `D-README`/`D-iptv`/`D-fields`/`D-panel`/`D-disg`/`D-res`/`D-mode-*`=基线各文档。
 
 ## 1. 身份与运行形态
 
@@ -203,33 +190,31 @@
 ## 11. 配置项（config.toml）规格
 
 ```toml
+
 [server]
 bind = "[::]:19899"
 timezone_offset_hours = 8
 log_level = "info"
-
 [panel]
 enabled = true
 username = "admin"
 password_sha256 = "..."
 session_ttl = 86400
-
 [cache]
 backend = "disk"
 disk_path = "./cache"
 m3u8_max_entries = 500
 segment_max_entries = 2000
 disk_max_mb = 0
-
 [auth]
 token_enabled = false
-
 [cache.disguise]
 enabled = true
 playlist = true
 subtitle = false
 master = false
 formats = ["jpg","png","gif","bmp","webp"]
+
 ```
 
 | ID | 规格声明 | 来源 | 状态 |
@@ -278,19 +263,11 @@ formats = ["jpg","png","gif","bmp","webp"]
 | S-BUG-03 | 伪装切片不支持 `Range`，影响部分按需起播播放器 | D-disg || ✅【观测】切片忽略 `Range`（S-DIS-07） |
 | S-BUG-04 | 本环境容器**无挂载卷**，重建即丢配置与缓存 | D-panel | ⏳ |
 
----
-
 ## 15. 使用方式
-
-- **本规格是逆向的"判据"**：`docs/findings/` 中的每条结论应能对应到这里的 `规格 ID`
-  （一致 → ✅；不一致 → ⚠️ 并给证据；未覆盖 → ⏳）。
-- 状态回填与差异登记规则见 `07-baseline-and-verification.md`。
-- 本文件**不承载**逆向结论；发现与本文冲突时，以**带证据的发现**为准，并在 `07` 登记差异。
-- 版本变化（非 v0.8.2）时，另建 `08b-target-spec-vX.Y.Z.md`，不复用本文件状态列。
+- **本规格是逆向的"判据"**：`docs/findings/` 中的每条结论应能对应到这里的 `规格 ID`（一致 → ✅；不一致 → ⚠️ 并给证据；未覆盖 → ⏳）；状态回填与差异登记规则见 `07-baseline-and-verification.md`。
+- 本文件**不承载**逆向结论：发现与本文冲突时，以**带证据的发现**为准，并在 `07` 登记差异；版本变化（非 v0.8.2）时，另建 `08b-target-spec-vX.Y.Z.md`，不复用本文件状态列。
 
 ## 16. 盘点补录（v0.8.2 新增能力，已登记；部分深化验证）
-
-> 来源：二进制 strings/字段与面板 JS 的**全量盘点**（见 `PROGRESS.md` §5）。这些能力在基线文档中缺失，先按"存在"登记；行为验证见对应 `D-*` 路线图项。
 
 | ID | 规格声明 | 来源 | 状态 |
 | --- | --- | --- | --- |
@@ -302,3 +279,5 @@ formats = ["jpg","png","gif","bmp","webp"]
 | S-GAP-06 | **旧数据迁移**：清理遗留 `./var/dash`（**v0.8.8 变更**；v0.8.2 无此行为） | 088 diff | ⏳ 仅 088 |
 | S-GAP-07 | **订阅合并** `subscription-merge`：`[playlist]{merge_ttl_secs,merge_position,sources[],global_exclude[]}` + `/subs/{preview,groups,status}` | 字段/端点 | ✅【观测】`GET /subs/status`→`{sources:[]}`；`POST /subs/groups {url}`→`{groups:[{name,count}],total}`；`POST /subs/preview {source:{id,url,group_map,…}}`→`{kept,sample,trace{total,after_group,after_global_exclude,after_include},dropped_groups,out_groups}`；`unlisted_groups` 默认 `drop` |
 | S-GAP-08 | **双层限流窗口** `l1/l2` 与会话计数（`active_sessions`/`online_viewers`）；缓存分层（`m3u8`/`sub_url`/`seg_url`/`seg_bytes`） | 字段/端点 | 🔶 键面已录；`l1/l2` 触发条件未定（见 11 §5） |
+
+> 来源：二进制 strings/字段与面板 JS 的**全量盘点**（见 `PROGRESS.md` §5）。这些能力在基线文档中缺失，先按"存在"登记；行为验证见对应 `D-*` 路线图项。

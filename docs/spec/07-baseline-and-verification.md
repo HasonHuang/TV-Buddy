@@ -1,36 +1,27 @@
 # 07 · 基线与核对矩阵
-
 > 规范版本 v1.0 ｜ 2026-10-15 ｜ 基线版本：**iptv-proxy v0.8.2**
 
 ## 1. 基线来源
-
 基线是既有实测文档（写于 **2026-10-02 / 2026-10-03**）：
 
 ```
+
 HasonHuang/sontv/docs/iptv-proxy/
-├── markdown/README.md            # 导航 · 六模式速查 · 安全清单
-├── markdown/iptv.md              # 订阅接入入门
-├── markdown/fields-common.md     # 通用字段详解
-├── markdown/mode-proxy.md        # 反向代理
-├── markdown/mode-remux.md        # Remux
-├── markdown/mode-dash.md         # DASH
-├── markdown/mode-redirect.md     # 302 跳转
-├── markdown/mode-rewrite.md      # URL 改写
-├── markdown/mode-passthrough.md  # 直链
-├── markdown/resource.md          # 资源占用实测
-├── markdown/panel.md             # 面板 13 页 · 配置 · 运维
-├── markdown/disguise-analysis.md # 切片伪装字节级验证
-├── iptv-proxy-handbook.html      # 可视化上手页
-└── iptv-proxy-reference.html     # 参考页
+├── markdown/README.md             # 导航 · 六模式速查 · 安全清单
+├── markdown/iptv.md               # 订阅接入入门
+├── markdown/fields-common.md      # 通用字段详解
+├── markdown/mode-{proxy,remux,dash,redirect,rewrite,passthrough}.md   # 六模式：反代/Remux/DASH/302 跳转/URL 改写/直链
+├── markdown/resource.md           # 资源占用实测
+├── markdown/panel.md              # 面板 13 页 · 配置 · 运维
+├── markdown/disguise-analysis.md  # 切片伪装字节级验证
+└── iptv-proxy-{handbook,reference}.html   # 可视化上手页 / 参考页
+
 ```
 
 **基线是"引用"关系**：本仓库产出**引用**基线，不复制其内容。
-
-> **规范正文**：基线的规范化整理见 [`08-target-spec.md`](08-target-spec.md)，
-> 其条目以 `S-*` 规格 ID 标识。本文件的核对矩阵应引用这些 ID（第 2.1 节为节选）。
+> **规范正文**：基线的规范化整理见 [`08-target-spec.md`](08-target-spec.md)，其条目以 `S-*` 规格 ID 标识。本文件的核对矩阵应引用这些 ID（第 2.1 节为节选）。
 
 ## 2. 核对矩阵（收尾必填）
-
 对每条基线结论，标注本次核验结果：
 
 | 状态 | 含义 |
@@ -141,13 +132,7 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-LOGO-03/04 | 动效 + 改名/删除同步引用 | `.orig/` 备份；`updated_channels`/`cleared_channels` | ✅ |
 
 ## 3. 差异登记
-
-出现 `⚠️ 差异` 时，在 `docs/findings/` 下建独立小节，包含：
-
-1. 基线的原文结论与出处；
-2. 本次证据（命令 / Evidence ID / 环境）；
-3. 差异范围（是否版本差异、架构差异、环境差异）；
-4. 处置（更新基线建议 / 待复测 / 已澄清）。
+出现 `⚠️ 差异` 时，在 `docs/findings/` 下建独立小节，写明四项：基线的原文结论与出处；本次证据（命令 / Evidence ID / 环境）；差异范围（版本/架构/环境差异）；处置（更新基线建议 / 待复测 / 已澄清）。
 
 ### 3.1 差异清单
 
@@ -160,38 +145,24 @@ HasonHuang/sontv/docs/iptv-proxy/
 | `D-005` | `rewrite` + MPD：输出被逐行当作相对 URL 绝对化，结果不可播放（非基线所述「直连 CDN」） | 实现缺陷/文档不符 | 🔶 已记录（v0.8.2） |
 
 **`D-002` 详情**
-
-- 基线原文（`08` §6 `S-SUB-03`）：输出可区分两类——手动/导入频道 `group-title=<显示名>`；**聚合频道 `group-title=<分组ID>`**。
-- 证据（v0.8.2，实例 `inst/02`）：聚合条目 `group-title` 为**上游分组名字符串**（或 `map`/`merge` 后的名），**不是本地分组 ID**；两类的真正差异在 **URL**（本地反代 `/<gid>/<cid>.m3u8` vs 上游原始地址）。
-  见 [`../findings/dynamic/08-import-backup-edge.md`](../findings/dynamic/08-import-backup-edge.md) §4。
+- 基线原文（`08` §6 `S-SUB-03`）：手动/导入频道 `group-title=<显示名>`；**聚合频道 `group-title=<分组ID>`**（不同代码路径）。
+- 证据（v0.8.2，实例 `inst/02`）：聚合条目 `group-title` 为**上游分组名字符串**（或 `map`/`merge` 后的名），**不是本地分组 ID**；两类的真正差异在 **URL**（本地反代 `/<gid>/<cid>.m3u8` vs 上游原始地址）。见 [`../findings/dynamic/08-import-backup-edge.md`](../findings/dynamic/08-import-backup-edge.md) §4。
 - 差异范围：**文档描述与实际实现不符**（非版本/架构差异）。
 - 处置：**已澄清**——`S-SUB-03` 标记 ❌ 并按观测修正；建议上游文档同步修订。
 
 **`D-001` 详情**
-
-- 基线原文：`07` 头部与 `08` 标题均标注目标为 **iptv-proxy v0.8.2**（基线实测于 2026-10-02/03）。
-- 现象：上游 `main` 随构建变动，当前 `main` 实为 **v0.8.8**（非 v0.8.2）。
-- 证据：Rust 版本常量 `env!("CARGO_PKG_VERSION")` 落在固定 `.rodata` 槽
-  `…local_path.m3u8start_epoch<VER>logo…`：`d302316fb8`=**0.8.2**、`b6331774f8`(main)=**0.8.8**。
-  见 [`../findings/static/01-sample-packing-and-toolchain.md`](../findings/static/01-sample-packing-and-toolchain.md) §5。
-- 差异范围：**版本差异**（非架构/环境）。上游**无 tag/release**，须以**提交 SHA**锚定。
-- 处置：**已解决**——主分析对象改用 **v0.8.2 = `d302316fb8`**（与基线一致），登记于
-  [`../findings/artifact.md`](../findings/artifact.md) §2.1。`main`(v0.8.8) 仅作**差异对照**，不作主分析对象。
+- 基线原文：`07` 头部与 `08` 标题均标注目标为 **iptv-proxy v0.8.2**（基线实测于 2026-10-02/03）。现象：上游 `main` 当前实为 **v0.8.8**（非 v0.8.2）。
+- 证据：Rust 版本常量 `env!("CARGO_PKG_VERSION")` 落在固定 `.rodata` 槽 `…local_path.m3u8start_epoch<VER>logo…`：`d302316fb8`=**0.8.2**、`b6331774f8`(main)=**0.8.8**。见 [`../findings/static/01-sample-packing-and-toolchain.md`](../findings/static/01-sample-packing-and-toolchain.md) §5。
+- 差异范围：**版本差异**（非架构/环境）；上游**无 tag/release**，须以**提交 SHA**锚定。
+- 处置：**已解决**——主分析对象改用 **v0.8.2 = `d302316fb8`**（与基线一致），登记于 [`../findings/artifact.md`](../findings/artifact.md) §2.1；`main`(v0.8.8) 仅作**差异对照**。
 
 **`D-005` 详情**
-
 - 基线原文（`08` §5 `S-MODE-10`）：`Rewrite + MPD` / `Redirect + MPD` → **直连 CDN**（不转封装）。
-- 证据（v0.8.2，主实例，2026-10-18）：`redirect` + MPD → **302 上游**（符合）；`rewrite` + MPD →
-  **200 `application/dash+xml` 但正文损坏**：每一行被当作相对 URL 拼接为
-  `http://host.docker.internal:9999/<URL 编码后的整行>`（连 `<?xml…?>` 也被拼上）。
-  见 [`../findings/dynamic/02-modes-and-watchdog.md`](../findings/dynamic/02-modes-and-watchdog.md) §9。
+- 证据（v0.8.2，主实例，2026-10-18）：`redirect` + MPD → **302 上游**（符合）；`rewrite` + MPD → **200 `application/dash+xml` 但正文损坏**：每一行被当作相对 URL 拼为 `http://host.docker.internal:9999/<URL 编码后的整行>`（连 `<?xml…?>` 也被拼上）。见 [`../findings/dynamic/02-modes-and-watchdog.md`](../findings/dynamic/02-modes-and-watchdog.md) §9。
 - 差异范围：**实现缺陷**（HLS 绝对化逻辑被套用到 MPD），非版本/架构差异。
 - 处置：**已记录**；`S-MODE-10` 标记 ⚠️（redirect 部分 ✅、rewrite 部分 ❌）。
 
-## 4. 收敛条件
-
-"本版本逆向完成"须同时满足：
-
+## 4. 收敛条件（"本版本逆向完成"须同时满足）
 - [ ] 目标指纹已登记；
 - [ ] 静态画像（段/符号/字符串/加固）已出；
 - [ ] 六种模式行为已（静态或动态）覆盖；

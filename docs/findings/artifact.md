@@ -1,33 +1,22 @@
 # 目标指纹与取得记录（artifact）
-
-> 遵循 [`../spec/01-target-and-scope.md`](../spec/01-target-and-scope.md) §1、§2。
-> **在登记指纹前，任何"对目标的分析"都必须标注所分析的具体副本来源。**
+> 遵循 [`../spec/01-target-and-scope.md`](../spec/01-target-and-scope.md) §1、§2。**登记指纹前，任何"对目标的分析"必须先标注所分析副本的来源。**
 
 ## 1. 取得
-
-- 来源仓库：`YanG-1989/rust`，子目录 `IPTV Proxy/`。**源码未公开**，仓库只托管预编译产物。
-- 取得方式：**raw 直取指定提交的产物**。该仓库**无 tag / 无 release**。
-  - 模板：`https://raw.githubusercontent.com/YanG-1989/rust/<sha>/IPTV%20Proxy/iptv-proxy-linux-{arch}`
-- 取得时间：**2026-10-15/16**（本地，Asia/Shanghai）
+- 来源仓库：`YanG-1989/rust`，子目录 `IPTV Proxy/`。**源码未公开**，仓库只托管预编译产物，且**无 tag / 无 release**。
+- 取得方式：**raw 直取指定提交的产物**。模板：`https://raw.githubusercontent.com/YanG-1989/rust/<sha>/IPTV%20Proxy/iptv-proxy-linux-{arch}`。
+- 取得时间：**2026-10-15/16**（本地，Asia/Shanghai）。
+- 本地布局（`samples/` **已 gitignore**，只登记指纹）：`samples/v0.8.2/`（主）与 `samples/v0.8.8/`（次）；各含 `iptv-proxy-linux-{arm64,amd64}` 与 `unpacked/`。
 
 | 角色 | 版本 | 上游提交 | 提交时间 | 说明 |
 | --- | --- | --- | --- | --- |
 | **主分析对象** | **v0.8.2** | `d302316fb8` | 2026-09-09 | **与基线一致**（基线 v0.8.2，实测 2026-10-02/03） |
 | 对照（次） | v0.8.8 | `b6331774f8` | 2026-10-15 | 当前 `main`，用于版本差异比对 |
 
-> **为何选 `d302316fb8` 作 v0.8.2**：基线文档（2026-10-02/03）面板显示版本 `0.8.2`。
-> 上游该时段唯一的产物提交是 `d302316fb8`（2026-09-09）；其后 `ae6bf91bb1`（`2026-10-03T18:05Z` = **CST 10-04 02:05**，即 v0.8.8）。
-> 该产物内嵌版本常量确为 **`0.8.2`**（见 §5）。证据见
-> [`static/01-sample-packing-and-toolchain.md`](static/01-sample-packing-and-toolchain.md) §5。
-
-- 本地布局（`samples/` **已 gitignore**，只登记指纹）：
-  - `samples/v0.8.2/`（主）：`iptv-proxy-linux-{arm64,amd64}` + `unpacked/`
-  - `samples/v0.8.8/`（次）：同上
+> **为何选 `d302316fb8` 作 v0.8.2**：基线文档（2026-10-02/03）面板显示版本 `0.8.2`。上游该时段唯一的产物提交是 `d302316fb8`（2026-09-09）；其后为 `ae6bf91bb1`（`2026-10-03T18:05Z` = **CST 10-04 02:05**，即 v0.8.8）。该产物内嵌版本常量确为 **`0.8.2`**（见 §5）。证据见 [`static/01-sample-packing-and-toolchain.md`](static/01-sample-packing-and-toolchain.md) §5。
 
 ## 2. 指纹登记
 
 ### 2.1 v0.8.2（主分析对象，`d302316fb8`）
-
 **发布产物（加壳态，上游分发原件）**
 
 | 文件 | sha256 | 字节 | `file` 结果 |
@@ -69,35 +58,24 @@
 ## 4. 采集命令（可复现）
 
 ```bash
-SHA=d302316fb8            # v0.8.2
-for a in arm64 amd64; do
-  curl -fsSL "https://raw.githubusercontent.com/YanG-1989/rust/$SHA/IPTV%20Proxy/iptv-proxy-linux-$a" \
-    -o "samples/v0.8.2/iptv-proxy-linux-$a"
-done
+
+curl -fsSL "https://raw.githubusercontent.com/YanG-1989/rust/d302316fb8/IPTV%20Proxy/iptv-proxy-linux-arm64" -o samples/v0.8.2/iptv-proxy-linux-arm64   # amd64 同理
 shasum -a 256 samples/v0.8.2/iptv-proxy-linux-arm64
 file samples/v0.8.2/iptv-proxy-linux-arm64
-
 # 脱壳（容器内官方 upx，跨格式可解）
 docker run --rm -v "$PWD/samples:/s" --platform linux/arm64 -w /s ubuntu:24.04 bash -c '
   apt-get update -qq && apt-get install -y -qq upx-ucl binutils file >/dev/null
-  mkdir -p v0.8.2/unpacked
-  cp v0.8.2/iptv-proxy-linux-arm64 v0.8.2/unpacked/iptv-proxy-arm64
+  mkdir -p v0.8.2/unpacked && cp v0.8.2/iptv-proxy-linux-arm64 v0.8.2/unpacked/iptv-proxy-arm64
   upx -d v0.8.2/unpacked/iptv-proxy-arm64'
+
 ```
 
 ## 5. 版本判定（为何是 v0.8.2）
-
-- Rust 用 `env!("CARGO_PKG_VERSION")` 把版本写成**编译期常量字符串**。
-- 该常量固定落在 `.rodata` 的同一"字符串槽"：`…local_path.m3u8start_epoch**<VER>**logo…`。
+- Rust 用 `env!("CARGO_PKG_VERSION")` 把版本写成**编译期常量字符串**，固定落在 `.rodata` 的同一"字符串槽"：`…local_path.m3u8start_epoch**<VER>**logo…`。
 - 实测该槽取值：`d302316fb8` → **`0.8.2`**；`b6331774f8`（main）→ **`0.8.8`**。
-- 旁证：`d302316fb8` 内嵌面板 `[vX.Y.Z]` 标注最高为 **v0.8.1**（面板改动标注会**滞后**于版本号）；main 最高为 `[v0.8.9]` 而版本常量为 `0.8.8`，说明标注可**超前**。
-
-> 结论：**v0.8.2 = `d302316fb8`**（主分析对象）。main 实为 **v0.8.8**（非 0.8.9）。
+- 旁证：`d302316fb8` 内嵌面板 `[vX.Y.Z]` 标注最高为 **v0.8.1**（面板改动标注**滞后**于版本号）；main 最高为 `[v0.8.9]` 而版本常量为 `0.8.8`，说明标注可**超前**。
+> 结论：**v0.8.2 = `d302316fb8`**（主分析对象）；main 实为 **v0.8.8**（非 0.8.9）。
 
 ## 6. 备注
-
-- 分析副本**只**用 Linux 产物（arm64 主、amd64 对照），与范围一致。
-- 上游**无 tag/release**，`main` 随构建变动；**必须以提交 SHA 作锚点**才能复现。
-- 二进制提交历史（arm64 产物）：
-  `d302316fb8`(2026-09-09, **v0.8.2**) / `ae6bf91bb1`(2026-10-03, v0.8.8) / `4fa239b1fb`(10-04) /
-  `16af7f4c75`(10-05) / `bbb5055769`(10-05) / `86c682c526`(10-07) / `b6331774f8`(10-15, v0.8.8)。
+- 分析副本**只**用 Linux 产物（arm64 主、amd64 对照），与范围一致。上游**无 tag/release**，`main` 随构建变动，**必须以提交 SHA 作锚点**才能复现。
+- 二进制提交历史（arm64 产物）：`d302316fb8`(2026-09-09, **v0.8.2**) / `ae6bf91bb1`(2026-10-03, v0.8.8) / `4fa239b1fb`(10-04) / `16af7f4c75`(10-05) / `bbb5055769`(10-05) / `86c682c526`(10-07) / `b6331774f8`(10-15, v0.8.8)。

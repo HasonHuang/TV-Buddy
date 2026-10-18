@@ -25,7 +25,9 @@
 安装脚本（公开）：
 
 ```bash
+
 bash <(curl -fsSL https://raw.githubusercontent.com/YanG-1989/rust/main/IPTV%20Proxy/iptv-proxy.sh)
+
 ```
 
 - 脚本按 CPU 架构（amd64 / arm64 / armv7）下载对应二进制。

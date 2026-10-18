@@ -14,6 +14,7 @@
 本仓库（`rea-iptv`）内：
 
 ```
+
 docs/
 ├── spec/          # 本规范（只读参考，改前先读 README）
 └── findings/      # 逆向发现（分析产出）
@@ -21,6 +22,7 @@ docs/
     ├── artifact.md        # 目标指纹与取得记录
     ├── static/            # 静态分析
     └── dynamic/           # 动态分析
+
 ```
 
 > 基线文档位于**另一个仓库** `HasonHuang/sontv/docs/iptv-proxy/`；
@@ -36,6 +38,7 @@ docs/
 > 目标版本：vX.Y.Z ｜ 目标 SHA-256：<sha256> ｜ 架构：arm64
 > 采集日期：YYYY-MM-DD ｜ 环境：<platform/arch/isolation>
 > 结论级别：观测 / 推断（逐条标注）
+
 ```
 
 正文要求：

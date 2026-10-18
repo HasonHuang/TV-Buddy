@@ -71,10 +71,12 @@
 ## 4. 工具清单（容器内建议）
 
 ```bash
+
 apt-get update && apt-get install -y \
   gdb rizin strace ltrace tcpdump file binutils \
   python3 curl
 # Frida：容器内运行 frida-server（版本与 REA 侧 client 对齐）
+
 ```
 
 ## 5. REA 使用规范
