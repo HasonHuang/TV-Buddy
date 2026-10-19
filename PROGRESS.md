@@ -65,6 +65,7 @@
 | 项 | 状态 | 结果 / 位置 |
 | --- | --- | --- |
 | E1 技术选型 | ✅ | [`design/01-tech-selection.md`](docs/design/01-tech-selection.md)（Rust + axum/tokio；Vite+React 面板嵌入；drop-in 兼容；首期 P0） |
+| E1b UI 参考截图 | ✅ | [`design/reference/`](docs/design/reference/)（30 张：13 页 + 13 弹窗 + 4 独立页；含功能↔证据映射） |
 | E2 架构与模块 | ⏳ | `design/02-architecture.md` |
 | E3 HTTP 契约 | ⏳ | `design/03-http-contract.md` |
 | E4 配置与存储 | ⏳ | `design/04-config-and-storage.md` |
@@ -126,6 +127,7 @@
 | 2026-10-18 | Phase 4：R3 阶段性报告 | ✅ `findings/report-stage-01.md` |
 | 2026-10-19 | 全库文档精简：删中间过程与重复叙述，保留全部编号/数字/状态；空行规范化 | ✅ 正文约 −25%~−30% |
 | 2026-10-19 | 实现阶段启动 · **E1 技术选型**（Rust + axum；Vite+React 面板嵌入；drop-in；首期 P0） | ✅ [`design/01-tech-selection.md`](docs/design/01-tech-selection.md) |
+| 2026-10-19 | **E1b UI 参考截图**：启动目标主实例造夹具，采集 30 张界面截图并映射功能与证据 | ✅ [`design/reference/`](docs/design/reference/) |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 
