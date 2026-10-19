@@ -105,11 +105,29 @@
 └─ iptv-proxy.sh       启停脚本
 ```
 
-| 项 | 设计 | 依据 |
+| 项 | 实现 | 依据 |
 | --- | --- | --- |
 | 目标平台 | `aarch64-unknown-linux-musl`、`x86_64-unknown-linux-musl` | 需求 |
-| 交叉编译 | `cross`（Docker）产出静态二进制 | ADR（E1） |
+| 交叉编译 | Docker `rust:1-alpine`：镜像宿主三元组本身就是 `*-linux-musl`，直接 `cargo build --release` 得静态二进制 | `scripts/build-release.sh` |
+| 依赖来源 | 宿主 `~/.cargo/registry` 与 `~/.cargo/git` 挂进容器，`--offline` 构建 | 容器无外网 |
+| 目标目录 | `CARGO_TARGET_DIR=target/pack-<arch>`，不污染本机构建 | — |
+| 产物校验 | `scripts/verify-release.sh`：`ldd` 无动态依赖、能启动、`/health` 返回 `ok` | `scripts/verify-release.sh` |
 | 服务 | systemd 单元；Alpine 用 OpenRC | S-ENV-04 |
+
+发布包内容（`dist/iptv-proxy-<version>-<arch>.tar.gz`）：
+
+```text
+iptv-proxy-<version>-<arch>/
+├─ iptv-proxy            静态 musl 二进制
+├─ config.toml.example   首次安装复制为 config.toml
+├─ iptv-proxy.sh         启停脚本（start/stop/restart/status/log）
+├─ install.sh            安装到 /opt/iptv-proxy，注册服务
+├─ iptv-proxy.service    systemd 单元
+└─ iptv-proxy.openrc     Alpine OpenRC 服务
+```
+
+> 说明：本机访问 `github.com` 的 release 资产与 `static.rust-lang.org` 会被中间设备断开 TLS，
+> 因此不用 `cross`，改用 Docker Hub 可用的 `rust:1-alpine` 完成双架构静态构建。
 | 备份（P2） | `tar.gz` 含 `config.toml` + `cache/logos` + `schedule.json`；恢复时原配置另存 `config.toml.bak` | S-BAK-01/02、F-013 §9 |
 
 ## 7. 未决问题

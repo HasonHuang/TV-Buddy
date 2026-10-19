@@ -82,6 +82,19 @@ frontend/          Vite + React + TS 面板（4 页）
 scripts/           构建与冒烟测试脚本
 ```
 
+## 发布与打包
+
+```bash
+scripts/build-release.sh            # 构建 amd64 与 arm64 两个静态 musl 包
+scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
+```
+
+产物在 `dist/iptv-proxy-<version>-<arch>.tar.gz`，含二进制、配置样例、启停脚本、安装脚本与 systemd/OpenRC 单元。
+
+- 构建用 Docker `rust:1-alpine`：镜像宿主三元组即 `*-linux-musl`，直接产出静态二进制。
+- 容器无外网，依赖来自宿主 `~/.cargo` 缓存（`--offline`）。
+- 安装：解包后 `sudo ./install.sh`，默认装到 `/opt/iptv-proxy`。
+
 ## 运维
 
 - 配置热重载：改 `config.toml` 即生效（`[epg]`、`[cache].disk_path` 需重启，与目标一致）。

@@ -3,11 +3,7 @@
 //! 契约见 [`docs/design/03-http-contract.md`](../docs/design/03-http-contract.md) §4、§4.2。
 //! 证据：S-MODE-08/09/11/13/14/15/16/18。
 
-use std::{
-    collections::HashMap,
-    sync::Mutex,
-    time::Instant,
-};
+use std::{collections::HashMap, sync::Mutex, time::Instant};
 
 /// 带每项 TTL 的地址缓存。
 #[derive(Default)]
@@ -39,7 +35,10 @@ impl AddressCache {
 
 /// 是否为「解析最佳画质」跳转方式。
 pub fn wants_best_quality(mode: &str) -> bool {
-    matches!(mode, "best" | "auto" | "resolve" | "best_quality" | "解析最佳画质")
+    matches!(
+        mode,
+        "best" | "auto" | "resolve" | "best_quality" | "解析最佳画质"
+    )
 }
 
 /// 生效的上游地址缓存时长。0 表示用默认 300 秒（S-MODE-08）。
@@ -72,7 +71,11 @@ pub fn best_variant(playlist: &str, base: &str) -> Option<String> {
             continue;
         };
         let absolute = absolute(base, trimmed);
-        if best.as_ref().map(|(level, _)| bandwidth > *level).unwrap_or(true) {
+        if best
+            .as_ref()
+            .map(|(level, _)| bandwidth > *level)
+            .unwrap_or(true)
+        {
             best = Some((bandwidth, absolute));
         }
     }

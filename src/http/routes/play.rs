@@ -14,10 +14,7 @@ use axum::{
 use crate::{playlist, state::AppState};
 
 /// `GET /playlist.m3u`。
-pub async fn total_playlist(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Response {
+pub async fn total_playlist(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let config = state.snapshot();
     let token = token_for(&state, &config);
     let body = playlist::render_total(&config, &base_url(&headers), token.as_deref());

@@ -117,7 +117,10 @@ pub async fn delete_group(
 }
 
 /// `GET /panel/api/groups/export`——顶层数组（F-013 §1）。
-pub async fn export_all(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
+pub async fn export_all(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
     let config = state.snapshot();
     Json(serde_json::to_value(&config.groups).unwrap_or(Value::Array(Vec::new())))
 }
@@ -132,9 +135,7 @@ pub async fn export_group(
     let group = config
         .group(&gid)
         .ok_or_else(|| ApiError::not_found("Group not found"))?;
-    Ok(Json(
-        serde_json::to_value(group).unwrap_or(Value::Null),
-    ))
+    Ok(Json(serde_json::to_value(group).unwrap_or(Value::Null)))
 }
 
 /// `POST /panel/api/groups/{gid}/channels`。

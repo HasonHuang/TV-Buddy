@@ -92,7 +92,8 @@ async fn redirect_entry(
     }
     let resolved = if proxy::modes::wants_best_quality(&group.redirect_mode) {
         match fetch(state, channel_url).await {
-            Ok(text) => proxy::modes::best_variant(&text, channel_url).unwrap_or_else(|| channel_url.to_string()),
+            Ok(text) => proxy::modes::best_variant(&text, channel_url)
+                .unwrap_or_else(|| channel_url.to_string()),
             // 失败不缓存（S-MODE-08）。
             Err(err) => {
                 tracing::warn!(url = %channel_url, error = %err, "解析上游主清单失败");
@@ -174,9 +175,10 @@ async fn dash_entry(
 /// Rewrite 响应：`text/plain` + `no-cache, must-revalidate`（S-MODE-09）。
 fn rewrite_response(body: String) -> Response {
     let mut response = Response::new(Body::from(body));
-    response
-        .headers_mut()
-        .insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
     insert_header(&mut response, header::CACHE_CONTROL, REWRITE_CACHE);
     response
 }
@@ -212,8 +214,8 @@ fn not_ready() -> Response {
 }
 
 /// Remux 预热响应（S-MODE-16）。
-fn warming_up() -> Response {    let mut response =
-        (StatusCode::SERVICE_UNAVAILABLE, "remux warming up").into_response();
+fn warming_up() -> Response {
+    let mut response = (StatusCode::SERVICE_UNAVAILABLE, "remux warming up").into_response();
     insert_header(&mut response, header::RETRY_AFTER, "2");
     insert_header(&mut response, header::CACHE_CONTROL, "no-store");
     response
@@ -236,7 +238,16 @@ pub async fn wildcard(
                 return placeholder(&config);
             };
             if group.mode == "proxy" {
-                proxy_entry(&state, &config, &gid, &cid, &url, &self_base(&headers), "m3u8").await
+                proxy_entry(
+                    &state,
+                    &config,
+                    &gid,
+                    &cid,
+                    &url,
+                    &self_base(&headers),
+                    "m3u8",
+                )
+                .await
             } else {
                 segment(&state, &gid, &cid, &rest).await
             }
@@ -418,7 +429,10 @@ fn self_base(headers: &HeaderMap) -> String {
         .get("x-forwarded-proto")
         .and_then(|value| value.to_str().ok())
         .unwrap_or("http");
-    match headers.get(header::HOST).and_then(|value| value.to_str().ok()) {
+    match headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+    {
         Some(host) if !host.is_empty() => format!("{scheme}://{host}"),
         _ => String::new(),
     }

@@ -1,0 +1,23 @@
+# IPTV Proxy 配置样例（首次安装时复制为 config.toml）
+# 键面对齐目标 v0.8.2；未列出的键取默认值。
+
+[server]
+bind = "[::]:19899"
+log_level = "info"
+
+[auth]
+token_enabled = false
+
+[cache]
+disk_path = "/opt/iptv-proxy/cache"
+
+[[groups]]
+id = "demo"
+name = "示例分组"
+mode = "proxy"
+access = "public"
+
+[[groups.channels]]
+id = "c1"
+name = "示例频道"
+url = "http://example.com/live.m3u8"

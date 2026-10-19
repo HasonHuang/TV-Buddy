@@ -38,7 +38,11 @@ pub fn spawn(state: Arc<AppState>) {
     let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         let Ok(event) = event else { return };
         // 只看配置文件的事件，避免日志文件写盘时误触发。
-        if event.paths.iter().any(|changed| same_file(changed, &watched)) {
+        if event
+            .paths
+            .iter()
+            .any(|changed| same_file(changed, &watched))
+        {
             let _ = tx.send(());
         }
     });

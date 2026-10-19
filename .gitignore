@@ -14,3 +14,6 @@ frontend/dist/
 
 # 运行时缓存（默认 [cache].disk_path = ./cache）
 /cache/
+
+# 发布产物（由 scripts/build-release.sh 生成）
+/dist/

@@ -80,7 +80,11 @@ impl Write for LogSink {
         let mut guard = self.file.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(file) = guard.as_mut() {
             file.write_all(buf)?;
-            if file.metadata().map(|meta| meta.len() >= FILE_LIMIT).unwrap_or(false) {
+            if file
+                .metadata()
+                .map(|meta| meta.len() >= FILE_LIMIT)
+                .unwrap_or(false)
+            {
                 // 目标行为：超过 5 MB 截断（S-CACHE-05）。
                 let _ = file.set_len(0);
                 let _ = file.write_all(b"[log truncated]\n");

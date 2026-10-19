@@ -109,8 +109,7 @@
 - 节奏：先写设计（`docs/design/`），再写 P0 代码；P0 完成后与目标实例逐条对拍。
 - 已完成：rustup 工具链（`rustc 1.99.1`）+ 两个 musl 目标；**M0 骨架**（配置读写、面板登录、内嵌 4 页前端、冒烟测试）；
   **M1 数据面**（分组/频道 CRUD、订阅导出、总/分组订阅与 `access` 过滤、播放 Token、分组管理页）。
-- 待办：**M4c 打包**——`cross` 双 musl 目标、`/opt/iptv-proxy` 布局、systemd/OpenRC 单元。
-- 待办（打包）：`cross` 交叉编译 musl 静态产物 + `/opt/iptv-proxy` 布局 + systemd/OpenRC。
+- 已完成：**M4c 打包**——双架构 musl 静态包、`/opt/iptv-proxy` 布局、systemd/OpenRC 单元（见 §3g）。
 
 ## 3c. M1 数据面（已完成）
 
@@ -238,7 +237,7 @@
 | --- | --- | --- |
 | `redirect`：入口 302 上游；地址按 `redirect_ttl` 缓存（0 → 300 s）；失败不缓存并跳 `error_url` | ✅ | `smoke-m3.sh`（上游请求计数 = 1） |
 | `redirect` + `解析最佳画质`：取主清单挑最高 `BANDWIDTH` 变体 | ✅ | `proxy::modes::best_variant`（单元测试 + 冒烟） |
-| `passthrough`：302 上游；不校验也不追加 Token | ✅ | `smoke-m3.sh` |
+| `passthrough`：302 上游；**校验 Token**（F-018 修正）；不追加 Token | ✅ | `smoke-m3.sh` |
 | `rewrite`：入口 200 `text/plain`，相对地址改绝对，切片客户端直连；清单缓存 ≈5 s | ✅ | `smoke-m3.sh` |
 | `remux`：恒 `503` + `Retry-After: 2` + `remux warming up`；首次抓上游分类记日志 | ✅ | `smoke-m3.sh` |
 | `dash`：30 s 就绪门；失败 `503 timeout waiting for master playlist`；正文透传 `application/dash+xml` | ✅ | `smoke-m3.sh` |
@@ -257,6 +256,21 @@
 | 指标：`GET /panel/api/stats`（请求数、分组请求数、清单/切片数、切片命中、上游失败、在线窗口） | ✅ | `src/stats.rs`（单元测试） |
 | 日志：`GET /panel/api/logs` 返回环形缓冲（500 行）；同时输出到标准输出与 `<配置目录>/iptv-proxy.log`，超 5 MB 截断 | ✅ | `src/logging.rs`（单元测试） |
 | 对拍（M4b）：同一夹具下 22 项用例，差异 0；发现并修正 11 处契约差异 | ✅ | `scripts/compare-p0.sh`、`design/reconciliation-report.md`、F-018 |
-| 未做（M4c）：`cross` 打包与发布布局 | ⏳ | `design/02` §14 |
+| 打包（M4c）：Docker 双架构静态包 + `/opt/iptv-proxy` 布局 + systemd/OpenRC | ✅ | §3g、`design/04` §6 |
 
-验证：`cargo test` 28 项；`smoke-m0.sh`…`smoke-m4.sh` 在 debug 与 release 均全绿。
+验证：`cargo test` 30 项；`smoke-m0.sh`…`smoke-m4.sh` 全绿。
+
+## 3g. M4c 打包（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 静态构建：`aarch64-unknown-linux-musl`、`x86_64-unknown-linux-musl` | ✅ | `scripts/build-release.sh`：Docker `rust:1-alpine`（镜像宿主三元组即 musl），依赖走宿主 `~/.cargo` 缓存 `--offline` |
+| 发布布局：`/opt/iptv-proxy`（二进制、配置样例、启停脚本、安装脚本、服务单元） | ✅ | `packaging/`、[`design/04`](docs/design/04-config-and-storage.md) §6 |
+| 产物校验：ELF 无 `PT_INTERP`、容器内启动、`/health` = `ok` | ✅ | `scripts/verify-release.sh`：arm64、amd64 均通过 |
+| 安装脚本：不覆盖已有配置；按存在性注册 systemd 或 OpenRC | ✅ | alpine:3.20 容器内 `install.sh` + `iptv-proxy.sh start/status/stop` 实测 |
+| 产物 | `dist/iptv-proxy-0.1.0-{arm64,amd64}.tar.gz`（2.5 / 2.7 MB，附 `.sha256`） | 不入库（`.gitignore` 已忽略 `/dist/`） |
+
+验证：`scripts/verify-release.sh arm64` 与 `... amd64` 均输出「静态链接 OK」「/health = ok」。
+
+> 说明：本机访问 `github.com` release 资产与 `static.rust-lang.org` 的 TLS 会被中途断开，
+> 因此不用 `cross`，改用 Docker Hub 可用的 `rust:1-alpine` 完成双架构构建。

@@ -1,0 +1,21 @@
+[Unit]
+Description=IPTV Proxy（目标 v0.8.2 兼容重实现）
+Documentation=https://github.com/HasonHuang/sontv
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/iptv-proxy
+ExecStart=/opt/iptv-proxy/iptv-proxy /opt/iptv-proxy/config.toml
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/iptv-proxy
+
+[Install]
+WantedBy=multi-user.target

@@ -88,12 +88,17 @@ pub fn best_variant(body: &str, base: &str) -> Option<(String, String)> {
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let Some(current) = attrs.take() else { continue };
+        let Some(current) = attrs.take() else {
+            continue;
+        };
         let Ok(url) = absolute_url(base, trimmed) else {
             continue;
         };
         let bandwidth = bandwidth_of(&current);
-        if best.as_ref().map_or(true, |(known, _, _)| bandwidth > *known) {
+        if best
+            .as_ref()
+            .map_or(true, |(known, _, _)| bandwidth > *known)
+        {
             best = Some((bandwidth, current, url));
         }
     }
@@ -205,7 +210,9 @@ fn absolute_url(base: &str, reference: &str) -> Result<String, url::ParseError> 
 /// 选择伪装扩展名：按频道序列轮换；伪装关闭或列表为空时用原扩展名。
 fn pick_ext(reference: &str, formats: &[String], index: usize) -> String {
     if !formats.is_empty() {
-        return formats[index % formats.len()].trim_start_matches('.').to_lowercase();
+        return formats[index % formats.len()]
+            .trim_start_matches('.')
+            .to_lowercase();
     }
     reference
         .rsplit_once('.')
@@ -258,7 +265,9 @@ mod tests {
         assert!(rendered
             .body
             .contains(&format!("http://self/g1/c1/{}_", prefix("g1", "c1"))));
-        assert!(rendered.body.contains(&format!("_{}.", rendered.segments[0].0)));
+        assert!(rendered
+            .body
+            .contains(&format!("_{}.", rendered.segments[0].0)));
         assert!(!rendered.body.contains("seg1.ts"));
     }
 
@@ -276,12 +285,17 @@ mod tests {
         );
         assert!(rendered.is_master);
         assert!(rendered.segments.is_empty());
-        assert!(rendered.body.contains("http://up.example/live/v0/index.m3u8"));
+        assert!(rendered
+            .body
+            .contains("http://up.example/live/v0/index.m3u8"));
     }
 
     #[test]
     fn target_duration_is_read() {
-        assert_eq!(target_duration("#EXTM3U\n#EXT-X-TARGETDURATION:12\n"), Some(12));
+        assert_eq!(
+            target_duration("#EXTM3U\n#EXT-X-TARGETDURATION:12\n"),
+            Some(12)
+        );
         assert_eq!(target_duration("#EXTM3U\n"), None);
     }
 

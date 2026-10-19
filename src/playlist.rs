@@ -3,7 +3,10 @@
 //! 契约见 [`docs/design/03-http-contract.md`](../docs/design/03-http-contract.md) §5。
 //! 证据：F-004、F-009、S-URL-02/04/07。
 
-use crate::config::{model::{Channel, Group}, Config};
+use crate::config::{
+    model::{Channel, Group},
+    Config,
+};
 
 /// 渲染失败的原因。
 #[derive(Debug, PartialEq, Eq)]
@@ -91,7 +94,13 @@ fn push_entry(
     }
 
     let ext = if group.format == "mpd" { "mpd" } else { "m3u8" };
-    let url = format!("{}/{}/{}.{}", base.trim_end_matches('/'), group.id, channel.id, ext);
+    let url = format!(
+        "{}/{}/{}.{}",
+        base.trim_end_matches('/'),
+        group.id,
+        channel.id,
+        ext
+    );
 
     // `open` 组免 Token，条目不带参数（F-009）。
     match token {

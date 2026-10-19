@@ -60,7 +60,8 @@ impl SegmentIndex {
     }
 
     /// 查索引：先内存，再磁盘。
-    pub fn get(&self, dir: &Path, gid: &str, cid: &str, suffix: &str) -> Option<Entry> {        if let Some(entry) = self.read().get(&Self::key(gid, cid, suffix)) {
+    pub fn get(&self, dir: &Path, gid: &str, cid: &str, suffix: &str) -> Option<Entry> {
+        if let Some(entry) = self.read().get(&Self::key(gid, cid, suffix)) {
             return Some(entry.clone());
         }
         let from_disk = load_index(dir, gid, cid).remove(suffix)?;
@@ -131,15 +132,26 @@ pub fn save_index(dir: &Path, gid: &str, cid: &str, entries: &[(String, String, 
 
 /// 切片正文缓存路径。
 pub fn segment_path(dir: &Path, gid: &str, cid: &str, suffix: &str, ext: &str) -> PathBuf {
-    dir.join("seg_bytes")
-        .join(format!("{}_{}_{}.{}", slug(gid), slug(cid), suffix, slug(ext)))
+    dir.join("seg_bytes").join(format!(
+        "{}_{}_{}.{}",
+        slug(gid),
+        slug(cid),
+        suffix,
+        slug(ext)
+    ))
 }
 
 /// 把标识压成文件名安全的形式。
 fn slug(value: &str) -> String {
     let mapped: String = value
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if mapped.is_empty() || mapped.len() > 48 {
         format!("{:x}", Sha256::digest(value.as_bytes()))[..16].to_string()
@@ -177,7 +189,13 @@ mod tests {
 
     #[test]
     fn segment_path_is_file_name_safe() {
-        let path = segment_path(Path::new("/tmp/cache"), "g/1", "c 1", "ab".repeat(16).as_str(), "jpg");
+        let path = segment_path(
+            Path::new("/tmp/cache"),
+            "g/1",
+            "c 1",
+            "ab".repeat(16).as_str(),
+            "jpg",
+        );
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         assert!(!name.contains('/'), "{name}");
     }

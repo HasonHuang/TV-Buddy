@@ -149,7 +149,7 @@
 | 项 | 结论 |
 | --- | --- |
 | 目标三元组 | `aarch64-unknown-linux-musl`、`x86_64-unknown-linux-musl`（静态） |
-| 构建工具 | `cargo` + `cross`（Docker，本机具备） |
+| 构建工具 | `cargo` + Docker `rust:1-alpine`（双架构静态构建，见 `design/04` §6） |
 | 前端构建 | `pnpm install && pnpm build` → `dist/` 嵌入 |
 | 发布物 | `iptv-proxy` 二进制（arm64/amd64）+ 安装脚本 |
 | 服务单元 | systemd（Alpine 用 OpenRC），`/opt/iptv-proxy` 布局 | 
