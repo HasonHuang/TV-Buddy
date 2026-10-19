@@ -150,9 +150,11 @@
 | 2026-10-19 | **E4 配置与存储 + E5 前端设计**：热重载矩阵与存储布局、13 分区与弹窗体系、组件与交互约定 | ✅ [`design/04`](docs/design/04-config-and-storage.md)、[`design/05`](docs/design/05-frontend.md)（`aba1d1e`） |
 | 2026-10-19 | **E6 · M1 数据面**：分组/频道 CRUD（局部更新、409/404 错误串）、导出、总/分组订阅与 `access` 过滤、播放 Token；面板分组管理页；`scripts/smoke-m1.sh` 全绿 | ✅ 见 §3c |
 | 2026-10-19 | **E6 · M2 播放链路**：入口清单 → 媒体清单 → 伪装切片（`<P>_<S>.<ext>`）、切片索引与字节缓存、缓存窗口（首写 `public` / 命中 `private`）、302 占位、Token 校验；`scripts/smoke-m2.sh` 全绿 | ✅ 见 §3d |
-| 2026-10-19 | **E6 · M3 直连模式**：`redirect`（含解析最佳画质、地址 TTL 缓存）、`rewrite`（清单绝对化）、`passthrough`（302 免 Token）、`remux` 预热 503、`dash` 30 s 就绪门；`scripts/smoke-m3.sh` 全绿 | ✅ 见 §3e |
-| 2026-10-20 | **目录结构**：改用「同名文件 + 目录」；新增 `src/lib.rs`，`main.rs` 只做启动 | ✅ | `cargo test` 30 项 |
+| 2026-10-19 | **E6 · M3 直连模式**：`redirect`（含解析最佳画质、地址 TTL 缓存）、`rewrite`（清单绝对化）、`passthrough`（302 上游，校验 Token）、`remux` 预热 503、`dash` 30 s 就绪门；`scripts/smoke-m3.sh` 全绿 | ✅ 见 §3e |
 | 2026-10-19 | **E6 · M4a 运维面**：配置热重载（只监视配置文件）、看门狗（连续 5 次失败 → 冷却 3600 s，重载即解除）、`cache/{stats,flush}`、`stats`、`logs`、日志文件 5 MB 截断；`scripts/smoke-m4.sh` 全绿 | ✅ 见 §3f |
+| 2026-10-20 | **M4b 对拍**：同一夹具下 22 项用例差异 0；修正代理分支、缓存窗口、Token 判断顺序、`passthrough` 校验等 11 处契约差异 | ✅ [`reconciliation-report.md`](docs/design/reconciliation-report.md)、F-018 |
+| 2026-10-20 | **目录结构**：改用「同名文件 + 目录」；新增 `src/lib.rs`，`main.rs` 只做启动 | ✅ `cargo test` 30 项 |
+| 2026-10-20 | **M4c 打包**：Docker `rust:1-alpine` 双架构静态包、`/opt/iptv-proxy` 布局、systemd/OpenRC 单元；`verify-release.sh` 两架构通过（静态链接 + `/health`） | ✅ 见 §3g |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 
