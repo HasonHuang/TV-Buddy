@@ -68,8 +68,8 @@
 | E1b UI 参考截图 | ✅ | [`design/reference/`](docs/design/reference/)（30 张：13 页 + 13 弹窗 + 4 独立页；含功能↔证据映射） |
 | E2 架构与模块 | ✅ | [`design/02-architecture.md`](docs/design/02-architecture.md)（分层、模块清单、流水线、状态、缓存/伪装设计、ADR、里程碑） |
 | E3 HTTP 契约 | ✅ | [`design/03-http-contract.md`](docs/design/03-http-contract.md)（公开/私有路由表、播放与订阅契约、access 矩阵、错误串、M1 清单） |
-| E4 配置与存储 | ⏳ | `design/04-config-and-storage.md` |
-| E5 前端设计 | ⏳ | `design/05-frontend.md` |
+| E4 配置与存储 | ✅ | [`design/04-config-and-storage.md`](docs/design/04-config-and-storage.md)（配置写入与热重载矩阵、存储布局、运行时数据、日志、发布布局） |
+| E5 前端设计 | ✅ | [`design/05-frontend.md`](docs/design/05-frontend.md)（技术形态、13 分区与弹窗体系、组件清单、交互约定、分期） |
 | E6 P0 实现 | 🔄 | **M0 骨架 ✅**；M1 数据面 → M2 播放链路 → M3 直连模式 → M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
 
 ## 2. 关键结论

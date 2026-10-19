@@ -27,8 +27,8 @@
 | [`02-architecture.md`](02-architecture.md) | 模块划分、进程模型、数据流 | ✅ 初稿（M0 骨架已按此实现） |
 | [`reference/`](reference/) | 目标 UI 参考截图（30 张）+ 功能与证据映射 | ✅ 已采集 |
 | `03-http-contract.md` | 路由表与接口契约 | ✅ 初稿（M1 按其 §9 实施） |
-| `04-config-and-storage.md` | 配置与存储细节 | ⏳ 待写 |
-| `05-frontend.md` | 前端页面与交互设计 | ⏳ 待写 |
+| `04-config-and-storage.md` | 配置与存储细节 | ✅ 初稿 |
+| `05-frontend.md` | 前端页面与交互设计 | ✅ 初稿 |
 
 ## 3. 写作要求
 
