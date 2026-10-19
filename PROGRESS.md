@@ -1,7 +1,7 @@
 # PROGRESS · IPTV Proxy 逆向任务
 
 > 本文件记录**任务计划**与**进度**。规则：**每处理完一项，立即更新本文件**。
-> 规范见 [`docs/spec/`](docs/spec/)。发现见 [`docs/findings/`](docs/findings/)。
+> 规范见 [`docs/spec/`](docs/spec/)。发现见 [`docs/findings/`](docs/findings/)。实现设计见 [`docs/design/`](docs/design/)。
 > 目标版本：**v0.8.2**（上游提交 `d302316fb8`）。
 
 ## 0. 任务目标
@@ -60,6 +60,17 @@
 | R2 核对矩阵回填 | ✅ | `07` §2.3 动态项覆盖 F-004…F-017（新增 S-DIS-17） |
 | R3 阶段性报告 | ✅ | [`findings/report-stage-01.md`](docs/findings/report-stage-01.md) |
 
+### Phase 5 · 实现设计（进行中）
+
+| 项 | 状态 | 结果 / 位置 |
+| --- | --- | --- |
+| E1 技术选型 | ✅ | [`design/01-tech-selection.md`](docs/design/01-tech-selection.md)（Rust + axum/tokio；Vite+React 面板嵌入；drop-in 兼容；首期 P0） |
+| E2 架构与模块 | ⏳ | `design/02-architecture.md` |
+| E3 HTTP 契约 | ⏳ | `design/03-http-contract.md` |
+| E4 配置与存储 | ⏳ | `design/04-config-and-storage.md` |
+| E5 前端设计 | ⏳ | `design/05-frontend.md` |
+| E6 P0 实现 | ⏳ | — |
+
 ## 2. 关键结论
 
 1. 样本：UPX 4.24 加壳；脱壳后 Rust 1.98.1、静态、非 PIE。
@@ -91,6 +102,13 @@
 - **收尾**：主实例配置已还原默认；停 6 个测试实例与容器；`samples/work/` 下运行产物不纳入版本控制。
 - 阶段报告：[`docs/findings/report-stage-01.md`](docs/findings/report-stage-01.md)。
 
+## 3b. 下一步（实现阶段）
+
+- 阶段目标：按 [`docs/spec/08`](docs/spec/08-target-spec.md) 重实现 IPTV Proxy v0.8.2 的功能，**drop-in 兼容**。
+- 节奏：先写设计（`docs/design/`），再写 P0 代码；P0 完成后与目标实例逐条对拍。
+- 待办：E2 架构与模块 → E3 HTTP 契约 → E4 配置与存储 → E5 前端设计 → E6 P0 实现。
+- 前置：安装 rustup 工具链（本机 `rustc 1.68.2` 过旧）；交叉编译目标 `aarch64/x86_64-unknown-linux-musl`。
+
 ## 4. 进度日志
 
 | 日期 | 事项 | 结果 |
@@ -107,6 +125,7 @@
 | 2026-10-18 | 收尾：**S7** 伪装前缀（F-017）；资产端点；一致性回填（spec/07-08 + 两个 README）；新增 `D-005`、`S-BUG-02` | ✅ |
 | 2026-10-18 | Phase 4：R3 阶段性报告 | ✅ `findings/report-stage-01.md` |
 | 2026-10-19 | 全库文档精简：删中间过程与重复叙述，保留全部编号/数字/状态；空行规范化 | ✅ 正文约 −25%~−30% |
+| 2026-10-19 | 实现阶段启动 · **E1 技术选型**（Rust + axum；Vite+React 面板嵌入；drop-in；首期 P0） | ✅ [`design/01-tech-selection.md`](docs/design/01-tech-selection.md) |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 
