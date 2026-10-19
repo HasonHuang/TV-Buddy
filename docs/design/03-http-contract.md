@@ -110,7 +110,19 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 | 主清单上游 | 变体地址**绝对化后透传**，不递归伪装 | 目标对嵌套清单另有处理 |
 | `#EXT-X-KEY` 等 | `URI="…"` 绝对化，不改名 | S-DIS-02（不改载荷） |
 | 上游失败 | `502` + `Upstream Error` | F-012 §3 错误串 |
-| 其他模式 | `remux`/`dash` 目前走同一代理链路；`redirect`/`rewrite`/`passthrough` 在 M3 | `design/02` §14 |
+
+### 4.2 直连模式（M3）
+
+| 模式 | 入口行为 | 细节 | 依据 |
+| --- | --- | --- | --- |
+| `redirect` | `302` 到上游 URL | `redirect_mode` = `解析最佳画质` 时先取主清单挑**最高码率**变体；地址按 `redirect_ttl`（0 → 300 s）缓存；失败不缓存，改跳 `error_url` | S-MODE-08/13 |
+| `passthrough` | `302` 到上游 URL | **不校验 Token**、不套 Token | S-MODE-11 |
+| `rewrite` | `200 text/plain` | 相对地址改绝对，切片客户端直连；清单缓存 ≈5 s | S-MODE-09/14 |
+| `remux` | `503` + `Retry-After: 2`，体 `remux warming up` | 转封装需 `ffmpeg`（P1）；首次请求抓上游并按 `hls`/`raw` 记日志（S-MODE-18：HLS 上游永不就绪） | S-MODE-16/18 |
+| `dash` | 上游正文透传（`application/dash+xml`） | 就绪门 30 s，超时 → `503 timeout waiting for master playlist`；MPD→HLS 转封装属 P1 | S-MODE-15 |
+| `proxy` | 代理链路（§4） | — | S-MODE-03 |
+
+> 差异：`remux`/`dash` 的转封装未实现（需 `ffmpeg`，见 ADR-04）。`proxy` 模式下的 MPD 正文与 `dash` 一样**原样透传**，避免按行改写破坏 XML。
 
 ## 5. 订阅契约
 

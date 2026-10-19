@@ -250,7 +250,7 @@ frontend/            # Vite + React + TS（独立目录）
 | M0 骨架 | 配置加载/写回、面板登录、静态页嵌入 | 能登录、能保存配置 |
 | M1 数据面 | 分组/频道 CRUD、总/分组订阅、access 过滤 | 订阅可导出且形状一致 |
 | M2 播放链路 | proxy 模式、切片伪装、缓存窗口、302 占位 | ✅ 已实现（`smoke-m2.sh`；入口/媒体清单/切片/占位/缓存窗口/Token 全绿） |
-| M3 直连模式 | redirect/rewrite/passthrough、redirect 缓存 | 三种模式对拍通过 |
+| M3 直连模式 | redirect/rewrite/passthrough、redirect 缓存 | ✅ 已实现（`smoke-m3.sh`；含 remux/dash 就绪语义与 Token 矩阵） |
 | M4 P0 收尾 | 看门狗、热重载、错误映射、对拍报告 | P0 验收判据全绿 |
 
 ## 15. 未决问题

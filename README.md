@@ -37,6 +37,7 @@ target/release/iptv-proxy config.toml
 scripts/smoke-m0.sh   # 健康检查、登录、状态、配置读写、鉴权、兜底
 scripts/smoke-m1.sh   # 分组/频道 CRUD、导出、订阅与 access 过滤、播放 Token
 scripts/smoke-m2.sh   # 播放链路、切片伪装、缓存窗口、302 占位（含伪上游）
+scripts/smoke-m3.sh   # 直连模式：redirect/rewrite/passthrough、remux/dash 就绪语义
 ```
 
 ## 接口（已实现）
@@ -73,10 +74,10 @@ frontend/          Vite + React + TS 面板（4 页）
 scripts/           构建与冒烟测试脚本
 ```
 
-## 已知限制（M2）
+## 已知限制（M3）
 
-- 仅 `proxy` 链路可用；`remux`/`dash` 暂走同一链路。`redirect`/`rewrite`/`passthrough` 在 M3 实现（`passthrough` 目前只在订阅里给上游原始地址）。
-- 主清单上游按绝对地址透传，不递归伪装；`remux` 预热 `503`、`dash` 就绪判定未实现。
-- 缓存无容量上限（与目标一致，见 F-015）；`cache/flush` 接口在 M2 之后补。
+- `remux` 恒 `503 remux warming up`，`dash` 只做 30 s 就绪门与正文透传：转封装需 `ffmpeg`，属 P1。
+- `proxy` 链路面向 HLS：媒体清单按行改写；MPD 正文原样透传。
+- 缓存无容量上限（与目标一致，见 F-015）；`cache/flush`、`stats`、`logs` 接口未实现（M4）。
 - 面板只实现概览与分组管理；其余分区显示为「待实现」。
 - `/epg`、`/logo`、`/unban` 仍是骨架页；EPG 未接入，订阅不输出 `x-tvg-url`。

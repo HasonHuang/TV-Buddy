@@ -14,7 +14,7 @@ use arc_swap::ArcSwap;
 use crate::{
     auth::{PlayTokenStore, SessionStore},
     config::Config,
-    proxy::{SegmentIndex, TtlCache},
+    proxy::{AddressCache, SegmentIndex, TtlCache},
 };
 
 pub struct AppState {
@@ -32,6 +32,8 @@ pub struct AppState {
     pub segments: SegmentIndex,
     /// 在线清单缓存（TTL 5 秒）。
     pub playlists: TtlCache,
+    /// 直连地址与模式分类缓存（每项自带 TTL）。
+    pub modes: AddressCache,
     /// 缓存根目录（`[cache].disk_path`）。
     pub cache_dir: PathBuf,
     /// 进程启动时刻。
@@ -56,6 +58,7 @@ impl AppState {
                 .unwrap_or_default(),
             segments: SegmentIndex::new(),
             playlists: TtlCache::new(Duration::from_secs(5)),
+            modes: AddressCache::new(),
             cache_dir,
             started: Instant::now(),
             write_lock: Mutex::new(()),

@@ -70,7 +70,7 @@
 | E3 HTTP 契约 | ✅ | [`design/03-http-contract.md`](docs/design/03-http-contract.md)（公开/私有路由表、播放与订阅契约、access 矩阵、错误串、M1 清单） |
 | E4 配置与存储 | ✅ | [`design/04-config-and-storage.md`](docs/design/04-config-and-storage.md)（配置写入与热重载矩阵、存储布局、运行时数据、日志、发布布局） |
 | E5 前端设计 | ✅ | [`design/05-frontend.md`](docs/design/05-frontend.md)（技术形态、13 分区与弹窗体系、组件清单、交互约定、分期） |
-| E6 P0 实现 | 🔄 | **M0 骨架 ✅、M1 数据面 ✅、M2 播放链路 ✅**；M3 直连模式 → M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
+| E6 P0 实现 | 🔄 | **M0 ✅、M1 ✅、M2 ✅、M3 ✅**；M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
 
 ## 2. 关键结论
 
@@ -109,7 +109,7 @@
 - 节奏：先写设计（`docs/design/`），再写 P0 代码；P0 完成后与目标实例逐条对拍。
 - 已完成：rustup 工具链（`rustc 1.99.1`）+ 两个 musl 目标；**M0 骨架**（配置读写、面板登录、内嵌 4 页前端、冒烟测试）；
   **M1 数据面**（分组/频道 CRUD、订阅导出、总/分组订阅与 `access` 过滤、播放 Token、分组管理页）。
-- 待办：**M3 直连模式**（`redirect`/`rewrite`/`passthrough` 的 302 与清单改写）→ M4 收尾（看门狗、对拍、打包）。
+- 待办：**M4 收尾**（看门狗与冷却、热重载、缓存/日志/指标接口、对拍报告、打包）。
 - 待办（打包）：`cross` 交叉编译 musl 静态产物 + `/opt/iptv-proxy` 布局 + systemd/OpenRC。
 
 ## 3c. M1 数据面（已完成）
@@ -151,6 +151,7 @@
 | 2026-10-19 | **E4 配置与存储 + E5 前端设计**：热重载矩阵与存储布局、13 分区与弹窗体系、组件与交互约定 | ✅ [`design/04`](docs/design/04-config-and-storage.md)、[`design/05`](docs/design/05-frontend.md)（`aba1d1e`） |
 | 2026-10-19 | **E6 · M1 数据面**：分组/频道 CRUD（局部更新、409/404 错误串）、导出、总/分组订阅与 `access` 过滤、播放 Token；面板分组管理页；`scripts/smoke-m1.sh` 全绿 | ✅ 见 §3c |
 | 2026-10-19 | **E6 · M2 播放链路**：入口清单 → 媒体清单 → 伪装切片（`<P>_<S>.<ext>`）、切片索引与字节缓存、缓存窗口（首写 `public` / 命中 `private`）、302 占位、Token 校验；`scripts/smoke-m2.sh` 全绿 | ✅ 见 §3d |
+| 2026-10-19 | **E6 · M3 直连模式**：`redirect`（含解析最佳画质、地址 TTL 缓存）、`rewrite`（清单绝对化）、`passthrough`（302 免 Token）、`remux` 预热 503、`dash` 30 s 就绪门；`scripts/smoke-m3.sh` 全绿 | ✅ 见 §3e |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 
@@ -228,3 +229,18 @@
 | 未做（属 M3/M4）：`redirect` 地址 TTL 缓存、`rewrite` 清单改写、`passthrough` 302、`remux` 预热 `503`、`dash` 就绪判定 | ⏳ | `design/02` §14 |
 
 验证：`cargo test` 18 项；`scripts/smoke-m0.sh`/`m1.sh`/`m2.sh` 在 debug 与 release 均全绿。
+
+## 3e. M3 直连模式（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `redirect`：入口 302 上游；地址按 `redirect_ttl` 缓存（0 → 300 s）；失败不缓存并跳 `error_url` | ✅ | `smoke-m3.sh`（上游请求计数 = 1） |
+| `redirect` + `解析最佳画质`：取主清单挑最高 `BANDWIDTH` 变体 | ✅ | `proxy::modes::best_variant`（单元测试 + 冒烟） |
+| `passthrough`：302 上游；不校验也不追加 Token | ✅ | `smoke-m3.sh` |
+| `rewrite`：入口 200 `text/plain`，相对地址改绝对，切片客户端直连；清单缓存 ≈5 s | ✅ | `smoke-m3.sh` |
+| `remux`：恒 `503` + `Retry-After: 2` + `remux warming up`；首次抓上游分类记日志 | ✅ | `smoke-m3.sh` |
+| `dash`：30 s 就绪门；失败 `503 timeout waiting for master playlist`；正文透传 `application/dash+xml` | ✅ | `smoke-m3.sh` |
+| MPD 正文（proxy 与 dash）原样透传，不按行改写 | ✅ | `stream.rs` 的 `looks_like_mpd` 分支 |
+| 未做（属 P1）：`remux`/`dash` 的 `ffmpeg` 转封装、DASH 轨道命名与片段容错 | ⏳ | ADR-04、S-MODE-06 |
+
+验证：`cargo test` 23 项；`smoke-m0.sh`…`smoke-m3.sh` 在 debug 与 release 均全绿。

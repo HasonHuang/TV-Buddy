@@ -4,9 +4,11 @@
 //! 证据：F-004、F-006、F-017。
 
 pub mod media;
+pub mod modes;
 pub mod segments;
 
 pub use media::{parse_segment, prefix, prefix_matches, rewrite_media};
+pub use modes::AddressCache;
 pub use segments::{save_index, segment_path, SegmentIndex};
 
 use std::{

@@ -1,4 +1,4 @@
-//! 播放链路：入口清单 → 媒体清单 → 伪装切片（M2）。
+//! 播放链路：入口清单 → 媒体清单 → 伪装切片（M2）与直连模式（M3）。
 //!
 //! 契约见 [`docs/design/03-http-contract.md`](../../../docs/design/03-http-contract.md) §4。
 
@@ -41,23 +41,167 @@ pub async fn entry(
     if group.access == "archived" {
         return placeholder(&config);
     }
-    if !group.channels.iter().any(|channel| channel.id == cid) {
+    let Some(channel) = group.channels.iter().find(|channel| channel.id == cid) else {
         return placeholder(&config);
+    };
+    // Passthrough 原样下发上游地址，不套 Token（S-MODE-11）。
+    if group.mode == "passthrough" {
+        return redirect(&channel.url);
     }
     if !token_ok(&state, &config, group, &query) {
         return redirect(&config.auth.token_failure_url);
     }
 
-    // M2 覆盖 proxy/remux/dash；redirect/rewrite/passthrough 在 M3 补齐。
-    let mut response = Response::new(Body::from(master_playlist(&gid, &cid)));
+    match group.mode.as_str() {
+        // 302 直连上游；缓存解析出的地址（S-MODE-08/13）。
+        "redirect" => redirect_entry(&state, &config, group, &cid, &channel.url).await,
+        // 清单绝对化，客户端直连上游切片（S-MODE-09/14）。
+        "rewrite" => rewrite_entry(&state, &config, group, &cid, &channel.url).await,
+        // 连续流转封装需 ffmpeg（P1）：恒 503 预热（S-MODE-16/18）。
+        "remux" => {
+            remux_classify(&state, group, &cid, &channel.url).await;
+            warming_up()
+        }
+        // 就绪门：30 秒内拿到上游主清单，否则 503（S-MODE-15）。
+        "dash" => dash_entry(&state, &config, group, &cid, &channel.url).await,
+        _ => {
+            let mut response = Response::new(Body::from(master_playlist(&gid, &cid)));
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(match ext.as_str() {
+                    "mpd" => "application/dash+xml",
+                    _ => "application/vnd.apple.mpegurl",
+                }),
+            );
+            insert_header(&mut response, header::CACHE_CONTROL, ENTRY_CACHE);
+            response
+        }
+    }
+}
+
+/// Redirect 模式：302 到上游；`解析最佳画质` 时先取主清单挑最高码率。
+async fn redirect_entry(
+    state: &Arc<AppState>,
+    config: &Config,
+    group: &Group,
+    cid: &str,
+    channel_url: &str,
+) -> Response {
+    let ttl = proxy::modes::effective_redirect_ttl(group.redirect_ttl);
+    let key = format!("redirect:{}:{cid}", group.id);
+    if let Some(url) = state.modes.get(&key, ttl) {
+        return redirect(&url);
+    }
+    let resolved = if proxy::modes::wants_best_quality(&group.redirect_mode) {
+        match fetch(state, channel_url).await {
+            Ok(text) => proxy::modes::best_variant(&text, channel_url).unwrap_or_else(|| channel_url.to_string()),
+            // 失败不缓存（S-MODE-08）。
+            Err(err) => {
+                tracing::warn!(url = %channel_url, error = %err, "解析上游主清单失败");
+                return redirect(&config.server.error_url);
+            }
+        }
+    } else {
+        channel_url.to_string()
+    };
+    state.modes.put(&key, resolved.clone());
+    redirect(&resolved)
+}
+
+/// Rewrite 模式：取一次清单，把相对地址改绝对，切片客户端直连（S-MODE-09）。
+async fn rewrite_entry(
+    state: &Arc<AppState>,
+    config: &Config,
+    group: &Group,
+    cid: &str,
+    channel_url: &str,
+) -> Response {
+    let key = format!("rw:{}:{cid}", group.id);
+    if let Some(body) = state.playlists.get(&key) {
+        return rewrite_response(body);
+    }
+    let upstream = match fetch(state, channel_url).await {
+        Ok(text) => text,
+        Err(err) => {
+            tracing::warn!(url = %channel_url, error = %err, "抓取上游清单失败");
+            let _ = config;
+            return (StatusCode::BAD_GATEWAY, "Upstream Error").into_response();
+        }
+    };
+    let rendered = proxy::rewrite_media(&upstream, channel_url, &group.id, cid, &[], false);
+    state.playlists.put(&key, rendered.body.clone());
+    rewrite_response(rendered.body)
+}
+
+/// DASH 模式：30 秒就绪门。转封装需 ffmpeg（P1），当前透传上游正文。
+async fn dash_entry(
+    state: &Arc<AppState>,
+    config: &Config,
+    group: &Group,
+    cid: &str,
+    channel_url: &str,
+) -> Response {
+    let key = format!("dash:{}:{cid}", group.id);
+    let body = match state.modes.get(&key, 30) {
+        Some(body) => body,
+        None => match fetch(state, channel_url).await {
+            Ok(body) => {
+                state.modes.put(&key, body.clone());
+                body
+            }
+            Err(err) => {
+                tracing::warn!(url = %channel_url, error = %err, "等待上游主清单超时");
+                let _ = config;
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "timeout waiting for master playlist",
+                )
+                    .into_response();
+            }
+        },
+    };
+    let mut response = Response::new(Body::from(body));
     response.headers_mut().insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_static(match ext.as_str() {
-            "mpd" => "application/dash+xml",
-            _ => "application/vnd.apple.mpegurl",
-        }),
+        HeaderValue::from_static("application/dash+xml"),
     );
     insert_header(&mut response, header::CACHE_CONTROL, ENTRY_CACHE);
+    response
+}
+
+/// Rewrite 响应：`text/plain`（S-MODE-09）。
+fn rewrite_response(body: String) -> Response {
+    let mut response = Response::new(Body::from(body));
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
+    insert_header(&mut response, header::CACHE_CONTROL, ENTRY_CACHE);
+    response
+}
+
+/// Remux：抓一次上游并分类，只在首次记录日志（S-MODE-18）。
+async fn remux_classify(state: &Arc<AppState>, group: &Group, cid: &str, channel_url: &str) {
+    let key = format!("remux:{}:{cid}", group.id);
+    if state.modes.get(&key, 3600).is_some() {
+        return;
+    }
+    let class = match fetch(state, channel_url).await {
+        Ok(body) if proxy::modes::looks_like_hls(&body) => "hls",
+        Ok(_) => "raw",
+        Err(err) => {
+            tracing::warn!(url = %channel_url, error = %err, "remux 预热抓取上游失败");
+            return;
+        }
+    };
+    tracing::warn!(group = %group.id, %cid, class, "remux 需要 ffmpeg，转封装未实现（P1）");
+    state.modes.put(&key, class.to_string());
+}
+
+/// Remux 预热响应（S-MODE-16）。
+fn warming_up() -> Response {    let mut response =
+        (StatusCode::SERVICE_UNAVAILABLE, "remux warming up").into_response();
+    insert_header(&mut response, header::RETRY_AFTER, "2");
+    insert_header(&mut response, header::CACHE_CONTROL, "no-store");
     response
 }
 
@@ -95,6 +239,12 @@ async fn media_playlist(state: &Arc<AppState>, gid: &str, cid: &str) -> Response
             return (StatusCode::BAD_GATEWAY, "Upstream Error").into_response();
         }
     };
+
+    // MPD/XML 原样透传，避免按行改写破坏正文（转封装属 P1）。
+    if proxy::modes::looks_like_mpd(&upstream) {
+        state.playlists.put(&cache_key, upstream.clone());
+        return playlist_response(upstream);
+    }
 
     let rendered = proxy::rewrite_media(
         &upstream,
