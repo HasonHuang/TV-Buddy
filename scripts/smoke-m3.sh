@@ -135,6 +135,10 @@ EOF
 
 python3 -m http.server "$UP" --directory "$WORK/up" >"$WORK/up.log" 2>&1 &
 UP_PID=$!
+for _ in $(seq 1 50); do
+  curl -fsS "http://127.0.0.1:$UP/seg1.ts" >/dev/null 2>&1 && break
+  sleep 0.1
+done
 "$BIN" "$CFG" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
@@ -176,6 +180,7 @@ check "选画质缓存地址" "1" "$(hits '/master.m3u8 ')"
 CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/rw/c3.m3u8")
 check "改写 200" "200" "$CODE"
 check "改写类型" "text/plain; charset=utf-8" "$(hfile "$WORK/h" content-type)"
+check "改写缓存头" "no-cache, must-revalidate" "$(hfile "$WORK/h" cache-control)"
 check "改写切片绝对化" "1" "$(grep -c "^http://127.0.0.1:$UP/seg1.ts$" "$WORK/body")"
 check "改写相对地址解析" "1" "$(grep -c "^http://127.0.0.1:$UP/sub/seg2.ts$" "$WORK/body")"
 check "改写不含本地路径" "0" "$(grep -c '/rw/c3/' "$WORK/body")"
@@ -221,8 +226,9 @@ PLAYTOKEN=$(curl -s "$B/playlist.m3u" | grep -oE 'token=[0-9a-f]{48}' | head -n1
 check "直连无 Token 302" "302" "$(status "$B/rd/c1.m3u8")"
 check "直连无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/rd/c1.m3u8")"
 check "直连带 Token 302 上游" "http://127.0.0.1:$UP/direct.m3u8" "$(location "$B/rd/c1.m3u8?token=$PLAYTOKEN")"
-check "透传免 Token" "302" "$(status "$B/pt/c4.m3u8")"
-check "透传免 Token 指上游" "http://127.0.0.1:$UP/pt.m3u8" "$(location "$B/pt/c4.m3u8")"
+check "透传无 Token 302" "302" "$(status "$B/pt/c4.m3u8")"
+check "透传无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/pt/c4.m3u8")"
+check "透传带 Token 指上游" "http://127.0.0.1:$UP/pt.m3u8" "$(location "$B/pt/c4.m3u8?token=$PLAYTOKEN")"
 
 if [ "$fail" = "0" ]; then
   printf 'M3 冒烟测试全部通过\n'

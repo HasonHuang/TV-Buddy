@@ -154,3 +154,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// 日志文件名（`design/04` §5）。
+pub const LOG_FILE: &str = "iptv-proxy.log";
+
+/// 日志文件与配置同目录。
+pub fn log_path_for(config_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let dir = config_path.parent()?;
+    if dir.as_os_str().is_empty() {
+        Some(std::path::PathBuf::from(LOG_FILE))
+    } else {
+        Some(dir.join(LOG_FILE))
+    }
+}
+
+/// 按 `[server].log_level` 初始化日志：标准输出 + 文件 + 环形缓冲。
+pub fn init(level: &str, log_path: Option<&std::path::Path>, ring: std::sync::Arc<RingBuffer>) {
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(format!("iptv_proxy={level},tower_http={level}")));
+    let writer = LogWriter::new(ring, log_path.map(|path| path.to_path_buf()));
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(writer))
+        .init();
+}

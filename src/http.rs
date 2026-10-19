@@ -8,7 +8,7 @@ pub mod static_assets;
 use std::sync::Arc;
 
 use axum::{
-    routing::{get, post, put},
+    routing::{any, get, post, put},
     Router,
 };
 
@@ -25,6 +25,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/", get(routes::public::home))
         .route("/playlist.m3u", get(routes::play::total_playlist))
         .route("/:gid/playlist.m3u", get(routes::play::group_playlist))
+        // 面板接口：未知路径固定 404 JSON，先于播放通配路由匹配。
+        .route("/panel/api/*rest", any(routes::panel::api_missing))
         // 播放链路（M2）
         .route("/:gid/:file", get(routes::stream::entry))
         .route("/:gid/:cid/*path", get(routes::stream::wildcard))

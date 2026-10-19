@@ -61,6 +61,10 @@ write_config "http://127.0.0.1:1/dead.mpd"
 
 python3 -m http.server "$UP" --directory "$WORK/up" >"$WORK/up.log" 2>&1 &
 UP_PID=$!
+for _ in $(seq 1 50); do
+  curl -fsS "http://127.0.0.1:$UP/live.m3u8" >/dev/null 2>&1 && break
+  sleep 0.1
+done
 # 在 $WORK 里启动，日志文件落在 $WORK/iptv-proxy.log。
 (cd "$WORK" && exec "$BIN" "$CFG" >"$WORK/server.log" 2>&1) &
 PID=$!
@@ -140,8 +144,9 @@ sleep 1
 check "改配置解除冷却" "200" "$(status "$B/dg/d1.m3u8")"
 
 # --- 缓存接口 ---
-check "切片预热 200" "200" "$(status "$B/pg/c1/video/index.txt")"
-FIRST=$(grep -oE '^/pg/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+' "$WORK/body" | head -n1)
+check "切片预热 200" "200" "$(status "$B/pg/c1.m3u8")"
+FIRST_URL=$(grep -oE "http://127\.0\.0\.1:$PORT/pg/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+" "$WORK/body" | head -n1)
+FIRST="/${FIRST_URL#http://127.0.0.1:$PORT/}"
 check "切片抓取 200" "200" "$(status "$B$FIRST")"
 check "缓存状态 200" "200" "$(code "${A[@]}" "$B/panel/api/cache/stats")"
 check "缓存条目 ≥ 1" "1" \
@@ -150,7 +155,7 @@ check "缓存清空 200" "200" "$(code -X POST "${A[@]}" "$B/panel/api/cache/flu
 check "清空计数 ≥ 1" "1" "$(jget '1 if d["removed"]>=1 else 0')"
 check "清空后缓存为空" "0" \
   "$(code "${A[@]}" "$B/panel/api/cache/stats" >/dev/null; jget 'd["entries"]["seg_bytes"] + d["entries"]["seg_url"]')"
-check "清空后索引重建" "200" "$(status "$B/pg/c1/video/index.txt")"
+check "清空后索引重建" "200" "$(status "$B/pg/c1.m3u8")"
 check "清空后切片重取" "200" "$(status "$B$FIRST")"
 
 # --- 指标与日志 ---

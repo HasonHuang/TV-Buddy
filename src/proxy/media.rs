@@ -1,6 +1,6 @@
 //! 清单改写：把上游媒体清单改成本地伪装地址。
 //!
-//! - 切片地址 → `/{gid}/{cid}/<P>_<S>.<ext>`（S-DIS-04）。
+//! - 切片地址 → `{self_base}/{gid}/{cid}/<P>_<S>.<ext>`（绝对地址，S-DIS-04）。
 //! - `<S>` = `sha256(上游绝对 URL)` 前 32 位十六进制。
 //! - `<P>` = `sha256("<gid>:<cid>")` 前 16 位十六进制（自研，F-017 未解）。
 //! - 主清单（含 `#EXT-X-STREAM-INF`）只把变体地址绝对化。
@@ -57,9 +57,62 @@ pub fn ext_offset(gid: &str, cid: &str) -> usize {
     Sha256::digest(format!("{gid}:{cid}").as_bytes())[0] as usize
 }
 
+/// 清单是否为主清单（含变体）。
+pub fn is_master(body: &str) -> bool {
+    body.contains("#EXT-X-STREAM-INF")
+}
+
+/// 清单的 `#EXT-X-TARGETDURATION`（秒）。缺失时返回 `None`。
+pub fn target_duration(body: &str) -> Option<u64> {
+    body.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("#EXT-X-TARGETDURATION:")?
+            .trim()
+            .parse()
+            .ok()
+    })
+}
+
+/// 主清单里的最佳变体：返回 `(STREAM-INF 属性串, 绝对地址)`。
+///
+/// 按 `BANDWIDTH` 取最大；一条变体都没有时返回 `None`。
+pub fn best_variant(body: &str, base: &str) -> Option<(String, String)> {
+    let mut attrs: Option<String> = None;
+    let mut best: Option<(u64, String, String)> = None;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("#EXT-X-STREAM-INF:") {
+            attrs = Some(rest.to_string());
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some(current) = attrs.take() else { continue };
+        let Ok(url) = absolute_url(base, trimmed) else {
+            continue;
+        };
+        let bandwidth = bandwidth_of(&current);
+        if best.as_ref().map_or(true, |(known, _, _)| bandwidth > *known) {
+            best = Some((bandwidth, current, url));
+        }
+    }
+    best.map(|(_, attrs, url)| (attrs, url))
+}
+
+/// 解析 `BANDWIDTH=…`；缺失时按 0 处理。
+fn bandwidth_of(attrs: &str) -> u64 {
+    attrs
+        .split(',')
+        .find_map(|part| part.trim().strip_prefix("BANDWIDTH="))
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0)
+}
+
 /// 改写清单正文。
 ///
 /// `base` 是清单自身的绝对 URL，用于解析相对地址。
+/// `self_base` 是本服务的对外基址（`http://主机:端口`），用于拼绝对伪装地址。
 /// `disguise` 关闭时切片地址改写为上游绝对地址。
 pub fn rewrite_media(
     body: &str,
@@ -68,8 +121,9 @@ pub fn rewrite_media(
     cid: &str,
     formats: &[String],
     disguise: bool,
+    self_base: &str,
 ) -> Rendered {
-    let is_master = body.contains("#EXT-X-STREAM-INF");
+    let is_master = is_master(body);
     let prefix = prefix(gid, cid);
     let offset = ext_offset(gid, cid);
     let mut out = String::with_capacity(body.len() + 256);
@@ -99,7 +153,9 @@ pub fn rewrite_media(
         }
         let ext = pick_ext(trimmed, formats, offset + index);
         let suffix = suffix(&absolute);
-        out.push_str(&format!("/{gid}/{cid}/{prefix}_{suffix}.{ext}\n"));
+        out.push_str(&format!(
+            "{self_base}/{gid}/{cid}/{prefix}_{suffix}.{ext}\n"
+        ));
         segments.push((suffix, absolute, ext));
         index += 1;
     }
@@ -193,6 +249,7 @@ mod tests {
             "c1",
             &formats(),
             true,
+            "http://self",
         );
         assert!(!rendered.is_master);
         assert_eq!(rendered.segments.len(), 2);
@@ -200,7 +257,7 @@ mod tests {
         assert_eq!(rendered.segments[1].1, "http://up.example/live/b/seg2.ts");
         assert!(rendered
             .body
-            .contains(&format!("/g1/c1/{}_", prefix("g1", "c1"))));
+            .contains(&format!("http://self/g1/c1/{}_", prefix("g1", "c1"))));
         assert!(rendered.body.contains(&format!("_{}.", rendered.segments[0].0)));
         assert!(!rendered.body.contains("seg1.ts"));
     }
@@ -215,10 +272,26 @@ mod tests {
             "c1",
             &formats(),
             true,
+            "http://self",
         );
         assert!(rendered.is_master);
         assert!(rendered.segments.is_empty());
         assert!(rendered.body.contains("http://up.example/live/v0/index.m3u8"));
+    }
+
+    #[test]
+    fn target_duration_is_read() {
+        assert_eq!(target_duration("#EXTM3U\n#EXT-X-TARGETDURATION:12\n"), Some(12));
+        assert_eq!(target_duration("#EXTM3U\n"), None);
+    }
+
+    #[test]
+    fn best_variant_takes_highest_bandwidth() {
+        let body = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=640x360\n360/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1920x1080\n1080/index.m3u8\n";
+        let (attrs, url) = best_variant(body, "http://up.example/live/master.m3u8").unwrap();
+        assert_eq!(attrs, "BANDWIDTH=2000000,RESOLUTION=1920x1080");
+        assert_eq!(url, "http://up.example/live/1080/index.m3u8");
+        assert!(best_variant("#EXTM3U\nseg.ts\n", "http://up.example/a.m3u8").is_none());
     }
 
     #[test]
@@ -231,6 +304,7 @@ mod tests {
             "c1",
             &formats(),
             true,
+            "http://self",
         );
         assert!(rendered
             .body
@@ -247,6 +321,7 @@ mod tests {
             "c1",
             &formats(),
             false,
+            "http://self",
         );
         assert!(rendered.body.contains("http://up.example/live/a/seg1.ts"));
         assert!(rendered.segments.is_empty());
@@ -273,6 +348,7 @@ mod tests {
             "c1",
             &formats(),
             true,
+            "http://self",
         );
         let first = rendered.segments[0].2.clone();
         let second = rendered.segments[1].2.clone();

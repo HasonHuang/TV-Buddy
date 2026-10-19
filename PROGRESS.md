@@ -109,7 +109,7 @@
 - 节奏：先写设计（`docs/design/`），再写 P0 代码；P0 完成后与目标实例逐条对拍。
 - 已完成：rustup 工具链（`rustc 1.99.1`）+ 两个 musl 目标；**M0 骨架**（配置读写、面板登录、内嵌 4 页前端、冒烟测试）；
   **M1 数据面**（分组/频道 CRUD、订阅导出、总/分组订阅与 `access` 过滤、播放 Token、分组管理页）。
-- 待办：**M4 收尾**——对拍报告（本实现 ↔ 目标 v0.8.2）与打包（`cross` + `/opt/iptv-proxy` + systemd/OpenRC）。
+- 待办：**M4c 打包**——`cross` 双 musl 目标、`/opt/iptv-proxy` 布局、systemd/OpenRC 单元。
 - 待办（打包）：`cross` 交叉编译 musl 静态产物 + `/opt/iptv-proxy` 布局 + systemd/OpenRC。
 
 ## 3c. M1 数据面（已完成）
@@ -152,6 +152,7 @@
 | 2026-10-19 | **E6 · M1 数据面**：分组/频道 CRUD（局部更新、409/404 错误串）、导出、总/分组订阅与 `access` 过滤、播放 Token；面板分组管理页；`scripts/smoke-m1.sh` 全绿 | ✅ 见 §3c |
 | 2026-10-19 | **E6 · M2 播放链路**：入口清单 → 媒体清单 → 伪装切片（`<P>_<S>.<ext>`）、切片索引与字节缓存、缓存窗口（首写 `public` / 命中 `private`）、302 占位、Token 校验；`scripts/smoke-m2.sh` 全绿 | ✅ 见 §3d |
 | 2026-10-19 | **E6 · M3 直连模式**：`redirect`（含解析最佳画质、地址 TTL 缓存）、`rewrite`（清单绝对化）、`passthrough`（302 免 Token）、`remux` 预热 503、`dash` 30 s 就绪门；`scripts/smoke-m3.sh` 全绿 | ✅ 见 §3e |
+| 2026-10-20 | **目录结构**：改用「同名文件 + 目录」；新增 `src/lib.rs`，`main.rs` 只做启动 | ✅ | `cargo test` 30 项 |
 | 2026-10-19 | **E6 · M4a 运维面**：配置热重载（只监视配置文件）、看门狗（连续 5 次失败 → 冷却 3600 s，重载即解除）、`cache/{stats,flush}`、`stats`、`logs`、日志文件 5 MB 截断；`scripts/smoke-m4.sh` 全绿 | ✅ 见 §3f |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
@@ -255,6 +256,7 @@
 | 缓存：`GET /panel/api/cache/stats`（按目录计数与字节）、`POST /panel/api/cache/flush`（保留 `dash/`，并丢弃进程内索引与清单缓存） | ✅ | `src/http/routes/admin.rs` |
 | 指标：`GET /panel/api/stats`（请求数、分组请求数、清单/切片数、切片命中、上游失败、在线窗口） | ✅ | `src/stats.rs`（单元测试） |
 | 日志：`GET /panel/api/logs` 返回环形缓冲（500 行）；同时输出到标准输出与 `<配置目录>/iptv-proxy.log`，超 5 MB 截断 | ✅ | `src/logging.rs`（单元测试） |
-| 未做（M4b/M4c）：对拍报告、`cross` 打包与发布布局 | ⏳ | `design/02` §14 |
+| 对拍（M4b）：同一夹具下 22 项用例，差异 0；发现并修正 11 处契约差异 | ✅ | `scripts/compare-p0.sh`、`design/reconciliation-report.md`、F-018 |
+| 未做（M4c）：`cross` 打包与发布布局 | ⏳ | `design/02` §14 |
 
 验证：`cargo test` 28 项；`smoke-m0.sh`…`smoke-m4.sh` 在 debug 与 release 均全绿。

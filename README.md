@@ -39,6 +39,7 @@ scripts/smoke-m1.sh   # 分组/频道 CRUD、导出、订阅与 access 过滤、
 scripts/smoke-m2.sh   # 播放链路、切片伪装、缓存窗口、302 占位（含伪上游）
 scripts/smoke-m3.sh   # 直连模式：redirect/rewrite/passthrough、remux/dash 就绪语义
 scripts/smoke-m4.sh   # 热重载、看门狗冷却、缓存状态与清空、指标与日志
+scripts/compare-p0.sh # 对拍：同一夹具下对比目标 v0.8.2（需容器 iptv82）
 ```
 
 ## 接口（已实现）
@@ -69,13 +70,14 @@ scripts/smoke-m4.sh   # 热重载、看门狗冷却、缓存状态与清空、�
 
 ```text
 src/
-  main.rs          启动与日志
+  main.rs          启动入口（只做参数、日志、状态、监听）
+  lib.rs           库根：模块声明
   state.rs         共享状态（ArcSwap 配置快照 + 改动串行化 + 缓存目录）
-  config/          配置模型、加载、校验、原子保存
+  config.rs        配置模型入口；config/model.rs 为键面模型
   playlist.rs      M3U 订阅渲染
-  proxy/           清单改写、切片索引与字节缓存
-  auth/            面板会话、播放 Token
-  http/            路由、提取器、错误映射、内嵌静态资源
+  proxy.rs         清单改写、切片索引与字节缓存；proxy/{media,modes,segments}.rs
+  auth.rs          面板会话、播放 Token；auth/{play_token,session}.rs
+  http.rs          路由、提取器、错误映射、内嵌静态资源；http/routes.rs 与 http/routes/*.rs
 frontend/          Vite + React + TS 面板（4 页）
 scripts/           构建与冒烟测试脚本
 ```
@@ -93,4 +95,5 @@ scripts/           构建与冒烟测试脚本
 - 缓存无容量上限（与目标一致，见 F-015）。
 - 运维接口的响应形状为本实现自定；目标只登记存在性（见 `design/03` §6.4）。
 - 面板只实现概览与分组管理；其余分区显示为「待实现」。
+- 与目标的差异以 `docs/design/reconciliation-report.md` 为准（22 项用例差异 0）。
 - `/epg`、`/logo`、`/unban` 仍是骨架页；EPG 未接入，订阅不输出 `x-tvg-url`。

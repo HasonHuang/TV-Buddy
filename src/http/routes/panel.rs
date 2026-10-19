@@ -2,7 +2,12 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, Json};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -11,6 +16,17 @@ use crate::{
     http::{error::ApiError, ext::PanelAuth},
     state::AppState,
 };
+
+/// 未知面板接口：`404` JSON（S-EP-08）。
+///
+/// 注册在 `/{gid}/{cid}/*path` 之前，避免面板路径被播放通配路由吞掉。
+pub async fn api_missing() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "接口不存在" })),
+    )
+        .into_response()
+}
 
 #[derive(Debug, Deserialize)]
 pub struct LoginReq {

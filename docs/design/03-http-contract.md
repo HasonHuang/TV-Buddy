@@ -67,47 +67,71 @@
 
 ## 4. 播放契约（proxy）
 
-> 状态：**已实现**（`src/http/routes/stream.rs`、`src/proxy/`）。验证见 `scripts/smoke-m2.sh`。差异见本节末。
+> 状态：**已实现，并经对拍确认**（`src/http/routes/stream.rs`、`src/proxy/`）。
+> 验证：`scripts/smoke-m2.sh`、`scripts/compare-p0.sh`（22 项全一致，见 `reconciliation-report.md`）。
 
-链路（F-004、F-006）：
+代理链路按**上游清单类型**分两支（F-018）：
 
 ```text
+上游是媒体清单（单码率）
 GET /{gid}/{cid}.m3u8
-  → 200 清单；cache-control: public, max-age=5, s-maxage=5
-     内容含媒体清单地址 /{gid}/{cid}/video/index.txt
+  → 200  text/plain; charset=utf-8
+         cache-control: public, max-age=<TARGETDURATION>, s-maxage=<同上>
+         正文 = 上游媒体清单；切片改写为绝对伪装地址
+                http://<host>/{gid}/{cid}/<16hex>_<32hex>.<ext>
 GET /{gid}/{cid}/video/index.txt
-  → 200 text/plain；切片地址 /{gid}/{cid}/<16hex>_<32hex>.<ext>
+  → 302  跳 error_url（该路径只在主清单上游时存在）
+
+上游是主清单（多码率）
+GET /{gid}/{cid}.m3u8
+  → 200  application/vnd.apple.mpegurl
+         cache-control: no-cache, no-store
+         正文 = #EXTM3U
+                #EXT-X-VERSION:6
+                #EXT-X-INDEPENDENT-SEGMENTS
+                #EXT-X-STREAM-INF:<最佳变体原属性>
+                http://<host>/{gid}/{cid}/video/index.txt
+GET /{gid}/{cid}/video/index.txt
+  → 200  text/plain; charset=utf-8
+         cache-control: public, max-age=<变体 TARGETDURATION>, s-maxage=<同上>
+         正文 = 最佳变体的媒体清单；切片改写为绝对伪装地址
+
+GET /{gid}/{cid}/index.m3u8
+  → 与入口同义（兼容别名）
 GET /{gid}/{cid}/<P>_<S>.<ext>
-  → 200 切片；忽略 Range（返回全量）
-     首次写入：public, max-age=300；命中缓存：private, max-age=300
+  → 200  切片；忽略 Range（返回全量）
+         首次写入 public, max-age=300；命中缓存 private, max-age=300
 ```
 
 | 项 | 契约 | 依据 |
 | --- | --- | --- |
+| 清单缓存窗口 | `max-age` = 清单的 `#EXT-X-TARGETDURATION`；缺失时按 6 秒 | F-018 |
+| 切片地址 | 绝对地址（`http://<Host>/…`），不是根相对路径 | F-018 |
 | 扩展名 | `format=hls` → `.m3u8`；`format=mpd` → `.mpd` | S-URL-01 |
 | `<S>` | `sha256(上游切片绝对 URL)` 前 32 hex | S-DIS-04 |
 | `<P>` | 16 hex，仅依赖 `(gid,cid)`；错值 → `302` | S-DIS-17、F-017 |
 | 扩展名轮换 | 取 `[cache.disguise].formats`，每频道独立序列 | S-DIS-04 |
 | 切片类型 | 按伪装后缀给 `Content-Type` | S-DIS-13 |
 | 载荷 | 不改字节 | S-DIS-02 |
-| Token | 入口按开关校验；**切片不校验** | F-007 |
+| Token | 入口按开关校验；**切片与子路径不校验** | F-007、F-018 |
+| 未知分组/频道（入口形状） | 无/错 Token → `token_failure_url`；Token 合法 → `not_found_url` | F-018 |
+| 未知路径（其它形状） | `302 not_found_url`，不看 Token | F-018 |
+| 归档组 | 入口 `302 not_found_url`（先于 Token 判定）；订阅 `404` | F-009、F-018 |
 | `Range` | 忽略 | S-DIS-07 |
 | remux 预热 | `503` + `Retry-After: 2`，体 `remux warming up` | S-MODE-16 |
 | dash 未就绪 | `503 timeout waiting for master playlist` | S-MODE-15 |
 
-### 4.1 本实现的补充约定
+### 4.1 实现细节（内部，不是兼容契约）
 
 | 项 | 取值 | 说明 |
 | --- | --- | --- |
-| 入口正文 | `#EXTM3U` + `#EXT-X-STREAM-INF:BANDWIDTH=2000000` + 根相对路径 `/{gid}/{cid}/video/index.txt` | 目标正文未逐字节采证；只要指向媒体清单即可（F-004） |
-| 入口类型 | `application/vnd.apple.mpegurl`（`.mpd` 用 `application/dash+xml`） | 目标未采证 |
-| 媒体清单头 | `text/plain; charset=utf-8` + `cache-control: public, max-age=5, s-maxage=5` | 类型按 F-006；缓存头为目标同款入口值 |
-| 媒体清单复用 | 进程内 TTL 5 秒 | 防突发请求打穿上游 |
 | `<P>` 算法 | `sha256("<gid>:<cid>")` 前 16 位十六进制 | 目标算法未解（F-017）；校验失败仍按契约 302 |
-| 切片索引 | `cache/seg_url/<sha256(gid/cid)[..16]>.json`（`S` → 上游 URL + 扩展名） | 内部实现，非兼容契约 |
+| 扩展名轮换起点 | `sha256("<gid>:<cid>")` 首字节 + 切片序号 | 目标轮换算法未解；只保证取自配置列表 |
+| 入口 Host | 取请求 `Host` 头；有 `X-Forwarded-Proto` 时用其 scheme | 用于拼切片绝对地址 |
+| 上游清单复用 | 进程内 TTL 5 秒 | 防突发请求打穿上游 |
+| 切片索引 | `cache/seg_url/<sha256(gid/cid)[..16]>.json`（`S` → 上游 URL + 扩展名） | 内部实现 |
 | 切片正文 | `cache/seg_bytes/<gid>_<cid>_<S>.<ext>` | 同上 |
 | 伪装关闭 | 媒体清单直接给上游绝对地址，不建索引 | 目标行为未采证 |
-| 主清单上游 | 变体地址**绝对化后透传**，不递归伪装 | 目标对嵌套清单另有处理 |
 | `#EXT-X-KEY` 等 | `URI="…"` 绝对化，不改名 | S-DIS-02（不改载荷） |
 | 上游失败 | `502` + `Upstream Error` | F-012 §3 错误串 |
 
@@ -115,9 +139,9 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 
 | 模式 | 入口行为 | 细节 | 依据 |
 | --- | --- | --- | --- |
-| `redirect` | `302` 到上游 URL | `redirect_mode` = `解析最佳画质` 时先取主清单挑**最高码率**变体；地址按 `redirect_ttl`（0 → 300 s）缓存；失败不缓存，改跳 `error_url` | S-MODE-08/13 |
-| `passthrough` | `302` 到上游 URL | **不校验 Token**、不套 Token | S-MODE-11 |
-| `rewrite` | `200 text/plain` | 相对地址改绝对，切片客户端直连；清单缓存 ≈5 s | S-MODE-09/14 |
+| `redirect` | `302` 到上游 URL | `redirect_mode` = `解析最佳画质` 时先取主清单挑**最高码率**变体；地址按 `redirect_ttl`（0 → 300 s）缓存；失败不缓存，改跳 `error_url` | S-MODE-08/13、F-018 |
+| `passthrough` | `302` 到上游 URL | **校验 Token**（与其它模式一致），不缓存上游清单 | S-MODE-11、F-018 |
+| `rewrite` | `200 text/plain; charset=utf-8` + `no-cache, must-revalidate` | 相对地址改绝对，切片客户端直连；清单缓存 ≈5 s | S-MODE-09/14、F-018 |
 | `remux` | `503` + `Retry-After: 2`，体 `remux warming up` | 转封装需 `ffmpeg`（P1）；首次请求抓上游并按 `hls`/`raw` 记日志（S-MODE-18：HLS 上游永不就绪） | S-MODE-16/18 |
 | `dash` | 上游正文透传（`application/dash+xml`） | 就绪门 30 s，超时 → `503 timeout waiting for master playlist`；MPD→HLS 转封装属 P1 | S-MODE-15 |
 | `proxy` | 代理链路（§4） | — | S-MODE-03 |

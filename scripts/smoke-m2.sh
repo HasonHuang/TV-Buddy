@@ -29,12 +29,23 @@ cat > "$WORK/up/master.m3u8" <<'EOF'
 #EXT-X-STREAM-INF:BANDWIDTH=800000
 v0/index.m3u8
 EOF
+mkdir -p "$WORK/up/v0"
+cat > "$WORK/up/v0/index.m3u8" <<'EOF'
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:6
+#EXTINF:6.0,
+v1.ts
+#EXT-X-ENDLIST
+EOF
+head -c 1024 /dev/urandom > "$WORK/up/v0/v1.ts"
 
 cat > "$CFG" <<EOF
 [server]
 bind = "127.0.0.1:$PORT"
 log_level = "warn"
 not_found_url = "http://placeholder.test/404.mp4"
+error_url = "http://placeholder.test/mistake.mp4"
 
 [auth]
 token_enabled = false
@@ -84,6 +95,10 @@ EOF
 
 python3 -m http.server "$UP" --directory "$WORK/up" >"$WORK/up.log" 2>&1 &
 UP_PID=$!
+for _ in $(seq 1 50); do
+  curl -fsS "http://127.0.0.1:$UP/index.m3u8" >/dev/null 2>&1 && break
+  sleep 0.1
+done
 "$BIN" "$CFG" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
@@ -112,21 +127,24 @@ hfile() { # 文件 头名
 status() { curl -s -o "$WORK/body" -w '%{http_code}' "$1"; }
 location() { curl -s -o /dev/null -D - "$1" | awk 'BEGIN{IGNORECASE=1}/^location:/{sub(/\r$/,"");print substr($0,11)}'; }
 
-# --- 入口清单 ---
-check "入口 200" "200" "$(status "$B/p1/c1.m3u8")"
-check "入口类型" "application/vnd.apple.mpegurl" "$(header "$B/p1/c1.m3u8" content-type)"
-check "入口缓存头" "public, max-age=5, s-maxage=5" "$(header "$B/p1/c1.m3u8" cache-control)"
-check "入口指向媒体清单" "1" "$(grep -c '^/p1/c1/video/index.txt$' "$WORK/body")"
-
-# --- 媒体清单 ---
-check "媒体清单 200" "200" "$(status "$B/p1/c1/video/index.txt")"
-check "媒体清单类型" "text/plain; charset=utf-8" "$(header "$B/p1/c1/video/index.txt" content-type)"
-check "媒体清单标签保留" "6" "$(grep -c '^#EXT' "$WORK/body")"
-check "媒体清单切片数" "2" "$(grep -cE '^/p1/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+$' "$WORK/body")"
-P=$(head -c 64 <<<"$(grep -oE '^/p1/c1/[0-9a-f]{16}' "$WORK/body" | head -n1)")
+# --- 入口清单（上游是媒体清单：直接下发改写后的媒体清单） ---
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/p1/c1.m3u8")
+check "入口 200" "200" "$CODE"
+check "入口类型" "text/plain; charset=utf-8" "$(hfile "$WORK/h" content-type)"
+check "入口缓存窗口 = TARGETDURATION" "public, max-age=4, s-maxage=4" "$(hfile "$WORK/h" cache-control)"
+check "入口直接下发媒体清单" "1" "$(grep -c '^#EXT-X-TARGETDURATION:4$' "$WORK/body")"
+check "入口不含变体" "0" "$(grep -c '^#EXT-X-STREAM-INF' "$WORK/body")"
+check "切片地址绝对" "2" \
+  "$(grep -cE "^http://127\.0\.0\.1:$PORT/p1/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+$" "$WORK/body")"
+FIRST_URL=$(grep -oE "http://127\.0\.0\.1:$PORT/p1/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+" "$WORK/body" | head -n1)
+FIRST="/${FIRST_URL#http://127.0.0.1:$PORT/}"
+P=$(grep -oE '/p1/c1/[0-9a-f]{16}_' <<<"$FIRST" | head -n1)
 P=${P:7:16}
-FIRST=$(grep -E '^/p1/c1/' "$WORK/body" | head -n1)
 S=$(printf '%s' "$FIRST" | sed -E 's|.*_([0-9a-f]{32})\..*|\1|')
+
+# --- 变体清单路径：上游是媒体清单时不存在 ---
+check "变体清单 302" "302" "$(status "$B/p1/c1/video/index.txt")"
+check "变体清单跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B/p1/c1/video/index.txt")"
 check "切片后缀 = sha256 前 32 位" \
   "$(python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:32])' "http://127.0.0.1:$UP/seg1.ts")" "$S"
 check "切片前缀 = sha256(gid:cid) 前 16 位" \
@@ -162,10 +180,24 @@ check "未知切片 404" "404" "$(status "$B$UNKNOWN")"
 check "未知切片错误串" "Segment not found" "$(cat "$WORK/body")"
 check "非法入口名 302" "302" "$(status "$B/p1/c1.txt")"
 
-# --- 主清单透传 ---
-check "主清单 200" "200" "$(status "$B/p1/m1/video/index.txt")"
-check "主清单变体绝对化" "1" \
-  "$(grep -c "^http://127.0.0.1:$UP/v0/index.m3u8$" "$WORK/body")"
+# --- 主清单上游：自造单变体主清单 ---
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/p1/m1.m3u8")
+check "主清单入口 200" "200" "$CODE"
+check "主清单入口类型" "application/vnd.apple.mpegurl" "$(hfile "$WORK/h" content-type)"
+check "主清单入口不缓存" "no-cache, no-store" "$(hfile "$WORK/h" cache-control)"
+check "主清单入口版本" "1" "$(grep -c '^#EXT-X-VERSION:6$' "$WORK/body")"
+check "主清单入口独立切片" "1" "$(grep -c '^#EXT-X-INDEPENDENT-SEGMENTS$' "$WORK/body")"
+check "主清单入口保留变体属性" "1" "$(grep -c '^#EXT-X-STREAM-INF:BANDWIDTH=800000$' "$WORK/body")"
+check "主清单入口指向变体清单" "1" \
+  "$(grep -c "^http://127\.0\.0\.1:$PORT/p1/m1/video/index.txt$" "$WORK/body")"
+
+# --- 变体媒体清单：抓最佳变体后改写 ---
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/p1/m1/video/index.txt")
+check "变体清单 200" "200" "$CODE"
+check "变体清单类型" "text/plain; charset=utf-8" "$(hfile "$WORK/h" content-type)"
+check "变体清单缓存窗口" "public, max-age=6, s-maxage=6" "$(hfile "$WORK/h" cache-control)"
+check "变体清单切片绝对" "1" \
+  "$(grep -cE "^http://127\.0\.0\.1:$PORT/p1/m1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+$" "$WORK/body")"
 
 # --- Token ---
 T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
@@ -188,6 +220,9 @@ check "无 Token 入口 302" "302" "$(status "$B/p1/c1.m3u8")"
 check "无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/p1/c1.m3u8")"
 check "带 Token 入口 200" "200" "$(status "$B/p1/c1.m3u8?token=$PLAYTOKEN")"
 check "错 Token 入口 302" "302" "$(status "$B/p1/c1.m3u8?token=deadbeef")"
+check "未知频道带 Token 跳占位" "http://placeholder.test/404.mp4" "$(location "$B/p1/ghost.m3u8?token=$PLAYTOKEN")"
+check "未知分组带 Token 跳占位" "http://placeholder.test/404.mp4" "$(location "$B/ghost/c1.m3u8?token=$PLAYTOKEN")"
+check "未知频道无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/p1/ghost.m3u8")"
 check "开放组免 Token" "200" "$(status "$B/op/c8.m3u8")"
 check "切片不校验 Token" "200" "$(status "$B$FIRST")"
 
