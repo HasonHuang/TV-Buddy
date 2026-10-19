@@ -70,7 +70,7 @@
 | E3 HTTP 契约 | ⏳ | `design/03-http-contract.md` |
 | E4 配置与存储 | ⏳ | `design/04-config-and-storage.md` |
 | E5 前端设计 | ⏳ | `design/05-frontend.md` |
-| E6 P0 实现 | ⏳ | — |
+| E6 P0 实现 | 🔄 | **M0 骨架 ✅**；M1 数据面 → M2 播放链路 → M3 直连模式 → M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
 
 ## 2. 关键结论
 
@@ -107,8 +107,9 @@
 
 - 阶段目标：按 [`docs/spec/08`](docs/spec/08-target-spec.md) 重实现 IPTV Proxy v0.8.2 的功能，**drop-in 兼容**。
 - 节奏：先写设计（`docs/design/`），再写 P0 代码；P0 完成后与目标实例逐条对拍。
-- 待办：E2 架构与模块 → E3 HTTP 契约 → E4 配置与存储 → E5 前端设计 → E6 P0 实现。
-- 前置：安装 rustup 工具链（本机 `rustc 1.68.2` 过旧）；交叉编译目标 `aarch64/x86_64-unknown-linux-musl`。
+- 已完成：rustup 工具链（`rustc 1.99.1`）+ 两个 musl 目标；**M0 骨架**（配置读写、面板登录、内嵌 4 页前端、冒烟测试）。
+- 待办：E3 HTTP 契约 → E4 配置与存储 → E5 前端设计；代码侧 M1 数据面（分组/频道 CRUD、订阅导出、access）。
+- 待办（打包）：`cross` 交叉编译 musl 静态产物 + `/opt/iptv-proxy` 布局 + systemd/OpenRC。
 
 ## 4. 进度日志
 
@@ -129,6 +130,8 @@
 | 2026-10-19 | 实现阶段启动 · **E1 技术选型**（Rust + axum；Vite+React 面板嵌入；drop-in；首期 P0） | ✅ [`design/01-tech-selection.md`](docs/design/01-tech-selection.md) |
 | 2026-10-19 | **E1b UI 参考截图**：启动目标主实例造夹具，采集 30 张界面截图并映射功能与证据 | ✅ [`design/reference/`](docs/design/reference/) |
 | 2026-10-19 | **E2 架构与模块设计**：分层、模块清单（P0/P1/P2）、请求流水线、共享状态、缓存/伪装设计、后台任务、ADR、里程碑 | ✅ [`design/02-architecture.md`](docs/design/02-architecture.md) |
+| 2026-10-19 | 工具链：rustup `1.99.1`（stable）+ `aarch64/x86_64-unknown-linux-musl` 目标；两目标 `cargo check` 通过 | ✅ |
+| 2026-10-19 | **E6 · M0 骨架**：配置模型/严格加载/原子保存、面板登录（UUID 会话）、状态与配置接口、内嵌 4 页前端（Vite+React）、`scripts/smoke-m0.sh` 15 项全绿 | ✅ 代码入仓（`cargo build` 无警告） |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 

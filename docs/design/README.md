@@ -24,11 +24,11 @@
 | 文件 | 内容 | 状态 |
 | --- | --- | --- |
 | [`01-tech-selection.md`](01-tech-selection.md) | 技术选型：语言、框架、依赖、构建、兼容契约 | ✅ 已确认 |
+| [`02-architecture.md`](02-architecture.md) | 模块划分、进程模型、数据流 | ✅ 初稿（M0 骨架已按此实现） |
 | [`reference/`](reference/) | 目标 UI 参考截图（30 张）+ 功能与证据映射 | ✅ 已采集 |
-| `02-architecture.md` | 模块划分、进程模型、数据流 | ✅ 初稿 |
-| `03-http-contract.md` | 路由表与面板 API 契约（对齐 `spec/08` §2） | ⏳ 待写 |
-| `04-config-and-storage.md` | `config.toml` 键面、默认值、文件布局 | ⏳ 待写 |
-| `05-frontend.md` | 面板信息架构、页面与组件、嵌入方式 | ⏳ 待写 |
+| `03-http-contract.md` | 路由表与接口契约 | ⏳ 待写 |
+| `04-config-and-storage.md` | 配置与存储细节 | ⏳ 待写 |
+| `05-frontend.md` | 前端页面与交互设计 | ⏳ 待写 |
 
 ## 3. 写作要求
 
