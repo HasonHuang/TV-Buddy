@@ -66,7 +66,7 @@
 | --- | --- | --- |
 | E1 技术选型 | ✅ | [`design/01-tech-selection.md`](docs/design/01-tech-selection.md)（Rust + axum/tokio；Vite+React 面板嵌入；drop-in 兼容；首期 P0） |
 | E1b UI 参考截图 | ✅ | [`design/reference/`](docs/design/reference/)（30 张：13 页 + 13 弹窗 + 4 独立页；含功能↔证据映射） |
-| E2 架构与模块 | ⏳ | `design/02-architecture.md` |
+| E2 架构与模块 | ✅ | [`design/02-architecture.md`](docs/design/02-architecture.md)（分层、模块清单、流水线、状态、缓存/伪装设计、ADR、里程碑） |
 | E3 HTTP 契约 | ⏳ | `design/03-http-contract.md` |
 | E4 配置与存储 | ⏳ | `design/04-config-and-storage.md` |
 | E5 前端设计 | ⏳ | `design/05-frontend.md` |
@@ -128,6 +128,7 @@
 | 2026-10-19 | 全库文档精简：删中间过程与重复叙述，保留全部编号/数字/状态；空行规范化 | ✅ 正文约 −25%~−30% |
 | 2026-10-19 | 实现阶段启动 · **E1 技术选型**（Rust + axum；Vite+React 面板嵌入；drop-in；首期 P0） | ✅ [`design/01-tech-selection.md`](docs/design/01-tech-selection.md) |
 | 2026-10-19 | **E1b UI 参考截图**：启动目标主实例造夹具，采集 30 张界面截图并映射功能与证据 | ✅ [`design/reference/`](docs/design/reference/) |
+| 2026-10-19 | **E2 架构与模块设计**：分层、模块清单（P0/P1/P2）、请求流水线、共享状态、缓存/伪装设计、后台任务、ADR、里程碑 | ✅ [`design/02-architecture.md`](docs/design/02-architecture.md) |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 
