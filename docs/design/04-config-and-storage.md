@@ -60,6 +60,9 @@
 | 目录创建 | 仅启动时创建 | F-006 |
 | 缓存键 | 清单：`{gid}_{cid}__{sha256(url)[..8]}`；切片：`sha256(上游绝对 URL)` | 内部实现，非兼容契约 |
 | 切片伪装 | `<S>` = 同一 sha256 前 32 hex | S-DIS-04 |
+| 切片索引（M2 已实现） | `seg_url/<sha256("{gid}/{cid}")[..16]>.json`：`<S>` → `{url, ext}`；内存 + 磁盘两级 | `src/proxy/segments.rs` |
+| 切片正文（M2 已实现） | `seg_bytes/<gid>_<cid>_<S>.<ext>`；命中复用，不设上限 | 同上 |
+| 清单复用（M2 已实现） | 进程内 TTL 5 秒（`TtlCache`） | `src/proxy/mod.rs` |
 | flush | 清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash/`** | S-CACHE-06 |
 | 容量上限 | P0 **不实现**（目标上限未生效） | F-015 |
 | 索引 | 启动扫描目录重建内存索引 | 设计决策 |

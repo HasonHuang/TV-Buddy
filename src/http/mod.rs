@@ -25,6 +25,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/", get(routes::public::home))
         .route("/playlist.m3u", get(routes::play::total_playlist))
         .route("/:gid/playlist.m3u", get(routes::play::group_playlist))
+        // 播放链路（M2）
+        .route("/:gid/:file", get(routes::stream::entry))
+        .route("/:gid/:cid/*path", get(routes::stream::wildcard))
         // 内嵌页面（免登录）
         .route("/panel", get(static_assets::panel_page))
         .route("/panel/", get(static_assets::panel_page))

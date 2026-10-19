@@ -14,6 +14,7 @@ use arc_swap::ArcSwap;
 use crate::{
     auth::{PlayTokenStore, SessionStore},
     config::Config,
+    proxy::{SegmentIndex, TtlCache},
 };
 
 pub struct AppState {
@@ -25,6 +26,14 @@ pub struct AppState {
     pub sessions: SessionStore,
     /// 播放 Token（内存，重启失效）。
     pub play_tokens: PlayTokenStore,
+    /// 上游请求客户端。
+    pub http: reqwest::Client,
+    /// 切片索引。
+    pub segments: SegmentIndex,
+    /// 在线清单缓存（TTL 5 秒）。
+    pub playlists: TtlCache,
+    /// 缓存根目录（`[cache].disk_path`）。
+    pub cache_dir: PathBuf,
     /// 进程启动时刻。
     pub started: Instant,
     /// 串行化配置改动。
@@ -34,11 +43,20 @@ pub struct AppState {
 impl AppState {
     pub fn new(config_path: PathBuf, config: Config) -> Self {
         let ttl = Duration::from_secs(config.panel.session_ttl.max(60));
+        let cache_dir = PathBuf::from(&config.cache.disk_path);
+        ensure_cache_dirs(&cache_dir);
         Self {
             config_path,
             config: ArcSwap::from_pointee(config),
             sessions: SessionStore::new(ttl),
             play_tokens: PlayTokenStore::new(),
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .unwrap_or_default(),
+            segments: SegmentIndex::new(),
+            playlists: TtlCache::new(Duration::from_secs(5)),
+            cache_dir,
             started: Instant::now(),
             write_lock: Mutex::new(()),
         }
@@ -81,5 +99,15 @@ impl AppState {
 
     pub fn uptime_secs(&self) -> u64 {
         self.started.elapsed().as_secs()
+    }
+}
+
+/// 建立缓存子目录。失败只记日志（后续写缓存会再报错）。
+fn ensure_cache_dirs(root: &std::path::Path) {
+    for name in ["m3u8", "seg_url", "seg_bytes", "sub_url", "dash"] {
+        let dir = root.join(name);
+        if let Err(err) = std::fs::create_dir_all(&dir) {
+            tracing::warn!(dir = %dir.display(), error = %err, "创建缓存目录失败");
+        }
     }
 }

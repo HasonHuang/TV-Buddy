@@ -67,6 +67,8 @@
 
 ## 4. 播放契约（proxy）
 
+> 状态：**已实现**（`src/http/routes/stream.rs`、`src/proxy/`）。验证见 `scripts/smoke-m2.sh`。差异见本节末。
+
 链路（F-004、F-006）：
 
 ```text
@@ -92,6 +94,23 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 | `Range` | 忽略 | S-DIS-07 |
 | remux 预热 | `503` + `Retry-After: 2`，体 `remux warming up` | S-MODE-16 |
 | dash 未就绪 | `503 timeout waiting for master playlist` | S-MODE-15 |
+
+### 4.1 本实现的补充约定
+
+| 项 | 取值 | 说明 |
+| --- | --- | --- |
+| 入口正文 | `#EXTM3U` + `#EXT-X-STREAM-INF:BANDWIDTH=2000000` + 根相对路径 `/{gid}/{cid}/video/index.txt` | 目标正文未逐字节采证；只要指向媒体清单即可（F-004） |
+| 入口类型 | `application/vnd.apple.mpegurl`（`.mpd` 用 `application/dash+xml`） | 目标未采证 |
+| 媒体清单头 | `text/plain; charset=utf-8` + `cache-control: public, max-age=5, s-maxage=5` | 类型按 F-006；缓存头为目标同款入口值 |
+| 媒体清单复用 | 进程内 TTL 5 秒 | 防突发请求打穿上游 |
+| `<P>` 算法 | `sha256("<gid>:<cid>")` 前 16 位十六进制 | 目标算法未解（F-017）；校验失败仍按契约 302 |
+| 切片索引 | `cache/seg_url/<sha256(gid/cid)[..16]>.json`（`S` → 上游 URL + 扩展名） | 内部实现，非兼容契约 |
+| 切片正文 | `cache/seg_bytes/<gid>_<cid>_<S>.<ext>` | 同上 |
+| 伪装关闭 | 媒体清单直接给上游绝对地址，不建索引 | 目标行为未采证 |
+| 主清单上游 | 变体地址**绝对化后透传**，不递归伪装 | 目标对嵌套清单另有处理 |
+| `#EXT-X-KEY` 等 | `URI="…"` 绝对化，不改名 | S-DIS-02（不改载荷） |
+| 上游失败 | `502` + `Upstream Error` | F-012 §3 错误串 |
+| 其他模式 | `remux`/`dash` 目前走同一代理链路；`redirect`/`rewrite`/`passthrough` 在 M3 | `design/02` §14 |
 
 ## 5. 订阅契约
 

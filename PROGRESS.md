@@ -70,7 +70,7 @@
 | E3 HTTP 契约 | ✅ | [`design/03-http-contract.md`](docs/design/03-http-contract.md)（公开/私有路由表、播放与订阅契约、access 矩阵、错误串、M1 清单） |
 | E4 配置与存储 | ✅ | [`design/04-config-and-storage.md`](docs/design/04-config-and-storage.md)（配置写入与热重载矩阵、存储布局、运行时数据、日志、发布布局） |
 | E5 前端设计 | ✅ | [`design/05-frontend.md`](docs/design/05-frontend.md)（技术形态、13 分区与弹窗体系、组件清单、交互约定、分期） |
-| E6 P0 实现 | 🔄 | **M0 骨架 ✅、M1 数据面 ✅**；M2 播放链路 → M3 直连模式 → M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
+| E6 P0 实现 | 🔄 | **M0 骨架 ✅、M1 数据面 ✅、M2 播放链路 ✅**；M3 直连模式 → M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
 
 ## 2. 关键结论
 
@@ -109,7 +109,7 @@
 - 节奏：先写设计（`docs/design/`），再写 P0 代码；P0 完成后与目标实例逐条对拍。
 - 已完成：rustup 工具链（`rustc 1.99.1`）+ 两个 musl 目标；**M0 骨架**（配置读写、面板登录、内嵌 4 页前端、冒烟测试）；
   **M1 数据面**（分组/频道 CRUD、订阅导出、总/分组订阅与 `access` 过滤、播放 Token、分组管理页）。
-- 待办：**M2 播放链路**（入口清单 → 媒体清单 → 伪装切片、缓存窗口、302 占位）→ M3 直连模式（`redirect`/`rewrite`/`passthrough`）→ M4 收尾（看门狗、对拍、打包）。
+- 待办：**M3 直连模式**（`redirect`/`rewrite`/`passthrough` 的 302 与清单改写）→ M4 收尾（看门狗、对拍、打包）。
 - 待办（打包）：`cross` 交叉编译 musl 静态产物 + `/opt/iptv-proxy` 布局 + systemd/OpenRC。
 
 ## 3c. M1 数据面（已完成）
@@ -150,6 +150,7 @@
 | 2026-10-19 | **E6 · M0 骨架**：配置模型/严格加载/原子保存、面板登录（UUID 会话）、状态与配置接口、内嵌 4 页前端（Vite+React）、`scripts/smoke-m0.sh` 15 项全绿 | ✅ 代码入仓（`cargo build` 无警告） |
 | 2026-10-19 | **E4 配置与存储 + E5 前端设计**：热重载矩阵与存储布局、13 分区与弹窗体系、组件与交互约定 | ✅ [`design/04`](docs/design/04-config-and-storage.md)、[`design/05`](docs/design/05-frontend.md)（`aba1d1e`） |
 | 2026-10-19 | **E6 · M1 数据面**：分组/频道 CRUD（局部更新、409/404 错误串）、导出、总/分组订阅与 `access` 过滤、播放 Token；面板分组管理页；`scripts/smoke-m1.sh` 全绿 | ✅ 见 §3c |
+| 2026-10-19 | **E6 · M2 播放链路**：入口清单 → 媒体清单 → 伪装切片（`<P>_<S>.<ext>`）、切片索引与字节缓存、缓存窗口（首写 `public` / 命中 `private`）、302 占位、Token 校验；`scripts/smoke-m2.sh` 全绿 | ✅ 见 §3d |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 
@@ -209,3 +210,21 @@
 
 盘点新增的 8 项能力（ClearKey/DRM、`epg/api/*`、`dash/scan-url`、`link-info`、每频道代理、旧数据迁移、`subscription-merge`、`l1/l2` 限流）
 已录入 [`spec/08` §16](docs/spec/08-target-spec.md)，状态与证据见该表。
+
+## 3d. M2 播放链路（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 入口清单 `GET /{gid}/{cid}.m3u8`（`.mpd`）：`public, max-age=5, s-maxage=5`，指向 `/{gid}/{cid}/video/index.txt` | ✅ | `src/http/routes/stream.rs` |
+| 媒体清单 `GET /{gid}/{cid}/video/index.txt`：抓上游、改写切片地址、`text/plain` | ✅ | `src/proxy/media.rs`（8 个单元测试） |
+| 切片后缀 `<S>` = `sha256(上游绝对 URL)[:32]`；前缀 `<P>` = `sha256("<gid>:<cid>")[:16]` | ✅ | `smoke-m2.sh` 断言与独立计算一致 |
+| 扩展名轮换：`[cache.disguise].formats`，每频道固定起点 | ✅ | `proxy::media::ext_offset` |
+| 切片索引与字节缓存：`cache/seg_url/*.json`、`cache/seg_bytes/*`（重启可命中） | ✅ | `src/proxy/segments.rs` |
+| 缓存窗口：首写 `public, max-age=300`；命中 `private, max-age=300` | ✅ | `smoke-m2.sh` |
+| 忽略 `Range`（返回全量）；按伪装后缀给 `Content-Type` | ✅ | `smoke-m2.sh` |
+| 302 占位：未知频道/分组、归档组、错 `<P>`；`404 Segment not found` | ✅ | `smoke-m2.sh` |
+| Token：入口校验（`open` 组免校验），切片与媒体清单不校验 | ✅ | `smoke-m2.sh` |
+| 主清单上游（含 `#EXT-X-STREAM-INF`）：变体地址绝对化透传 | ✅ | `smoke-m2.sh` |
+| 未做（属 M3/M4）：`redirect` 地址 TTL 缓存、`rewrite` 清单改写、`passthrough` 302、`remux` 预热 `503`、`dash` 就绪判定 | ⏳ | `design/02` §14 |
+
+验证：`cargo test` 18 项；`scripts/smoke-m0.sh`/`m1.sh`/`m2.sh` 在 debug 与 release 均全绿。
