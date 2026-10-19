@@ -67,7 +67,7 @@
 | E1 技术选型 | ✅ | [`design/01-tech-selection.md`](docs/design/01-tech-selection.md)（Rust + axum/tokio；Vite+React 面板嵌入；drop-in 兼容；首期 P0） |
 | E1b UI 参考截图 | ✅ | [`design/reference/`](docs/design/reference/)（30 张：13 页 + 13 弹窗 + 4 独立页；含功能↔证据映射） |
 | E2 架构与模块 | ✅ | [`design/02-architecture.md`](docs/design/02-architecture.md)（分层、模块清单、流水线、状态、缓存/伪装设计、ADR、里程碑） |
-| E3 HTTP 契约 | ⏳ | `design/03-http-contract.md` |
+| E3 HTTP 契约 | ✅ | [`design/03-http-contract.md`](docs/design/03-http-contract.md)（公开/私有路由表、播放与订阅契约、access 矩阵、错误串、M1 清单） |
 | E4 配置与存储 | ⏳ | `design/04-config-and-storage.md` |
 | E5 前端设计 | ⏳ | `design/05-frontend.md` |
 | E6 P0 实现 | 🔄 | **M0 骨架 ✅**；M1 数据面 → M2 播放链路 → M3 直连模式 → M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
@@ -132,6 +132,7 @@
 | 2026-10-19 | **E2 架构与模块设计**：分层、模块清单（P0/P1/P2）、请求流水线、共享状态、缓存/伪装设计、后台任务、ADR、里程碑 | ✅ [`design/02-architecture.md`](docs/design/02-architecture.md) |
 | 2026-10-19 | 工具链：rustup `1.99.1`（stable）+ `aarch64/x86_64-unknown-linux-musl` 目标；两目标 `cargo check` 通过 | ✅ |
 | 2026-10-19 | **E6 · M0 骨架**：配置模型/严格加载/原子保存、面板登录（UUID 会话）、状态与配置接口、内嵌 4 页前端（Vite+React）、`scripts/smoke-m0.sh` 15 项全绿 | ✅ 代码入仓（`cargo build` 无警告） |
+| 2026-10-19 | **E3 HTTP 契约**：公开/私有路由表、播放与订阅契约、`access` 矩阵、错误串对照、已知差异、M1 实施清单 | ✅ [`design/03-http-contract.md`](docs/design/03-http-contract.md) |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 
