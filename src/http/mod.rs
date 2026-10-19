@@ -45,6 +45,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(routes::panel::get_config).put(routes::panel::put_config),
         )
         .route("/panel/api/reload", post(routes::panel::reload))
+        .route("/panel/api/cache/stats", get(routes::admin::cache_stats))
+        .route("/panel/api/cache/flush", post(routes::admin::cache_flush))
+        .route("/panel/api/stats", get(routes::admin::stats))
+        .route("/panel/api/logs", get(routes::admin::logs))
         .route("/panel/api/groups", post(routes::groups::create_group))
         .route("/panel/api/groups/export", get(routes::groups::export_all))
         .route(
@@ -63,6 +67,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/panel/api/groups/:gid/channels/:cid",
             put(routes::groups::update_channel).delete(routes::groups::delete_channel),
         )
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            routes::admin::count_request,
+        ))
         .fallback(routes::public::fallback)
         .with_state(state)
 }

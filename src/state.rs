@@ -14,7 +14,10 @@ use arc_swap::ArcSwap;
 use crate::{
     auth::{PlayTokenStore, SessionStore},
     config::Config,
+    logging::RingBuffer,
     proxy::{AddressCache, SegmentIndex, TtlCache},
+    stats::Stats,
+    watchdog::Watchdog,
 };
 
 pub struct AppState {
@@ -36,6 +39,12 @@ pub struct AppState {
     pub modes: AddressCache,
     /// 缓存根目录（`[cache].disk_path`）。
     pub cache_dir: PathBuf,
+    /// 运行指标。
+    pub stats: Stats,
+    /// 看门狗状态（冷却）。
+    pub watchdog: Watchdog,
+    /// 最近日志行。
+    pub logs: Arc<RingBuffer>,
     /// 进程启动时刻。
     pub started: Instant,
     /// 串行化配置改动。
@@ -43,7 +52,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(config_path: PathBuf, config: Config) -> Self {
+    pub fn new(config_path: PathBuf, config: Config, logs: Arc<RingBuffer>) -> Self {
         let ttl = Duration::from_secs(config.panel.session_ttl.max(60));
         let cache_dir = PathBuf::from(&config.cache.disk_path);
         ensure_cache_dirs(&cache_dir);
@@ -60,6 +69,9 @@ impl AppState {
             playlists: TtlCache::new(Duration::from_secs(5)),
             modes: AddressCache::new(),
             cache_dir,
+            stats: Stats::default(),
+            watchdog: Watchdog::new(),
+            logs,
             started: Instant::now(),
             write_lock: Mutex::new(()),
         }
@@ -70,8 +82,9 @@ impl AppState {
         self.config.load_full()
     }
 
-    /// 原子替换配置。
+    /// 原子替换配置。同时解除全部冷却（S-MODE-17）。
     pub fn replace(&self, config: Config) {
+        self.watchdog.clear_all();
         self.config.store(Arc::new(config));
     }
 
@@ -102,6 +115,11 @@ impl AppState {
 
     pub fn uptime_secs(&self) -> u64 {
         self.started.elapsed().as_secs()
+    }
+
+    /// 在线清单缓存条目数。
+    pub fn playlist_cache_entries(&self) -> usize {
+        self.playlists.len()
     }
 }
 

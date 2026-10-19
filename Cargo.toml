@@ -23,6 +23,7 @@ async-trait = "0.1"
 axum = "0.7"
 hex = "0.4"
 mime_guess = "2"
+notify = "8.2.0"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "deflate", "brotli"] }
 rust-embed = "8"
 serde = { version = "1", features = ["derive"] }

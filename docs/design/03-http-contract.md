@@ -193,20 +193,34 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 组 | 路径 | 阶段 |
 | --- | --- | --- |
-| 缓存 | `POST /panel/api/cache/flush`、`GET /panel/api/cache/stats` | M2 |
+| 缓存 | `POST /panel/api/cache/flush`、`GET /panel/api/cache/stats` | ✅ M4 |
 | 素材 | `/panel/api/assets/{list,convert,remove,ffmpeg-status}` | P2 |
 | 录制 | `/panel/api/schedule`、`/schedule/from-epg`、`/schedule/{idx}`、`/schedule/{idx}/stop`、`/schedule/download/{filename}` | P1 |
 | 推流 | `/panel/api/livestream`、`/livestream/{gid}/{cid}/{start,stop}` | P1 |
 | DASH | `/panel/api/dash/{status,scan-url,tracks/:gid/:cid}`、`/dash-timeshift/status` | P2 |
 | EPG | `/panel/api/epg/{status,refresh,regenerate,mappings,programmes,scripts,match-report,mapping,extra,script,script-delete,cron-preview}`、`/epg/{suggest,search,viewer-channels,source-channels,tz-preview}` | P1 |
 | 安全 | `/panel/api/security/{token,token/rotate,ip/stats,ip/ban,ip/unban,ip/unban-batch}` | P1 |
-| 指标 | `/panel/api/{stats,logs,health}` | M3 |
+| 指标 | `/panel/api/{stats,logs,health}` | ✅ M4（`health` 在 M0） |
 | 备份 | `/panel/api/{backup,restore}` | P2 |
 | 导入 | `POST /panel/api/groups/import/m3u`、`/groups/{import,import/force}` | P2 |
 | 订阅聚合 | `POST /panel/api/subs/{groups,preview}` | P2 |
 | 翻译 | `/panel/api/epg/translate/{run,status,clear,probe,models,mtran/test}`、`/subtitle/translate/clear` | P2 |
 | 分享 | `GET /api/share/pull?key=`（仅 GET/HEAD） | P2 |
 | 解析脚本 | `/panel/api/resolver/{scripts,script-delete}` | P2 |
+
+### 6.4 运维接口（M4 已实现）
+
+响应形状为本实现自定；目标只登记了存在性与用途（F-010），未逐字段采证。
+
+| 方法 | 路径 | 响应 |
+| --- | --- | --- |
+| `GET` | `/panel/api/cache/stats` | `{"backend","disk_path","entries":{"m3u8","seg_url","seg_bytes","sub_url","dash"},"bytes","playlist_cache_entries"}` |
+| `POST` | `/panel/api/cache/flush` | `{"ok":true,"removed":<文件数>}`；清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash`**（S-CACHE-06）；同时丢弃进程内索引与清单缓存 |
+| `GET` | `/panel/api/stats` | `{"version","uptime_secs","requests","playlists","segments","segment_hits","upstream_failures","online_window_secs","groups":[{"id","requests"}]}` |
+| `GET` | `/panel/api/logs?limit=n` | `{"total","lines":[…]}`；`limit` 上限 500，默认 200；来源为进程内环形缓冲（500 行） |
+| `POST` | `/panel/api/reload` | 立即重读配置；返回 `{"ok":true}` |
+
+热重载：只监视配置文件本身；解析失败保留旧快照并记 `error` 日志（`design/04` §2）。冷却中的频道在配置重载后立即解除冷却（S-MODE-17）。
 
 ## 7. 错误串对照
 

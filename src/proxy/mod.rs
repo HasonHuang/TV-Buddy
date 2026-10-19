@@ -45,4 +45,14 @@ impl TtlCache {
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(key.to_string(), (Instant::now(), value));
     }
+
+    /// 清空缓存。
+    pub fn clear(&self) {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
+    /// 当前条目数。
+    pub fn len(&self) -> usize {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
 }

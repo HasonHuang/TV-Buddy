@@ -142,21 +142,25 @@ async fn dash_entry(
     channel_url: &str,
 ) -> Response {
     let key = format!("dash:{}:{cid}", group.id);
+    if state.watchdog.is_cooling(&key) {
+        return not_ready();
+    }
     let body = match state.modes.get(&key, 30) {
         Some(body) => body,
         None => match fetch(state, channel_url).await {
             Ok(body) => {
+                state.watchdog.record_success(&key);
                 state.modes.put(&key, body.clone());
                 body
             }
             Err(err) => {
                 tracing::warn!(url = %channel_url, error = %err, "等待上游主清单超时");
+                state.stats.record_upstream_failure();
+                if state.watchdog.record_failure(&key) {
+                    tracing::warn!(group = %group.id, %cid, "连续失败 5 次，进入冷却 3600s");
+                }
                 let _ = config;
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "timeout waiting for master playlist",
-                )
-                    .into_response();
+                return not_ready();
             }
         },
     };
@@ -190,11 +194,23 @@ async fn remux_classify(state: &Arc<AppState>, group: &Group, cid: &str, channel
         Ok(_) => "raw",
         Err(err) => {
             tracing::warn!(url = %channel_url, error = %err, "remux 预热抓取上游失败");
+            state.stats.record_upstream_failure();
+            state.watchdog.record_failure(&key);
             return;
         }
     };
+    state.watchdog.record_success(&key);
     tracing::warn!(group = %group.id, %cid, class, "remux 需要 ffmpeg，转封装未实现（P1）");
     state.modes.put(&key, class.to_string());
+}
+
+/// DASH 未就绪响应（S-MODE-15）。
+fn not_ready() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        "timeout waiting for master playlist",
+    )
+        .into_response()
 }
 
 /// Remux 预热响应（S-MODE-16）。
@@ -236,6 +252,7 @@ async fn media_playlist(state: &Arc<AppState>, gid: &str, cid: &str) -> Response
         Ok(text) => text,
         Err(err) => {
             tracing::warn!(%gid, %cid, error = %err, "抓取上游清单失败");
+            state.stats.record_upstream_failure();
             return (StatusCode::BAD_GATEWAY, "Upstream Error").into_response();
         }
     };
@@ -257,6 +274,8 @@ async fn media_playlist(state: &Arc<AppState>, gid: &str, cid: &str) -> Response
     state.segments.register(gid, cid, &rendered.segments);
     proxy::save_index(&state.cache_dir, gid, cid, &rendered.segments);
     state.playlists.put(&cache_key, rendered.body.clone());
+    state.watchdog.record_success(&format!("media:{gid}:{cid}"));
+    state.stats.record_playlist();
     let _ = group;
 
     playlist_response(rendered.body)
@@ -296,8 +315,10 @@ async fn segment(state: &Arc<AppState>, gid: &str, cid: &str, name: &str) -> Res
 
     let path = proxy::segment_path(&state.cache_dir, gid, cid, &suffix, &ext);
     if let Ok(bytes) = std::fs::read(&path) {
+        state.stats.record_segment(true);
         return segment_response(bytes, &ext, SEGMENT_HIT);
     }
+    state.stats.record_segment(false);
     match fetch_bytes(state, &entry.url).await {
         Ok(bytes) => {
             if let Some(parent) = path.parent() {
@@ -310,6 +331,7 @@ async fn segment(state: &Arc<AppState>, gid: &str, cid: &str, name: &str) -> Res
         }
         Err(err) => {
             tracing::warn!(url = %entry.url, error = %err, "抓取上游切片失败");
+            state.stats.record_upstream_failure();
             (StatusCode::BAD_GATEWAY, "Upstream Error").into_response()
         }
     }

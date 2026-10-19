@@ -70,7 +70,7 @@
 | E3 HTTP 契约 | ✅ | [`design/03-http-contract.md`](docs/design/03-http-contract.md)（公开/私有路由表、播放与订阅契约、access 矩阵、错误串、M1 清单） |
 | E4 配置与存储 | ✅ | [`design/04-config-and-storage.md`](docs/design/04-config-and-storage.md)（配置写入与热重载矩阵、存储布局、运行时数据、日志、发布布局） |
 | E5 前端设计 | ✅ | [`design/05-frontend.md`](docs/design/05-frontend.md)（技术形态、13 分区与弹窗体系、组件清单、交互约定、分期） |
-| E6 P0 实现 | 🔄 | **M0 ✅、M1 ✅、M2 ✅、M3 ✅**；M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
+| E6 P0 实现 | 🔄 | **M0 ✅、M1 ✅、M2 ✅、M3 ✅**；**M4 进行中**（热重载/看门狗/运维接口 ✅，对拍与打包待做）（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
 
 ## 2. 关键结论
 
@@ -109,7 +109,7 @@
 - 节奏：先写设计（`docs/design/`），再写 P0 代码；P0 完成后与目标实例逐条对拍。
 - 已完成：rustup 工具链（`rustc 1.99.1`）+ 两个 musl 目标；**M0 骨架**（配置读写、面板登录、内嵌 4 页前端、冒烟测试）；
   **M1 数据面**（分组/频道 CRUD、订阅导出、总/分组订阅与 `access` 过滤、播放 Token、分组管理页）。
-- 待办：**M4 收尾**（看门狗与冷却、热重载、缓存/日志/指标接口、对拍报告、打包）。
+- 待办：**M4 收尾**——对拍报告（本实现 ↔ 目标 v0.8.2）与打包（`cross` + `/opt/iptv-proxy` + systemd/OpenRC）。
 - 待办（打包）：`cross` 交叉编译 musl 静态产物 + `/opt/iptv-proxy` 布局 + systemd/OpenRC。
 
 ## 3c. M1 数据面（已完成）
@@ -152,6 +152,7 @@
 | 2026-10-19 | **E6 · M1 数据面**：分组/频道 CRUD（局部更新、409/404 错误串）、导出、总/分组订阅与 `access` 过滤、播放 Token；面板分组管理页；`scripts/smoke-m1.sh` 全绿 | ✅ 见 §3c |
 | 2026-10-19 | **E6 · M2 播放链路**：入口清单 → 媒体清单 → 伪装切片（`<P>_<S>.<ext>`）、切片索引与字节缓存、缓存窗口（首写 `public` / 命中 `private`）、302 占位、Token 校验；`scripts/smoke-m2.sh` 全绿 | ✅ 见 §3d |
 | 2026-10-19 | **E6 · M3 直连模式**：`redirect`（含解析最佳画质、地址 TTL 缓存）、`rewrite`（清单绝对化）、`passthrough`（302 免 Token）、`remux` 预热 503、`dash` 30 s 就绪门；`scripts/smoke-m3.sh` 全绿 | ✅ 见 §3e |
+| 2026-10-19 | **E6 · M4a 运维面**：配置热重载（只监视配置文件）、看门狗（连续 5 次失败 → 冷却 3600 s，重载即解除）、`cache/{stats,flush}`、`stats`、`logs`、日志文件 5 MB 截断；`scripts/smoke-m4.sh` 全绿 | ✅ 见 §3f |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 
@@ -244,3 +245,16 @@
 | 未做（属 P1）：`remux`/`dash` 的 `ffmpeg` 转封装、DASH 轨道命名与片段容错 | ⏳ | ADR-04、S-MODE-06 |
 
 验证：`cargo test` 23 项；`smoke-m0.sh`…`smoke-m3.sh` 在 debug 与 release 均全绿。
+
+## 3f. M4a 运维面（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 热重载：只监视配置文件本身（避免日志文件写盘误触发）；解析失败保留旧快照并记 `error` | ✅ | `src/reload.rs`；`smoke-m4.sh` |
+| 看门狗：同一频道连续失败 5 次 → 冷却 3600 s；冷却期内不再请求上游；配置重载立即解除（S-MODE-17） | ✅ | `src/watchdog.rs`（单元测试 + 冒烟） |
+| 缓存：`GET /panel/api/cache/stats`（按目录计数与字节）、`POST /panel/api/cache/flush`（保留 `dash/`，并丢弃进程内索引与清单缓存） | ✅ | `src/http/routes/admin.rs` |
+| 指标：`GET /panel/api/stats`（请求数、分组请求数、清单/切片数、切片命中、上游失败、在线窗口） | ✅ | `src/stats.rs`（单元测试） |
+| 日志：`GET /panel/api/logs` 返回环形缓冲（500 行）；同时输出到标准输出与 `<配置目录>/iptv-proxy.log`，超 5 MB 截断 | ✅ | `src/logging.rs`（单元测试） |
+| 未做（M4b/M4c）：对拍报告、`cross` 打包与发布布局 | ⏳ | `design/02` §14 |
+
+验证：`cargo test` 28 项；`smoke-m0.sh`…`smoke-m4.sh` 在 debug 与 release 均全绿。

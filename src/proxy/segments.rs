@@ -54,9 +54,13 @@ impl SegmentIndex {
         }
     }
 
+    /// 清空内存索引（清空缓存时调用）。
+    pub fn clear(&self) {
+        self.write().clear();
+    }
+
     /// 查索引：先内存，再磁盘。
-    pub fn get(&self, dir: &Path, gid: &str, cid: &str, suffix: &str) -> Option<Entry> {
-        if let Some(entry) = self.read().get(&Self::key(gid, cid, suffix)) {
+    pub fn get(&self, dir: &Path, gid: &str, cid: &str, suffix: &str) -> Option<Entry> {        if let Some(entry) = self.read().get(&Self::key(gid, cid, suffix)) {
             return Some(entry.clone());
         }
         let from_disk = load_index(dir, gid, cid).remove(suffix)?;
@@ -75,7 +79,6 @@ impl SegmentIndex {
     fn read(&self) -> std::sync::RwLockReadGuard<'_, HashMap<String, Entry>> {
         self.inner.read().unwrap_or_else(|e| e.into_inner())
     }
-
     fn write(&self) -> std::sync::RwLockWriteGuard<'_, HashMap<String, Entry>> {
         self.inner.write().unwrap_or_else(|e| e.into_inner())
     }

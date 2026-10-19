@@ -38,6 +38,7 @@ scripts/smoke-m0.sh   # 健康检查、登录、状态、配置读写、鉴权�
 scripts/smoke-m1.sh   # 分组/频道 CRUD、导出、订阅与 access 过滤、播放 Token
 scripts/smoke-m2.sh   # 播放链路、切片伪装、缓存窗口、302 占位（含伪上游）
 scripts/smoke-m3.sh   # 直连模式：redirect/rewrite/passthrough、remux/dash 就绪语义
+scripts/smoke-m4.sh   # 热重载、看门狗冷却、缓存状态与清空、指标与日志
 ```
 
 ## 接口（已实现）
@@ -58,6 +59,11 @@ scripts/smoke-m3.sh   # 直连模式：redirect/rewrite/passthrough、remux/dash
 | `PUT`/`DELETE` | `/panel/api/groups/{gid}` | 局部更新 / 删除分组 |
 | `POST` | `/panel/api/groups/{gid}/channels` | 新建频道 |
 | `PUT`/`DELETE` | `/panel/api/groups/{gid}/channels/{cid}` | 局部更新 / 删除频道 |
+| `POST` | `/panel/api/reload` | 立即重读配置 |
+| `GET` | `/panel/api/cache/stats` | 缓存目录条目与占用 |
+| `POST` | `/panel/api/cache/flush` | 清空缓存（保留 `dash/`） |
+| `GET` | `/panel/api/stats` | 运行指标 |
+| `GET` | `/panel/api/logs` | 最近运行日志 |
 
 ## 目录
 
@@ -74,10 +80,17 @@ frontend/          Vite + React + TS 面板（4 页）
 scripts/           构建与冒烟测试脚本
 ```
 
-## 已知限制（M3）
+## 运维
+
+- 配置热重载：改 `config.toml` 即生效（`[epg]`、`[cache].disk_path` 需重启，与目标一致）。
+- 日志：标准输出与 `<配置目录>/iptv-proxy.log`；超过 5 MB 截断。`[server].log_level` 控制级别。
+- 看门狗：同一频道连续失败 5 次后冷却 3600 秒；改配置立即解除。
+
+## 已知限制（M4）
 
 - `remux` 恒 `503 remux warming up`，`dash` 只做 30 s 就绪门与正文透传：转封装需 `ffmpeg`，属 P1。
 - `proxy` 链路面向 HLS：媒体清单按行改写；MPD 正文原样透传。
-- 缓存无容量上限（与目标一致，见 F-015）；`cache/flush`、`stats`、`logs` 接口未实现（M4）。
+- 缓存无容量上限（与目标一致，见 F-015）。
+- 运维接口的响应形状为本实现自定；目标只登记存在性（见 `design/03` §6.4）。
 - 面板只实现概览与分组管理；其余分区显示为「待实现」。
 - `/epg`、`/logo`、`/unban` 仍是骨架页；EPG 未接入，订阅不输出 `x-tvg-url`。
