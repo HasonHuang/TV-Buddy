@@ -34,24 +34,43 @@ target/release/iptv-proxy config.toml
 ## 测试
 
 ```bash
-scripts/smoke-m0.sh
+scripts/smoke-m0.sh   # 健康检查、登录、状态、配置读写、鉴权、兜底
+scripts/smoke-m1.sh   # 分组/频道 CRUD、导出、订阅与 access 过滤、播放 Token
 ```
+
+## 接口（已实现）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/health` | `200 text/plain` `ok` |
+| `GET` | `/playlist.m3u` | 总订阅（只含 `access = "public"` 的组） |
+| `GET` | `/{gid}/playlist.m3u` | 分组订阅（归档组 `404`） |
+| `POST` | `/panel/api/login` | 登录换取会话 token |
+| `GET`/`PUT` | `/panel/api/config` | 读取 / 全量保存配置 |
+| `GET` | `/panel/api/groups/export` | 导出全部分组（数组） |
+| `GET` | `/panel/api/groups/{gid}/export` | 导出单个分组 |
+| `POST` | `/panel/api/groups` | 新建分组 |
+| `PUT`/`DELETE` | `/panel/api/groups/{gid}` | 局部更新 / 删除分组 |
+| `POST` | `/panel/api/groups/{gid}/channels` | 新建频道 |
+| `PUT`/`DELETE` | `/panel/api/groups/{gid}/channels/{cid}` | 局部更新 / 删除频道 |
 
 ## 目录
 
 ```text
 src/
   main.rs          启动与日志
-  state.rs         共享状态（ArcSwap 配置快照）
+  state.rs         共享状态（ArcSwap 配置快照 + 改动串行化）
   config/          配置模型、加载、校验、原子保存
-  auth/            面板会话（播放 Token/封禁/限流在后续里程碑）
+  playlist.rs      M3U 订阅渲染
+  auth/            面板会话、播放 Token
   http/            路由、提取器、错误映射、内嵌静态资源
 frontend/          Vite + React + TS 面板（4 页）
 scripts/           构建与冒烟测试脚本
 ```
 
-## 已知限制（M0）
+## 已知限制（M1）
 
-- 播放面（订阅、频道播放、切片伪装、缓存）未接入，在 M1–M3 实现。
-- 面板只有登录、状态、配置读写；其余接口在 E3 定义后补齐。
-- 前端 4 页中，`/epg`、`/logo`、`/unban` 目前是骨架页。
+- 播放面未接入：`/{gid}/{cid}.m3u8`、媒体清单、切片伪装与缓存在 M2 实现。
+- `redirect`/`rewrite`/`passthrough` 的 302 与清单改写未接入（M3）；`passthrough` 目前只在订阅里给上游原始地址。
+- 面板只实现概览与分组管理；其余分区显示为「待实现」。
+- `/epg`、`/logo`、`/unban` 仍是骨架页；EPG 未接入，订阅不输出 `x-tvg-url`。

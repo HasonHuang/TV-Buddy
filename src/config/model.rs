@@ -22,6 +22,18 @@ pub struct Config {
     pub extra: toml::Table,
 }
 
+impl Config {
+    /// 按 id 找分组。
+    pub fn group(&self, gid: &str) -> Option<&Group> {
+        self.groups.iter().find(|group| group.id == gid)
+    }
+
+    /// 按 id 找可变分组。
+    pub fn group_mut(&mut self, gid: &str) -> Option<&mut Group> {
+        self.groups.iter_mut().find(|group| group.id == gid)
+    }
+}
+
 /// `[server]`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
