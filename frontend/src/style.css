@@ -124,3 +124,280 @@ dd {
 .msg.err {
   color: var(--danger);
 }
+
+/* --- 侧栏与内容区（M1） --- */
+.shell {
+  display: grid;
+  grid-template-columns: 224px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: #12151b;
+  border-right: 1px solid var(--line);
+  padding: 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text2);
+  font-weight: 500;
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.nav-item:hover:not(:disabled) {
+  background: #1b1f28;
+  color: var(--text);
+}
+
+.nav-item.active {
+  background: #1d2a44;
+  color: #cfe0ff;
+}
+
+.nav-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sidebar-foot {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.content {
+  padding: 26px 26px 60px;
+  max-width: 1180px;
+}
+
+.row.between {
+  justify-content: space-between;
+}
+
+.muted {
+  color: var(--text2);
+  font-size: 13px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.badge,
+.tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 11px;
+  line-height: 18px;
+  border: 1px solid var(--line);
+  color: var(--text2);
+  white-space: nowrap;
+}
+
+.badge.ok {
+  border-color: #2c7a5b;
+  color: var(--ok);
+}
+
+.badge.warn {
+  border-color: #7a632c;
+  color: #e3b341;
+}
+
+.badge.info {
+  border-color: #2c4d7a;
+  color: #79a9ff;
+}
+
+.badge.muted {
+  opacity: 0.7;
+}
+
+/* --- 表格 --- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.table th {
+  text-align: left;
+  color: var(--text2);
+  font-weight: 600;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 6px 8px;
+}
+
+.table td {
+  border-bottom: 1px solid #1e222b;
+  padding: 8px;
+  vertical-align: middle;
+}
+
+.table .right {
+  text-align: right;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.ellipsis {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table button {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.danger-text {
+  color: var(--danger);
+  border-color: #5a2a2a;
+}
+
+input.search {
+  width: 220px;
+}
+
+input:disabled {
+  opacity: 0.6;
+}
+
+select {
+  width: 100%;
+  background: #0d1016;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 9px 11px;
+  font: inherit;
+}
+
+.field {
+  margin-bottom: 10px;
+}
+
+a.btn {
+  display: inline-block;
+  text-decoration: none;
+}
+
+button.danger {
+  background: #b83232;
+}
+
+/* --- 弹窗 --- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 8, 12, 0.68);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 80px 20px;
+  z-index: 40;
+}
+
+.modal {
+  width: 460px;
+  max-width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.modal-body {
+  padding: 16px;
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.icon-btn {
+  background: transparent;
+  border: 0;
+  color: var(--text2);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+/* --- 提示条 --- */
+.toast {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  background: #1b1f28;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  z-index: 50;
+}
+
+.toast.ok {
+  border-left-color: var(--ok);
+}
+
+.toast.err {
+  border-left-color: var(--danger);
+}

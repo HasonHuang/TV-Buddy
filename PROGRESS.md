@@ -70,7 +70,7 @@
 | E3 HTTP 契约 | ✅ | [`design/03-http-contract.md`](docs/design/03-http-contract.md)（公开/私有路由表、播放与订阅契约、access 矩阵、错误串、M1 清单） |
 | E4 配置与存储 | ✅ | [`design/04-config-and-storage.md`](docs/design/04-config-and-storage.md)（配置写入与热重载矩阵、存储布局、运行时数据、日志、发布布局） |
 | E5 前端设计 | ✅ | [`design/05-frontend.md`](docs/design/05-frontend.md)（技术形态、13 分区与弹窗体系、组件清单、交互约定、分期） |
-| E6 P0 实现 | 🔄 | **M0 骨架 ✅**；M1 数据面 → M2 播放链路 → M3 直连模式 → M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
+| E6 P0 实现 | 🔄 | **M0 骨架 ✅、M1 数据面 ✅**；M2 播放链路 → M3 直连模式 → M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
 
 ## 2. 关键结论
 
@@ -107,9 +107,24 @@
 
 - 阶段目标：按 [`docs/spec/08`](docs/spec/08-target-spec.md) 重实现 IPTV Proxy v0.8.2 的功能，**drop-in 兼容**。
 - 节奏：先写设计（`docs/design/`），再写 P0 代码；P0 完成后与目标实例逐条对拍。
-- 已完成：rustup 工具链（`rustc 1.99.1`）+ 两个 musl 目标；**M0 骨架**（配置读写、面板登录、内嵌 4 页前端、冒烟测试）。
-- 待办：E3 HTTP 契约 → E4 配置与存储 → E5 前端设计；代码侧 M1 数据面（分组/频道 CRUD、订阅导出、access）。
+- 已完成：rustup 工具链（`rustc 1.99.1`）+ 两个 musl 目标；**M0 骨架**（配置读写、面板登录、内嵌 4 页前端、冒烟测试）；
+  **M1 数据面**（分组/频道 CRUD、订阅导出、总/分组订阅与 `access` 过滤、播放 Token、分组管理页）。
+- 待办：**M2 播放链路**（入口清单 → 媒体清单 → 伪装切片、缓存窗口、302 占位）→ M3 直连模式（`redirect`/`rewrite`/`passthrough`）→ M4 收尾（看门狗、对拍、打包）。
 - 待办（打包）：`cross` 交叉编译 musl 静态产物 + `/opt/iptv-proxy` 布局 + systemd/OpenRC。
+
+## 3c. M1 数据面（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 分组 CRUD：`POST/PUT/DELETE /panel/api/groups[/{gid}]`（局部更新、`409`/`404` 错误串） | ✅ | `src/http/routes/groups.rs`；`smoke-m1.sh` |
+| 频道 CRUD：`POST/PUT/DELETE /panel/api/groups/{gid}/channels[/{cid}]` | ✅ | 同上 |
+| 导出：`GET /panel/api/groups/export`（数组）、`/{gid}/export`（对象） | ✅ | 同上 |
+| 订阅：`GET /playlist.m3u`、`/{gid}/playlist.m3u`；`access` 过滤；直通组用上游地址；归档组订阅 `404` | ✅ | `src/playlist.rs`（6 个单元测试） |
+| 播放 Token：48 位十六进制、内存、轮换宽限 1 h；`open` 组与直通组不带 Token | ✅ | `src/auth/play_token.rs` |
+| 保存语义：改动立即原子重写 `config.toml`（以磁盘为事实源） | ✅ | `AppState::mutate` |
+| 面板：侧栏 + 分组管理页（分组卡、频道表、弹窗增删改、复制订阅/播放地址） | ✅ | [`reference/ours/m1-groups.png`](docs/design/reference/ours/m1-groups.png) |
+| 验证：`scripts/smoke-m0.sh`（M0 15 项）+ `scripts/smoke-m1.sh`（M1 全绿，debug 与 release）+ 无头浏览器端到端 9 项 | ✅ | 日志见 `PROGRESS` §4 |
+| 未做（属 M2/M3）：播放链路 `/{gid}/{cid}.{ext}`、切片伪装与缓存、`redirect`/`rewrite`/`passthrough` 302 | ⏳ | `design/02` §14 |
 
 ## 4. 进度日志
 
@@ -131,8 +146,10 @@
 | 2026-10-19 | **E1b UI 参考截图**：启动目标主实例造夹具，采集 30 张界面截图并映射功能与证据 | ✅ [`design/reference/`](docs/design/reference/) |
 | 2026-10-19 | **E2 架构与模块设计**：分层、模块清单（P0/P1/P2）、请求流水线、共享状态、缓存/伪装设计、后台任务、ADR、里程碑 | ✅ [`design/02-architecture.md`](docs/design/02-architecture.md) |
 | 2026-10-19 | 工具链：rustup `1.99.1`（stable）+ `aarch64/x86_64-unknown-linux-musl` 目标；两目标 `cargo check` 通过 | ✅ |
+| 2026-10-19 | **E3 HTTP 契约**：公开/私有路由表、播放与订阅契约、`access` 矩阵、错误串对照、已知差异、M1 实施清单 | ✅ [`design/03-http-contract.md`](docs/design/03-http-contract.md)（`b080dec`） |
 | 2026-10-19 | **E6 · M0 骨架**：配置模型/严格加载/原子保存、面板登录（UUID 会话）、状态与配置接口、内嵌 4 页前端（Vite+React）、`scripts/smoke-m0.sh` 15 项全绿 | ✅ 代码入仓（`cargo build` 无警告） |
-| 2026-10-19 | **E3 HTTP 契约**：公开/私有路由表、播放与订阅契约、`access` 矩阵、错误串对照、已知差异、M1 实施清单 | ✅ [`design/03-http-contract.md`](docs/design/03-http-contract.md) |
+| 2026-10-19 | **E4 配置与存储 + E5 前端设计**：热重载矩阵与存储布局、13 分区与弹窗体系、组件与交互约定 | ✅ [`design/04`](docs/design/04-config-and-storage.md)、[`design/05`](docs/design/05-frontend.md)（`aba1d1e`） |
+| 2026-10-19 | **E6 · M1 数据面**：分组/频道 CRUD（局部更新、409/404 错误串）、导出、总/分组订阅与 `access` 过滤、播放 Token；面板分组管理页；`scripts/smoke-m1.sh` 全绿 | ✅ 见 §3c |
 
 ## 5. 功能全集路线图（按优先级 · 2026-10-17）
 

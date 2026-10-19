@@ -6,6 +6,7 @@
 mod auth;
 mod config;
 mod http;
+mod playlist;
 mod state;
 
 use std::{path::PathBuf, sync::Arc};

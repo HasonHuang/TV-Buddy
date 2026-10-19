@@ -1,8 +1,31 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { api, clearToken, getToken, setToken } from './api';
+import { api, clearToken, getToken, setToken, UNAUTHORIZED_EVENT } from './api';
+import { GroupsPage } from './groups';
 import './style.css';
+
+/** 侧栏分区。已实现的分区可切换，其余显示为待实现。 */
+type SectionId = 'dashboard' | 'groups';
+
+const NAV: { id: SectionId; label: string }[] = [
+  { id: 'dashboard', label: '概览' },
+  { id: 'groups', label: '分组管理' },
+];
+
+const PENDING = [
+  '缓存状态',
+  '系统设置',
+  '安全管控',
+  '频道热度',
+  '定时录制',
+  '节目指南',
+  '台标管理',
+  '订阅聚合',
+  '回看管理',
+  '视频素材',
+  '运行日志',
+];
 
 type Status = Record<string, unknown>;
 
@@ -54,7 +77,7 @@ function Login({ onDone }: { onDone: () => void }) {
   );
 }
 
-function Dashboard({ onLogout }: { onLogout: () => void }) {
+function Overview() {
   const [status, setStatus] = useState<Status | null>(null);
   const [config, setConfig] = useState('');
   const [message, setMessage] = useState('');
@@ -90,22 +113,12 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  const logout = async () => {
-    try {
-      await api('POST', '/logout');
-    } catch {
-      // 忽略注销错误
-    }
-    clearToken();
-    onLogout();
-  };
-
   const entries = Object.entries(status ?? {}).filter(([, value]) => typeof value !== 'object');
 
   return (
-    <div className="page">
+    <>
       <div className="card">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
+        <div className="row between">
           <div>
             <h1>IPTV Proxy</h1>
             <h2>概览</h2>
@@ -113,9 +126,6 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           <div className="row">
             <button className="ghost" onClick={() => void load()}>
               刷新
-            </button>
-            <button className="ghost" onClick={() => void logout()}>
-              退出登录
             </button>
           </div>
         </div>
@@ -138,14 +148,72 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}
       </div>
+    </>
+  );
+}
+
+function Shell({ onLogout }: { onLogout: () => void }) {
+  const [section, setSection] = useState<SectionId>('dashboard');
+
+  const logout = async () => {
+    try {
+      await api('POST', '/logout');
+    } catch {
+      // 忽略注销错误
+    }
+    clearToken();
+    onLogout();
+  };
+
+  return (
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <strong>IPTV Proxy</strong>
+          <span className="muted">管理面板</span>
+        </div>
+        <nav>
+          {NAV.map((item) => (
+            <button
+              key={item.id}
+              className={`nav-item${section === item.id ? ' active' : ''}`}
+              onClick={() => setSection(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+          {PENDING.map((label) => (
+            <button key={label} className="nav-item" disabled>
+              {label}
+              <span className="tag">待实现</span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-foot">
+          <button className="ghost" onClick={() => void logout()}>
+            退出登录
+          </button>
+        </div>
+      </aside>
+      <main className="content">
+        {section === 'groups' ? <GroupsPage /> : <Overview />}
+      </main>
     </div>
   );
 }
 
 function App() {
   const [loggedIn, setLoggedIn] = useState(() => getToken() !== '');
+
+  // 会话失效（401）时回到登录卡。
+  useEffect(() => {
+    const onUnauthorized = () => setLoggedIn(false);
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
+
   return loggedIn ? (
-    <Dashboard onLogout={() => setLoggedIn(false)} />
+    <Shell onLogout={() => setLoggedIn(false)} />
   ) : (
     <Login onDone={() => setLoggedIn(true)} />
   );

@@ -207,6 +207,8 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 ## 9. M1 实施清单
 
+> 状态：**已实现**（`src/http/routes/groups.rs`、`src/playlist.rs`、`src/auth/play_token.rs`、`frontend/src/groups.tsx`；验证见 `scripts/smoke-m1.sh` 与 `PROGRESS.md` §3c）。差异：无 `x-tvg-url`（EPG 属 P1）。
+
 1. 分组 CRUD + 频道 CRUD（§6.2），改后原子写盘并替换内存快照。
 2. 订阅渲染（§5）：总订阅与分组订阅、`access` 过滤、Token 附加、`m3u_header_lines`、`x-tvg-url` 占位（EPG 在 P1 前恒不输出）。
 3. 分组导出（§6.2 两个 `export`）。
