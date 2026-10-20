@@ -68,4 +68,13 @@ check "解封 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$
   -d '{"ip":"7.7.7.7"}' "$B/panel/api/security/ip/unban")"
 check "解封后 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/playlist.m3u")"
 
+# 批量解封。
+for ip in 8.8.8.8 9.9.9.9; do
+  curl -s -o /dev/null -X POST -H "$AUTH" -H 'content-type: application/json' \
+    -d "{\"ip\":\"$ip\",\"seconds\":60}" "$B/panel/api/security/ip/ban"
+done
+curl -s -o "$WORK/batch.json" -X POST -H "$AUTH" -H 'content-type: application/json' \
+  -d '{"ips":["8.8.8.8","9.9.9.9"]}' "$B/panel/api/security/ip/unban-batch"
+check "批量解封 2 个" "2" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["removed"])' "$WORK/batch.json")"
+
 if [ "$fail" = "0" ]; then echo "安全面冒烟测试全部通过"; else echo "安全面冒烟测试有失败项"; exit 1; fi

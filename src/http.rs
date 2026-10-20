@@ -78,6 +78,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/panel/api/security/ip/unban",
             post(routes::security::ip_unban),
         )
+        .route(
+            "/panel/api/security/ip/unban-batch",
+            post(routes::security::ip_unban),
+        )
         .route("/panel/api/backup", get(routes::backup::backup))
         .route(
             "/panel/api/restore",

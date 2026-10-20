@@ -282,7 +282,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 推流 | `/panel/api/livestream`、`/livestream/{gid}/{cid}/{start,stop}` | P1 |
 | DASH | `/panel/api/dash/{status,scan-url,tracks/:gid/:cid}`、`/dash-timeshift/status` | P2 |
 | EPG | `/panel/api/epg/{status,refresh,regenerate,mappings,programmes,scripts,match-report,mapping,extra,script,script-delete,cron-preview}`、`/epg/{suggest,search,viewer-channels,source-channels,tz-preview}` | P1 |
-| 安全 | `/panel/api/security/{token,token/rotate,ip/stats,ip/ban,ip/unban}` | ✅ P1（见 §6.7）；`ip/unban-batch` 未实现 |
+| 安全 | `/panel/api/security/{token,token/rotate,ip/stats,ip/ban,ip/unban,ip/unban-batch}` | ✅ P1（见 §6.7） |
 | 指标 | `/panel/api/{stats,logs,health}` | ✅ M4（`health` 在 M0） |
 | 备份 | `GET /panel/api/backup?include=all\|epg-scripts\|resolver`、`POST /panel/api/restore` | ✅ P1（见 §6.6） |
 | 导入 | `POST /panel/api/groups/import/m3u` | ✅ P1（见 §6.2） |
@@ -362,7 +362,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | `POST` | `/panel/api/security/token/rotate` | `{"ok":true,"token":"<48hex>"}`；旧值保留 1 小时宽限（S-AUTH-09） |
 | `GET` | `/panel/api/security/ip/stats` | `{"count","banned","entries":[{"ip","requests","failures","banned","remaining_secs"}]}`，按请求数降序 |
 | `POST` | `/panel/api/security/ip/ban` | `{"ip","seconds"}`；`seconds = 0` 用默认 3600，上限 30 天；返回实际时长 |
-| `POST` | `/panel/api/security/ip/unban` | `{"ip"}` 或 `{"ips":[…]}`；`{"ok":true,"removed":n,"requested":n}` |
+| `POST` | `/panel/api/security/ip/unban`<br>`POST …/ip/unban-batch` | `{"ip"}` 或 `{"ips":[…]}`；`{"ok":true,"removed":n,"requested":n}`；两个路径同义 |
 
 执行规则：
 
@@ -371,7 +371,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 记账 | 非 `/panel` 路径按 `X-Forwarded-For` 首项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略 |
 | 拦截 | 封禁期内 → `403` 纯文本 `banned`；面板路径不拦截（避免管理员自锁） |
 | 容量 | 最多保留 10 000 个地址，超出后忽略新地址 |
-| 未实现 | `ip/unban-batch`、按 IP 的会话上限、自动限流与 `/unban` 自助解封（P2） |
+| 未实现 | 按 IP 的会话上限、自动限流与 `/unban` 自助解封（P2） |
 
 ### 6.8 面板分区（前端）
 
