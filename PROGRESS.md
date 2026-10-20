@@ -567,11 +567,11 @@
 
 | 项 | 状态 |
 | --- | --- |
-| amd64 | 3.53 MB |
-| arm64 | 3.27 MB |
+| amd64 | 3.55 MB |
+| arm64 | 3.29 MB |
 | `verify-release.sh` 双架构 | ✅ 静态链接、`/health`、面板/台标资源、健康 401、分享默认 404 |
 
-验证：`cargo test --offline` 119 项（80 单元 + 39 集成）。
+验证：`cargo test --offline` 120 项（80 单元 + 40 集成）。
 
 已知缺口（P2）：EPG 翻译引擎、订阅聚合 UI。
 
@@ -623,11 +623,11 @@
 
 | 项 | 状态 |
 | --- | --- |
-| amd64 | 3.53 MB |
-| arm64 | 3.27 MB |
+| amd64 | 3.55 MB |
+| arm64 | 3.29 MB |
 | `verify-release.sh` 双架构 | ✅ 面板资源 `panel-CiSNGll5.js`、台标资源、健康 401、分享默认 404 |
 
-验证：`cargo test --offline` 119 项；smoke：assets 13、share 7、panel 7、resolver 5、remux 7、schedule 9、timeshift 8、record 5。
+验证：`cargo test --offline` 120 项；smoke：assets 13、share 7、panel 7、resolver 5、remux 7、schedule 9、timeshift 8、record 5；DASH 回看按 ffmpeg 能力跳过。
 
 ## 3ak. P2 · 订阅聚合配置与面板
 
@@ -637,3 +637,13 @@
 | 空源 ID 自动生成；非法 URL → `400` | ✅ | 同上 |
 | 面板「订阅聚合」：源增删改、启用、全局排除、复制聚合地址 | ✅ | `frontend/src/playlist.tsx` |
 | 验证 | ✅ | 1 集成；前端构建 panel 35.6 kB |
+
+## 3al. 最终发布包（订阅聚合 + DASH 回看）
+
+| 项 | 状态 |
+| --- | --- |
+| amd64 | 3.55 MB |
+| arm64 | 3.29 MB |
+| `verify-release.sh` 双架构 | ✅ 面板资源 `panel-*.js`、台标资源、健康 401、分享默认 404 |
+
+验证：`cargo test --offline` 120 项；全部冒烟通过（DASH 回看按 ffmpeg 能力跳过）。

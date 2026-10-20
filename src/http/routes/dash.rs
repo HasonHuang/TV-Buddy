@@ -64,7 +64,7 @@ pub async fn scan_url(
     inspect(&state, url, "", "").await.map(Json)
 }
 
-/// `GET /panel/api/dash-timeshift/status`——回看能力（代理频道已实现，DASH 未实现）。
+/// `GET /panel/api/dash-timeshift/status`——回看能力与已缓冲片数。
 pub async fn timeshift_status(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -98,7 +98,7 @@ pub async fn timeshift_status(
         "enabled": !channels.is_empty(),
         "ready": ready,
         "channels": channels,
-        "note": "代理频道回看可用；DASH 回看尚未实现（P2）",
+        "note": "代理频道直接缓冲；DASH 频道经 ffmpeg 转 HLS 后缓冲",
     }))
 }
 
