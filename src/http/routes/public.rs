@@ -39,8 +39,11 @@ pub async fn home(State(state): State<Arc<AppState>>) -> Response {
     found(&cfg.server.home_url)
 }
 
-/// 兜底：面板接口返回 404 JSON；其余跳占位视频（S-DIS-15）。
-pub async fn fallback(State(state): State<Arc<AppState>>, uri: Uri) -> Response {
+/// 兜底：面板接口返回 404 JSON；其余路径返回 404 正文。
+///
+/// 目标把 `/status` 一类单段未知路径判为 404（S-EP-08）。
+/// 两段及以上的播放形状由 `/{gid}/{file}` 与通配路由处理。
+pub async fn fallback(State(_): State<Arc<AppState>>, uri: Uri) -> Response {
     if uri.path().starts_with("/panel/api/") {
         return (
             StatusCode::NOT_FOUND,
@@ -48,6 +51,5 @@ pub async fn fallback(State(state): State<Arc<AppState>>, uri: Uri) -> Response 
         )
             .into_response();
     }
-    let cfg = state.snapshot();
-    found(&cfg.server.not_found_url)
+    (StatusCode::NOT_FOUND, "not found").into_response()
 }

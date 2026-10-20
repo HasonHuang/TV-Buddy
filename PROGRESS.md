@@ -299,3 +299,12 @@
 | 未做 | ⏳ | 脚本源、翻译接口、映射/录制联动（P2） |
 
 验证：`cargo test` 共 48 项（36 单元 + 12 集成）；`scripts/smoke-epg.sh` 13 项全绿。
+
+## 3j. 回看参数与兜底（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 回看：入口只把 `playseek` 追加到上游；缓存键带地址标签，回看区间不互相覆盖 | ✅ | `stream.rs::with_playseek`/`url_tag`；集成测试 `playseek_is_forwarded_to_upstream` |
+| 兜底：未知单段路径 → `404`（目标 `/status` 行为，S-EP-08） | ✅ | 集成测试 `single_segment_unknown_path_is_404` |
+
+验证：`cargo test` 50 项（36 单元 + 14 集成）全绿。

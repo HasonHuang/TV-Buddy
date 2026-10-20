@@ -10,7 +10,7 @@ use std::{
 };
 
 use axum::{
-    extract::Path,
+    extract::{Path, Query},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
@@ -19,6 +19,7 @@ use axum::{
 use iptv_proxy::{config, epg, http, logging::RingBuffer, state::AppState};
 use reqwest::{redirect::Policy, Client, Response as HttpResponse};
 
+const LIVE_BODY: &str = "#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nseg1.ts\n#EXTINF:4.0,\nseg2.ts\n#EXT-X-ENDLIST\n";
 const LIVE: &str = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nseg1.ts\n#EXTINF:4.0,\nseg2.ts\n#EXT-X-ENDLIST\n";
 const MASTER: &str = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080\nv0/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\nv1/index.m3u8\n";
 const VARIANT: &str =
@@ -26,7 +27,21 @@ const VARIANT: &str =
 const SEGMENT: &[u8] = b"segment-bytes";
 
 /// 伪上游：按路径返回清单或切片。
-async fn upstream_file(Path(path): Path<String>) -> Response {
+async fn upstream_file(
+    Path(path): Path<String>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    // 回看：把 playseek 回显成注释行，便于断言透传。
+    if path == "live.m3u8" {
+        if let Some(seek) = query.get("playseek") {
+            let body = format!("#EXTM3U\n# playseek={seek}\n{LIVE_BODY}");
+            return (
+                [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+                body,
+            )
+                .into_response();
+        }
+    }
     let (mime, body): (&str, &[u8]) = match path.as_str() {
         "live.m3u8" => ("application/vnd.apple.mpegurl", LIVE.as_bytes()),
         "master.m3u8" => ("application/vnd.apple.mpegurl", MASTER.as_bytes()),
@@ -600,4 +615,41 @@ async fn epg_enabled_serves_xmltv_and_filters() {
     // 面板接口需要会话。
     let response = fetch(&fixture, "/panel/api/epg/status").await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn playseek_is_forwarded_to_upstream() {
+    let fixture = fixture().await;
+    let seek = "20261020080000-20261020090000";
+
+    // 代理：上游收到 playseek，响应带注释行。
+    let response = fetch(
+        &fixture,
+        &format!("/pg/c1.m3u8?token={}&playseek={seek}", fixture.token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("读正文");
+    assert!(body.contains(&format!("# playseek={seek}")), "{body}");
+
+    // 透传：跳转地址带 playseek。
+    let response = fetch(
+        &fixture,
+        &format!("/pt/c1.m3u8?token={}&playseek={seek}", fixture.token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        header(&response, "location"),
+        format!("{}/live.m3u8?playseek={seek}", fixture.upstream)
+    );
+}
+
+#[tokio::test]
+async fn single_segment_unknown_path_is_404() {
+    let fixture = fixture().await;
+    for path in ["/status", "/foo"] {
+        let response = fetch(&fixture, path).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
 }

@@ -49,12 +49,12 @@
 | GET | `/{gid}/playlist.m3u` | 无 | `200` M3U / `404`（归档组） | M1 | S-EP-02、F-009 |
 | GET | `/{gid}/{cid}.{ext}` | 按 token 开关 | `200` 清单 / `302` 占位 | M2 | S-EP-03 |
 | GET | `/{gid}/{cid}/index.m3u8` | 同上 | 同上（兼容旧路径） | M2 | F-012 §3 |
-| GET | `/{gid}/{cid}/video/index.txt` | 无 | `200` `text/plain` 媒体清单 | M2 | F-004 |
+| GET | `/{gid}/{cid}/video/index.txt` | 无 | `200` `text/plain` 媒体清单（仅主清单上游）；否则 `302 error_url` | M2 | F-004、F-018 |
 | GET | `/{gid}/{cid}/<P>_<S>.<ext>` | 无 | `200` 切片 | M2 | S-DIS-04 |
 | GET | `/{gid}/{cid}/timeshift/{filename}` | 按 token 开关 | `200` 本地回看 | P1 | F-014 |
 | GET | `/{gid}/{cid}/dash-timeshift/{track}/{...}` | 按 token 开关 | `200` DASH 回看 | P2 | S-EP-16 |
-| GET | `/epg` | 无 | `200` `text/html`；EPG 关 → `404` | P1 | S-EP-05 |
-| GET | `/epg.xml`、`/epg.xml.gz` | 无 | `200` `application/xml` / `application/gzip` | P1 | S-EP-05 |
+| GET | `/epg` | 无 | `200` `text/html`；EPG 关 → `404` | ✅ P1 | S-EP-05 |
+| GET | `/epg.xml`、`/epg.xml.gz` | 无 | `200` `application/xml` / `application/gzip`；EPG 关 → `404` | ✅ P1 | S-EP-05 |
 | GET | `/epg/api/{channels,programmes/:channel,search}` | 无 | `200` JSON | P1 | S-EP-16 |
 | GET | `/logo` | 无 | `200` `text/html` | P2 | S-EP-06 |
 | GET | `/logo/<file>` | 无 | `200` 图片 + `public, max-age=86400` / `404` | P2 | F-011 §6 |
@@ -118,6 +118,8 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 | 未知路径（其它形状） | `302 not_found_url`，不看 Token | F-018 |
 | 归档组 | 入口 `302 not_found_url`（先于 Token 判定）；订阅 `404` | F-009、F-018 |
 | `Range` | 忽略 | S-DIS-07 |
+| 回看 `playseek` | 只把 `playseek` 原样追加到上游 URL；`start`/`end`/`utc`/`utcend` 丢弃 | S-EP-04 |
+| 未知单段路径 | `404`（如 `/status`）；两段及以上按播放形状处理 | S-EP-08 |
 | remux 预热 | `503` + `Retry-After: 2`，体 `remux warming up` | S-MODE-16 |
 | dash 未就绪 | `503 timeout waiting for master playlist` | S-MODE-15 |
 

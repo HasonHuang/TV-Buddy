@@ -55,26 +55,48 @@ pub async fn entry(
     if !token_ok(&state, &config, group, &query) {
         return redirect(&config.auth.token_failure_url);
     }
+    // 回看：只把 `playseek` 原样追加到上游（S-EP-04），其余回看参数丢弃。
+    let upstream = with_playseek(&channel.url, &query);
     // Passthrough 原样下发上游地址（S-MODE-11）。
     if group.mode == "passthrough" {
-        return redirect(&channel.url);
+        return redirect(&upstream);
     }
 
     match group.mode.as_str() {
         // 302 直连上游；缓存解析出的地址（S-MODE-08/13）。
-        "redirect" => redirect_entry(&state, &config, group, &cid, &channel.url).await,
+        "redirect" => redirect_entry(&state, &config, group, &cid, &upstream).await,
         // 清单绝对化，客户端直连上游切片（S-MODE-09/14）。
-        "rewrite" => rewrite_entry(&state, &config, group, &cid, &channel.url).await,
+        "rewrite" => rewrite_entry(&state, &config, group, &cid, &upstream).await,
         // 连续流转封装需 ffmpeg（P1）：恒 503 预热（S-MODE-16/18）。
         "remux" => {
-            remux_classify(&state, group, &cid, &channel.url).await;
+            remux_classify(&state, group, &cid, &upstream).await;
             warming_up()
         }
         // 就绪门：30 秒内拿到上游主清单，否则 503（S-MODE-15）。
-        "dash" => dash_entry(&state, &config, group, &cid, &channel.url).await,
+        "dash" => dash_entry(&state, &config, group, &cid, &upstream).await,
         // 代理：上游是主清单则自造单变体主清单；上游是媒体清单则直接改写。
-        _ => proxy_entry(&state, &config, &gid, &cid, &channel.url, &self_base, &ext).await,
+        _ => proxy_entry(&state, &config, &gid, &cid, &upstream, &self_base, &ext).await,
     }
+}
+
+/// 回看参数：只保留 `playseek`，按上游已有查询串拼接（S-EP-04）。
+fn with_playseek(url: &str, query: &HashMap<String, String>) -> String {
+    let Some(value) = query
+        .get("playseek")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    else {
+        return url.to_string();
+    };
+    let encoded: String = url::form_urlencoded::byte_serialize(value.as_bytes()).collect();
+    let separator = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{separator}playseek={encoded}")
+}
+
+/// 缓存键里的地址标签：同一频道不同回看区间不互相覆盖。
+fn url_tag(url: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(&Sha256::digest(url.as_bytes())[..4])
 }
 
 /// Redirect 模式：302 到上游；`解析最佳画质` 时先取主清单挑最高码率。
@@ -86,7 +108,7 @@ async fn redirect_entry(
     channel_url: &str,
 ) -> Response {
     let ttl = proxy::modes::effective_redirect_ttl(group.redirect_ttl);
-    let key = format!("redirect:{}:{cid}", group.id);
+    let key = format!("redirect:{}:{cid}:{}", group.id, url_tag(channel_url));
     if let Some(url) = state.modes.get(&key, ttl) {
         return redirect(&url);
     }
@@ -115,7 +137,7 @@ async fn rewrite_entry(
     cid: &str,
     channel_url: &str,
 ) -> Response {
-    let key = format!("rw:{}:{cid}", group.id);
+    let key = format!("rw:{}:{cid}:{}", group.id, url_tag(channel_url));
     if let Some(body) = state.playlists.get(&key) {
         return rewrite_response(body);
     }
