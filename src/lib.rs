@@ -7,6 +7,7 @@ pub mod assets;
 pub mod auth;
 pub mod backup;
 pub mod config;
+pub mod dash;
 pub mod epg;
 pub mod http;
 pub mod logging;

@@ -25,6 +25,18 @@ const MASTER: &str = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=19
 const VARIANT: &str =
     "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nv1.ts\n#EXT-X-ENDLIST\n";
 const SEGMENT: &[u8] = b"segment-bytes";
+/// 伪 DASH 清单：两条轨道。
+const MPD: &str = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT30S">
+  <Period>
+    <AdaptationSet contentType="video" maxWidth="1280" maxHeight="720">
+      <Representation id="v0" codecs="avc1.4d401f" bandwidth="2500000"/>
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4" lang="zh">
+      <Representation id="a0" codecs="mp4a.40.2" bandwidth="128000"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
 
 /// 伪上游：按路径返回清单或切片。
 async fn upstream_file(
@@ -60,6 +72,7 @@ async fn upstream_file(
         "v0/index.m3u8" => ("application/vnd.apple.mpegurl", VARIANT.as_bytes()),
         "seg1.ts" | "seg2.ts" | "v0/v1.ts" => ("video/mp2t", SEGMENT),
         "extra.m3u8" => ("application/vnd.apple.mpegurl", EXTRA.as_bytes()),
+        "manifest.mpd" => ("application/dash+xml", MPD.as_bytes()),
         _ => return (StatusCode::NOT_FOUND, "not found").into_response(),
     };
     ([(header::CONTENT_TYPE, mime)], body.to_vec()).into_response()
@@ -1647,4 +1660,103 @@ poll_secs = 5
         .await
         .expect("请求");
     assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn dash_tracks_scan_url_health_and_timeshift_status() {
+    let fixture = fixture_with_extra(
+        r#"
+[[groups]]
+id = "dg"
+name = "DASH 组"
+mode = "proxy"
+access = "public"
+[[groups.channels]]
+id = "c1"
+name = "DASH 频道"
+url = "{upstream}/manifest.mpd"
+"#,
+    )
+    .await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let get = |path: &str| {
+        fixture
+            .client
+            .get(format!("{}{path}", fixture.base))
+            .header("authorization", auth.clone())
+            .send()
+    };
+
+    let body: serde_json::Value = serde_json::from_str(
+        &get("/panel/api/dash/tracks/dg/c1")
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert_eq!(body["count"], 2);
+    assert_eq!(body["tracks"][0]["kind"], "video");
+    assert_eq!(body["tracks"][0]["width"], 1280);
+    assert_eq!(body["tracks"][1]["lang"], "zh");
+
+    assert_eq!(
+        get("/panel/api/dash/tracks/none/c1")
+            .await
+            .expect("请求")
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+
+    let scan = serde_json::json!({ "url": format!("{}/manifest.mpd", fixture.upstream) });
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/dash/scan-url", fixture.base))
+        .header("authorization", auth.clone())
+        .header("content-type", "application/json")
+        .body(scan.to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["kind"], "static");
+    assert_eq!(body["count"], 2);
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/dash/scan-url", fixture.base))
+        .header("authorization", auth.clone())
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "url": "file:///etc/passwd" }).to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body: serde_json::Value = serde_json::from_str(
+        &get("/panel/api/health")
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert_eq!(body["ok"], true);
+    assert!(body["channels"].as_u64().unwrap_or(0) >= 1);
+
+    let body: serde_json::Value = serde_json::from_str(
+        &get("/panel/api/dash-timeshift/status")
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert_eq!(body["enabled"], false);
 }

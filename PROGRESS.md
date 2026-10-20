@@ -511,3 +511,15 @@
 | 验证 | ✅ | `scripts/smoke-share.sh` 7 项；集成测试 2 项；单元 3 项 |
 
 验证：`cargo test --offline` 95 项（66 单元 + 29 集成）。
+
+## 3aa. P1 · 健康与 DASH 探测
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `GET /panel/api/health`：版本、运行时长、分组/频道数、EPG/安全/分享摘要 | ✅ | `routes/dash.rs` |
+| `GET /panel/api/dash/tracks/:gid/:cid`：抓 MPD 并列出轨道 | ✅ | `src/dash.rs`、`routes/dash.rs` |
+| `POST /panel/api/dash/scan-url`：解析任意 MPD，只读 | ✅ | 同上 |
+| `GET /panel/api/dash-timeshift/status`：占位，`enabled=false` | ✅ | 同上 |
+| 测试 | ✅ | dash 2 单元 + 1 集成；`scripts/smoke-panel.sh` 7 项 |
+
+验证：`cargo test --offline` 98 项（68 单元 + 30 集成）。

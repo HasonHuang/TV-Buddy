@@ -2,6 +2,7 @@
 
 pub mod admin;
 pub mod backup;
+pub mod dash;
 pub mod epg;
 pub mod groups;
 pub mod logo;

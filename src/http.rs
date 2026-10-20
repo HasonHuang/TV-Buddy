@@ -56,6 +56,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/login", post(routes::panel::login))
         .route("/panel/api/logout", post(routes::panel::logout))
         .route("/panel/api/status", get(routes::panel::status))
+        .route("/panel/api/health", get(routes::dash::health))
+        .route(
+            "/panel/api/dash/tracks/:gid/:cid",
+            get(routes::dash::tracks),
+        )
+        .route("/panel/api/dash/scan-url", post(routes::dash::scan_url))
+        .route(
+            "/panel/api/dash-timeshift/status",
+            get(routes::dash::timeshift_status),
+        )
         .route(
             "/panel/api/config",
             get(routes::panel::get_config).put(routes::panel::put_config),

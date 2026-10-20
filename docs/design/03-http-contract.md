@@ -438,6 +438,21 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 > 差异：目标启动后立即同步；本实现延迟 5 秒，避开启动竞态。
 
+### 6.11 健康与 DASH 探测（P1 已实现）
+
+目标只登记了路由存在性（F-011、F-013），响应形状为本实现自定。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/panel/api/health` | `{ok, version, uptime_secs, time, bind, groups, channels, sessions, cache, epg, security, share}` |
+| `GET` | `/panel/api/dash/tracks/:gid/:cid` | 抓频道 MPD 并列出轨道；未知频道 → `404 Channel not found` |
+| `POST` | `/panel/api/dash/scan-url` | `{"url"}`；只解析，不改配置；非 HTTP(S) → `400` |
+| `GET` | `/panel/api/dash-timeshift/status` | `{ok, enabled, ready, note}`；DASH 回看未实现（P2） |
+
+轨道对象：`{id, kind, codecs, bandwidth, lang, width, height}`。
+`kind` 取 `video`/`audio`/`text`/`unknown`。
+MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒体。
+
 ## 7. 错误串对照
 
 面板错误体保留目标原文，便于前端与外部脚本匹配（F-012 §3、F-013 §5）：

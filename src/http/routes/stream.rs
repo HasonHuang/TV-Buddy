@@ -596,7 +596,7 @@ fn insert_header(response: &mut Response, name: header::HeaderName, value: &str)
 /// 频道自定义上游头：`channel.headers` 中的 `"名称: 值"` 字符串。
 ///
 /// 由 M3U 导入写入（`#EXTVLCOPT`、`#EXTHTTP` 与行内头）。
-fn channel_headers(state: &AppState, gid: &str, cid: &str) -> Vec<(String, String)> {
+pub(crate) fn channel_headers(state: &AppState, gid: &str, cid: &str) -> Vec<(String, String)> {
     let config = state.snapshot();
     let Some((group, _)) = resolve(&config, gid, cid) else {
         return Vec::new();
@@ -620,7 +620,7 @@ fn channel_headers(state: &AppState, gid: &str, cid: &str) -> Vec<(String, Strin
 }
 
 /// 抓上游文本。
-async fn fetch(
+pub(crate) async fn fetch(
     state: &AppState,
     url: &str,
     gid: &str,
