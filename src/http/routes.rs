@@ -8,4 +8,5 @@ pub mod logo;
 pub mod panel;
 pub mod play;
 pub mod public;
+pub mod security;
 pub mod stream;

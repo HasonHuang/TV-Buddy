@@ -54,30 +54,9 @@ pub async fn fallback(State(_): State<Arc<AppState>>, uri: Uri) -> Response {
     (StatusCode::NOT_FOUND, "not found").into_response()
 }
 
-/// 客户端地址：优先 `X-Forwarded-For` 首项，其次 `X-Real-IP`。
-///
-/// 本实现不开启 TCP 对端地址采集，未带代理头时返回 `unknown`。
-fn client_ip(headers: &axum::http::HeaderMap) -> String {
-    if let Some(value) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first) = value.split(',').next() {
-            let first = first.trim();
-            if !first.is_empty() {
-                return first.to_string();
-            }
-        }
-    }
-    if let Some(value) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-        let value = value.trim();
-        if !value.is_empty() {
-            return value.to_string();
-        }
-    }
-    "unknown".to_string()
-}
-
 /// `GET /whoami`、`GET /unban/whoami`——返回调用方地址。
 ///
 /// 响应形状为本实现自定。目标只登记了路由存在性（S-EP-15）。
 pub async fn whoami(headers: axum::http::HeaderMap) -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({ "ip": client_ip(&headers) }))
+    axum::Json(serde_json::json!({ "ip": crate::http::ext::client_ip(&headers) }))
 }

@@ -1124,3 +1124,120 @@ async fn channel_headers_are_sent_upstream() {
     let body = response.text().await.expect("读正文");
     assert!(body.contains("# x-token=abc123"), "{body}");
 }
+
+#[tokio::test]
+async fn security_token_rotation_and_ip_ban() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let panel = |path: &str| {
+        fixture
+            .client
+            .get(format!("{}{path}", fixture.base))
+            .header("authorization", &auth)
+            .send()
+    };
+
+    // Token 查看。
+    let response = panel("/panel/api/security/token").await.expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["enabled"], true);
+    let first = body["current"].as_str().expect("token").to_string();
+    assert_eq!(first.len(), 48);
+
+    // 轮换：订阅地址改用新 Token。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/security/token/rotate", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    let second = body["token"].as_str().expect("token").to_string();
+    assert_ne!(first, second);
+    let playlist = fetch(&fixture, "/playlist.m3u")
+        .await
+        .text()
+        .await
+        .expect("读正文");
+    assert!(playlist.contains(&second));
+
+    // 统计：带转发头的公开请求会被记账。
+    let response = fixture
+        .client
+        .get(format!("{}/playlist.m3u", fixture.base))
+        .header("x-forwarded-for", "7.7.7.7")
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 封禁后用同一地址请求 → 403。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/security/ip/ban", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", &auth)
+        .body(r#"{"ip":"7.7.7.7","seconds":60}"#)
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = fixture
+        .client
+        .get(format!("{}/playlist.m3u", fixture.base))
+        .header("x-forwarded-for", "7.7.7.7")
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    // 面板面不受封禁影响（未登录仍是 401）。
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/status", fixture.base))
+        .header("x-forwarded-for", "7.7.7.7")
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    // 统计反映封禁状态。
+    let response = panel("/panel/api/security/ip/stats").await.expect("请求");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert!(body["banned"].as_u64().expect("banned") >= 1);
+    let entry = body["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .find(|entry| entry["ip"] == "7.7.7.7")
+        .expect("应有 7.7.7.7 记录");
+    assert_eq!(entry["banned"], true);
+    assert!(entry["requests"].as_u64().expect("requests") >= 1);
+
+    // 解封后恢复。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/security/ip/unban", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", &auth)
+        .body(r#"{"ip":"7.7.7.7"}"#)
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = fixture
+        .client
+        .get(format!("{}/playlist.m3u", fixture.base))
+        .header("x-forwarded-for", "7.7.7.7")
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+}

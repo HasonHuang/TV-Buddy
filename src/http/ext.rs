@@ -44,3 +44,24 @@ impl FromRequestParts<Arc<AppState>> for PanelAuth {
         }
     }
 }
+
+/// 客户端地址：优先 `X-Forwarded-For` 首项，其次 `X-Real-IP`。
+///
+/// 本实现不采集 TCP 对端地址；都没有时返回 `unknown`。
+pub fn client_ip(headers: &axum::http::HeaderMap) -> String {
+    if let Some(value) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+        if let Some(first) = value.split(',').next() {
+            let first = first.trim();
+            if !first.is_empty() {
+                return first.to_string();
+            }
+        }
+    }
+    if let Some(value) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+        let value = value.trim();
+        if !value.is_empty() {
+            return value.to_string();
+        }
+    }
+    "unknown".to_string()
+}

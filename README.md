@@ -42,6 +42,7 @@ scripts/smoke-m4.sh   # 热重载、看门狗冷却、缓存状态与清空、�
 scripts/smoke-epg.sh  # EPG：采集、/epg.xml[.gz]、/epg 页面与 /epg/api/*、状态与刷新
 scripts/smoke-logo.sh # 台标库：上传、公开取图与列表、删除
 scripts/smoke-backup.sh # 备份与恢复：导出 gzip、改动后回滚、拒绝非法内容
+scripts/smoke-security.sh # 安全面：Token 查看/轮换、IP 统计、封禁与解封
 scripts/compare-p0.sh # 对拍：同一夹具下对比目标 v0.8.2（需容器 iptv82）
 tests/             # 路由级集成测试（起真实服务 + 伪上游）
 ```

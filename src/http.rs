@@ -2,6 +2,7 @@
 
 pub mod error;
 pub mod ext;
+pub mod guard;
 pub mod routes;
 pub mod static_assets;
 
@@ -63,6 +64,20 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/cache/flush", post(routes::admin::cache_flush))
         .route("/panel/api/stats", get(routes::admin::stats))
         .route("/panel/api/logs", get(routes::admin::logs))
+        .route("/panel/api/security/token", get(routes::security::token))
+        .route(
+            "/panel/api/security/token/rotate",
+            post(routes::security::token_rotate),
+        )
+        .route(
+            "/panel/api/security/ip/stats",
+            get(routes::security::ip_stats),
+        )
+        .route("/panel/api/security/ip/ban", post(routes::security::ip_ban))
+        .route(
+            "/panel/api/security/ip/unban",
+            post(routes::security::ip_unban),
+        )
         .route("/panel/api/backup", get(routes::backup::backup))
         .route(
             "/panel/api/restore",
@@ -109,5 +124,9 @@ pub fn router(state: Arc<AppState>) -> Router {
             routes::admin::count_request,
         ))
         .fallback(routes::public::fallback)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            guard::ip_guard,
+        ))
         .with_state(state)
 }

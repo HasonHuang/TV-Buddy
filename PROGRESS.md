@@ -389,7 +389,7 @@
 | --- | --- | --- | --- |
 | 面板其余分区 UI（缓存、日志、EPG、台标、安全、订阅） | 中 | 无 | 接口大多已就绪；前端按既有页签模式补页 |
 | 订阅聚合 `[playlist]`（`sources[]`、`merge_ttl_secs`、`merge_position`、`global_exclude[]`） | 中 | 无 | 需新增配置建模、远端拉取与合并、`include`/`exclude` 前缀过滤（F-009、F-013 §2） |
-| 安全面：`/panel/api/security/*`（Token 轮换、IP 统计/封禁）与 `[auth]` IP 守护 | 中 | 无 | 需定义封禁存储与 `GET /unban` 自助解封（每月 3 次） |
+| 安全面补全：`ip/unban-batch`、按 IP 会话上限、自动限流、`GET /unban` 自助解封 | 中 | 无 | 基础面已在 §3q 实现 |
 | `remux` / `dash` 转封装 | 大 | `ffmpeg` | 外部程序；P0 起恒 503 预热 |
 | 录制与推流 `/panel/api/schedule`、`/livestream/*`、`/timeshift/*` | 大 | `ffmpeg` | 需任务调度与文件管理 |
 | EPG 脚本源与翻译接口 | 大 | `python3` | `kind="script"`、`/epg/translate/*` |
@@ -398,3 +398,15 @@
 | 面板 `/panel/api/{health,assets,schedule,dash,subtitle,resolver}` | 中 | 视项 | 按 F-010/F-011/F-014 补 |
 
 > 每项开工前先补 `docs/design/` 小节与用例，再按 M0–M4 的节奏提交。
+
+## 3q. P1 · 安全面（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| Token：`GET /panel/api/security/token`、`POST …/token/rotate`（旧值 1 小时宽限） | ✅ | `routes/security.rs`；`PlayTokenStore` 复用 |
+| IP 统计与封禁：`ip/stats`、`ip/ban`（默认 1 小时、上限 30 天）、`ip/unban`（单个或批量） | ✅ | `src/auth/ip_guard.rs`（4 项单元测试） |
+| 执行：非面板路径按转发头记账，封禁期内 `403`；面板路径不拦截 | ✅ | `src/http/guard.rs`（中间件） |
+| 容量：最多 10 000 个地址 | ✅ | 同上 |
+| 验证 | ✅ | `scripts/smoke-security.sh` 10 项；集成测试 `security_token_rotation_and_ip_ban` |
+
+验证：`cargo test` 74 项（52 单元 + 22 集成）。

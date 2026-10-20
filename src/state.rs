@@ -45,6 +45,8 @@ pub struct AppState {
     pub watchdog: Watchdog,
     /// 节目单状态。
     pub epg: crate::epg::EpgState,
+    /// IP 统计与封禁。
+    pub ip_guard: crate::auth::IpGuard,
     /// 最近日志行。
     pub logs: Arc<RingBuffer>,
     /// 进程启动时刻。
@@ -74,6 +76,7 @@ impl AppState {
             stats: Stats::default(),
             watchdog: Watchdog::new(),
             epg: crate::epg::EpgState::default(),
+            ip_guard: crate::auth::IpGuard::new(),
             logs,
             started: Instant::now(),
             write_lock: Mutex::new(()),
