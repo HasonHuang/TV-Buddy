@@ -567,11 +567,11 @@
 
 | 项 | 状态 |
 | --- | --- |
-| amd64 | 3.55 MB |
-| arm64 | 3.29 MB |
+| amd64 | 3.56 MB |
+| arm64 | 3.31 MB |
 | `verify-release.sh` 双架构 | ✅ 静态链接、`/health`、面板/台标资源、健康 401、分享默认 404 |
 
-验证：`cargo test --offline` 120 项（80 单元 + 40 集成）。
+验证：`cargo test --offline` 121 项（80 单元 + 41 集成）。
 
 已知缺口（P2）：EPG 翻译引擎、订阅聚合 UI。
 
@@ -623,8 +623,8 @@
 
 | 项 | 状态 |
 | --- | --- |
-| amd64 | 3.55 MB |
-| arm64 | 3.29 MB |
+| amd64 | 3.56 MB |
+| arm64 | 3.31 MB |
 | `verify-release.sh` 双架构 | ✅ 面板资源 `panel-CiSNGll5.js`、台标资源、健康 401、分享默认 404 |
 
 验证：`cargo test --offline` 120 项；smoke：assets 13、share 7、panel 7、resolver 5、remux 7、schedule 9、timeshift 8、record 5；DASH 回看按 ffmpeg 能力跳过。
@@ -642,11 +642,11 @@
 
 | 项 | 状态 |
 | --- | --- |
-| amd64 | 3.55 MB |
-| arm64 | 3.29 MB |
+| amd64 | 3.56 MB |
+| arm64 | 3.31 MB |
 | `verify-release.sh` 双架构 | ✅ 面板资源 `panel-*.js`、台标资源、健康 401、分享默认 404 |
 
-验证：`cargo test --offline` 120 项；全部冒烟通过（DASH 回看按 ffmpeg 能力跳过）。
+验证：`cargo test --offline` 121 项；全部冒烟通过（DASH 回看按 ffmpeg 能力跳过）。
 
 ## 3am. P2 · 面板「系统状态」分区
 
@@ -669,3 +669,15 @@
 | `POST /epg/translate/{clear,clear-engine}` | 清空 `<cache>/epg/.translate/` |
 
 | 验证 | ✅ 1 集成（未配置引擎路径） |
+
+## 3ao. 最终发布包（系统状态 + EPG 翻译接口面）
+
+| 项 | 状态 |
+| --- | --- |
+| amd64 | 3.56 MB |
+| arm64 | 3.31 MB |
+| `verify-release.sh` 双架构 | ✅ 面板资源、台标资源、健康 401、分享默认 404 |
+
+验证：`cargo test --offline` 121 项；smoke：assets 13、share 7、panel 7、resolver 5、remux 7、schedule 9、timeshift 8、record 5。
+
+剩余（P2）：EPG 翻译引擎本体（接口面已就绪）、字幕翻译引擎本体。
