@@ -274,5 +274,14 @@
 
 验证：`scripts/verify-release.sh arm64` 与 `... amd64` 均输出「静态链接 OK」「/health = ok」。
 
+## 3h. 集成测试（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 路由级集成测试：起真实 HTTP 服务 + 伪上游，用 `reqwest`（不跟随跳转）观测契约 | ✅ | `tests/http_contract.rs`（10 项） |
+| 覆盖：健康检查与总订阅、媒体清单入口、主清单入口、变体清单与别名、切片首写/命中缓存头、Token 与未知路径顺序、归档组、`passthrough` 校验、未知面板接口 | ✅ | 同上 |
+
+验证：`cargo test` 共 40 项（30 单元 + 10 集成）全绿。
+
 > 说明：本机访问 `github.com` release 资产与 `static.rust-lang.org` 的 TLS 会被中途断开，
 > 因此不用 `cross`，改用 Docker Hub 可用的 `rust:1-alpine` 完成双架构构建。
