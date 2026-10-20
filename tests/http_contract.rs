@@ -687,3 +687,124 @@ async fn epg_api_exposes_channels_programmes_and_search() {
     let response = fetch(&disabled, "/epg/api/channels").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+/// 用默认口令登录，返回会话 Token。
+async fn login(fixture: &Fixture) -> String {
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/login", fixture.base))
+        .header("content-type", "application/json")
+        .body(r#"{"username":"admin","password":"admin"}"#)
+        .send()
+        .await
+        .expect("登录请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    body["token"].as_str().expect("应返回 token").to_string()
+}
+
+#[tokio::test]
+async fn whoami_reports_forwarded_ip() {
+    let fixture = fixture().await;
+
+    let response = fixture
+        .client
+        .get(format!("{}/whoami", fixture.base))
+        .header("x-forwarded-for", "1.2.3.4, 5.6.7.8")
+        .send()
+        .await
+        .expect("请求 whoami");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["ip"], "1.2.3.4");
+
+    let response = fetch(&fixture, "/unban/whoami").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["ip"], "unknown");
+}
+
+#[tokio::test]
+async fn group_import_adds_skips_and_overwrites() {
+    let fixture = fixture().await;
+    let token = login(&fixture).await;
+    let body = serde_json::json!([{
+        "id": "imp",
+        "name": "导入组",
+        "mode": "proxy",
+        "access": "public",
+        "channels": [{
+            "id": "c1",
+            "name": "导入频道",
+            "url": format!("{}/live.m3u8", fixture.upstream)
+        }]
+    }]);
+
+    let post = |path: &str, body: &serde_json::Value| {
+        fixture
+            .client
+            .post(format!("{}{path}", fixture.base))
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {token}"))
+            .body(body.to_string())
+            .send()
+    };
+
+    // 未登录 → 401。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/groups/import", fixture.base))
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    // 首次导入。
+    let response = post("/panel/api/groups/import", &body).await.expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let result: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(result["imported"], 1);
+    assert_eq!(result["skipped"], 0);
+
+    let playlist = fetch(&fixture, "/playlist.m3u")
+        .await
+        .text()
+        .await
+        .expect("读正文");
+    assert!(playlist.contains("/imp/c1.m3u8?token="));
+
+    // 重复导入 → 跳过。
+    let response = post("/panel/api/groups/import", &body).await.expect("请求");
+    let result: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(result["imported"], 0);
+    assert_eq!(result["skipped"], 1);
+
+    // 强制导入 → 覆盖。
+    let mut renamed = body.clone();
+    renamed[0]["name"] = serde_json::json!("覆盖组");
+    let response = post("/panel/api/groups/import/force", &renamed)
+        .await
+        .expect("请求");
+    let result: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(result["imported"], 1);
+    let playlist = fetch(&fixture, "/playlist.m3u")
+        .await
+        .text()
+        .await
+        .expect("读正文");
+    assert!(playlist.contains("覆盖组"));
+
+    // 非数组 → 400。
+    let response = post("/panel/api/groups/import", &serde_json::json!({}))
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

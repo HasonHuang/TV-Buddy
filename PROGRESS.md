@@ -310,3 +310,14 @@
 | 兜底：未知单段路径 → `404`（目标 `/status` 行为，S-EP-08） | ✅ | 集成测试 `single_segment_unknown_path_is_404` |
 
 验证：`cargo test` 50 项（36 单元 + 14 集成）全绿。
+
+## 3k. P1 · 客户端地址与分组导入（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `GET /whoami`、`GET /unban/whoami` → `{"ip":…}`（`X-Forwarded-For` 首项 / `X-Real-IP` / `unknown`） | ✅ | `src/http/routes/public.rs` |
+| `POST /panel/api/groups/import`：分组数组导入，重复 id 跳过 | ✅ | `src/http/routes/groups.rs` |
+| `POST /panel/api/groups/import/force`：重复 id 覆盖 | ✅ | 同上 |
+| 校验：非数组 → `400`；未登录 → `401`；导入后订阅立即可见 | ✅ | 集成测试 `group_import_adds_skips_and_overwrites`、`whoami_reports_forwarded_ip` |
+
+验证：`cargo test` 53 项（36 单元 + 17 集成）全绿。

@@ -225,3 +225,68 @@ pub async fn delete_channel(
     tracing::info!(group = %gid, channel = %cid, "删除频道");
     Ok(Json(json!({ "ok": true })))
 }
+
+/// 导入分组：`force = false` 跳过已存在的 id，`true` 覆盖。
+fn import(state: Arc<AppState>, body: Value, force: bool) -> Result<Json<Value>, ApiError> {
+    let items = body
+        .as_array()
+        .ok_or_else(|| ApiError::bad_request("请求体必须是分组数组"))?;
+    let mut groups: Vec<Group> = Vec::with_capacity(items.len());
+    for item in items {
+        let group: Group = serde_json::from_value(item.clone())
+            .map_err(|err| ApiError::bad_request(format!("分组字段不合法: {err}")))?;
+        if group.id.trim().is_empty() || group.name.trim().is_empty() {
+            return Err(ApiError::bad_request("分组 id 与名称不能为空"));
+        }
+        groups.push(group);
+    }
+
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+    state
+        .mutate(|config| {
+            for group in &groups {
+                match config
+                    .groups
+                    .iter()
+                    .position(|existing| existing.id == group.id)
+                {
+                    Some(index) if force => {
+                        config.groups[index] = group.clone();
+                        imported += 1;
+                    }
+                    Some(_) => skipped += 1,
+                    None => {
+                        config.groups.push(group.clone());
+                        imported += 1;
+                    }
+                }
+            }
+            Ok(())
+        })
+        .map_err(|err| ApiError::internal(format!("{err:#}")))?;
+
+    Ok(Json(json!({
+        "ok": true,
+        "imported": imported,
+        "skipped": skipped,
+    })))
+}
+
+/// `POST /panel/api/groups/import`——导入分组数组，id 重复的跳过。
+pub async fn import_groups(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    import(state, body, false)
+}
+
+/// `POST /panel/api/groups/import/force`——导入分组数组，id 重复的覆盖。
+pub async fn import_groups_force(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    import(state, body, true)
+}

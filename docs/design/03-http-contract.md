@@ -60,7 +60,7 @@
 | GET | `/logo/<file>` | 无 | `200` 图片 + `public, max-age=86400` / `404` | P2 | F-011 §6 |
 | GET | `/logo/api/list` | 无 | `200` JSON | P2 | F-011 |
 | GET | `/unban` | 无 | `200` `text/html` | P1 | S-EP-07 |
-| GET | `/unban/whoami`、`/whoami` | 无 | `200` JSON（客户端 IP） | P1 | S-EP-15 |
+| GET | `/unban/whoami`、`/whoami` | 无 | `200` `{"ip":"<地址>"}`；取 `X-Forwarded-For` 首项或 `X-Real-IP`，都没有时 `unknown` | ✅ P1 | S-EP-15 |
 | GET | `/health` | 无 | `200` `ok`（`text/plain`） | ✅ M0 | S-EP-10 |
 | GET | `/panel`、`/panel/`、`/panel/epg` | 无 | `200` `text/html` | ✅ M0 | S-EP-01 |
 | GET | `/__assets/*path` | 无 | `200` 静态资源 / `404` | ✅ M0 | S-EP-16 |
@@ -211,6 +211,8 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | PUT | `/panel/api/groups/{gid}/channels/{cid}` | 局部字段 | `{"ok":true}` | F-004 |
 | DELETE | `/panel/api/groups/{gid}/channels/{cid}` | — | `{"ok":true}`；缺 → `404` `Channel not found` | F-013 §5 |
 | GET | `/panel/api/groups/export` | — | 顶层**数组**（完整分组对象） | F-013 §1 |
+| POST | `/panel/api/groups/import` | — | 体为分组数组；id 已存在则跳过；`{"ok":true,"imported":n,"skipped":m}` | F-013 |
+| POST | `/panel/api/groups/import/force` | — | 同上，但同 id 覆盖 | F-013 |
 | GET | `/panel/api/groups/{gid}/export` | — | 单个分组对象 | F-013 §1 |
 
 写入语义：分组与频道改动**立即重写** `config.toml`；`PUT /config` 是**全量替换**（F-013 §6）。

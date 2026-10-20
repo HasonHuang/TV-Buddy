@@ -31,6 +31,8 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(routes::epg::api_programmes),
         )
         .route("/epg/api/search", get(routes::epg::api_search))
+        .route("/whoami", get(routes::public::whoami))
+        .route("/unban/whoami", get(routes::public::whoami))
         .route("/playlist.m3u", get(routes::play::total_playlist))
         .route("/:gid/playlist.m3u", get(routes::play::group_playlist))
         // 面板接口：未知路径固定 404 JSON，先于播放通配路由匹配。
@@ -63,6 +65,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/epg/refresh", post(routes::epg::refresh))
         .route("/panel/api/groups", post(routes::groups::create_group))
         .route("/panel/api/groups/export", get(routes::groups::export_all))
+        .route(
+            "/panel/api/groups/import",
+            post(routes::groups::import_groups),
+        )
+        .route(
+            "/panel/api/groups/import/force",
+            post(routes::groups::import_groups_force),
+        )
         .route(
             "/panel/api/groups/:gid",
             put(routes::groups::update_group).delete(routes::groups::delete_group),
