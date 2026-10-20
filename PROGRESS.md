@@ -573,7 +573,7 @@
 
 验证：`cargo test --offline` 119 项（80 单元 + 39 集成）。
 
-已知缺口（P2）：DASH 回看（`dash_timeshift`）、EPG 翻译引擎、订阅聚合 UI。
+已知缺口（P2）：EPG 翻译引擎、订阅聚合 UI。
 
 ## 3af. P2 · EPG 脚本源、批量录制、字幕自检
 
@@ -599,7 +599,14 @@
 | 面板状态：`/panel/api/dash-timeshift/status` 报告频道与已缓冲片数 | ✅ | `routes/dash.rs` |
 | 验证 | ✅ | 3 单元 + 1 集成；`scripts/smoke-timeshift.sh` 8 项（真实 ffmpeg HLS） |
 
-> DASH 回看（`dash_timeshift`）仍为 P2。
+## 3aj. P2 · DASH 回看
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `dash_timeshift=true` 时用 ffmpeg 转本地 HLS（`-hls_time 4`，滑动窗口 120 片） | ✅ | `timeshift::spawn_ffmpeg` |
+| 本地 HLS 增量入缓冲，VOD 清单与伪装切片复用 | ✅ | `spawn_poller` |
+| 会话回收时结束 ffmpeg | ✅ | `Session::shutdown` |
+| 冒烟 | ⚠️ | `scripts/smoke-dash-timeshift.sh` 在 ffmpeg 缺少 DASH 解复用器时跳过 |
 
 ## 3ah. P1 · 面板「录制与回看」分区
 
@@ -621,3 +628,12 @@
 | `verify-release.sh` 双架构 | ✅ 面板资源 `panel-CiSNGll5.js`、台标资源、健康 401、分享默认 404 |
 
 验证：`cargo test --offline` 119 项；smoke：assets 13、share 7、panel 7、resolver 5、remux 7、schedule 9、timeshift 8、record 5。
+
+## 3ak. P2 · 订阅聚合配置与面板
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `GET/PUT /panel/api/playlist`：全量替换，校验 URL、合并位置、TTL 夹取 | ✅ | `routes/playlist.rs` |
+| 空源 ID 自动生成；非法 URL → `400` | ✅ | 同上 |
+| 面板「订阅聚合」：源增删改、启用、全局排除、复制聚合地址 | ✅ | `frontend/src/playlist.tsx` |
+| 验证 | ✅ | 1 集成；前端构建 panel 35.6 kB |

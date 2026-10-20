@@ -67,7 +67,7 @@ pub async fn entry(
     // 回看：只把 `playseek` 原样追加到上游（S-EP-04），其余回看参数丢弃。
     let mut upstream = with_playseek(&base, &query);
     // 本地回看：点亮 `livestream` 的频道优先读缓冲；未命中落回实时（S-TS-01）。
-    if channel.livestream {
+    if channel.livestream || channel.dash_timeshift {
         if let Some((start, end)) =
             crate::timeshift::range(&query, config.server.timezone_offset_hours as i64)
         {

@@ -387,8 +387,9 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 备份恢复 | `GET /panel/api/backup`、`POST /panel/api/restore`（浏览器内下载/上传） | ✅ |
 | 素材 | `/panel/api/{assets,subtitle}/*`、`/panel/api/assets/ffmpeg-status` | ✅ |
 | 录制与回看 | `/panel/api/schedule*`、`/panel/api/livestream*`、`GET /panel/api/dash-timeshift/status` | ✅ |
+| 订阅聚合 | `GET/PUT /panel/api/playlist`（源、过滤、缓存与合并位置）；清单 `GET /playlist.m3u` | ✅ |
 | 台标 | 独立页 `/logo`（`/logo/api/*`） | ✅ |
-| 其它（系统设置、订阅聚合） | — | 待实现，侧栏置灰 |
+| 其它（系统设置） | 概览页已支持 `GET/PUT /panel/api/config` 全量编辑 | ✅ |
 
 ### 6.9 素材与脚本（P1 已实现）
 
@@ -537,14 +538,14 @@ MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒�
 
 | 项 | 规则 |
 | --- | --- |
-| 启用 | 频道 `livestream = true`；启动时或点亮后开始缓冲 |
+| 启用 | 频道 `livestream = true`（代理）或 `dash_timeshift = true`（DASH）；启动时或点亮后开始缓冲 |
 | 缓冲 | 抓上游媒体清单，增量下载切片；主清单取最高码率；窗口 `timeshift_hours`，容量 `timeshift_max_gb`（0 = 不限） |
 | 参数 | `?start=<unix>&end=<unix>` 或 `?playseek=<本地 yyyymmddHHMMSS-yyyymmddHHMMSS>` |
 | 清单 | `#EXT-X-PLAYLIST-TYPE:VOD`、`#EXT-X-TARGETDURATION`、`#EXT-X-ENDLIST`；`Cache-Control: no-cache, must-revalidate` |
 | 切片 | `/{gid}/{cid}/timeshift/<16hex>.<png|gif|bmp|jpg|webp>`；图片 Content-Type；`Cache-Control: private, max-age=3600` |
 | 越界 | 缓冲区无交集 → 落回实时清单，不报错 |
 | 会话 | 键 `gid/cid`；15 分钟无访问回收；索引在内存，重启后从空开始 |
-| 范围 | 代理频道；DASH 回看未实现（`/panel/api/dash-timeshift/status` 只报告） |
+| 范围 | 代理频道；DASH 频道设 `dash_timeshift = true` 时，用 ffmpeg 转本地 HLS 后缓冲（需 ffmpeg 含 DASH 解复用器） |
 
 ## 7. 错误串对照
 

@@ -51,6 +51,7 @@ pub struct Session {
     entries: Mutex<VecDeque<Entry>>,
     last: Mutex<Instant>,
     stop: AtomicBool,
+    ffmpeg: Mutex<Option<tokio::process::Child>>,
 }
 
 impl Session {
@@ -104,6 +105,15 @@ impl Session {
         }
         self.touch();
         fs::read(self.dir.join(name)).ok()
+    }
+
+    /// 停止会话：结束 ffmpeg、删除目录。
+    fn shutdown(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(mut child) = self.ffmpeg.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = child.start_kill();
+        }
+        let _ = fs::remove_dir_all(&self.dir);
     }
 
     fn push(&self, entry: Entry) {
@@ -163,7 +173,9 @@ impl Manager {
         let config = state.snapshot();
         let group = config.group(gid)?;
         let channel = group.channels.iter().find(|channel| channel.id == cid)?;
-        if !channel.livestream {
+        // 代理频道点亮即缓冲；DASH 频道按 `dash_timeshift` 用 ffmpeg 转 HLS 后缓冲。
+        let dash = group.mode == "dash" && channel.dash_timeshift;
+        if !channel.livestream && !dash {
             return None;
         }
         let key = format!("{gid}/{cid}");
@@ -179,22 +191,35 @@ impl Manager {
         }
         let dir = state.cache_dir.join("timeshift").join(gid).join(cid);
         let _ = fs::create_dir_all(&dir);
+        let dash_live = dash.then(|| dir.join("live"));
         let session = Arc::new(Session {
             gid: gid.to_string(),
             cid: cid.to_string(),
             dir,
-            hours: channel.timeshift_hours,
-            max_bytes: channel.timeshift_max_gb.saturating_mul(1 << 30),
+            hours: channel.timeshift_hours.max(channel.dash_timeshift_hours),
+            max_bytes: channel
+                .timeshift_max_gb
+                .max(channel.dash_timeshift_max_gb)
+                .saturating_mul(1 << 30),
             entries: Mutex::new(VecDeque::new()),
             last: Mutex::new(Instant::now()),
             stop: AtomicBool::new(false),
+            ffmpeg: Mutex::new(None),
         });
         self.sessions
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(key, session.clone());
         info!(gid, cid, "回看会话开始");
-        spawn_poller(session.clone(), state.clone(), channel.url.clone());
+        if let Some(live) = &dash_live {
+            spawn_ffmpeg(&session, live, &channel.url);
+        }
+        spawn_poller(
+            session.clone(),
+            state.clone(),
+            channel.url.clone(),
+            dash_live,
+        );
         self.ensure_janitor();
         Some(session)
     }
@@ -278,8 +303,7 @@ impl Manager {
                         .collect()
                 };
                 for session in reaped {
-                    session.stop.store(true, Ordering::SeqCst);
-                    let _ = fs::remove_dir_all(&session.dir);
+                    session.shutdown();
                     info!(gid = %session.gid, cid = %session.cid, "回看会话回收");
                 }
             }
@@ -323,7 +347,37 @@ fn parse_compact(text: &str, offset_hours: i64) -> Option<i64> {
     crate::schedule::parse_local(&expanded, offset_hours)
 }
 
-fn spawn_poller(session: Arc<Session>, state: Arc<AppState>, url: String) {
+/// 用 ffmpeg 把 DASH 转成本地 HLS，供轮询器增量读取。
+fn spawn_ffmpeg(session: &Arc<Session>, dir: &PathBuf, url: &str) {
+    let _ = fs::create_dir_all(dir);
+    let playlist = dir.join("index.m3u8");
+    let pattern = dir.join("d%d.ts");
+    let mut command = tokio::process::Command::new("ffmpeg");
+    command
+        .args(["-y", "-loglevel", "error", "-i", url, "-c", "copy"])
+        .args(["-f", "hls", "-hls_time", "4", "-hls_list_size", "120"])
+        .args(["-hls_flags", "delete_segments+omit_endlist"])
+        .arg("-hls_segment_filename")
+        .arg(&pattern)
+        .arg(&playlist)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    match command.spawn() {
+        Ok(child) => {
+            *session.ffmpeg.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
+            info!(dir = %dir.display(), "DASH 回看转封装启动");
+        }
+        Err(error) => warn!(%error, "无法启动 ffmpeg（DASH 回看不可用）"),
+    }
+}
+
+fn spawn_poller(
+    session: Arc<Session>,
+    state: Arc<AppState>,
+    url: String,
+    dash_live: Option<PathBuf>,
+) {
     tokio::spawn(async move {
         let mut seen_remote: HashSet<String> = HashSet::new();
         let offset = crate::proxy::media::ext_offset(&session.gid, &session.cid);
@@ -341,44 +395,55 @@ fn spawn_poller(session: Arc<Session>, state: Arc<AppState>, url: String) {
             }) else {
                 break;
             };
-            if !channel.livestream {
+            if !channel.livestream && dash_live.is_none() {
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 continue;
             }
             let headers = channel_headers(&state, &session.gid, &session.cid);
             let mut base = url.clone();
-            let mut request = state.http.get(&base);
-            for (name, value) in &headers {
-                request = request.header(name, value);
-            }
-            let mut playlist = match request.send().await {
-                Ok(response) if response.status().is_success() => {
-                    response.text().await.unwrap_or_default()
-                }
-                Ok(response) => {
-                    warn!(status = %response.status(), "回看上游状态异常");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    continue;
-                }
-                Err(error) => {
-                    warn!(%error, "回看上游连接失败");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    continue;
-                }
-            };
-            if crate::proxy::media::is_master(&playlist) {
-                if let Some((_, variant)) = crate::proxy::media::best_variant(&playlist, &base) {
-                    base = variant;
-                    let mut request = state.http.get(&base);
-                    for (name, value) in &headers {
-                        request = request.header(name, value);
+            let playlist = if let Some(dir) = &dash_live {
+                match fs::read_to_string(dir.join("index.m3u8")) {
+                    Ok(text) => text,
+                    Err(_) => {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
                     }
-                    playlist = match request.send().await {
-                        Ok(response) => response.text().await.unwrap_or_default(),
-                        Err(_) => String::new(),
-                    };
                 }
-            }
+            } else {
+                let mut request = state.http.get(&base);
+                for (name, value) in &headers {
+                    request = request.header(name, value);
+                }
+                let mut text = match request.send().await {
+                    Ok(response) if response.status().is_success() => {
+                        response.text().await.unwrap_or_default()
+                    }
+                    Ok(response) => {
+                        warn!(status = %response.status(), "回看上游状态异常");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+                    Err(error) => {
+                        warn!(%error, "回看上游连接失败");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+                };
+                if crate::proxy::media::is_master(&text) {
+                    if let Some((_, variant)) = crate::proxy::media::best_variant(&text, &base) {
+                        base = variant;
+                        let mut request = state.http.get(&base);
+                        for (name, value) in &headers {
+                            request = request.header(name, value);
+                        }
+                        text = match request.send().await {
+                            Ok(response) => response.text().await.unwrap_or_default(),
+                            Err(_) => String::new(),
+                        };
+                    }
+                }
+                text
+            };
             let mut duration = 0f64;
             for line in playlist.lines().map(str::trim) {
                 if let Some(rest) = line.strip_prefix("#EXTINF:") {
@@ -392,29 +457,38 @@ fn spawn_poller(session: Arc<Session>, state: Arc<AppState>, url: String) {
                 if line.is_empty() || line.starts_with('#') {
                     continue;
                 }
-                let Ok(segment) = url::Url::parse(&base).and_then(|base| base.join(line)) else {
-                    continue;
+                let identifier = if let Some(dir) = &dash_live {
+                    dir.join(line).to_string_lossy().to_string()
+                } else {
+                    let Ok(segment) = url::Url::parse(&base).and_then(|base| base.join(line))
+                    else {
+                        continue;
+                    };
+                    segment.to_string()
                 };
-                let segment = segment.to_string();
-                if !seen_remote.insert(segment.clone()) {
+                if !seen_remote.insert(identifier.clone()) {
                     duration = 0.0;
                     continue;
                 }
-                let mut request = state.http.get(&segment);
-                for (name, value) in &headers {
-                    request = request.header(name, value);
-                }
-                let bytes = match request.send().await {
-                    Ok(response) if response.status().is_success() => {
-                        response.bytes().await.ok().map(|bytes| bytes.to_vec())
+                let bytes = if let Some(dir) = &dash_live {
+                    fs::read(dir.join(line)).ok()
+                } else {
+                    let mut request = state.http.get(&identifier);
+                    for (name, value) in &headers {
+                        request = request.header(name, value);
                     }
-                    _ => None,
+                    match request.send().await {
+                        Ok(response) if response.status().is_success() => {
+                            response.bytes().await.ok().map(|bytes| bytes.to_vec())
+                        }
+                        _ => None,
+                    }
                 };
                 let Some(bytes) = bytes else {
                     duration = 0.0;
                     continue;
                 };
-                let digest = Sha256::digest(segment.as_bytes());
+                let digest = Sha256::digest(identifier.as_bytes());
                 let stem: String = hex::encode(digest)[..16].to_string();
                 let ext = EXTS[(sequence + offset) % EXTS.len()];
                 let name = format!("{stem}.{ext}");
@@ -433,9 +507,13 @@ fn spawn_poller(session: Arc<Session>, state: Arc<AppState>, url: String) {
             if seen_remote.len() > 4096 {
                 seen_remote.clear();
             }
-            let interval = crate::proxy::media::target_duration(&playlist)
-                .unwrap_or(5)
-                .clamp(2, 10);
+            let interval = if dash_live.is_some() {
+                2
+            } else {
+                crate::proxy::media::target_duration(&playlist)
+                    .unwrap_or(5)
+                    .clamp(2, 10)
+            };
             tokio::time::sleep(Duration::from_secs(interval)).await;
         }
     });
@@ -451,7 +529,7 @@ pub fn warm(state: &Arc<AppState>) {
             group
                 .channels
                 .iter()
-                .filter(|channel| channel.livestream)
+                .filter(|channel| channel.livestream || channel.dash_timeshift)
                 .map(|channel| (group.id.clone(), channel.id.clone()))
                 .collect::<Vec<_>>()
         })
@@ -489,6 +567,7 @@ mod tests {
             entries: Mutex::new(VecDeque::new()),
             last: Mutex::new(Instant::now()),
             stop: AtomicBool::new(false),
+            ffmpeg: Mutex::new(None),
         }
     }
 

@@ -2357,3 +2357,76 @@ timeshift_hours = 4
         "越界应落回实时：{body}"
     );
 }
+
+#[tokio::test]
+async fn playlist_config_roundtrip_and_validation() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/playlist", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("读取");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["merge_position"], "bottom");
+
+    let cfg = serde_json::json!({
+        "merge_ttl_secs": 120,
+        "merge_position": "top",
+        "global_exclude": ["购物"],
+        "sources": [{
+            "id": "",
+            "name": "上游",
+            "url": format!("{}/extra.m3u8", fixture.upstream),
+            "enabled": true,
+            "include": [],
+            "exclude": []
+        }]
+    });
+    let response = fixture
+        .client
+        .put(format!("{}/panel/api/playlist", fixture.base))
+        .header("authorization", auth.clone())
+        .header("content-type", "application/json")
+        .body(cfg.to_string())
+        .send()
+        .await
+        .expect("保存");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/playlist", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("复核");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["merge_position"], "top");
+    assert_eq!(body["merge_ttl_secs"], 120);
+    assert_eq!(body["sources"][0]["name"], "上游");
+    assert!(!body["sources"][0]["id"].as_str().unwrap_or("").is_empty());
+
+    let bad = serde_json::json!({
+        "merge_ttl_secs": 60, "merge_position": "bottom",
+        "global_exclude": [],
+        "sources": [{ "id": "x", "name": "坏", "url": "ftp://x", "enabled": true }]
+    });
+    let response = fixture
+        .client
+        .put(format!("{}/panel/api/playlist", fixture.base))
+        .header("authorization", auth)
+        .header("content-type", "application/json")
+        .body(bad.to_string())
+        .send()
+        .await
+        .expect("坏配置");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

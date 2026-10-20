@@ -86,6 +86,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(routes::schedule::livestream_switch),
         )
         .route(
+            "/panel/api/playlist",
+            get(routes::playlist::get).put(routes::playlist::update),
+        )
+        .route(
             "/panel/api/dash/tracks/:gid/:cid",
             get(routes::dash::tracks),
         )

@@ -77,7 +77,7 @@ pub async fn timeshift_status(
             group
                 .channels
                 .iter()
-                .filter(|channel| channel.livestream)
+                .filter(|channel| channel.livestream || channel.dash_timeshift)
                 .map(|channel| {
                     json!({
                         "group_id": group.id,
