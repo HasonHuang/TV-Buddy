@@ -1977,3 +1977,114 @@ url = "{upstream}/live.ts"
     );
     assert_eq!(header(&response, "cache-control"), "public, max-age=30");
 }
+
+#[tokio::test]
+async fn schedule_crud_and_livestream_toggle() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let post = |path: &str, body: serde_json::Value| {
+        fixture
+            .client
+            .post(format!("{}{path}", fixture.base))
+            .header("authorization", auth.clone())
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+    };
+
+    let task = serde_json::json!({
+        "name": "测试录制",
+        "group_id": "pg",
+        "channel_id": "c1",
+        "start_time": "2099-01-01T00:00:00",
+        "end_time": "2099-01-01T00:10:00",
+        "format": "mkv"
+    });
+    let response = post("/panel/api/schedule", task).await.expect("新增");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["ok"], true);
+    let id = body["id"].as_str().expect("id").to_string();
+
+    let list: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/schedule", fixture.base))
+            .header("authorization", auth.clone())
+            .send()
+            .await
+            .expect("列表")
+            .text()
+            .await
+            .expect("正文"),
+    )
+    .expect("JSON");
+    assert_eq!(list.as_array().map(Vec::len), Some(1));
+    assert_eq!(list[0]["id"], id);
+    assert_eq!(list[0]["status"], "pending");
+
+    let response = fixture
+        .client
+        .put(format!("{}/panel/api/schedule/0", fixture.base))
+        .header("authorization", auth.clone())
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "name": "改名任务" }).to_string())
+        .send()
+        .await
+        .expect("更新");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = post("/panel/api/schedule/0/stop", serde_json::json!({}))
+        .await
+        .expect("停止");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 未知频道 → 404。
+    let bad = serde_json::json!({
+        "name": "x", "group_id": "pg", "channel_id": "none",
+        "start_time": "2099-01-01T00:00:00", "end_time": "2099-01-01T00:10:00"
+    });
+    assert_eq!(
+        post("/panel/api/schedule", bad)
+            .await
+            .expect("新增")
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+
+    let response = fixture
+        .client
+        .delete(format!("{}/panel/api/schedule/0", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("删除");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 直播开关：改写频道 livestream。
+    let response = post("/panel/api/livestream/pg/c1/start", serde_json::json!({}))
+        .await
+        .expect("点亮");
+    assert_eq!(response.status(), StatusCode::OK);
+    let list: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/livestream", fixture.base))
+            .header("authorization", auth.clone())
+            .send()
+            .await
+            .expect("列表")
+            .text()
+            .await
+            .expect("正文"),
+    )
+    .expect("JSON");
+    assert_eq!(list["count"], 1);
+
+    let response = post("/panel/api/livestream/pg/c1/stop", serde_json::json!({}))
+        .await
+        .expect("熄灭");
+    assert_eq!(response.status(), StatusCode::OK);
+}

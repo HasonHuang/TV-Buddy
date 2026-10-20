@@ -496,6 +496,36 @@ MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒�
 
 > 目标按关键帧对齐；本实现用 PES PTS 与 H264/HEVC 关键帧 NAL 判定。
 
+### 6.14 定时录制与直播开关（P1 已实现）
+
+证据：F-009 §2。`{idx}` 是列表下标，不是任务 ID。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/panel/api/schedule` | 任务数组 |
+| `POST` | `/panel/api/schedule` | 新增，返回 `{"ok":true,"id"}`；未知分组/频道 → `404` |
+| `PUT` | `/panel/api/schedule/:idx` | 更新字段 |
+| `DELETE` | `/panel/api/schedule/:idx` | `{"ok":true,"was_running"}` |
+| `POST` | `/panel/api/schedule/:idx/stop` | 停止录制 |
+| `GET` | `/panel/api/schedule/download/:filename` | 下载产物 |
+| `POST` | `/panel/api/schedule/from-epg` | 未实现 → `400` |
+| `GET` | `/panel/api/livestream` | 已点亮频道 |
+| `POST` | `/panel/api/livestream/:gid/:cid/{start,stop}` | 改写频道 `livestream` 并落盘 |
+
+任务字段：`id,name,group_id,channel_id,start_time,end_time,format,status,output_file,extra_files,note,error,created_at,file_size,record_secs`。
+时间格式 `YYYY-MM-DDTHH:MM:SS`（按 `[server].timezone_offset_hours` 解释）。
+
+录制规则：
+
+| 项 | 规则 |
+| --- | --- |
+| 调度 | 每 10 秒扫描；开始时间已到 → `recording` |
+| 取材 | 抓媒体清单，增量下载切片并合并；主清单取最高码率 |
+| 产物 | `<cache>/recordings/<name>_<unix>.ts`；`format=mkv` 且有 ffmpeg 时转封装为 MKV |
+| 状态 | `pending` / `recording` / `finished` / `failed` |
+| 失败 | 无切片（如静态 MPD）→ `failed`，`note` 记录原因 |
+| 时移 | 未实现（P2） |
+
 ## 7. 错误串对照
 
 面板错误体保留目标原文，便于前端与外部脚本匹配（F-012 §3、F-013 §5）：

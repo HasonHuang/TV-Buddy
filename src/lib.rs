@@ -18,6 +18,7 @@ pub mod proxy;
 pub mod reload;
 pub mod remux;
 pub mod resolver;
+pub mod schedule;
 pub mod share;
 pub mod state;
 pub mod stats;

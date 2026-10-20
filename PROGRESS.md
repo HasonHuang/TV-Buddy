@@ -549,3 +549,16 @@
 | 会话：`gid/cid` 去重、断流重连、90 秒空闲回收 | ✅ | `remux::Manager` |
 | 频道自定义头上游 | ✅ | `channel_headers` |
 | 验证 | ✅ | 4 单元 + 1 集成；`scripts/smoke-remux.sh` 7 项（真实 ffmpeg TS） |
+
+## 3ad. P1 · 定时录制与直播开关
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 任务 CRUD（下标语义）、停止、下载 | ✅ | `src/schedule.rs`、`routes/schedule.rs` |
+| 调度：10 秒扫描，到期转 `recording` | ✅ | `schedule::spawn` |
+| 录制：媒体清单增量切片、主清单选最高码率、合并 | ✅ | `schedule::record` |
+| 产物：`<cache>/recordings/`；有 ffmpeg 时 MKV，否则保留 TS | ✅ | 同上 |
+| 直播开关：`livestream/{start,stop}` 改写配置并落盘 | ✅ | `routes/schedule.rs` |
+| 验证 | ✅ | 2 单元 + 1 集成；`scripts/smoke-schedule.sh` 9 项 |
+
+> 时移（`/timeshift/*`、`/dash-timeshift/*`）仍为 P2。

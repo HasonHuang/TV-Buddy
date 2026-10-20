@@ -41,6 +41,8 @@ pub struct AppState {
     pub resolver: crate::resolver::Cache,
     /// Remux 会话。
     pub remux: Arc<crate::remux::Manager>,
+    /// 定时录制任务。
+    pub schedule: Arc<crate::schedule::Store>,
     /// 直连地址与模式分类缓存（每项自带 TTL）。
     pub modes: AddressCache,
     /// 缓存根目录（`[cache].disk_path`）。
@@ -65,6 +67,7 @@ impl AppState {
     pub fn new(config_path: PathBuf, config: Config, logs: Arc<RingBuffer>) -> Self {
         let ttl = Duration::from_secs(config.panel.session_ttl.max(60));
         let cache_dir = PathBuf::from(&config.cache.disk_path);
+        let offset_hours = config.server.timezone_offset_hours as i64;
         ensure_cache_dirs(&cache_dir);
         Self {
             config_path,
@@ -80,6 +83,7 @@ impl AppState {
             sources: TtlCache::new(std::time::Duration::from_secs(3600)),
             resolver: crate::resolver::Cache::default(),
             remux: Arc::new(crate::remux::Manager::default()),
+            schedule: Arc::new(crate::schedule::Store::load(&cache_dir, offset_hours)),
             modes: AddressCache::new(),
             cache_dir,
             stats: Stats::default(),

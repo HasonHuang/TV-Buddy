@@ -27,6 +27,7 @@ async fn main() -> anyhow::Result<()> {
     reload::spawn(state.clone());
     epg::spawn(state.clone());
     iptv_proxy::share::spawn(state.clone());
+    iptv_proxy::schedule::spawn(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind)
         .await

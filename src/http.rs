@@ -58,6 +58,34 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/status", get(routes::panel::status))
         .route("/panel/api/health", get(routes::dash::health))
         .route(
+            "/panel/api/schedule",
+            get(routes::schedule::list).post(routes::schedule::create),
+        )
+        .route(
+            "/panel/api/schedule/from-epg",
+            post(routes::schedule::from_epg),
+        )
+        .route(
+            "/panel/api/schedule/download/:filename",
+            get(routes::schedule::download),
+        )
+        .route(
+            "/panel/api/schedule/:idx",
+            put(routes::schedule::update).delete(routes::schedule::remove),
+        )
+        .route(
+            "/panel/api/schedule/:idx/stop",
+            post(routes::schedule::stop),
+        )
+        .route(
+            "/panel/api/livestream",
+            get(routes::schedule::livestream_list),
+        )
+        .route(
+            "/panel/api/livestream/:gid/:cid/:action",
+            post(routes::schedule::livestream_switch),
+        )
+        .route(
             "/panel/api/dash/tracks/:gid/:cid",
             get(routes::dash::tracks),
         )
