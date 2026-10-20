@@ -188,7 +188,7 @@ export function AssetsPage() {
           <dd>
             {ffmpeg?.installed
               ? `已安装（${ffmpeg.version ?? '版本未知'}）`
-              : '未安装（remux/dash 保持 503）'}
+              : '未安装（录制无法转 MKV；remux 不受影响）'}
           </dd>
         </dl>
       </div>

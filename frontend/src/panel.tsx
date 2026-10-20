@@ -6,6 +6,7 @@ import { GroupsPage } from './groups';
 import { BackupPage, EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
 import { AssetsPage } from './assets';
+import { SchedulePage } from './schedule';
 import './style.css';
 
 /** 侧栏分区。已实现的分区可切换，其余显示为待实现。 */
@@ -17,6 +18,7 @@ type SectionId =
   | 'epg'
   | 'assets'
   | 'security'
+  | 'schedule'
   | 'logs'
   | 'backup';
 
@@ -28,17 +30,12 @@ const NAV: { id: SectionId; label: string }[] = [
   { id: 'epg', label: '节目指南' },
   { id: 'assets', label: '视频素材' },
   { id: 'security', label: '安全管控' },
+  { id: 'schedule', label: '录制与回看' },
   { id: 'logs', label: '运行日志' },
   { id: 'backup', label: '备份恢复' },
 ];
 
-const PENDING = [
-  '系统设置',
-  '定时录制',
-  '台标管理',
-  '订阅聚合',
-  '回看管理',
-];
+const PENDING = ['系统设置', '订阅聚合'];
 
 type Status = Record<string, unknown>;
 
@@ -215,6 +212,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         {section === 'epg' && <EpgPanelPage />}
         {section === 'assets' && <AssetsPage />}
         {section === 'security' && <SecurityPage />}
+        {section === 'schedule' && <SchedulePage />}
         {section === 'logs' && <LogsPage />}
         {section === 'backup' && <BackupPage />}
         {section === 'dashboard' && <Overview />}

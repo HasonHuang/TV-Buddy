@@ -600,3 +600,14 @@
 | 验证 | ✅ | 3 单元 + 1 集成；`scripts/smoke-timeshift.sh` 8 项（真实 ffmpeg HLS） |
 
 > DASH 回看（`dash_timeshift`）仍为 P2。
+
+## 3ah. P1 · 面板「录制与回看」分区
+
+| 项 | 状态 |
+| --- | --- |
+| 新建任务：分组/频道联动、时间、格式 | ✅ `frontend/src/schedule.tsx` |
+| 任务表：状态、产物大小、停止、删除、带 Bearer 下载 | ✅ |
+| 直播回看表：逐频道点亮/停止，显示已缓冲片数 | ✅ |
+| 回看能力卡片：`dash-timeshift/status` | ✅ |
+| 侧栏：移除占位「定时录制」「回看管理」 | ✅ |
+| 前端构建 | ✅ `npm run build`（panel 32.4 kB） |

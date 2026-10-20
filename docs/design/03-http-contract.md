@@ -385,7 +385,10 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 节目指南 | `GET /panel/api/epg/status`、`POST /panel/api/epg/refresh`；链接到 `/epg` 浏览页 | ✅ |
 | 运行日志 | `GET /panel/api/logs?limit=`（5 秒轮询） | ✅ |
 | 备份恢复 | `GET /panel/api/backup`、`POST /panel/api/restore`（浏览器内下载/上传） | ✅ |
-| 其它（系统设置、录制、台标、订阅聚合、回看、素材） | — | 待实现，侧栏置灰 |
+| 素材 | `/panel/api/{assets,subtitle}/*`、`/panel/api/assets/ffmpeg-status` | ✅ |
+| 录制与回看 | `/panel/api/schedule*`、`/panel/api/livestream*`、`GET /panel/api/dash-timeshift/status` | ✅ |
+| 台标 | 独立页 `/logo`（`/logo/api/*`） | ✅ |
+| 其它（系统设置、订阅聚合） | — | 待实现，侧栏置灰 |
 
 ### 6.9 素材与脚本（P1 已实现）
 
