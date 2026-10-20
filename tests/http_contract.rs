@@ -808,3 +808,111 @@ async fn group_import_adds_skips_and_overwrites() {
         .expect("请求");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn m3u_import_creates_groups_and_channels() {
+    let fixture = fixture().await;
+    let token = login(&fixture).await;
+
+    let post = |path: &str, body: &serde_json::Value| {
+        fixture
+            .client
+            .post(format!("{}{path}", fixture.base))
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {token}"))
+            .body(body.to_string())
+            .send()
+    };
+
+    let text = "#EXTM3U\n\
+        #EXTINF:-1 tvg-id=\"m1\" tvg-name=\"频道一\" group-title=\"导入A\",频道一\n\
+        http://up/1.m3u8\n\
+        #EXTINF:-1 group-title=\"导入A\",频道二\n\
+        http://up/2.m3u8\n\
+        #EXTINF:-1 tvg-id=\"d1\" group-title=\"导入D\",DASH\n\
+        http://up/3.mpd\n";
+
+    let body = serde_json::json!({ "text": text, "mode": "append", "group_mode": "auto" });
+    let response = post("/panel/api/groups/import/m3u", &body)
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let result: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(result["parsed_groups"], 2);
+    assert_eq!(result["parsed_channels"], 3);
+    assert_eq!(result["added_groups"], 2);
+    assert_eq!(result["skipped_groups"], 0);
+
+    // 落库检查：auto 按扩展名判定模式，tvg-id 作为频道 id。
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/config", fixture.base))
+        .header("authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("取配置");
+    let config: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    let groups = config["groups"].as_array().expect("分组数组");
+    let group_a = groups
+        .iter()
+        .find(|group| group["id"] == "A")
+        .expect("应有分组 A");
+    assert_eq!(group_a["mode"], "rewrite");
+    assert_eq!(group_a["format"], "hls");
+    assert_eq!(group_a["channels"].as_array().expect("频道").len(), 2);
+    assert_eq!(group_a["channels"][0]["id"], "m1");
+    assert_eq!(group_a["channels"][0]["name"], "频道一");
+    let group_d = groups
+        .iter()
+        .find(|group| group["id"] == "D")
+        .expect("应有分组 D");
+    assert_eq!(group_d["mode"], "dash");
+    assert_eq!(group_d["format"], "mpd");
+
+    // append 再导入 → 全部跳过。
+    let response = post("/panel/api/groups/import/m3u", &body)
+        .await
+        .expect("请求");
+    let result: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(result["skipped_groups"], 2);
+
+    // merge 补一个新频道。
+    let merge = serde_json::json!({
+        "text": "#EXTM3U\n#EXTINF:-1 tvg-id=\"m3\" group-title=\"导入A\",频道三\nhttp://up/4.m3u8\n",
+        "mode": "merge",
+        "group_mode": "auto"
+    });
+    let response = post("/panel/api/groups/import/m3u", &merge)
+        .await
+        .expect("请求");
+    let result: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(result["merged_channels"], 1);
+
+    // replace 整体替换。
+    let response = post("/panel/api/groups/import/m3u", &merge)
+        .await
+        .expect("请求");
+    let _ = response;
+    let replace = serde_json::json!({
+        "text": "#EXTM3U\n#EXTINF:-1 tvg-id=\"m9\" group-title=\"导入A\",新频道\nhttp://up/9.m3u8\n",
+        "mode": "replace",
+        "group_mode": "auto"
+    });
+    let response = post("/panel/api/groups/import/m3u", &replace)
+        .await
+        .expect("请求");
+    let result: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(result["replaced_groups"], 1);
+
+    // 非法 mode → 400。
+    let bad = serde_json::json!({ "text": text, "mode": "upsert" });
+    let response = post("/panel/api/groups/import/m3u", &bad)
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

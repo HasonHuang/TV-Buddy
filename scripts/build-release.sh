@@ -50,6 +50,12 @@ package() { # 参数：架构（amd64/arm64）
   echo "    产物：$OUT/iptv-proxy-$VERSION-$platform.tar.gz"
 }
 
-for arch in "${@:-amd64 arm64}"; do
+if [ "$#" -gt 0 ]; then
+  arches=("$@")
+else
+  arches=(amd64 arm64)
+fi
+
+for arch in "${arches[@]}"; do
   package "$arch"
 done

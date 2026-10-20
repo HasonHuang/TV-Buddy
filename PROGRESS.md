@@ -321,3 +321,16 @@
 | 校验：非数组 → `400`；未登录 → `401`；导入后订阅立即可见 | ✅ | 集成测试 `group_import_adds_skips_and_overwrites`、`whoami_reports_forwarded_ip` |
 
 验证：`cargo test` 53 项（36 单元 + 17 集成）全绿。
+
+## 3l. P1 · M3U 导入（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 解析：`#EXTINF` 属性、`#EXTVLCOPT`、`#EXTHTTP`、行内头 | ✅ | `src/m3u.rs`（5 项单元测试） |
+| 落库：`append`/`merge`/`replace`；`auto` 按 `.mpd` 选 `dash`/`rewrite` | ✅ | `groups.rs::import_m3u` |
+| id 规则：分组去非 ASCII、空则 `g-<6hex>`；频道优先 `tvg-id` | ✅ | `m3u::group_id`/`channel_id` |
+| 属性保留：`tvg_*`/`group_title` → `extra`；头 → `channel.headers`（只落库） | ✅ | 同上；转发附加留 P2 |
+| 校验：非法 `mode`/`group_mode`、空 `text`、无频道 → `400` | ✅ | 集成测试 `m3u_import_creates_groups_and_channels` |
+| 文档 | ✅ | `docs/design/03-http-contract.md` §6.2.1 |
+
+验证：`cargo test` 59 项（41 单元 + 18 集成）全绿。

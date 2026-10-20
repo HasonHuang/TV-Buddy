@@ -74,6 +74,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(routes::groups::import_groups_force),
         )
         .route(
+            "/panel/api/groups/import/m3u",
+            post(routes::groups::import_m3u),
+        )
+        .route(
             "/panel/api/groups/:gid",
             put(routes::groups::update_group).delete(routes::groups::delete_group),
         )

@@ -213,9 +213,27 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | GET | `/panel/api/groups/export` | — | 顶层**数组**（完整分组对象） | F-013 §1 |
 | POST | `/panel/api/groups/import` | — | 体为分组数组；id 已存在则跳过；`{"ok":true,"imported":n,"skipped":m}` | F-013 |
 | POST | `/panel/api/groups/import/force` | — | 同上，但同 id 覆盖 | F-013 |
+| POST | `/panel/api/groups/import/m3u` | — | 体 `{text,mode,group_mode}`；解析后落库 | F-013 §2 |
 | GET | `/panel/api/groups/{gid}/export` | — | 单个分组对象 | F-013 §1 |
 
 写入语义：分组与频道改动**立即重写** `config.toml`；`PUT /config` 是**全量替换**（F-013 §6）。
+
+### 6.2.1 M3U 导入语义
+
+请求体是 JSON（不是 multipart）：`{"text":"#EXTM3U…","mode":"append","group_mode":"auto"}`。
+
+| 项 | 规则 |
+| --- | --- |
+| `mode` | `append`（默认，同名分组跳过）｜`merge`（同名分组补新频道）｜`replace`（同名分组整体替换）。其它值 → `400` |
+| `group_mode` | `auto`（默认）或 `proxy`/`remux`/`dash`/`redirect`/`rewrite`/`passthrough`。其它值 → `400` |
+| `auto` 判定 | 分组内有 `.mpd` 地址 → `mode=dash`、`format=mpd`；否则 `mode=rewrite`、`format=hls`（与 F-013 观测一致） |
+| 分组 id | `group-title` 去掉非 ASCII 字母数字与 `_`/`-`；结果为空 → `g-<6hex>` |
+| 频道 id | 有 `tvg-id` 用 `tvg-id`；否则 `g-<6hex>`（不幂等，与目标一致）。组内重复时追加 `-2`、`-3` |
+| 无 `group-title` | 落到分组 `Default` |
+| 属性保留 | `tvg_id`/`tvg_name`/`tvg_logo`/`group_title` 存入频道 `extra`；`#EXTVLCOPT`、`#EXTHTTP` 与行内 `http-user-agent`/`http-referer` 转为 `channel.headers` 字符串 |
+| 响应 | `{"ok":true,"parsed_groups","parsed_channels","added_groups","merged_channels","replaced_groups","skipped_groups","group_mode"}` |
+
+> 限制：`channel.headers` 只落库，转发时尚未附加（P2）。空 `text` 或未解析到频道 → `400`。
 
 ### 6.3 后续里程碑（登记存在性）
 
@@ -230,7 +248,8 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 安全 | `/panel/api/security/{token,token/rotate,ip/stats,ip/ban,ip/unban,ip/unban-batch}` | P1 |
 | 指标 | `/panel/api/{stats,logs,health}` | ✅ M4（`health` 在 M0） |
 | 备份 | `/panel/api/{backup,restore}` | P2 |
-| 导入 | `POST /panel/api/groups/import/m3u`、`/groups/{import,import/force}` | P2 |
+| 导入 | `POST /panel/api/groups/import/m3u` | ✅ P1（见 §6.2） |
+| 导入 | `/groups/{import,import/force}`（JSON 分组数组） | ✅ P1（`/groups/import/m3u` 相邻） |
 | 订阅聚合 | `POST /panel/api/subs/{groups,preview}` | P2 |
 | 翻译 | `/panel/api/epg/translate/{run,status,clear,probe,models,mtran/test}`、`/subtitle/translate/clear` | P2 |
 | 分享 | `GET /api/share/pull?key=`（仅 GET/HEAD） | P2 |
