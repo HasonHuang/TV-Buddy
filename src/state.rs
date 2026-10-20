@@ -39,6 +39,8 @@ pub struct AppState {
     pub sources: TtlCache,
     /// 上游解析脚本结果缓存（SWR）。
     pub resolver: crate::resolver::Cache,
+    /// Remux 会话。
+    pub remux: Arc<crate::remux::Manager>,
     /// 直连地址与模式分类缓存（每项自带 TTL）。
     pub modes: AddressCache,
     /// 缓存根目录（`[cache].disk_path`）。
@@ -77,6 +79,7 @@ impl AppState {
             playlists: TtlCache::new(Duration::from_secs(5)),
             sources: TtlCache::new(std::time::Duration::from_secs(3600)),
             resolver: crate::resolver::Cache::default(),
+            remux: Arc::new(crate::remux::Manager::default()),
             modes: AddressCache::new(),
             cache_dir,
             stats: Stats::default(),

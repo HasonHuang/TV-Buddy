@@ -25,6 +25,9 @@ const MASTER: &str = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=19
 const VARIANT: &str =
     "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nv1.ts\n#EXT-X-ENDLIST\n";
 const SEGMENT: &[u8] = b"segment-bytes";
+/// 合成 TS 流缓存（8 个关键帧）。
+static TS_STREAM: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+
 /// 伪 DASH 清单：两条轨道。
 const MPD: &str = r#"<?xml version="1.0"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT30S">
@@ -73,6 +76,10 @@ async fn upstream_file(
         "seg1.ts" | "seg2.ts" | "v0/v1.ts" => ("video/mp2t", SEGMENT),
         "extra.m3u8" => ("application/vnd.apple.mpegurl", EXTRA.as_bytes()),
         "manifest.mpd" => ("application/dash+xml", MPD.as_bytes()),
+        "live.ts" => (
+            "video/mp2t",
+            TS_STREAM.get_or_init(|| ts_stream(8)).as_slice(),
+        ),
         _ => return (StatusCode::NOT_FOUND, "not found").into_response(),
     };
     ([(header::CONTENT_TYPE, mime)], body.to_vec()).into_response()
@@ -1853,4 +1860,120 @@ resolver_script = "missing.py"
         .await
         .expect("请求");
     assert_eq!(response.status(), StatusCode::FOUND);
+}
+
+/// 合成 TS 流：PAT/PMT + 每 5 秒一个 IDR 关键帧。
+fn ts_stream(keyframes: u64) -> Vec<u8> {
+    fn packet(pid: u16, pusi: bool, payload: &[u8]) -> Vec<u8> {
+        let mut out = vec![
+            0x47,
+            if pusi { 0x40 } else { 0x00 } | ((pid >> 8) as u8 & 0x1f),
+            pid as u8,
+            0x10,
+        ];
+        out.extend_from_slice(payload);
+        out.resize(188, 0xff);
+        out
+    }
+    fn pts_bytes(pts: u64) -> [u8; 5] {
+        [
+            0x21 | (((pts >> 30) as u8 & 0x07) << 1),
+            (pts >> 22) as u8,
+            0x01 | ((pts >> 14) as u8 & 0xfe),
+            (pts >> 7) as u8,
+            0x01 | ((pts << 1) as u8 & 0xfe),
+        ]
+    }
+
+    let mut out = Vec::new();
+    let pat = [
+        0x00, 0x00, 0xB0, 0x0D, 0x00, 0x01, 0xC1, 0x00, 0x00, 0x00, 0x01, 0xE1, 0x00, 0, 0, 0, 0,
+    ];
+    out.extend(packet(0, true, &pat));
+    let pmt = [
+        0x00, 0x02, 0xB0, 0x12, 0x00, 0x01, 0xC1, 0x00, 0x00, 0xE1, 0x01, 0xF0, 0x00, 0x1B, 0xE1,
+        0x01, 0xF0, 0x00, 0, 0, 0, 0,
+    ];
+    out.extend(packet(0x100, true, &pmt));
+
+    for index in 0..keyframes {
+        let pts = index * 90_000 * 5;
+        for frame in 0..5 {
+            let key = frame == 0;
+            let mut pes = vec![0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x80, 0x80, 0x05];
+            pes.extend_from_slice(&pts_bytes(pts + frame * 18_000));
+            pes.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, if key { 0x65 } else { 0x41 }]);
+            pes.extend(std::iter::repeat(0x88).take(40));
+            out.extend(packet(0x101, true, &pes));
+        }
+    }
+    out
+}
+
+async fn wait_remux_playlist(client: &Client, url: &str) -> HttpResponse {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let response = client.get(url).send().await.expect("请求");
+        if response.status() == StatusCode::OK || Instant::now() > deadline {
+            return response;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn remux_segments_continuous_ts_and_serves_disguised_slices() {
+    let fixture = fixture_with_extra(
+        r#"
+[[groups]]
+id = "rx"
+name = "Remux 组"
+mode = "remux"
+access = "open"
+[[groups.channels]]
+id = "c1"
+name = "连续流"
+url = "{upstream}/live.ts"
+"#,
+    )
+    .await;
+
+    // 首次请求一定在会话创建前 → 503 预热。
+    let first = fixture
+        .client
+        .get(format!("{}/rx/c1.m3u8", fixture.base))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(first.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        first
+            .headers()
+            .get(header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok()),
+        Some("2")
+    );
+    assert_eq!(first.text().await.expect("正文"), "remux warming up");
+
+    let response =
+        wait_remux_playlist(&fixture.client, &format!("{}/rx/c1.m3u8", fixture.base)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("正文");
+    assert!(body.contains("#EXT-X-TARGETDURATION:5"));
+    let segments = media_lines(&body);
+    assert!(!segments.is_empty());
+    assert!(segments[0].starts_with("/rx/c1/rseg_"));
+
+    let response = fixture
+        .client
+        .get(format!("{}{}", fixture.base, segments[0]))
+        .send()
+        .await
+        .expect("请求切片");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        header(&response, "content-type").starts_with("image/"),
+        "切片应伪装为图片"
+    );
+    assert_eq!(header(&response, "cache-control"), "public, max-age=30");
 }

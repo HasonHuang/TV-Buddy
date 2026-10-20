@@ -76,10 +76,13 @@ pub async fn entry(
         "redirect" => redirect_entry(&state, &config, group, &cid, &upstream).await,
         // 清单绝对化，客户端直连上游切片（S-MODE-09/14）。
         "rewrite" => rewrite_entry(&state, &config, group, &cid, &upstream).await,
-        // 连续流转封装需 ffmpeg（P1）：恒 503 预热（S-MODE-16/18）。
+        // 连续流转封装：纯 Rust 切片；未产出前 503（S-MODE-16/18）。
         "remux" => {
-            remux_classify(&state, group, &cid, &upstream).await;
-            warming_up()
+            let session = state.remux.ensure(&state, &gid, &cid, &upstream);
+            match session.playlist() {
+                Some(body) => remux_playlist(body),
+                None => warming_up(),
+            }
         }
         // 就绪门：30 秒内拿到上游主清单，否则 503（S-MODE-15）。
         "dash" => dash_entry(&state, &config, group, &cid, &upstream).await,
@@ -214,27 +217,6 @@ fn rewrite_response(body: String) -> Response {
     response
 }
 
-/// Remux：抓一次上游并分类，只在首次记录日志（S-MODE-18）。
-async fn remux_classify(state: &Arc<AppState>, group: &Group, cid: &str, channel_url: &str) {
-    let key = format!("remux:{}:{cid}", group.id);
-    if state.modes.get(&key, 3600).is_some() {
-        return;
-    }
-    let class = match fetch(state, channel_url, &group.id, cid).await {
-        Ok(body) if proxy::modes::looks_like_hls(&body) => "hls",
-        Ok(_) => "raw",
-        Err(err) => {
-            tracing::warn!(url = %channel_url, error = %err, "remux 预热抓取上游失败");
-            state.stats.record_upstream_failure();
-            state.watchdog.record_failure(&key);
-            return;
-        }
-    };
-    state.watchdog.record_success(&key);
-    tracing::warn!(group = %group.id, %cid, class, "remux 需要 ffmpeg，转封装未实现（P1）");
-    state.modes.put(&key, class.to_string());
-}
-
 /// DASH 未就绪响应（S-MODE-15）。
 fn not_ready() -> Response {
     (
@@ -242,6 +224,21 @@ fn not_ready() -> Response {
         "timeout waiting for master playlist",
     )
         .into_response()
+}
+
+/// Remux 清单响应：`text/plain`，禁止缓存。
+fn remux_playlist(body: String) -> Response {
+    let mut response = Response::new(Body::from(body));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    insert_header(
+        &mut response,
+        header::CACHE_CONTROL,
+        "no-cache, must-revalidate",
+    );
+    response
 }
 
 /// Remux 预热响应（S-MODE-16）。
@@ -259,6 +256,9 @@ pub async fn wildcard(
     Path((gid, cid, rest)): Path<(String, String, String)>,
 ) -> Response {
     let rest = rest.trim_start_matches('/').to_string();
+    if let Some(response) = state.remux.serve(&gid, &cid, &rest) {
+        return response;
+    }
     match rest.as_str() {
         // 变体媒体清单：只有上游是主清单时存在（S-PROXY-07）。
         "video/index.txt" => variant_playlist(&state, &gid, &cid, &self_base(&headers)).await,
@@ -268,7 +268,13 @@ pub async fn wildcard(
             let Some((group, url)) = resolve(&config, &gid, &cid) else {
                 return placeholder(&config);
             };
-            if group.mode == "proxy" {
+            if group.mode == "remux" {
+                let session = state.remux.ensure(&state, &gid, &cid, &url);
+                match session.playlist() {
+                    Some(body) => remux_playlist(body),
+                    None => warming_up(),
+                }
+            } else if group.mode == "proxy" {
                 proxy_entry(
                     &state,
                     &config,

@@ -538,3 +538,14 @@
 验证：`cargo test --offline` 102 项（71 单元 + 31 集成）。
 
 发布包：双架构重建（amd64 3.36 MB、arm64 3.12 MB），`verify-release.sh` 双架构通过（静态、`/health`、面板资源、台标、`/panel/api/health=401`、分享默认 404）。
+
+## 3ac. P1 · Remux 转封装
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 连续 TS → HLS：PAT/PMT 解析、PES PTS、关键帧切分（H264/HEVC） | ✅ | `src/remux.rs` |
+| 预热 503 + `Retry-After: 2`；就绪后清单（4 条窗口、MEDIA-SEQUENCE） | ✅ | `routes/stream.rs` |
+| 伪装切片：`rseg_<序号>.<png|gif|bmp|jpg|webp>`，图片 Content-Type | ✅ | `remux::serve` |
+| 会话：`gid/cid` 去重、断流重连、90 秒空闲回收 | ✅ | `remux::Manager` |
+| 频道自定义头上游 | ✅ | `channel_headers` |
+| 验证 | ✅ | 4 单元 + 1 集成；`scripts/smoke-remux.sh` 7 项（真实 ffmpeg TS） |

@@ -44,7 +44,7 @@ scripts/smoke-logo.sh # 台标库：上传、公开取图与列表、删除
 scripts/smoke-backup.sh # 备份与恢复：导出 gzip、改动后回滚、拒绝非法内容
 scripts/smoke-security.sh # 安全面：Token 查看/轮换、IP 统计、封禁与解封
 scripts/smoke-aggregate.sh # 订阅聚合：远端源合并、过滤与位置
-scripts/smoke-assets.sh # 素材：ffmpeg 状态、视频/字幕上传与删除、解析脚本\nscripts/smoke-share.sh  # 多 VPS：门禁、Token 同步、封禁汇总\nscripts/smoke-panel.sh  # 面板：健康摘要、DASH 探测、回看状态\nscripts/smoke-resolver.sh # 解析脚本：URL 覆盖、TTL 缓存、失败转 error_url
+scripts/smoke-assets.sh # 素材：ffmpeg 状态、视频/字幕上传与删除、解析脚本\nscripts/smoke-share.sh  # 多 VPS：门禁、Token 同步、封禁汇总\nscripts/smoke-panel.sh  # 面板：健康摘要、DASH 探测、回看状态\nscripts/smoke-resolver.sh # 解析脚本：URL 覆盖、TTL 缓存、失败转 error_url\nscripts/smoke-remux.sh    # Remux：预热、清单、伪装切片（需 ffmpeg 生成测试流）
 scripts/compare-p0.sh # 对拍：同一夹具下对比目标 v0.8.2（需容器 iptv82）
 tests/             # 路由级集成测试（起真实服务 + 伪上游）
 ```

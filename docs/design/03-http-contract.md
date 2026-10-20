@@ -144,11 +144,11 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 | `redirect` | `302` 到上游 URL | `redirect_mode` = `解析最佳画质` 时先取主清单挑**最高码率**变体；地址按 `redirect_ttl`（0 → 300 s）缓存；失败不缓存，改跳 `error_url` | S-MODE-08/13、F-018 |
 | `passthrough` | `302` 到上游 URL | **校验 Token**（与其它模式一致），不缓存上游清单 | S-MODE-11、F-018 |
 | `rewrite` | `200 text/plain; charset=utf-8` + `no-cache, must-revalidate` | 相对地址改绝对，切片客户端直连；清单缓存 ≈5 s | S-MODE-09/14、F-018 |
-| `remux` | `503` + `Retry-After: 2`，体 `remux warming up` | 转封装需 `ffmpeg`（P1）；首次请求抓上游并按 `hls`/`raw` 记日志（S-MODE-18：HLS 上游永不就绪） | S-MODE-16/18 |
+| `remux` | 预热期 `503` + `Retry-After: 2`，体 `remux warming up`；就绪后 `200` 清单 | 纯 Rust 把连续 TS 切成 HLS；HLS 上游永不就绪（S-MODE-18） | S-MODE-16/18 |
 | `dash` | 上游正文透传（`application/dash+xml`） | 就绪门 30 s，超时 → `503 timeout waiting for master playlist`；MPD→HLS 转封装属 P1 | S-MODE-15 |
 | `proxy` | 代理链路（§4） | — | S-MODE-03 |
 
-> 差异：`remux`/`dash` 的转封装未实现（需 `ffmpeg`，见 ADR-04）。`proxy` 模式下的 MPD 正文与 `dash` 一样**原样透传**，避免按行改写破坏 XML。
+> `remux` 已实现（纯 Rust 切片，不调用 ffmpeg）；`dash` 仍按原样透传 MPD。`proxy` 模式下的 MPD 正文与 `dash` 一样**原样透传**，避免按行改写破坏 XML。
 
 ## 5. 订阅契约
 
@@ -477,6 +477,24 @@ MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒�
 | 缓存 | TTL 内直接返回；过期先返回旧值并后台刷新（SWR） |
 | 失败 | 冷启动失败、超时或输出非法 → `302 error_url` |
 | 回看 | `playseek` 追加到解析后的地址 |
+
+### 6.13 Remux（P1 已实现）
+
+证据：F-009 §1。
+
+| 项 | 值 |
+| --- | --- |
+| 输入 | 连续 TS（HTTP 裸流）；HLS 上游不会产出切片 |
+| 输出 | `#EXT-X-VERSION:3`、`#EXT-X-TARGETDURATION:5`、`#EXT-X-MEDIA-SEQUENCE`，窗口 4 条 |
+| 切片 | 按视频关键帧切分（PTS 计时，5 秒）；扩展名轮换 `png/gif/bmp/jpg/webp` |
+| 路径 | `/{gid}/{cid}/rseg_<12 位序号>.<ext>` |
+| Content-Type | 与扩展名一致的图片类型 |
+| Cache-Control | 切片 `public, max-age=30`；清单 `no-cache, must-revalidate` |
+| 预热 | 未产出首片 → `503` + `Retry-After: 2` + `remux warming up` |
+| 会话 | 键 `gid/cid`；上游断开后每 500 ms 重连；空闲 90 秒回收并删目录 |
+| 上游头 | 附加 `channel.headers` |
+
+> 目标按关键帧对齐；本实现用 PES PTS 与 H264/HEVC 关键帧 NAL 判定。
 
 ## 7. 错误串对照
 
