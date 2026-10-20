@@ -562,3 +562,15 @@
 | 验证 | ✅ | 2 单元 + 1 集成；`scripts/smoke-schedule.sh` 9 项 |
 
 > 时移（`/timeshift/*`、`/dash-timeshift/*`）仍为 P2。
+
+## 3ae. 发布包（Remux + 录制）
+
+| 项 | 状态 |
+| --- | --- |
+| amd64 | 3.46 MB |
+| arm64 | 3.21 MB |
+| `verify-release.sh` 双架构 | ✅ 静态链接、`/health`、面板/台标资源、健康 401、分享默认 404 |
+
+验证：`cargo test --offline` 110 项（77 单元 + 33 集成）。
+
+已知缺口（P2）：时移（`/timeshift/*`、`/dash-timeshift/*`）、`schedule/from-epg`、字幕翻译、EPG 脚本源。
