@@ -259,6 +259,9 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | `GET` | `/epg` | 无 | `200 text/html`（内嵌浏览页）；关闭时 `404` |
 | `GET` | `/panel/api/epg/status` | Bearer | `{"enabled","running","sources","channels","programmes","kept","keep_days","future_days","last_success","last_error"}` |
 | `POST` | `/panel/api/epg/refresh` | Bearer | 同步采集一次；`{"ok":true,"msg":"采集完成","channels","programmes"}`；失败 → `500` + 原因 |
+| `GET` | `/epg/api/channels` | 无 | `{"count","channels":[{"id","names":[{"lang","name"}]}]}` |
+| `GET` | `/epg/api/programmes/{channel}` | 无 | `{"channel","count","programmes":[{"channel","start","stop","title","desc","categories"}]}` |
+| `GET` | `/epg/api/search?q=` | 无 | `{"q","count","programmes":[…]}`；最多 200 条；空 `q` 返回 0 |
 
 采集规则（F-008 观测值）：
 
@@ -272,6 +275,9 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 原样保留 | `icon`、`credits` 等未建模子节点按原片段输出 |
 | 调度 | 启动即采集一次；之后按 `[epg].cron`，只识别 `0 */N * * *`（N 小时），其它写法回退 4 小时 |
 
+> 三个 `/epg/api/*` 的响应形状为本实现自定（目标只登记了路由存在性）。
+> 实现：按请求读取 `epg.xml` 并解析；节目单较大时再改为内存快照。
+>
 > 未实现：翻译接口、脚本源、节目单映射与录制联动（P2）。
 
 ## 7. 错误串对照

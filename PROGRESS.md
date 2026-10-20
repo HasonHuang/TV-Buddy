@@ -294,11 +294,13 @@
 | 采集：拉 XMLTV → 解析 → 时间窗裁剪 → 频道匹配 → 生成 `epg.xml` 与 `epg.xml.gz` | ✅ | `src/epg.rs`（6 项单元测试） |
 | 公开面：`/epg.xml`、`/epg.xml.gz`、`/epg`；关闭时三者 `404`（S-EP-05） | ✅ | `src/http/routes/epg.rs` |
 | 面板：`/panel/api/epg/status`、`/panel/api/epg/refresh`（Bearer） | ✅ | 同上 |
+| 公开 JSON：`/epg/api/{channels,programmes/:channel,search}` | ✅ | `src/http/routes/epg.rs`；集成测试 `epg_api_exposes_channels_programmes_and_search` |
+| 浏览页：`/epg` 频道列表 + 节目列表 + 搜索（自研 UI，不复用目标文案） | ✅ | `frontend/src/epg.tsx` |
 | 调度：启动即采集；之后按 `0 */N * * *` 或 4 小时 | ✅ | `epg::spawn` |
 | 验证 | ✅ | `scripts/smoke-epg.sh` 13 项全绿；`tests/http_contract.rs` EPG 2 项 |
 | 未做 | ⏳ | 脚本源、翻译接口、映射/录制联动（P2） |
 
-验证：`cargo test` 共 48 项（36 单元 + 12 集成）；`scripts/smoke-epg.sh` 13 项全绿。
+验证：`cargo test` 共 51 项（36 单元 + 15 集成）；`scripts/smoke-epg.sh` 18 项全绿。
 
 ## 3j. 回看参数与兜底（已完成）
 

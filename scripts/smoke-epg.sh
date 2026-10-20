@@ -107,7 +107,14 @@ check "EPG gzip 200" "200" "$(curl -s -o "$WORK/body.gz" -w '%{http_code}' "$B/e
 check "EPG gzip 类型" "application/gzip" "$(header "$B/epg.xml.gz" content-type)"
 check "EPG gzip 魔数" "1f8b" "$(od -An -tx1 -N2 "$WORK/body.gz" | tr -d ' ')"
 
-check "EPG 浏览页 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$B/epg")"
+check "EPG 浏览页 200" "200" "$(curl -s -o "$WORK/page.html" -w '%{http_code}' "$B/epg")"
+check "EPG 浏览页含前端资源" "1" "$(grep -c '/assets/epg-' "$WORK/page.html")"
+
+check "EPG 频道接口 200" "200" "$(curl -s -o "$WORK/channels.json" -w '%{http_code}' "$B/epg/api/channels")"
+check "EPG 频道接口计数" "1" "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(1 if d["count"]>=1 and d["channels"][0]["id"]=="cctv1" else 0)' "$WORK/channels.json")"
+check "EPG 节目接口 200" "200" "$(curl -s -o "$WORK/prog.json" -w '%{http_code}' "$B/epg/api/programmes/cctv1")"
+check "EPG 节目含标题" "1" "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(1 if d["count"]==1 and d["programmes"][0]["title"]=="新闻" else 0)' "$WORK/prog.json")"
+check "EPG 搜索命中" "1" "$(curl -s "$B/epg/api/search?q=%E6%96%B0%E9%97%BB" | python3 -c 'import json,sys;print(1 if json.load(sys.stdin)["count"]==1 else 0)')"
 
 COOKIE=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' -D - -o "$WORK/login.json" | awk 'BEGIN{IGNORECASE=1}/^set-cookie:/{sub(/\r$/,"");print substr($0,13)}')

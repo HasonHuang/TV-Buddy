@@ -25,6 +25,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/", get(routes::public::home))
         .route("/epg.xml", get(routes::epg::xml))
         .route("/epg.xml.gz", get(routes::epg::xml_gz))
+        .route("/epg/api/channels", get(routes::epg::api_channels))
+        .route(
+            "/epg/api/programmes/:channel",
+            get(routes::epg::api_programmes),
+        )
+        .route("/epg/api/search", get(routes::epg::api_search))
         .route("/playlist.m3u", get(routes::play::total_playlist))
         .route("/:gid/playlist.m3u", get(routes::play::group_playlist))
         // 面板接口：未知路径固定 404 JSON，先于播放通配路由匹配。

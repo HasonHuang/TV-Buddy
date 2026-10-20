@@ -60,6 +60,13 @@ pub fn output_dir(cache_dir: &Path) -> PathBuf {
     cache_dir.join("epg")
 }
 
+/// 读取已生成的节目单文件并解析。EPG 关闭或文件缺失时返回错误。
+pub fn load_generated(config: &Config) -> Result<DocumentData> {
+    let path = output_file(config);
+    let body = fs::read_to_string(&path).with_context(|| format!("读 {}", path.display()))?;
+    parse(&body)
+}
+
 /// 生成文件路径。
 pub fn output_file(config: &Config) -> PathBuf {
     output_dir(Path::new(&config.cache.disk_path)).join("epg.xml")

@@ -653,3 +653,37 @@ async fn single_segment_unknown_path_is_404() {
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
 }
+
+#[tokio::test]
+async fn epg_api_exposes_channels_programmes_and_search() {
+    let fixture = fixture_with(true).await;
+    epg::refresh(&fixture.state).await.expect("采集应成功");
+
+    let response = fetch(&fixture, "/epg/api/channels").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["count"], 1);
+    assert_eq!(body["channels"][0]["id"], "cctv1");
+
+    let response = fetch(&fixture, "/epg/api/programmes/cctv1").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["count"], 1);
+    assert_eq!(body["programmes"][0]["title"], "新闻");
+
+    let response = fetch(&fixture, "/epg/api/search?q=新闻").await;
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["count"], 1);
+
+    let response = fetch(&fixture, "/epg/api/search?q=不存在").await;
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["count"], 0);
+
+    let disabled = fixture_with(false).await;
+    let response = fetch(&disabled, "/epg/api/channels").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}

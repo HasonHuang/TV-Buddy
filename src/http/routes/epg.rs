@@ -3,10 +3,10 @@
 //! 公开面：`/epg.xml`、`/epg.xml.gz`、`/epg`。EPG 关闭时三者都 `404`（S-EP-05）。
 //! 私有面：`/panel/api/epg/{status,refresh}`（S-EP-12 的 P1 子集）。
 
-use std::{path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path as FsPath, sync::Arc};
 
 use axum::{
-    extract::State,
+    extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -29,7 +29,7 @@ async fn document(state: &Arc<AppState>, gzip: bool) -> Response {
         return not_found();
     }
     let name = if gzip { "epg.xml.gz" } else { "epg.xml" };
-    let path = epg::output_dir(Path::new(&config.cache.disk_path)).join(name);
+    let path = epg::output_dir(FsPath::new(&config.cache.disk_path)).join(name);
     let Ok(body) = tokio::fs::read(&path).await else {
         return not_found();
     };
@@ -101,4 +101,116 @@ pub async fn refresh(
         }))),
         Err(error) => Err(ApiError::internal(format!("{error:#}"))),
     }
+}
+
+/// 读取并解析生成的节目单；关闭或缺失时返回 `None`。
+fn load(state: &Arc<AppState>) -> Option<epg::DocumentData> {
+    let config = state.snapshot();
+    if !config.epg.enabled {
+        return None;
+    }
+    epg::load_generated(&config).ok()
+}
+
+fn title_of(programme: &epg::Programme) -> String {
+    programme
+        .texts
+        .iter()
+        .find(|(name, _, _)| name == "title")
+        .map(|(_, _, text)| text.clone())
+        .unwrap_or_default()
+}
+
+fn desc_of(programme: &epg::Programme) -> String {
+    programme
+        .texts
+        .iter()
+        .find(|(name, _, _)| name == "desc")
+        .map(|(_, _, text)| text.clone())
+        .unwrap_or_default()
+}
+
+fn programme_json(programme: &epg::Programme) -> Value {
+    json!({
+        "channel": programme.channel,
+        "start": programme.start,
+        "stop": programme.stop,
+        "title": title_of(programme),
+        "desc": desc_of(programme),
+        "categories": programme
+            .texts
+            .iter()
+            .filter(|(name, _, _)| name == "category")
+            .map(|(_, _, text)| text.clone())
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// `GET /epg/api/channels`——频道表（形状为本实现自定）。
+pub async fn api_channels(State(state): State<Arc<AppState>>) -> Response {
+    let Some(data) = load(&state) else {
+        return not_found();
+    };
+    let channels: Vec<Value> = data
+        .channels
+        .iter()
+        .map(|channel| {
+            json!({
+                "id": channel.id,
+                "names": channel
+                    .names
+                    .iter()
+                    .map(|(lang, name)| json!({ "lang": lang, "name": name }))
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Json(json!({ "count": channels.len(), "channels": channels })).into_response()
+}
+
+/// `GET /epg/api/programmes/{channel}`——单个频道的节目。
+pub async fn api_programmes(
+    State(state): State<Arc<AppState>>,
+    Path(channel): Path<String>,
+) -> Response {
+    let Some(data) = load(&state) else {
+        return not_found();
+    };
+    let programmes: Vec<Value> = data
+        .programmes
+        .iter()
+        .filter(|programme| programme.channel == channel)
+        .map(programme_json)
+        .collect();
+    Json(json!({ "channel": channel, "count": programmes.len(), "programmes": programmes }))
+        .into_response()
+}
+
+/// `GET /epg/api/search?q=`——按标题/简介搜索，最多 200 条。
+pub async fn api_search(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let Some(data) = load(&state) else {
+        return not_found();
+    };
+    let query = params
+        .get("q")
+        .map(|value| value.trim().to_lowercase())
+        .unwrap_or_default();
+    if query.is_empty() {
+        return Json(json!({ "q": "", "count": 0, "programmes": Vec::<Value>::new() }))
+            .into_response();
+    }
+    let programmes: Vec<Value> = data
+        .programmes
+        .iter()
+        .filter(|programme| {
+            title_of(programme).to_lowercase().contains(&query)
+                || desc_of(programme).to_lowercase().contains(&query)
+        })
+        .take(200)
+        .map(programme_json)
+        .collect();
+    Json(json!({ "q": query, "count": programmes.len(), "programmes": programmes })).into_response()
 }

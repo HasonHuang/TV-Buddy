@@ -39,7 +39,7 @@ scripts/smoke-m1.sh   # 分组/频道 CRUD、导出、订阅与 access 过滤、
 scripts/smoke-m2.sh   # 播放链路、切片伪装、缓存窗口、302 占位（含伪上游）
 scripts/smoke-m3.sh   # 直连模式：redirect/rewrite/passthrough、remux/dash 就绪语义
 scripts/smoke-m4.sh   # 热重载、看门狗冷却、缓存状态与清空、指标与日志
-scripts/smoke-epg.sh  # EPG：启动采集、/epg.xml[.gz]、/epg、状态与刷新
+scripts/smoke-epg.sh  # EPG：采集、/epg.xml[.gz]、/epg 页面与 /epg/api/*、状态与刷新
 scripts/compare-p0.sh # 对拍：同一夹具下对比目标 v0.8.2（需容器 iptv82）
 tests/             # 路由级集成测试（起真实服务 + 伪上游）
 ```
