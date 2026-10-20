@@ -916,3 +916,84 @@ async fn m3u_import_creates_groups_and_channels() {
         .expect("请求");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn logo_library_upload_serve_and_delete() {
+    let fixture = fixture().await;
+    let token = login(&fixture).await;
+
+    // PNG 魔数的 base64。
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    let body = serde_json::json!({
+        "items": [{ "name": "cctv1.png", "data": format!("data:image/png;base64,{png}") }]
+    });
+    let upload = |body: &serde_json::Value| {
+        fixture
+            .client
+            .post(format!("{}/panel/api/logo/upload", fixture.base))
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {token}"))
+            .body(body.to_string())
+            .send()
+    };
+
+    // 未登录 → 401。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/logo/upload", fixture.base))
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = upload(&body).await.expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let result: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(result["added"][0]["file"], "cctv1.png");
+    assert_eq!(result["failed"].as_array().expect("失败列表").len(), 0);
+
+    // 公开列表。
+    let response = fetch(&fixture, "/logo/api/list").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let list: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(list["count"], 1);
+    assert_eq!(list["logos"][0]["url"], "/logo/cctv1.png");
+
+    // 公开取图。
+    let response = fetch(&fixture, "/logo/cctv1.png").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header(&response, "content-type"), "image/png");
+    assert_eq!(header(&response, "cache-control"), "public, max-age=86400");
+    let bytes = response.bytes().await.expect("读字节");
+    assert_eq!(&bytes[..4], &[0x89, 0x50, 0x4e, 0x47], "应为 PNG 魔数");
+
+    // 缺文件与越界名 → 404。
+    for path in [
+        "/logo/missing.png",
+        "/logo/..%2F..%2Fconfig.toml",
+        "/logo/evil.exe",
+    ] {
+        let response = fetch(&fixture, path).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+
+    // 删除。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/logo/delete", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(serde_json::json!({ "file": "cctv1.png" }).to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        fetch(&fixture, "/logo/cctv1.png").await.status(),
+        StatusCode::NOT_FOUND
+    );
+}

@@ -8,6 +8,7 @@ pub mod config;
 pub mod epg;
 pub mod http;
 pub mod logging;
+pub mod logo;
 pub mod m3u;
 pub mod playlist;
 pub mod proxy;

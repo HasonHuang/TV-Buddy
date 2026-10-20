@@ -345,3 +345,15 @@
 | 校验：发布包内 `/epg` 页面引用新资源，`/__assets/assets/epg-*.js` 返回 2866 字节且含页面文案 | ✅ | alpine:3.20 + amd64 包实测 |
 
 > `dist/` 不入库（`.gitignore`）。
+
+## 3n. P1 · 台标库（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 存储：`<cache>/logos/`；白名单扩展名 `png/jpg/jpeg/gif/webp/svg`；文件名去路径与危险字符 | ✅ | `src/logo.rs`（4 项单元测试） |
+| 公开面：`/logo` 页面、`/logo/<file>`（`public, max-age=86400`，缺文件/越界名/非法扩展 → 404）、`/logo/api/list` | ✅ | `src/http/routes/logo.rs` |
+| 面板：`/panel/api/logo/{list,upload,delete}`；`data:` URL 与纯 base64 都接受；空内容与非法扩展进 `failed` | ✅ | 同上 |
+| 前端：台标库页（网格、上传、删除；上传按钮仅在已登录时显示） | ✅ | `frontend/src/logo.tsx` |
+| 验证 | ✅ | `scripts/smoke-logo.sh` 15 项；集成测试 `logo_library_upload_serve_and_delete` |
+
+验证：`cargo test` 64 项（45 单元 + 19 集成）。

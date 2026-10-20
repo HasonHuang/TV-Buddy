@@ -31,6 +31,8 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(routes::epg::api_programmes),
         )
         .route("/epg/api/search", get(routes::epg::api_search))
+        .route("/logo/api/list", get(routes::logo::public_list))
+        .route("/logo/:file", get(routes::logo::file))
         .route("/whoami", get(routes::public::whoami))
         .route("/unban/whoami", get(routes::public::whoami))
         .route("/playlist.m3u", get(routes::play::total_playlist))
@@ -61,6 +63,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/cache/flush", post(routes::admin::cache_flush))
         .route("/panel/api/stats", get(routes::admin::stats))
         .route("/panel/api/logs", get(routes::admin::logs))
+        .route("/panel/api/logo/list", get(routes::logo::panel_list))
+        .route("/panel/api/logo/upload", post(routes::logo::upload))
+        .route("/panel/api/logo/delete", post(routes::logo::delete))
         .route("/panel/api/epg/status", get(routes::epg::status))
         .route("/panel/api/epg/refresh", post(routes::epg::refresh))
         .route("/panel/api/groups", post(routes::groups::create_group))

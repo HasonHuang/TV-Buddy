@@ -56,9 +56,9 @@
 | GET | `/epg` | 无 | `200` `text/html`；EPG 关 → `404` | ✅ P1 | S-EP-05 |
 | GET | `/epg.xml`、`/epg.xml.gz` | 无 | `200` `application/xml` / `application/gzip`；EPG 关 → `404` | ✅ P1 | S-EP-05 |
 | GET | `/epg/api/{channels,programmes/:channel,search}` | 无 | `200` JSON | P1 | S-EP-16 |
-| GET | `/logo` | 无 | `200` `text/html` | P2 | S-EP-06 |
-| GET | `/logo/<file>` | 无 | `200` 图片 + `public, max-age=86400` / `404` | P2 | F-011 §6 |
-| GET | `/logo/api/list` | 无 | `200` JSON | P2 | F-011 |
+| GET | `/logo` | 无 | `200` `text/html` | ✅ P1 | S-EP-06 |
+| GET | `/logo/<file>` | 无 | `200` 图片 + `public, max-age=86400`；缺文件、越界名、非白名单扩展 → `404` | ✅ P1 | F-011 §6 |
+| GET | `/logo/api/list` | 无 | `{"allowed_exts","count","logos":[{"file","name","ext","bytes","mtime","url"}]}` | ✅ P1 | F-011 |
 | GET | `/unban` | 无 | `200` `text/html` | P1 | S-EP-07 |
 | GET | `/unban/whoami`、`/whoami` | 无 | `200` `{"ip":"<地址>"}`；取 `X-Forwarded-For` 首项或 `X-Real-IP`，都没有时 `unknown` | ✅ P1 | S-EP-15 |
 | GET | `/health` | 无 | `200` `ok`（`text/plain`） | ✅ M0 | S-EP-10 |
@@ -214,6 +214,9 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | POST | `/panel/api/groups/import` | — | 体为分组数组；id 已存在则跳过；`{"ok":true,"imported":n,"skipped":m}` | F-013 |
 | POST | `/panel/api/groups/import/force` | — | 同上，但同 id 覆盖 | F-013 |
 | POST | `/panel/api/groups/import/m3u` | — | 体 `{text,mode,group_mode}`；解析后落库 | F-013 §2 |
+| GET | `/panel/api/logo/list` | — | 同 `/logo/api/list` | F-012 |
+| POST | `/panel/api/logo/upload` | — | 体 `{"items":[{"name","ext","data"}]}`（`data` 可带 `data:image/…;base64,` 前缀）；返回 `{"ok":true,"added":[…],"failed":[…]}` | F-012 |
+| POST | `/panel/api/logo/delete` | — | 体 `{"file"}`；成功 `{"ok":true,"removed":1}`；缺文件 → `404` | F-012 |
 | GET | `/panel/api/groups/{gid}/export` | — | 单个分组对象 | F-013 §1 |
 
 写入语义：分组与频道改动**立即重写** `config.toml`；`PUT /config` 是**全量替换**（F-013 §6）。
