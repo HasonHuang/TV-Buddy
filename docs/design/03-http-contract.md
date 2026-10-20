@@ -247,6 +247,10 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | GET | `/panel/api/logo/list` | — | 同 `/logo/api/list` | F-012 |
 | POST | `/panel/api/logo/upload` | — | 体 `{"items":[{"name","ext","data"}]}`（`data` 可带 `data:image/…;base64,` 前缀）；返回 `{"ok":true,"added":[…],"failed":[…]}` | F-012 |
 | POST | `/panel/api/logo/delete` | — | 体 `{"file"}`；成功 `{"ok":true,"removed":1}`；缺文件 → `404` | F-012 |
+| POST | `/panel/api/logo/rename` | — | 体 `{"file","name"}`；保留扩展名；`{"ok":true,"logo":{…}}`；缺文件 → `404`，目标已存在 → `400` | F-012（形状自定） |
+| GET | `/panel/api/logo/match-report` | — | `{"channels","missing","broken","unused","missing_channels":[…],"broken_logos":[…],"unused_logos":[…]}` | F-012（形状自定） |
+| POST | `/panel/api/logo/apply` | — | 体 `{"gid","cid","file"}`；把 `/logo/<file>` 写入频道 `logo`；`404` 用于缺文件或未知分组/频道 | F-012（形状自定） |
+| POST | `/panel/api/logo/suggest` | — | 体 `{"threshold","limit"}`；按名称相似度推荐，`{"threshold","count","channels":[{"gid","cid","name","suggest":[{"file","score"}]}]}` | F-012（形状自定） |
 | GET | `/panel/api/groups/{gid}/export` | — | 单个分组对象 | F-013 §1 |
 
 写入语义：分组与频道改动**立即重写** `config.toml`；`PUT /config` 是**全量替换**（F-013 §6）。
@@ -263,7 +267,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 分组 id | `group-title` 去掉非 ASCII 字母数字与 `_`/`-`；结果为空 → `g-<6hex>` |
 | 频道 id | 有 `tvg-id` 用 `tvg-id`；否则 `g-<6hex>`（不幂等，与目标一致）。组内重复时追加 `-2`、`-3` |
 | 无 `group-title` | 落到分组 `Default` |
-| 属性保留 | `tvg_id`/`tvg_name`/`tvg_logo`/`group_title` 存入频道 `extra`；`#EXTVLCOPT`、`#EXTHTTP` 与行内 `http-user-agent`/`http-referer` 转为 `channel.headers` 字符串 |
+| 属性保留 | `tvg_id`/`tvg_name`/`tvg_logo`/`group_title` 存入频道 `extra`；订阅渲染时 `logo` 优先、回退 `tvg_logo`；`#EXTVLCOPT`、`#EXTHTTP` 与行内 `http-user-agent`/`http-referer` 转为 `channel.headers` 字符串 |
 | 响应 | `{"ok":true,"parsed_groups","parsed_channels","added_groups","merged_channels","replaced_groups","skipped_groups","group_mode"}` |
 
 > `channel.headers` 在**代理/改写/串流（dash、remux）取上游清单与切片**时附加。302 模式（redirect、passthrough）由客户端直连上游，无法附加。空 `text` 或未解析到频道 → `400`。

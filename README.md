@@ -79,7 +79,9 @@ tests/             # 路由级集成测试（起真实服务 + 伪上游）
 | `POST` | `/panel/api/restore` | 恢复备份并重载 |
 | `GET` | `/logo/<file>` | 台标（`public, max-age=86400`） |
 | `GET` | `/logo/api/list` | 台标列表 |
-| `POST` | `/panel/api/logo/{upload,delete}` | 上传 / 删除台标 |
+| `POST` | `/panel/api/logo/{upload,delete,rename,apply}` | 上传 / 删除 / 重命名 / 应用到频道 |
+| `GET` | `/panel/api/logo/match-report` | 缺台标、坏引用与未使用 |
+| `POST` | `/panel/api/logo/suggest` | 按名称相似度推荐台标 |
 | `GET` | `/epg.xml[.gz]` | 节目单 |
 | `GET` | `/epg/api/{channels,programmes,search}` | 节目单 JSON |
 | `POST` | `/panel/api/groups/import[/m3u]` | 批量导入分组（JSON / M3U） |

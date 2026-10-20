@@ -40,7 +40,7 @@ pub fn sanitize(name: &str) -> Option<String> {
     let cleaned: String = name
         .chars()
         .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+            if c.is_alphanumeric() || matches!(c, '.' | '_' | '-') {
                 c
             } else {
                 '_'
@@ -198,6 +198,7 @@ mod tests {
         assert_eq!(sanitize("cctv1.png").as_deref(), Some("cctv1.png"));
         assert_eq!(sanitize("../etc/passwd").as_deref(), Some("passwd"));
         assert_eq!(sanitize("a b.png").as_deref(), Some("a_b.png"));
+        assert_eq!(sanitize("台标 1.png").as_deref(), Some("台标_1.png"));
         assert_eq!(sanitize(""), None);
         assert_eq!(sanitize(".."), None);
         assert_eq!(sanitize(".hidden"), None);
@@ -222,12 +223,39 @@ mod tests {
     }
 
     #[test]
+    fn similarity_scores() {
+        assert_eq!(similarity("CCTV-1", "cctv1"), 1.0);
+        assert!(similarity("CCTV-1 综合", "cctv1") >= 0.9);
+        assert!(similarity("湖南卫视", "浙江卫视") > 0.0);
+        assert!(similarity("湖南卫视", "浙江卫视") < similarity("湖南卫视", "湖南卫视"));
+        assert_eq!(similarity("", "x"), 0.0);
+    }
+
+    #[test]
+    fn rename_keeps_extension() {
+        let dir = std::env::temp_dir().join(format!("logo-rename-{}", uuid::Uuid::new_v4()));
+        let cache = dir.to_string_lossy().to_string();
+        let entry = write(&cache, "old", "png", b"img").expect("写入");
+        let renamed = rename(&cache, &entry.file, "新台标").expect("重命名");
+        assert_eq!(renamed.file, "新台标.png");
+        assert!(!dir.join("logos").join("old.png").exists());
+        assert!(dir.join("logos").join("新台标.png").is_file());
+        write(&cache, "other", "png", b"x").expect("写入");
+        assert!(
+            rename(&cache, "other.png", "新台标").is_err(),
+            "目标已存在应报错"
+        );
+        assert!(rename(&cache, "missing.png", "x").is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn write_list_and_remove() {
         let dir = std::env::temp_dir().join(format!("logo-test-{}", uuid::Uuid::new_v4()));
         let cache = dir.to_string_lossy().to_string();
         let entry = write(&cache, "台标 1", "png", b"data").expect("应写入");
-        assert_eq!(entry.file, "___1.png");
-        assert_eq!(entry.url, "/logo/___1.png");
+        assert_eq!(entry.file, "台标_1.png");
+        assert_eq!(entry.url, "/logo/台标_1.png");
         let entries = list(&cache);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].bytes, 4);
@@ -235,4 +263,80 @@ mod tests {
         assert!(!remove(&cache, &entry.file).expect("再删应返回 false"));
         let _ = fs::remove_dir_all(&dir);
     }
+}
+
+/// 重命名台标：保留原扩展名；目标已存在时报错。
+pub fn rename(cache_dir: &str, file: &str, name: &str) -> Result<Entry> {
+    let file = sanitize(file).context("文件名不合法")?;
+    let Some((_, ext)) = file.rsplit_once('.') else {
+        bail!("缺少扩展名");
+    };
+    let ext = check_ext(ext).context("扩展名不在白名单")?;
+    let name = sanitize(name).context("文件名不合法")?;
+    let directory = dir(cache_dir);
+    let source = directory.join(&file);
+    if !source.is_file() {
+        bail!("文件不存在");
+    }
+    let target_name = format!("{name}.{ext}");
+    let target = directory.join(&target_name);
+    if target == source {
+        return Ok(Entry {
+            name,
+            file: target_name.clone(),
+            ext,
+            bytes: fs::metadata(&source).map(|meta| meta.len()).unwrap_or(0),
+            mtime: 0,
+            url: format!("/logo/{target_name}"),
+        });
+    }
+    if target.exists() {
+        bail!("目标已存在");
+    }
+    fs::rename(&source, &target).with_context(|| format!("重命名 {}", source.display()))?;
+    let meta = fs::metadata(&target).ok();
+    Ok(Entry {
+        url: format!("/logo/{target_name}"),
+        file: target_name,
+        name,
+        ext,
+        bytes: meta.as_ref().map(|meta| meta.len()).unwrap_or(0),
+        mtime: meta
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|value| value.as_secs())
+            .unwrap_or(0),
+    })
+}
+
+/// 名称相似度（0.0–1.0）：字符集合的 Jaccard 系数，忽略大小写与非字母数字。
+pub fn similarity(name: &str, stem: &str) -> f64 {
+    let left = normalize(name);
+    let right = normalize(stem);
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    if left == right {
+        return 1.0;
+    }
+    if left.contains(&right) || right.contains(&left) {
+        return 0.9;
+    }
+    let a: std::collections::HashSet<char> = left.chars().collect();
+    let b: std::collections::HashSet<char> = right.chars().collect();
+    let inter = a.intersection(&b).count() as f64;
+    let union = a.union(&b).count() as f64;
+    if union == 0.0 {
+        0.0
+    } else {
+        inter / union
+    }
+}
+
+fn normalize(value: &str) -> String {
+    value
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
 }

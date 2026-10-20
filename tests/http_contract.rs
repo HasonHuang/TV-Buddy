@@ -1307,3 +1307,106 @@ enabled = true
 
 #[test]
 fn placeholder() {}
+
+#[tokio::test]
+async fn logo_rename_apply_and_match_report() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    let post = |path: &str, body: serde_json::Value| {
+        fixture
+            .client
+            .post(format!("{}{path}", fixture.base))
+            .header("content-type", "application/json")
+            .header("authorization", auth.clone())
+            .body(body.to_string())
+            .send()
+    };
+
+    for name in ["cctv1.png", "hunan.png"] {
+        let body = serde_json::json!({
+            "items": [{ "name": name, "data": format!("data:image/png;base64,{png}") }]
+        });
+        assert_eq!(
+            post("/panel/api/logo/upload", body)
+                .await
+                .expect("上传")
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    // 应用到频道。
+    let response = post(
+        "/panel/api/logo/apply",
+        serde_json::json!({ "gid": "pg", "cid": "c1", "file": "cctv1.png" }),
+    )
+    .await
+    .expect("应用");
+    assert_eq!(response.status(), StatusCode::OK);
+    let playlist = fetch(&fixture, "/playlist.m3u")
+        .await
+        .text()
+        .await
+        .expect("读正文");
+    assert!(
+        playlist.contains("tvg-logo=\"/logo/cctv1.png\""),
+        "{playlist}"
+    );
+
+    // 缺文件 → 404。
+    let response = post(
+        "/panel/api/logo/apply",
+        serde_json::json!({ "gid": "pg", "cid": "c1", "file": "missing.png" }),
+    )
+    .await
+    .expect("应用");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // 匹配报告：hunan.png 未使用；其余频道缺台标。
+    let report: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/logo/match-report", fixture.base))
+            .header("authorization", &auth)
+            .send()
+            .await
+            .expect("报告")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert_eq!(report["unused"], 1);
+    assert_eq!(report["unused_logos"][0], "hunan.png");
+    assert!(report["missing"].as_u64().expect("missing") >= 1);
+
+    // 重命名（保留扩展名，支持中文）。
+    let response = post(
+        "/panel/api/logo/rename",
+        serde_json::json!({ "file": "cctv1.png", "name": "央视一套" }),
+    )
+    .await
+    .expect("重命名");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["logo"]["file"], "央视一套.png");
+    assert_eq!(
+        fetch(&fixture, "/logo/央视一套.png").await.status(),
+        StatusCode::OK
+    );
+
+    // 推荐：无台标频道返回数组。
+    let response = post(
+        "/panel/api/logo/suggest",
+        serde_json::json!({ "threshold": 0.1 }),
+    )
+    .await
+    .expect("推荐");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert!(body["channels"].is_array());
+}

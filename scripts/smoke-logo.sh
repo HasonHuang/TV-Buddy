@@ -20,6 +20,10 @@ disk_path = "$WORK/cache"
 id = "g1"
 name = "分组"
 mode = "proxy"
+[[groups.channels]]
+id = "c1"
+name = "频道"
+url = "http://127.0.0.1:9/none.m3u8"
 TOML
 
 "$BIN" "$CFG" >"$WORK/server.log" 2>&1 &
@@ -64,5 +68,40 @@ DEL=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/delete" 
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"file":"cctv1.png"}')
 check "删除 200" "200" "$DEL"
 check "删除后 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/cctv1.png")"
+
+# 第二个台标：上传后未使用。
+BODY2="{\"items\":[{\"name\":\"hunan.png\",\"data\":\"data:image/png;base64,$PNG\"}]}"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/upload" \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "$BODY2")
+check "上传第二个 200" "200" "$STATUS"
+
+# 前一段已删除 cctv1.png；重新上传以便应用与重命名。
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/upload" \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "$BODY")
+check "重传第一个 200" "200" "$STATUS"
+
+# 应用到频道 g1/c1。
+APPLY=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/apply" \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"gid":"g1","cid":"c1","file":"cctv1.png"}')
+check "应用台标 200" "200" "$APPLY"
+check "订阅含台标" "1" "$(curl -s "$B/playlist.m3u" | grep -c 'tvg-logo="/logo/cctv1.png"' || true)"
+
+# 匹配报告：hunan.png 未使用。
+curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/logo/match-report" > "$WORK/report.json"
+check "报告未使用 1" "1" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["unused"])' "$WORK/report.json")"
+
+# 重命名为中文名。
+RENAME=$(curl -s -o "$WORK/rename.json" -w '%{http_code}' -X POST "$B/panel/api/logo/rename" \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"file":"cctv1.png","name":"央视一套"}')
+check "重命名 200" "200" "$RENAME"
+check "新文件名" "央视一套.png" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["logo"]["file"])' "$WORK/rename.json")"
+check "新文件可取" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/%E5%A4%AE%E8%A7%86%E4%B8%80%E5%A5%97.png")"
+
+# 推荐接口。
+SUGGEST=$(curl -s -o "$WORK/suggest.json" -w '%{http_code}' -X POST "$B/panel/api/logo/suggest" \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"threshold":0.1}')
+check "推荐 200" "200" "$SUGGEST"
 
 if [ "$fail" = "0" ]; then echo "台标库冒烟测试全部通过"; else echo "台标库冒烟测试有失败项"; exit 1; fi

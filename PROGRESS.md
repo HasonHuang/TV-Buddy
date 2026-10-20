@@ -463,3 +463,16 @@
 | 离线构建修复：备份 tar 改内置实现，移除 `tar` 依赖（缓存缺 `linux-raw-sys`） | ✅ | `src/backup/tar.rs`；`cargo test --offline` 83 项 |
 
 验证：`cargo test --offline` 83 项；`verify-release.sh arm64|amd64` 全绿；`smoke-backup`、`smoke-security` 复跑通过。
+
+## 3w. P1 · 台标库其余端点
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `POST /panel/api/logo/rename`：保留扩展名，支持中文名，目标已存在报错 | ✅ | `logo::rename`（单元测试） |
+| `GET /panel/api/logo/match-report`：缺台标、坏引用、未使用 | ✅ | `routes/logo.rs` |
+| `POST /panel/api/logo/apply`：写入频道 `logo`，订阅立即生效 | ✅ | 同上；`playlist` 兼容 `tvg_logo` 回退 |
+| `POST /panel/api/logo/suggest`：字符集合 Jaccard 相似度（0–1，阈值与条数可调） | ✅ | `logo::similarity`（单元测试） |
+| 前端：匹配报告摘要、缺台标频道表（下拉 + 应用）、卡片重命名 | ✅ | `frontend/src/logo.tsx` |
+| 验证 | ✅ | `scripts/smoke-logo.sh` 25 项；集成测试 `logo_rename_apply_and_match_report` |
+
+验证：`cargo test --offline` 86 项（60 单元 + 26 集成）。

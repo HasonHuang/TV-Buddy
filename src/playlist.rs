@@ -74,7 +74,9 @@ fn push_entry(
 ) {
     let tvg_id = string_field(channel, "tvg_id").unwrap_or_else(|| channel.id.clone());
     let tvg_name = string_field(channel, "tvg_name").unwrap_or_else(|| channel.name.clone());
-    let logo = string_field(channel, "logo").unwrap_or_default();
+    let logo = string_field(channel, "logo")
+        .or_else(|| string_field(channel, "tvg_logo"))
+        .unwrap_or_default();
     let group_title = if group.name.is_empty() {
         group.id.clone()
     } else {

@@ -87,6 +87,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/logo/list", get(routes::logo::panel_list))
         .route("/panel/api/logo/upload", post(routes::logo::upload))
         .route("/panel/api/logo/delete", post(routes::logo::delete))
+        .route("/panel/api/logo/rename", post(routes::logo::rename))
+        .route(
+            "/panel/api/logo/match-report",
+            get(routes::logo::match_report),
+        )
+        .route("/panel/api/logo/apply", post(routes::logo::apply))
+        .route("/panel/api/logo/suggest", post(routes::logo::suggest))
         .route("/panel/api/epg/status", get(routes::epg::status))
         .route("/panel/api/epg/refresh", post(routes::epg::refresh))
         .route("/panel/api/groups", post(routes::groups::create_group))

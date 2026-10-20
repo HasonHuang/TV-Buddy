@@ -139,3 +139,217 @@ pub async fn delete(
         Err(error) => Err(ApiError::internal(format!("{error:#}"))),
     }
 }
+
+/// `POST /panel/api/logo/rename`——`{"file","name"}`；保留原扩展名。
+pub async fn rename(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let file = body
+        .get("file")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if file.trim().is_empty() || name.trim().is_empty() {
+        return Err(ApiError::bad_request("file 与 name 不能为空"));
+    }
+    let cache = state.snapshot().cache.disk_path.clone();
+    let safe = logo::sanitize(&file).ok_or_else(|| ApiError::bad_request("文件名不合法"))?;
+    if !logo::dir(&cache).join(&safe).is_file() {
+        return Err(ApiError::not_found("文件不存在"));
+    }
+    match logo::rename(&cache, &safe, &name) {
+        Ok(entry) => Ok(Json(json!({ "ok": true, "logo": entry }))),
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
+}
+
+/// 频道当前的台标值（`logo` 优先，兼容导入的 `tvg_logo`）。
+fn channel_logo(channel: &crate::config::model::Channel) -> Option<String> {
+    ["logo", "tvg_logo"]
+        .iter()
+        .find_map(|key| channel.extra.get(*key).and_then(|value| value.as_str()))
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+/// `GET /panel/api/logo/match-report`——缺台标、坏引用与未使用。
+pub async fn match_report(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    let config = state.snapshot();
+    let entries = logo::list(&config.cache.disk_path);
+    let files: std::collections::HashSet<&str> =
+        entries.iter().map(|entry| entry.file.as_str()).collect();
+    let mut missing = Vec::new();
+    let mut broken = Vec::new();
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut total = 0usize;
+
+    for group in &config.groups {
+        for channel in &group.channels {
+            total += 1;
+            let Some(value) = channel_logo(channel) else {
+                missing.push(json!({
+                    "gid": group.id,
+                    "cid": channel.id,
+                    "name": channel.name,
+                }));
+                continue;
+            };
+            if let Some(file) = value.strip_prefix("/logo/") {
+                if files.contains(file) {
+                    used.insert(file.to_string());
+                } else {
+                    broken.push(json!({
+                        "gid": group.id,
+                        "cid": channel.id,
+                        "name": channel.name,
+                        "logo": value,
+                    }));
+                }
+            }
+        }
+    }
+    let mut unused: Vec<String> = entries
+        .iter()
+        .filter(|entry| !used.contains(&entry.file))
+        .map(|entry| entry.file.clone())
+        .collect();
+    unused.sort();
+
+    Json(json!({
+        "channels": total,
+        "missing": missing.len(),
+        "broken": broken.len(),
+        "unused": unused.len(),
+        "missing_channels": missing,
+        "broken_logos": broken,
+        "unused_logos": unused,
+    }))
+}
+
+/// `POST /panel/api/logo/apply`——`{"gid","cid","file"}`；写入频道 `logo`。
+pub async fn apply(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let gid = body
+        .get("gid")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let cid = body
+        .get("cid")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let file = body
+        .get("file")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if gid.is_empty() || cid.is_empty() || file.is_empty() {
+        return Err(ApiError::bad_request("gid、cid 与 file 不能为空"));
+    }
+    let cache = state.snapshot().cache.disk_path.clone();
+    let safe = logo::sanitize(&file).ok_or_else(|| ApiError::bad_request("文件名不合法"))?;
+    if !logo::dir(&cache).join(&safe).is_file() {
+        return Err(ApiError::not_found("文件不存在"));
+    }
+    state
+        .mutate(|config| {
+            let group = config
+                .groups
+                .iter_mut()
+                .find(|group| group.id == gid)
+                .ok_or_else(|| anyhow::anyhow!("Group not found"))?;
+            let channel = group
+                .channels
+                .iter_mut()
+                .find(|channel| channel.id == cid)
+                .ok_or_else(|| anyhow::anyhow!("Channel not found"))?;
+            channel
+                .extra
+                .insert("logo".into(), toml::Value::String(format!("/logo/{safe}")));
+            Ok(())
+        })
+        .map_err(|error| {
+            let message = format!("{error:#}");
+            if message.contains("not found") {
+                ApiError::not_found(message)
+            } else {
+                ApiError::internal(message)
+            }
+        })?;
+    Ok(Json(json!({
+        "ok": true,
+        "gid": gid,
+        "cid": cid,
+        "logo": format!("/logo/{safe}"),
+    })))
+}
+
+/// `POST /panel/api/logo/suggest`——按名称相似度为缺台标频道推荐文件。
+pub async fn suggest(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let threshold = body
+        .get("threshold")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.5)
+        .clamp(0.0, 1.0);
+    let limit = body
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(3)
+        .clamp(1, 10) as usize;
+    let config = state.snapshot();
+    let entries = logo::list(&config.cache.disk_path);
+
+    let mut channels = Vec::new();
+    for group in &config.groups {
+        for channel in &group.channels {
+            if channel_logo(channel).is_some() || entries.is_empty() {
+                continue;
+            }
+            let mut scored: Vec<(f64, &str)> = entries
+                .iter()
+                .filter_map(|entry| {
+                    let score = logo::similarity(&channel.name, &entry.name);
+                    if score >= threshold && score > 0.0 {
+                        Some((score, entry.file.as_str()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+            channels.push(json!({
+                "gid": group.id,
+                "cid": channel.id,
+                "name": channel.name,
+                "suggest": scored
+                    .into_iter()
+                    .take(limit)
+                    .map(|(score, file)| json!({ "file": file, "score": (score * 100.0).round() / 100.0 }))
+                    .collect::<Vec<_>>(),
+            }));
+        }
+    }
+    Json(json!({
+        "threshold": threshold,
+        "count": channels.len(),
+        "channels": channels,
+    }))
+}
