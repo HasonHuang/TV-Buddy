@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getToken, setToken, UNAUTHORIZED_EVENT } from './api';
 import { GroupsPage } from './groups';
-import { BackupPage, LogsPage, SecurityPage } from './ops';
+import { BackupPage, EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
 import './style.css';
 
@@ -13,6 +13,7 @@ type SectionId =
   | 'groups'
   | 'cache'
   | 'stats'
+  | 'epg'
   | 'security'
   | 'logs'
   | 'backup';
@@ -22,6 +23,7 @@ const NAV: { id: SectionId; label: string }[] = [
   { id: 'groups', label: '分组管理' },
   { id: 'cache', label: '缓存状态' },
   { id: 'stats', label: '频道热度' },
+  { id: 'epg', label: '节目指南' },
   { id: 'security', label: '安全管控' },
   { id: 'logs', label: '运行日志' },
   { id: 'backup', label: '备份恢复' },
@@ -30,7 +32,6 @@ const NAV: { id: SectionId; label: string }[] = [
 const PENDING = [
   '系统设置',
   '定时录制',
-  '节目指南',
   '台标管理',
   '订阅聚合',
   '回看管理',
@@ -209,6 +210,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         {section === 'groups' && <GroupsPage />}
         {section === 'cache' && <CachePage />}
         {section === 'stats' && <StatsPage />}
+        {section === 'epg' && <EpgPanelPage />}
         {section === 'security' && <SecurityPage />}
         {section === 'logs' && <LogsPage />}
         {section === 'backup' && <BackupPage />}

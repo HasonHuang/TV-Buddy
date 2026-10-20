@@ -378,9 +378,10 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 安全管控 | `/panel/api/security/{token,token/rotate,ip/stats,ip/ban,ip/unban}` | ✅ |
 | 缓存状态 | `GET /panel/api/cache/stats`、`POST /panel/api/cache/flush`（二次确认） | ✅ |
 | 频道热度 | `GET /panel/api/stats`（总请求、切片、上游失败、分组排行） | ✅ |
+| 节目指南 | `GET /panel/api/epg/status`、`POST /panel/api/epg/refresh`；链接到 `/epg` 浏览页 | ✅ |
 | 运行日志 | `GET /panel/api/logs?limit=`（5 秒轮询） | ✅ |
 | 备份恢复 | `GET /panel/api/backup`、`POST /panel/api/restore`（浏览器内下载/上传） | ✅ |
-| 其它（系统设置、录制、节目指南、台标、订阅聚合、回看、素材） | — | 待实现，侧栏置灰 |
+| 其它（系统设置、录制、台标、订阅聚合、回看、素材） | — | 待实现，侧栏置灰 |
 
 ## 7. 错误串对照
 

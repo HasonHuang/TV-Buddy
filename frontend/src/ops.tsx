@@ -329,3 +329,99 @@ export function BackupPage() {
     </div>
   );
 }
+
+type EpgStatus = {
+  enabled: boolean;
+  running: boolean;
+  sources: number;
+  channels: number;
+  programmes: number;
+  kept: number;
+  keep_days: number;
+  future_days: number;
+  last_success: number | null;
+  last_error: string | null;
+};
+
+/** 节目指南：采集状态与手动刷新。 */
+export function EpgPanelPage() {
+  const [status, setStatus] = useState<EpgStatus | null>(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await api<EpgStatus>('GET', '/epg/status'));
+      setError('');
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const refresh = async () => {
+    setBusy(true);
+    setMessage('');
+    setError('');
+    try {
+      const result = await api<{ channels: number; programmes: number }>(
+        'POST',
+        '/epg/refresh',
+      );
+      setMessage(`采集完成：${result.channels} 个频道，${result.programmes} 条节目`);
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const last = status?.last_success
+    ? new Date(status.last_success * 1000).toLocaleString()
+    : '—';
+
+  return (
+    <div className="card">
+      <div className="row between">
+        <div>
+          <h1>节目指南</h1>
+          <h2>{status?.enabled ? '已开启' : '已关闭'}</h2>
+        </div>
+        <div className="row">
+          <a className="nav-item" href="/epg" target="_blank" rel="noreferrer">
+            浏览页面
+          </a>
+          <button className="ghost" onClick={() => void load()}>
+            刷新状态
+          </button>
+          <button onClick={() => void refresh()} disabled={busy || !status?.enabled}>
+            {busy ? '采集中…' : '立即采集'}
+          </button>
+        </div>
+      </div>
+      <dl>
+        <dt>源</dt>
+        <dd>{status?.sources ?? 0} 个</dd>
+        <dt>频道 / 节目</dt>
+        <dd>
+          {status?.channels ?? 0} / {status?.programmes ?? 0}
+        </dd>
+        <dt>保留</dt>
+        <dd>
+          已过 {status?.keep_days ?? 0} 天、未来 {status?.future_days ?? 0} 天
+        </dd>
+        <dt>最近成功</dt>
+        <dd>{last}</dd>
+        <dt>最近错误</dt>
+        <dd className="mono ellipsis">{status?.last_error ?? '—'}</dd>
+      </dl>
+      {message && <div className="msg ok">{message}</div>}
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
