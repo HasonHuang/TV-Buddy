@@ -476,3 +476,11 @@
 | 验证 | ✅ | `scripts/smoke-logo.sh` 25 项；集成测试 `logo_rename_apply_and_match_report` |
 
 验证：`cargo test --offline` 86 项（60 单元 + 26 集成）。
+
+## 3x. P1 · 台标端点的发布重建
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 双架构包重建（含台标重命名/应用/报告/推荐页面与 unban-batch 路由） | ✅ | `dist/iptv-proxy-0.1.0-{amd64,arm64}.tar.gz`（3.19 MB / 2.97 MB） |
+| `verify-release.sh` 两架构校验：静态链接、`/health`、`/logo/api/list`、面板资源含 `security/token`、台标资源含 `match-report` | ✅ | 两架构均输出 `panel-DuIKO3OL.js` 与 `logo-g_CaRg2R.js` |
+| 冒烟复跑 | ✅ | `smoke-logo` 25 项、`smoke-security` 11 项、`smoke-m1` |

@@ -78,5 +78,13 @@ logos=$(wget -qO- http://127.0.0.1:19899/logo/api/list)
 printf "%s" "$logos" | grep -q count || { echo "台标列表异常：$logos"; kill $pid 2>/dev/null || true; exit 1; }
 echo "/logo/api/list = ok"
 
+# 台标页脚本必须含新端点。
+lpage=$(wget -qO- http://127.0.0.1:19899/logo)
+lasset=$(printf "%s" "$lpage" | grep -o "/__assets/[^\"]*logo-[^\"]*\.js" | head -1)
+[ -n "$lasset" ] || { echo "台标页缺少脚本引用"; kill $pid 2>/dev/null || true; exit 1; }
+wget -qO /tmp/logo.js "http://127.0.0.1:19899$lasset"
+grep -q "match-report" /tmp/logo.js || { echo "台标资源不含匹配报告"; kill $pid 2>/dev/null || true; exit 1; }
+echo "台标资源 = $lasset"
+
 kill $pid 2>/dev/null || true
 '
