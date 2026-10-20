@@ -2,6 +2,9 @@
 //!
 //! 备份是 gzip 压缩的 tar，根目录 `iptv-proxy-backup/`（F-013 §8）。
 //! 作用域：`all`（默认）｜`epg-scripts`｜`resolver`；其它值回退 `all`。
+//! tar 读写由本模块内置，不引入第三方库。
+
+mod tar;
 
 use std::{
     fs,
@@ -41,33 +44,32 @@ pub fn create(
     version: &str,
 ) -> Result<Vec<u8>> {
     let scope = scope(include);
-    let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    let mut builder = tar::Builder::new(encoder);
     let cache = Path::new(cache_dir);
+    let mut entries: Vec<tar::Entry> = Vec::new();
 
     if scope == "all" {
-        add_file(&mut builder, config_path, &format!("{ROOT}/config.toml"))?;
-        add_dir(
-            &mut builder,
+        push_file(&mut entries, config_path, &format!("{ROOT}/config.toml"))?;
+        push_dir(
+            &mut entries,
             &logo::dir(cache_dir),
             &format!("{ROOT}/logos"),
         )?;
     }
     if scope == "all" || scope == "epg-scripts" {
-        add_dir(
-            &mut builder,
+        push_dir(
+            &mut entries,
             &cache.join("epg").join("scripts"),
             &format!("{ROOT}/epg/scripts"),
         )?;
-        add_file(
-            &mut builder,
+        push_file(
+            &mut entries,
             &cache.join("epg").join("epg_map.json"),
             &format!("{ROOT}/epg/epg_map.json"),
         )?;
     }
     if scope == "all" || scope == "resolver" {
-        add_dir(
-            &mut builder,
+        push_dir(
+            &mut entries,
             &cache.join("resolvers"),
             &format!("{ROOT}/resolvers"),
         )?;
@@ -79,14 +81,15 @@ pub fn create(
         "created": now_secs(),
         "scope": scope,
     });
-    add_bytes(
-        &mut builder,
-        &format!("{ROOT}/manifest.json"),
-        manifest.to_string().as_bytes(),
-    )?;
+    entries.push(tar::Entry {
+        name: format!("{ROOT}/manifest.json"),
+        data: manifest.to_string().into_bytes(),
+    });
 
-    builder.finish().context("写 tar 失败")?;
-    let encoder = builder.into_inner().context("取压缩流失败")?;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&tar::build(&entries))
+        .context("写 tar 失败")?;
     encoder.finish().context("写 gzip 失败")
 }
 
@@ -108,43 +111,37 @@ pub fn file_name() -> String {
 ///
 /// 返回恢复后的配置与报告；调用方负责重载快照。
 pub fn restore(config_path: &Path, cache_dir: &str, data: &[u8]) -> Result<(Config, Report)> {
-    let decoder = flate2::read::GzDecoder::new(data);
-    let mut archive = tar::Archive::new(decoder);
+    let mut decoder = flate2::read::GzDecoder::new(data);
+    let mut raw = Vec::new();
+    decoder.read_to_end(&mut raw).context("解压失败")?;
+    let entries = tar::parse(&raw).context("读取 tar 失败")?;
+
     let mut config_text: Option<String> = None;
     let mut logos: Vec<(String, Vec<u8>)> = Vec::new();
     let mut report = Report::default();
 
-    for entry in archive.entries().context("读取 tar 失败")? {
-        let mut entry = entry.context("读取条目失败")?;
-        let path = entry
-            .path()
-            .context("条目路径")?
-            .to_string_lossy()
+    for entry in entries {
+        report.files.push(entry.name.clone());
+        let name = entry
+            .name
+            .rsplit('/')
+            .next()
+            .unwrap_or(&entry.name)
             .to_string();
-        if !entry.header().entry_type().is_file() {
+        if name == "config.toml" {
+            config_text = Some(String::from_utf8(entry.data).context("配置不是 UTF-8")?);
             continue;
         }
-        report.files.push(path.clone());
-
-        let file_name = path.rsplit('/').next().unwrap_or(&path).to_string();
-        if file_name == "config.toml" && path.ends_with("config.toml") {
-            let mut text = String::new();
-            entry.read_to_string(&mut text).context("读取配置")?;
-            config_text = Some(text);
-            continue;
-        }
-        if let Some((_, name)) = path.rsplit_once("/logos/") {
-            let Some(ext) = name.rsplit_once('.').map(|(_, ext)| ext) else {
-                report.skipped.push(path);
+        if let Some((_, file)) = entry.name.rsplit_once("/logos/") {
+            let Some(ext) = file.rsplit_once('.').map(|(_, ext)| ext) else {
+                report.skipped.push(entry.name);
                 continue;
             };
-            if logo::sanitize(name).is_none() || logo::check_ext(ext).is_none() {
-                report.skipped.push(path);
+            if logo::sanitize(file).is_none() || logo::check_ext(ext).is_none() {
+                report.skipped.push(entry.name);
                 continue;
             }
-            let mut bytes = Vec::new();
-            entry.read_to_end(&mut bytes).context("读取台标")?;
-            logos.push((name.to_string(), bytes));
+            logos.push((file.to_string(), entry.data));
         }
     }
 
@@ -170,17 +167,19 @@ pub fn restore(config_path: &Path, cache_dir: &str, data: &[u8]) -> Result<(Conf
     Ok((config, report))
 }
 
-fn add_file<W: Write>(builder: &mut tar::Builder<W>, path: &Path, name: &str) -> Result<()> {
+fn push_file(entries: &mut Vec<tar::Entry>, path: &Path, name: &str) -> Result<()> {
     if !path.is_file() {
         return Ok(());
     }
-    builder
-        .append_path_with_name(path, name)
-        .with_context(|| format!("打包 {}", path.display()))?;
+    let data = fs::read(path).with_context(|| format!("读 {}", path.display()))?;
+    entries.push(tar::Entry {
+        name: name.to_string(),
+        data,
+    });
     Ok(())
 }
 
-fn add_dir<W: Write>(builder: &mut tar::Builder<W>, path: &Path, prefix: &str) -> Result<()> {
+fn push_dir(entries: &mut Vec<tar::Entry>, path: &Path, prefix: &str) -> Result<()> {
     let Ok(read) = fs::read_dir(path) else {
         return Ok(());
     };
@@ -192,21 +191,9 @@ fn add_dir<W: Write>(builder: &mut tar::Builder<W>, path: &Path, prefix: &str) -
     for name in names {
         let full = path.join(&name);
         if full.is_file() {
-            add_file(builder, &full, &format!("{prefix}/{name}"))?;
+            push_file(entries, &full, &format!("{prefix}/{name}"))?;
         }
     }
-    Ok(())
-}
-
-fn add_bytes<W: Write>(builder: &mut tar::Builder<W>, name: &str, data: &[u8]) -> Result<()> {
-    let mut header = tar::Header::new_gnu();
-    header.set_size(data.len() as u64);
-    header.set_mode(0o644);
-    header.set_mtime(now_secs());
-    header.set_cksum();
-    builder
-        .append_data(&mut header, name, data)
-        .with_context(|| format!("打包 {name}"))?;
     Ok(())
 }
 
