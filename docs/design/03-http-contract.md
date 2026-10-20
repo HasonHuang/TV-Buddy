@@ -336,7 +336,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 > 三个 `/epg/api/*` 的响应形状为本实现自定（目标只登记了路由存在性）。
 > 实现：按请求读取 `epg.xml` 并解析；节目单较大时再改为内存快照。
 >
-| 翻译 | `GET /epg/translate/status` 返回 `enabled`（未实现引擎）；`POST /epg/translate/clear-engine` 清缓存 |
+| 翻译 | `GET /epg/translate/{status,models}` 报告能力；`POST /epg/translate/{run,probe,mtran/test,clear,clear-engine}`。未配置引擎时 `run/probe/mtran/test` → `400`；`clear*` 清缓存 |
 
 ### 6.6 备份与恢复（P1 已实现）
 

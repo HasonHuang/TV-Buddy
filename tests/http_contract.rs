@@ -2430,3 +2430,46 @@ async fn playlist_config_roundtrip_and_validation() {
         .expect("坏配置");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn epg_translate_endpoints_report_unconfigured_engine() {
+    let fixture = fixture().await;
+
+    let response = fixture
+        .client
+        .get(format!("{}/epg/translate/models", fixture.base))
+        .send()
+        .await
+        .expect("模型");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["models"].as_array().map(Vec::len), Some(0));
+
+    for path in [
+        "/epg/translate/run",
+        "/epg/translate/probe",
+        "/epg/translate/mtran/test",
+    ] {
+        let response = fixture
+            .client
+            .post(format!("{}{path}", fixture.base))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({ "text": "hello" }).to_string())
+            .send()
+            .await
+            .expect("请求");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+    }
+
+    let response = fixture
+        .client
+        .post(format!("{}/epg/translate/clear", fixture.base))
+        .send()
+        .await
+        .expect("清空");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["ok"], true);
+}

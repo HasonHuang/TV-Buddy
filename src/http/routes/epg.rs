@@ -236,6 +236,141 @@ pub async fn translate_status(State(state): State<Arc<AppState>>) -> Json<Value>
     }))
 }
 
+/// `GET /epg/translate/models`——可用翻译模型（未接入引擎）。
+pub async fn translate_models(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let config = state.snapshot();
+    let enabled = translate_enabled(&config);
+    Json(json!({
+        "enabled": enabled,
+        "models": [],
+        "note": "EPG 翻译引擎尚未实现",
+    }))
+}
+
+/// `POST /epg/translate/run`——触发翻译。
+pub async fn translate_run(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiError> {
+    if !translate_enabled(&state.snapshot()) {
+        return Err(ApiError::bad_request("EPG 翻译未启用"));
+    }
+    Err(ApiError::bad_request("EPG 翻译引擎不可用"))
+}
+
+/// `POST /epg/translate/probe`——探测翻译服务。
+pub async fn translate_probe(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiError> {
+    let base = translate_url(&state.snapshot());
+    if base.is_empty() {
+        return Err(ApiError::bad_request("请先填写翻译服务地址"));
+    }
+    let endpoint = format!("{base}/translate/batch");
+    let result = state
+        .http
+        .post(&endpoint)
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::to_vec(&json!({
+                "texts": ["hello"],
+                "source_lang": "auto",
+                "target_lang": "zh-cn",
+            }))
+            .unwrap_or_default(),
+        )
+        .send()
+        .await;
+    Ok(Json(match result {
+        Ok(response) => json!({
+            "ok": response.status().is_success(),
+            "base": base,
+            "status": response.status().as_u16(),
+        }),
+        Err(error) => json!({ "ok": false, "base": base, "error": format!("{error}") }),
+    }))
+}
+
+/// `POST /epg/translate/mtran/test`——机翻自检。
+pub async fn translate_mtran(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Response {
+    let text = body
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("hello")
+        .to_string();
+    let base = translate_url(&state.snapshot());
+    if base.is_empty() {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "请先填写 MTranServer 地址(字幕机翻只支持本地 MTranServer)"
+            })),
+        )
+            .into_response();
+    }
+    let endpoint = format!("{base}/translate/batch");
+    let result = state
+        .http
+        .post(&endpoint)
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::to_vec(&json!({
+                "texts": [text],
+                "source_lang": "auto",
+                "target_lang": "zh-cn",
+            }))
+            .unwrap_or_default(),
+        )
+        .send()
+        .await;
+    let (ok, error) = match result {
+        Ok(response) if response.status().is_success() => (true, String::new()),
+        Ok(response) => (false, format!("请求失败: HTTP {}", response.status())),
+        Err(error) => (false, format!("请求失败: {error}")),
+    };
+    Json(json!({
+        "base": base,
+        "ok": ok,
+        "targets": [{ "code": "zh-Hans", "lang": "zh-cn", "ok": ok, "error": error }],
+        "version": null,
+    }))
+    .into_response()
+}
+
+fn translate_enabled(config: &crate::config::Config) -> bool {
+    config
+        .epg
+        .extra
+        .get("translate")
+        .and_then(|table| table.get("enabled"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn translate_url(config: &crate::config::Config) -> String {
+    config
+        .epg
+        .extra
+        .get("translate")
+        .and_then(|table| table.get("url"))
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            config
+                .extra
+                .get("subtitle")
+                .and_then(|table| table.get("translate"))
+                .and_then(|table| table.get("url"))
+                .and_then(|value| value.as_str())
+        })
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// `POST /epg/translate/clear`——清空翻译结果缓存。
+pub async fn translate_clear_results(State(state): State<Arc<AppState>>) -> Json<Value> {
+    translate_clear(State(state)).await
+}
+
 /// `POST /epg/translate/clear-engine`——清空翻译缓存。
 pub async fn translate_clear(State(state): State<Arc<AppState>>) -> Json<Value> {
     let dir = state.cache_dir.join("epg").join(".translate");

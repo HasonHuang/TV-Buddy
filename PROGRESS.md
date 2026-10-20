@@ -656,3 +656,16 @@
 | 能力：ffmpeg、回看缓冲（频道/片数）、解析脚本列表 | ✅ |
 | 刷新按钮；数据源四个面板接口 | ✅ |
 | 前端构建 | ✅ panel 37.9 kB |
+
+## 3an. P2 · EPG 翻译接口面
+
+| 端点 | 行为 |
+| --- | --- |
+| `GET /epg/translate/status` | `enabled`（读 `[epg.translate].enabled`）、`engine=none` |
+| `GET /epg/translate/models` | 空列表 + 说明 |
+| `POST /epg/translate/run` | 未启用 → `400 转换未启用`；已启用但无引擎 → `400` |
+| `POST /epg/translate/probe` | 未配地址 → `400`；否则探测 `<url>/translate/batch` |
+| `POST /epg/translate/mtran/test` | 未配地址 → `400`；否则逐目标结果 |
+| `POST /epg/translate/{clear,clear-engine}` | 清空 `<cache>/epg/.translate/` |
+
+| 验证 | ✅ 1 集成（未配置引擎路径） |

@@ -149,6 +149,17 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(routes::media::translate_clear),
         )
         .route("/epg/translate/status", get(routes::epg::translate_status))
+        .route("/epg/translate/models", get(routes::epg::translate_models))
+        .route("/epg/translate/run", post(routes::epg::translate_run))
+        .route("/epg/translate/probe", post(routes::epg::translate_probe))
+        .route(
+            "/epg/translate/mtran/test",
+            post(routes::epg::translate_mtran),
+        )
+        .route(
+            "/epg/translate/clear",
+            post(routes::epg::translate_clear_results),
+        )
         .route(
             "/epg/translate/clear-engine",
             post(routes::epg::translate_clear),
