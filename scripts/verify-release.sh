@@ -78,6 +78,16 @@ logos=$(wget -qO- http://127.0.0.1:19899/logo/api/list)
 printf "%s" "$logos" | grep -q count || { echo "台标列表异常：$logos"; kill $pid 2>/dev/null || true; exit 1; }
 echo "/logo/api/list = ok"
 
+# 面板健康接口需要会话；未登录应为 401。
+wget -q --server-response -O /dev/null http://127.0.0.1:19899/panel/api/health 2>/tmp/head.txt || true
+grep -q " 401 " /tmp/head.txt || { echo "健康接口未鉴权"; cat /tmp/head.txt; kill $pid 2>/dev/null || true; exit 1; }
+echo "/panel/api/health = 401"
+
+# 分享默认关闭 → 404。
+wget -q --server-response -O /dev/null "http://127.0.0.1:19899/api/share/pull?key=x" 2>/tmp/share.txt || true
+grep -q " 404 " /tmp/share.txt || { echo "分享端点异常"; cat /tmp/share.txt; kill $pid 2>/dev/null || true; exit 1; }
+echo "/api/share/pull = disabled"
+
 # 台标页脚本必须含新端点。
 lpage=$(wget -qO- http://127.0.0.1:19899/logo)
 lasset=$(printf "%s" "$lpage" | grep -o "/__assets/[^\"]*logo-[^\"]*\.js" | head -1)

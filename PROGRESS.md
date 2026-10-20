@@ -536,3 +536,5 @@
 | 验证 | ✅ | 3 单元 + 1 集成；`scripts/smoke-resolver.sh` 5 项 |
 
 验证：`cargo test --offline` 102 项（71 单元 + 31 集成）。
+
+发布包：双架构重建（amd64 3.36 MB、arm64 3.12 MB），`verify-release.sh` 双架构通过（静态、`/health`、面板资源、台标、`/panel/api/health=401`、分享默认 404）。
