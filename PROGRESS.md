@@ -380,3 +380,21 @@
 | 验证 | ✅ | 集成测试 `channel_headers_are_sent_upstream`（伪上游回显） |
 
 验证：`cargo test` 69 项（48 单元 + 21 集成）。
+
+## 5. 后续路线（P1 剩余与 P2）
+
+已完成：P0 全部（M0–M4）、EPG、回看、台标库、备份/恢复、分组导入（JSON 与 M3U）、自定义头转发、发布打包。
+
+| 项 | 规模 | 依赖 | 说明 |
+| --- | --- | --- | --- |
+| 面板其余分区 UI（缓存、日志、EPG、台标、安全、订阅） | 中 | 无 | 接口大多已就绪；前端按既有页签模式补页 |
+| 订阅聚合 `[playlist]`（`sources[]`、`merge_ttl_secs`、`merge_position`、`global_exclude[]`） | 中 | 无 | 需新增配置建模、远端拉取与合并、`include`/`exclude` 前缀过滤（F-009、F-013 §2） |
+| 安全面：`/panel/api/security/*`（Token 轮换、IP 统计/封禁）与 `[auth]` IP 守护 | 中 | 无 | 需定义封禁存储与 `GET /unban` 自助解封（每月 3 次） |
+| `remux` / `dash` 转封装 | 大 | `ffmpeg` | 外部程序；P0 起恒 503 预热 |
+| 录制与推流 `/panel/api/schedule`、`/livestream/*`、`/timeshift/*` | 大 | `ffmpeg` | 需任务调度与文件管理 |
+| EPG 脚本源与翻译接口 | 大 | `python3` | `kind="script"`、`/epg/translate/*` |
+| `/logo/{apply,rename,restore,suggest,animate,match-report}` | 中 | 无 | 库内其余 6 个端点；`animate` 需图像处理 |
+| 多 VPS 分享 `/api/share/pull` 与 `edge_mode` | 中 | 无 | 见 F-013 §10、F-016 |
+| 面板 `/panel/api/{health,assets,schedule,dash,subtitle,resolver}` | 中 | 视项 | 按 F-010/F-011/F-014 补 |
+
+> 每项开工前先补 `docs/design/` 小节与用例，再按 M0–M4 的节奏提交。
