@@ -388,6 +388,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 素材 | `/panel/api/{assets,subtitle}/*`、`/panel/api/assets/ffmpeg-status` | ✅ |
 | 录制与回看 | `/panel/api/schedule*`、`/panel/api/livestream*`、`GET /panel/api/dash-timeshift/status` | ✅ |
 | 订阅聚合 | `GET/PUT /panel/api/playlist`（源、过滤、缓存与合并位置）；清单 `GET /playlist.m3u` | ✅ |
+| 系统状态 | `GET /panel/api/health`、`/assets/ffmpeg-status`、`/resolver/scripts`、`/dash-timeshift/status` | ✅ |
 | 台标 | 独立页 `/logo`（`/logo/api/*`） | ✅ |
 | 其它（系统设置） | 概览页已支持 `GET/PUT /panel/api/config` 全量编辑 | ✅ |
 

@@ -8,6 +8,7 @@ import { CachePage, StatsPage } from './cache';
 import { AssetsPage } from './assets';
 import { PlaylistPage } from './playlist';
 import { SchedulePage } from './schedule';
+import { SystemPage } from './system';
 import './style.css';
 
 /** 侧栏分区。已实现的分区可切换，其余显示为待实现。 */
@@ -21,6 +22,7 @@ type SectionId =
   | 'security'
   | 'schedule'
   | 'playlist'
+  | 'system'
   | 'logs'
   | 'backup';
 
@@ -34,6 +36,7 @@ const NAV: { id: SectionId; label: string }[] = [
   { id: 'security', label: '安全管控' },
   { id: 'schedule', label: '录制与回看' },
   { id: 'playlist', label: '订阅聚合' },
+  { id: 'system', label: '系统状态' },
   { id: 'logs', label: '运行日志' },
   { id: 'backup', label: '备份恢复' },
 ];
@@ -217,6 +220,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         {section === 'security' && <SecurityPage />}
         {section === 'schedule' && <SchedulePage />}
         {section === 'playlist' && <PlaylistPage />}
+        {section === 'system' && <SystemPage />}
         {section === 'logs' && <LogsPage />}
         {section === 'backup' && <BackupPage />}
         {section === 'dashboard' && <Overview />}
