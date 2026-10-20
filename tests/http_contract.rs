@@ -1410,3 +1410,135 @@ async fn logo_rename_apply_and_match_report() {
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     assert!(body["channels"].is_array());
 }
+
+#[tokio::test]
+async fn media_assets_subtitles_and_resolver_scripts() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let post = |path: &str, body: serde_json::Value| {
+        fixture
+            .client
+            .post(format!("{}{path}", fixture.base))
+            .header("content-type", "application/json")
+            .header("authorization", auth.clone())
+            .body(body.to_string())
+            .send()
+    };
+    let get = |path: &str| {
+        fixture
+            .client
+            .get(format!("{}{path}", fixture.base))
+            .header("authorization", auth.clone())
+            .send()
+    };
+
+    // ffmpeg 检测：只要求字段存在。
+    let body: serde_json::Value = serde_json::from_str(
+        &get("/panel/api/assets/ffmpeg-status")
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert!(body["installed"].is_boolean());
+
+    // 视频素材：上传、列表、下载、删除。
+    let payload = serde_json::json!({
+        "items": [{ "name": "花絮.mp4", "data": "data:video/mp4;base64,AAAA" }]
+    });
+    assert_eq!(
+        post("/panel/api/assets/upload", payload)
+            .await
+            .expect("上传")
+            .status(),
+        StatusCode::OK
+    );
+    let list: serde_json::Value = serde_json::from_str(
+        &get("/panel/api/assets/list")
+            .await
+            .expect("列表")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert_eq!(list["count"], 1);
+    assert_eq!(list["files"][0]["file"], "花絮.mp4");
+
+    let response = get("/panel/api/assets/raw/花絮.mp4").await.expect("下载");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.bytes().await.expect("字节").as_ref(), b"\0\0\0");
+
+    let removed = post(
+        "/panel/api/assets/remove",
+        serde_json::json!({ "file": "花絮.mp4" }),
+    )
+    .await
+    .expect("删除");
+    assert_eq!(removed.status(), StatusCode::OK);
+    assert_eq!(
+        get("/panel/api/assets/raw/花絮.mp4")
+            .await
+            .expect("再取")
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+
+    // 字幕素材：扩展名白名单。
+    let srt = serde_json::json!({
+        "items": [{ "name": "第1集.srt", "data": "data:application/x-subrip;base64,MSAwOjAwOjAw" }]
+    });
+    assert_eq!(
+        post("/panel/api/subtitle/upload", srt)
+            .await
+            .expect("上传")
+            .status(),
+        StatusCode::OK
+    );
+    let list: serde_json::Value = serde_json::from_str(
+        &get("/panel/api/subtitle/list")
+            .await
+            .expect("列表")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert_eq!(list["count"], 1);
+
+    // 解析脚本：保存、列出、删除。
+    let saved = post(
+        "/panel/api/resolver/script",
+        serde_json::json!({ "name": "demo", "content": "print(1)" }),
+    )
+    .await
+    .expect("保存");
+    assert_eq!(saved.status(), StatusCode::OK);
+    let scripts: serde_json::Value = serde_json::from_str(
+        &get("/panel/api/resolver/scripts")
+            .await
+            .expect("列表")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert_eq!(scripts["count"], 1);
+    assert_eq!(scripts["scripts"][0]["name"], "demo.py");
+    let removed = post(
+        "/panel/api/resolver/remove",
+        serde_json::json!({ "name": "demo.py" }),
+    )
+    .await
+    .expect("删除");
+    assert_eq!(removed.status(), StatusCode::OK);
+
+    // 未知素材类型 → 404。
+    assert_eq!(
+        get("/panel/api/unknown/list").await.expect("请求").status(),
+        StatusCode::NOT_FOUND
+    );
+}

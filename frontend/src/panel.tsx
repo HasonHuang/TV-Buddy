@@ -5,6 +5,7 @@ import { api, clearToken, getToken, setToken, UNAUTHORIZED_EVENT } from './api';
 import { GroupsPage } from './groups';
 import { BackupPage, EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
+import { AssetsPage } from './assets';
 import './style.css';
 
 /** 侧栏分区。已实现的分区可切换，其余显示为待实现。 */
@@ -14,6 +15,7 @@ type SectionId =
   | 'cache'
   | 'stats'
   | 'epg'
+  | 'assets'
   | 'security'
   | 'logs'
   | 'backup';
@@ -24,6 +26,7 @@ const NAV: { id: SectionId; label: string }[] = [
   { id: 'cache', label: '缓存状态' },
   { id: 'stats', label: '频道热度' },
   { id: 'epg', label: '节目指南' },
+  { id: 'assets', label: '视频素材' },
   { id: 'security', label: '安全管控' },
   { id: 'logs', label: '运行日志' },
   { id: 'backup', label: '备份恢复' },
@@ -35,7 +38,6 @@ const PENDING = [
   '台标管理',
   '订阅聚合',
   '回看管理',
-  '视频素材',
 ];
 
 type Status = Record<string, unknown>;
@@ -211,6 +213,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         {section === 'cache' && <CachePage />}
         {section === 'stats' && <StatsPage />}
         {section === 'epg' && <EpgPanelPage />}
+        {section === 'assets' && <AssetsPage />}
         {section === 'security' && <SecurityPage />}
         {section === 'logs' && <LogsPage />}
         {section === 'backup' && <BackupPage />}

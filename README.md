@@ -44,6 +44,7 @@ scripts/smoke-logo.sh # 台标库：上传、公开取图与列表、删除
 scripts/smoke-backup.sh # 备份与恢复：导出 gzip、改动后回滚、拒绝非法内容
 scripts/smoke-security.sh # 安全面：Token 查看/轮换、IP 统计、封禁与解封
 scripts/smoke-aggregate.sh # 订阅聚合：远端源合并、过滤与位置
+scripts/smoke-assets.sh # 素材：ffmpeg 状态、视频/字幕上传与删除、解析脚本
 scripts/compare-p0.sh # 对拍：同一夹具下对比目标 v0.8.2（需容器 iptv82）
 tests/             # 路由级集成测试（起真实服务 + 伪上游）
 ```
@@ -82,6 +83,11 @@ tests/             # 路由级集成测试（起真实服务 + 伪上游）
 | `POST` | `/panel/api/logo/{upload,delete,rename,apply}` | 上传 / 删除 / 重命名 / 应用到频道 |
 | `GET` | `/panel/api/logo/match-report` | 缺台标、坏引用与未使用 |
 | `POST` | `/panel/api/logo/suggest` | 按名称相似度推荐台标 |
+| `GET` | `/panel/api/assets/list` | 视频素材列表 |
+| `POST` | `/panel/api/assets/{upload,remove}` | 上传 / 删除视频素材 |
+| `GET` | `/panel/api/assets/ffmpeg-status` | ffmpeg 检测 |
+| `GET`/`POST` | `/panel/api/subtitle/*` | 字幕列表、上传、删除、下载 |
+| `GET`/`POST` | `/panel/api/resolver/{scripts,script,remove}` | 解析脚本管理 |
 | `GET` | `/epg.xml[.gz]` | 节目单 |
 | `GET` | `/epg/api/{channels,programmes,search}` | 节目单 JSON |
 | `POST` | `/panel/api/groups/import[/m3u]` | 批量导入分组（JSON / M3U） |

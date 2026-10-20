@@ -88,6 +88,30 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(routes::backup::restore)
                 .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
         )
+        .route(
+            "/panel/api/assets/ffmpeg-status",
+            get(routes::media::ffmpeg_status),
+        )
+        .route("/panel/api/assets/list", get(routes::media::list))
+        .route("/panel/api/assets/upload", post(routes::media::upload))
+        .route("/panel/api/assets/remove", post(routes::media::remove))
+        .route("/panel/api/assets/raw/:file", get(routes::media::raw))
+        .route("/panel/api/subtitle/list", get(routes::media::list))
+        .route("/panel/api/subtitle/upload", post(routes::media::upload))
+        .route("/panel/api/subtitle/remove", post(routes::media::remove))
+        .route("/panel/api/subtitle/raw/:file", get(routes::media::raw))
+        .route(
+            "/panel/api/resolver/scripts",
+            get(routes::media::resolver_list),
+        )
+        .route(
+            "/panel/api/resolver/script",
+            post(routes::media::resolver_save),
+        )
+        .route(
+            "/panel/api/resolver/remove",
+            post(routes::media::resolver_remove),
+        )
         .route("/panel/api/logo/list", get(routes::logo::panel_list))
         .route("/panel/api/logo/upload", post(routes::logo::upload))
         .route("/panel/api/logo/delete", post(routes::logo::delete))

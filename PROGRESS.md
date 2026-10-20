@@ -484,3 +484,16 @@
 | 双架构包重建（含台标重命名/应用/报告/推荐页面与 unban-batch 路由） | ✅ | `dist/iptv-proxy-0.1.0-{amd64,arm64}.tar.gz`（3.19 MB / 2.97 MB） |
 | `verify-release.sh` 两架构校验：静态链接、`/health`、`/logo/api/list`、面板资源含 `security/token`、台标资源含 `match-report` | ✅ | 两架构均输出 `panel-DuIKO3OL.js` 与 `logo-g_CaRg2R.js` |
 | 冒烟复跑 | ✅ | `smoke-logo` 25 项、`smoke-security` 11 项、`smoke-m1` |
+
+## 3y. P1 · 素材与脚本管理
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 视频素材：`assets/{list,upload,remove,raw}`；扩展名白名单 `mp4/mkv/ts/mov/webm/m4v` | ✅ | `src/assets.rs`（2 单元）、`routes/media.rs` |
+| 字幕：`subtitle/{list,upload,remove,raw}`；扩展名 `srt/ass/ssa/vtt` | ✅ | 同上 |
+| `GET /panel/api/assets/ffmpeg-status`：实时执行 `ffmpeg -version`，返回 `installed/version/remux_ready` | ✅ | `routes/media.rs` |
+| 解析脚本：`resolver/{scripts,script,remove}`，写 `<cache>/resolvers/*.py`，不执行 | ✅ | 同上 |
+| 前端：视频素材分区（ffmpeg 状态、上传、打开、删除；字幕同页） | ✅ | `frontend/src/assets.tsx` |
+| 验证 | ✅ | `scripts/smoke-assets.sh` 13 项；集成测试 `media_assets_subtitles_and_resolver_scripts` |
+
+验证：`cargo test --offline` 89 项（62 单元 + 27 集成）。

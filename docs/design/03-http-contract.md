@@ -387,6 +387,32 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 备份恢复 | `GET /panel/api/backup`、`POST /panel/api/restore`（浏览器内下载/上传） | ✅ |
 | 其它（系统设置、录制、台标、订阅聚合、回看、素材） | — | 待实现，侧栏置灰 |
 
+### 6.9 素材与脚本（P1 已实现）
+
+目标只登记了路由存在性（F-011、S-EP-16），响应形状为本实现自定。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/panel/api/assets/list` | `{"kind":"assets","count","files":[{"file","name","ext","bytes","mtime"}]}` |
+| `POST` | `/panel/api/assets/upload` | `{"items":[{"name","ext","data"}]}`；`data` 可带 `data:` 前缀 |
+| `POST` | `/panel/api/assets/remove` | `{"file"}`；缺文件 → `404` |
+| `GET` | `/panel/api/assets/raw/<file>` | 面板内下载（`private, max-age=0`） |
+| `GET` | `/panel/api/assets/ffmpeg-status` | `{"installed","version","remux_ready","note"}`；每次实时执行 `ffmpeg -version` |
+| `GET` | `/panel/api/subtitle/list`、`…/upload`、`…/remove`、`…/raw/<file>` | 与视频同形；扩展名 `srt/ass/ssa/vtt` |
+| `GET` | `/panel/api/resolver/scripts` | `{"count","scripts":[{"name","bytes"}]}`（`<cache>/resolvers/*.py`） |
+| `POST` | `/panel/api/resolver/script` | `{"name","content"}`；写 `<name>.py`；空内容 → `400` |
+| `POST` | `/panel/api/resolver/remove` | `{"name"}`；缺文件 → `404` |
+
+规则：
+
+| 项 | 规则 |
+| --- | --- |
+| 目录 | `<cache>/assets/`、`<cache>/subtitles/`、`<cache>/resolvers/` |
+| 文件名 | 与台标同规则（去路径、允许中文、拒 `..`） |
+| 视频扩展 | `mp4/mkv/ts/mov/webm/m4v`；其它进 `failed`，不落盘 |
+| 上传上限 | 每个请求 64 MiB（与恢复一致） |
+| 脚本执行 | 只保存与列出；**不执行**（P2） |
+
 ## 7. 错误串对照
 
 面板错误体保留目标原文，便于前端与外部脚本匹配（F-012 §3、F-013 §5）：
