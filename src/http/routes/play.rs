@@ -17,8 +17,60 @@ use crate::{playlist, state::AppState};
 pub async fn total_playlist(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let config = state.snapshot();
     let token = token_for(&state, &config);
-    let body = playlist::render_total(&config, &base_url(&headers), token.as_deref());
+    let local = playlist::render_total(&config, &base_url(&headers), token.as_deref());
+    let extra = aggregate_sources(&state, &config).await;
+    let body = playlist::compose(local, extra, &config.playlist.merge_position);
     m3u_response(body, "playlist.m3u")
+}
+
+/// 抓取并合并聚合源（F-013 §5）。
+///
+/// 单个源失败只记日志；本地订阅照常返回。
+async fn aggregate_sources(state: &Arc<AppState>, config: &crate::config::Config) -> String {
+    let mut extra = String::new();
+    let ttl = config.playlist.merge_ttl_secs.max(1);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0);
+    let bucket = now / ttl;
+    for source in config
+        .playlist
+        .sources
+        .iter()
+        .filter(|source| source.enabled && !source.url.trim().is_empty())
+    {
+        let key = format!("sub:{}:{bucket}", source.url);
+        let body = match state.sources.get(&key) {
+            Some(body) => body,
+            None => match state.http.get(&source.url).send().await {
+                Ok(response) if response.status().is_success() => match response.text().await {
+                    Ok(text) => {
+                        state.sources.put(&key, text.clone());
+                        text
+                    }
+                    Err(error) => {
+                        tracing::warn!(url = %source.url, error = %error, "读取聚合源失败");
+                        continue;
+                    }
+                },
+                Ok(response) => {
+                    tracing::warn!(url = %source.url, status = %response.status(), "聚合源返回非成功状态");
+                    continue;
+                }
+                Err(error) => {
+                    tracing::warn!(url = %source.url, error = %error, "抓取聚合源失败");
+                    continue;
+                }
+            },
+        };
+        extra.push_str(&playlist::aggregate(
+            source,
+            &config.playlist.global_exclude,
+            &body,
+        ));
+    }
+    extra
 }
 
 /// `GET /{gid}/playlist.m3u`。

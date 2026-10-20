@@ -14,6 +14,7 @@ pub struct Config {
     pub cache: CacheCfg,
     pub auth: AuthCfg,
     pub epg: EpgCfg,
+    pub playlist: PlaylistCfg,
     pub health: HealthCfg,
     pub stats: StatsCfg,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -404,6 +405,62 @@ impl Default for EpgSource {
             cron: String::new(),
             timeout_secs: 0,
             tz_shift_mins: 0,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[playlist]`——订阅聚合（F-013 §5）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlaylistCfg {
+    /// 聚合源缓存时长（秒）。
+    pub merge_ttl_secs: u64,
+    /// `top` 或 `bottom`。
+    pub merge_position: String,
+    pub global_exclude: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<PlaylistSource>,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for PlaylistCfg {
+    fn default() -> Self {
+        Self {
+            merge_ttl_secs: 300,
+            merge_position: "bottom".into(),
+            global_exclude: Vec::new(),
+            sources: Vec::new(),
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[[playlist.sources]]`——聚合源。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlaylistSource {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub enabled: bool,
+    /// 频道名白名单；支持 `group:` 与 `id:` 前缀。
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for PlaylistSource {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            url: String::new(),
+            enabled: true,
+            include: Vec::new(),
+            exclude: Vec::new(),
             extra: toml::Table::new(),
         }
     }

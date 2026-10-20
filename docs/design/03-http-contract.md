@@ -187,6 +187,36 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 > `open` 同时**排除出总订阅**——与 `hidden` 同规则（F-009）。
 
+### 5.4 订阅聚合（P1 已实现）
+
+`GET /playlist.m3u` 可合并外部 M3U 源（F-013 §5）。分组订阅不聚合。
+
+| 配置 | 含义 |
+| --- | --- |
+| `[playlist].merge_ttl_secs` | 单个源的抓取缓存时长（秒，默认 300） |
+| `[playlist].merge_position` | `top` 或 `bottom`（默认 `bottom`） |
+| `[playlist].global_exclude` | 对所有源生效的过滤词 |
+| `[[playlist.sources]].enabled` | `false` 时跳过 |
+| `[[playlist.sources]].include` / `.exclude` | 源级过滤词；`include` 为空表示全收 |
+
+过滤词规则：
+
+| 写法 | 匹配对象 |
+| --- | --- |
+| `group:<文本>` | `group-title` 包含文本 |
+| `id:<文本>` | `tvg-id` 完全相等 |
+| 其它 | 频道名包含文本 |
+
+规则与限制：
+
+| 项 | 规则 |
+| --- | --- |
+| 大小写 | 不区分 |
+| 优先级 | `exclude` 与 `global_exclude` 优先于 `include` |
+| 地址 | 保留上游原始 URL；**不改写**，也不加本服务 Token |
+| 失败 | 单个源超时或非 2xx → 跳过并记日志；本地订阅照常返回 `200` |
+| 正则 | `/…/` 形式未实现（P2） |
+
 ## 6. 面板接口契约
 
 ### 6.1 已实现（M0）

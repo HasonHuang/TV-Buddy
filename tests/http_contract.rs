@@ -59,6 +59,7 @@ async fn upstream_file(
         "master.m3u8" => ("application/vnd.apple.mpegurl", MASTER.as_bytes()),
         "v0/index.m3u8" => ("application/vnd.apple.mpegurl", VARIANT.as_bytes()),
         "seg1.ts" | "seg2.ts" | "v0/v1.ts" => ("video/mp2t", SEGMENT),
+        "extra.m3u8" => ("application/vnd.apple.mpegurl", EXTRA.as_bytes()),
         _ => return (StatusCode::NOT_FOUND, "not found").into_response(),
     };
     ([(header::CONTENT_TYPE, mime)], body.to_vec()).into_response()
@@ -108,8 +109,20 @@ async fn fixture() -> Fixture {
     fixture_with(false).await
 }
 
+/// 聚合源文本：三条频道，供 `[playlist]` 过滤测试。
+const EXTRA: &str = "#EXTM3U\n#EXTINF:-1 tvg-id=\"keep\" group-title=\"远端组\",远端频道\nhttp://placeholder.test/remote.m3u8\n#EXTINF:-1 tvg-id=\"skip\" group-title=\"远端组\",跳过频道\nhttp://placeholder.test/skip.m3u8\n#EXTINF:-1 tvg-id=\"excluded\" group-title=\"远端组\",全局排除\nhttp://placeholder.test/excluded.m3u8\n";
+
 /// `epg_enabled` 为真时，伪上游额外提供 `/epg.xml`，配置里打开 EPG。
 async fn fixture_with(epg_enabled: bool) -> Fixture {
+    fixture_with_all(epg_enabled, "").await
+}
+
+/// 带额外 TOML 片段的夹具（用于 `[playlist]` 聚合）。
+async fn fixture_with_extra(extra: &str) -> Fixture {
+    fixture_with_all(false, extra).await
+}
+
+async fn fixture_with_all(epg_enabled: bool, extra_section: &str) -> Fixture {
     let dir = std::env::temp_dir().join(format!("iptv-proxy-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("建临时目录");
 
@@ -125,6 +138,7 @@ async fn fixture_with(epg_enabled: bool) -> Fixture {
         );
     }
     let upstream = serve(upstream_app).await;
+    let extra_section = extra_section.replace("{upstream}", &upstream);
 
     let toml = format!(
         r#"
@@ -196,8 +210,10 @@ id = "c1"
 name = "透传频道"
 url = "{upstream}/live.m3u8"
 {epg_section}
+{extra_section}
 "#,
         dir = dir.display(),
+        extra_section = extra_section,
         epg_section = if epg_enabled {
             format!(
                 r#"
@@ -1241,3 +1257,53 @@ async fn security_token_rotation_and_ip_ban() {
         .expect("请求");
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn playlist_aggregates_sources_with_filters() {
+    let extra = r#"
+[playlist]
+merge_ttl_secs = 60
+merge_position = "top"
+global_exclude = ["id:excluded"]
+
+[[playlist.sources]]
+id = "s1"
+name = "远端源"
+url = "{upstream}/extra.m3u8"
+enabled = true
+exclude = ["id:skip"]
+"#;
+    let fixture = fixture_with_extra(extra).await;
+    let body = fetch(&fixture, "/playlist.m3u")
+        .await
+        .text()
+        .await
+        .expect("读正文");
+    assert!(body.contains("远端频道"), "{body}");
+    assert!(!body.contains("跳过频道"), "exclude 应生效");
+    assert!(!body.contains("全局排除"), "global_exclude 应生效");
+    assert!(body.contains("媒体清单频道"), "本地频道仍应存在");
+    // merge_position = "top"：聚合条目在本地条目之前。
+    let remote = body.find("远端频道").expect("远端");
+    let local = body.find("媒体清单频道").expect("本地");
+    assert!(remote < local, "聚合应位于顶部");
+}
+
+#[tokio::test]
+async fn playlist_source_failure_does_not_break_subscription() {
+    let extra = r#"
+[[playlist.sources]]
+id = "bad"
+name = "坏源"
+url = "http://127.0.0.1:9/none.m3u8"
+enabled = true
+"#;
+    let fixture = fixture_with_extra(extra).await;
+    let response = fetch(&fixture, "/playlist.m3u").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("读正文");
+    assert!(body.contains("媒体清单频道"));
+}
+
+#[test]
+fn placeholder() {}

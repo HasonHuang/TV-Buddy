@@ -4,7 +4,7 @@
 //! 证据：F-004、F-009、S-URL-02/04/07。
 
 use crate::config::{
-    model::{Channel, Group},
+    model::{Channel, Group, PlaylistSource},
     Config,
 };
 
@@ -205,5 +205,155 @@ mod tests {
         config.groups[0].format = "mpd".into();
         let body = render_total(&config, "http://host", None);
         assert!(body.contains("http://host/g6/c1.mpd"));
+    }
+}
+
+/// 聚合源过滤 + 提取条目（F-013 §5）。
+///
+/// 保留 `#EXTINF` 及其附属 `#` 行和原始 URL；不改写地址，也不加 Token。
+/// 过滤词：`group:<文本>` 匹配 `group-title`，`id:<文本>` 匹配 `tvg-id`，
+/// 其余按频道名匹配。都不区分大小写，空列表表示不过滤。
+pub fn aggregate(source: &PlaylistSource, global_exclude: &[String], body: &str) -> String {
+    let mut out = String::new();
+    let mut pending: Vec<&str> = Vec::new();
+    for line in body.lines() {
+        let line = line.trim_end_matches('\r');
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            if !trimmed.starts_with("#EXTM3U") {
+                pending.push(line);
+            }
+            continue;
+        }
+        let entry: Vec<&str> = pending.iter().copied().collect();
+        pending.clear();
+        let meta = entry
+            .iter()
+            .find(|line| line.starts_with("#EXTINF"))
+            .map(|line| entry_meta(line))
+            .unwrap_or_default();
+        if (!source.include.is_empty() && !matches(&source.include, &meta))
+            || matches(&source.exclude, &meta)
+            || matches(global_exclude, &meta)
+        {
+            continue;
+        }
+        for line in &entry {
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push_str(trimmed);
+        out.push('\n');
+    }
+    out
+}
+
+/// 把聚合条目按位置拼到本地订阅上。
+pub fn compose(local: String, extra: String, position: &str) -> String {
+    if extra.is_empty() {
+        return local;
+    }
+    let (head, rest) = match local.split_once('\n') {
+        Some((first, rest)) => (format!("{first}\n"), rest.to_string()),
+        None => (String::new(), local),
+    };
+    if position == "top" {
+        format!("{head}{extra}{rest}")
+    } else {
+        format!("{head}{rest}{extra}")
+    }
+}
+
+/// `(频道名, group-title, tvg-id)`。
+fn entry_meta(line: &str) -> (String, String, String) {
+    let name = line
+        .rsplit_once(',')
+        .map(|(_, name)| name.trim().to_string())
+        .unwrap_or_default();
+    (
+        name,
+        attr(line, "group-title").unwrap_or_default(),
+        attr(line, "tvg-id").unwrap_or_default(),
+    )
+}
+
+/// 取 `key="value"` 属性。
+fn attr(line: &str, key: &str) -> Option<String> {
+    let start = line.find(&format!("{key}=\""))? + key.len() + 2;
+    let rest = &line[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// 是否有任一过滤词命中。
+fn matches(patterns: &[String], meta: &(String, String, String)) -> bool {
+    let (name, group, id) = meta;
+    patterns
+        .iter()
+        .map(|pattern| pattern.trim())
+        .filter(|pattern| !pattern.is_empty())
+        .any(|pattern| {
+            if let Some(want) = pattern.strip_prefix("group:") {
+                group.to_lowercase().contains(&want.trim().to_lowercase())
+            } else if let Some(want) = pattern.strip_prefix("id:") {
+                id.to_lowercase() == want.trim().to_lowercase()
+            } else {
+                name.to_lowercase().contains(&pattern.to_lowercase())
+            }
+        })
+}
+
+#[cfg(test)]
+mod aggregate_tests {
+    use super::*;
+
+    const BODY: &str = "#EXTM3U\n#EXTINF:-1 tvg-id=\"a\" group-title=\"新闻\",CCTV-1\nhttp://a/1.m3u8\n#EXTINF:-1 tvg-id=\"b\" group-title=\"体育\",CCTV-5\nhttp://a/5.m3u8\n";
+
+    fn source(include: &[&str], exclude: &[&str]) -> PlaylistSource {
+        PlaylistSource {
+            include: include.iter().map(|s| s.to_string()).collect(),
+            exclude: exclude.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn keeps_all_when_no_filter() {
+        let out = aggregate(&source(&[], &[]), &[], BODY);
+        assert!(out.contains("CCTV-1") && out.contains("CCTV-5"));
+        assert!(out.starts_with("#EXTINF"));
+        assert!(!out.contains("#EXTM3U"));
+    }
+
+    #[test]
+    fn include_by_name_group_and_id() {
+        assert!(!aggregate(&source(&["cctv-1"], &[]), &[], BODY).contains("CCTV-5"));
+        assert!(aggregate(&source(&["group:体育"], &[]), &[], BODY).contains("CCTV-5"));
+        assert!(!aggregate(&source(&["id:b"], &[]), &[], BODY).contains("CCTV-1"));
+    }
+
+    #[test]
+    fn exclude_wins_and_global_applies() {
+        let out = aggregate(&source(&[], &["cctv-5"]), &[], BODY);
+        assert!(out.contains("CCTV-1") && !out.contains("CCTV-5"));
+        let out = aggregate(&source(&[], &[]), &["group:体育".to_string()], BODY);
+        assert!(!out.contains("CCTV-5"));
+    }
+
+    #[test]
+    fn compose_places_extra() {
+        let local = "#EXTM3U\n#EXTINF:-1,本地\nhttp://self/1.m3u8\n".to_string();
+        let extra = "#EXTINF:-1,远端\nhttp://up/1.m3u8\n".to_string();
+        let top = compose(local.clone(), extra.clone(), "top");
+        assert!(top.starts_with("#EXTM3U\n#EXTINF:-1,远端"));
+        let bottom = compose(local, extra, "bottom");
+        assert!(bottom.ends_with("#EXTINF:-1,远端\nhttp://up/1.m3u8\n"));
+        assert_eq!(
+            compose("#EXTM3U\n".into(), String::new(), "top"),
+            "#EXTM3U\n"
+        );
     }
 }

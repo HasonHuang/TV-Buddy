@@ -35,6 +35,8 @@ pub struct AppState {
     pub segments: SegmentIndex,
     /// 在线清单缓存（TTL 5 秒）。
     pub playlists: TtlCache,
+    /// 订阅聚合源缓存（键含时间桶，TTL 1 小时）。
+    pub sources: TtlCache,
     /// 直连地址与模式分类缓存（每项自带 TTL）。
     pub modes: AddressCache,
     /// 缓存根目录（`[cache].disk_path`）。
@@ -71,6 +73,7 @@ impl AppState {
                 .unwrap_or_default(),
             segments: SegmentIndex::new(),
             playlists: TtlCache::new(Duration::from_secs(5)),
+            sources: TtlCache::new(std::time::Duration::from_secs(3600)),
             modes: AddressCache::new(),
             cache_dir,
             stats: Stats::default(),

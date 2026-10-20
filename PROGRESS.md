@@ -410,3 +410,16 @@
 | 验证 | ✅ | `scripts/smoke-security.sh` 10 项；集成测试 `security_token_rotation_and_ip_ban` |
 
 验证：`cargo test` 74 项（52 单元 + 22 集成）。
+
+## 3r. P1 · 订阅聚合（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `[playlist]` 配置：`merge_ttl_secs`、`merge_position`、`global_exclude`、`[[playlist.sources]]` | ✅ | `config/model.rs` |
+| 合并：只作用于 `GET /playlist.m3u`；保留上游原始 URL，不改写、不加 Token | ✅ | `playlist::aggregate`、`compose`、`routes/play.rs` |
+| 过滤词：`group:`、`id:`、频道名；大小写不敏感；`exclude` 优先 | ✅ | 同上（4 项单元测试） |
+| 缓存：键含时间桶，按 `merge_ttl_secs` 生效 | ✅ | `AppState::sources` |
+| 失败隔离：单源失败只记日志，本地订阅照常返回 | ✅ | `aggregate_sources` |
+| 验证 | ✅ | `scripts/smoke-aggregate.sh` 5 项；集成测试 2 项 |
+
+验证：`cargo test` 81 项（56 单元 + 25 集成）。
