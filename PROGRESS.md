@@ -567,13 +567,13 @@
 
 | 项 | 状态 |
 | --- | --- |
-| amd64 | 3.46 MB |
-| arm64 | 3.21 MB |
+| amd64 | 3.53 MB |
+| arm64 | 3.27 MB |
 | `verify-release.sh` 双架构 | ✅ 静态链接、`/health`、面板/台标资源、健康 401、分享默认 404 |
 
-验证：`cargo test --offline` 110 项（77 单元 + 33 集成）。
+验证：`cargo test --offline` 119 项（80 单元 + 39 集成）。
 
-已知缺口（P2）：时移（`/timeshift/*`、`/dash-timeshift/*`）、`schedule/from-epg`、字幕翻译、EPG 脚本源。
+已知缺口（P2）：DASH 回看（`dash_timeshift`）、EPG 翻译引擎、订阅聚合 UI。
 
 ## 3af. P2 · EPG 脚本源、批量录制、字幕自检
 
@@ -611,3 +611,13 @@
 | 回看能力卡片：`dash-timeshift/status` | ✅ |
 | 侧栏：移除占位「定时录制」「回看管理」 | ✅ |
 | 前端构建 | ✅ `npm run build`（panel 32.4 kB） |
+
+## 3ai. 发布包（EPG 脚本源 + 回看 + 面板）
+
+| 项 | 状态 |
+| --- | --- |
+| amd64 | 3.53 MB |
+| arm64 | 3.27 MB |
+| `verify-release.sh` 双架构 | ✅ 面板资源 `panel-CiSNGll5.js`、台标资源、健康 401、分享默认 404 |
+
+验证：`cargo test --offline` 119 项；smoke：assets 13、share 7、panel 7、resolver 5、remux 7、schedule 9、timeshift 8。
