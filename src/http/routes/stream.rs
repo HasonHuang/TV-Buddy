@@ -55,8 +55,17 @@ pub async fn entry(
     if !token_ok(&state, &config, group, &query) {
         return redirect(&config.auth.token_failure_url);
     }
+    // 上游解析脚本：每次播放前算地址（S-RES-01）。
+    let resolved = match crate::resolver::resolve(&state, &gid, &cid, channel).await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(gid = %gid, cid = %cid, "解析脚本失败: {error:#}");
+            return redirect(&config.server.error_url);
+        }
+    };
+    let base = resolved.unwrap_or_else(|| channel.url.clone());
     // 回看：只把 `playseek` 原样追加到上游（S-EP-04），其余回看参数丢弃。
-    let upstream = with_playseek(&channel.url, &query);
+    let upstream = with_playseek(&base, &query);
     // Passthrough 原样下发上游地址（S-MODE-11）。
     if group.mode == "passthrough" {
         return redirect(&upstream);

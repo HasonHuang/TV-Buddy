@@ -149,3 +149,9 @@ iptv-proxy-<version>-<arch>/
 | `master_url` | 空 | follower 拉取的基地址 |
 | `follower_urls` | `[]` | master 汇总的基地址 |
 | `poll_secs` | `300` | 同步周期（秒），最小 5 |
+
+## 10. 频道级解析脚本
+
+`[groups.channels]` 支持 `resolver_script`、`resolver_arg` 与 `resolver_ttl`。
+脚本位于 `<cache>/resolvers/`，通过 `python3` 执行。
+详见 `03-http-contract.md` §6.12。

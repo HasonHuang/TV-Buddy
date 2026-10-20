@@ -453,6 +453,31 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 `kind` 取 `video`/`audio`/`text`/`unknown`。
 MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒体。
 
+### 6.12 上游解析脚本（P1 已实现）
+
+证据：F-009 §5（S-RES-01）。
+
+频道在 `[groups.channels]` 中用三个键开启脚本解析：
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `resolver_script` | 空 | 脚本文件名，位于 `<cache>/resolvers/<name>.py`；空表示关闭 |
+| `resolver_arg` | 空 | 作为 `argv[1]` 传入 |
+| `resolver_ttl` | `30` | 结果缓存秒数 |
+
+执行规则：
+
+| 项 | 规则 |
+| --- | --- |
+| 命令 | `python3 <cache>/resolvers/<脚本> <arg>` |
+| 工作目录 | 脚本所在目录 |
+| 输出 | stdout 最后一个非空行；必须是 `http://` 或 `https://` |
+| 超时 | 30 秒 |
+| 覆盖 | 解析成功时忽略频道 `url` |
+| 缓存 | TTL 内直接返回；过期先返回旧值并后台刷新（SWR） |
+| 失败 | 冷启动失败、超时或输出非法 → `302 error_url` |
+| 回看 | `playseek` 追加到解析后的地址 |
+
 ## 7. 错误串对照
 
 面板错误体保留目标原文，便于前端与外部脚本匹配（F-012 §3、F-013 §5）：

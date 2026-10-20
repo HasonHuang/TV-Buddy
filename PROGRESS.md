@@ -523,3 +523,16 @@
 | 测试 | ✅ | dash 2 单元 + 1 集成；`scripts/smoke-panel.sh` 7 项 |
 
 验证：`cargo test --offline` 98 项（68 单元 + 30 集成）。
+
+## 3ab. P1 · 上游解析脚本
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 频道键 `resolver_script`/`resolver_arg`/`resolver_ttl`（默认 30 秒） | ✅ | `src/resolver.rs` |
+| 执行 `python3 <cache>/resolvers/<脚本> <arg>`，stdout 末行即 URL | ✅ | 同上 |
+| 30 秒超时；非 HTTP(S) 输出报错 | ✅ | 同上 |
+| SWR 缓存：TTL 内不执行；过期先返回旧值并后台刷新 | ✅ | `resolver::resolve` |
+| 冷启动失败 → `302 error_url`；`playseek` 追加到解析结果 | ✅ | `routes/stream.rs` |
+| 验证 | ✅ | 3 单元 + 1 集成；`scripts/smoke-resolver.sh` 5 项 |
+
+验证：`cargo test --offline` 102 项（71 单元 + 31 集成）。

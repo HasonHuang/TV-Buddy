@@ -16,6 +16,7 @@ pub mod m3u;
 pub mod playlist;
 pub mod proxy;
 pub mod reload;
+pub mod resolver;
 pub mod share;
 pub mod state;
 pub mod stats;

@@ -1760,3 +1760,97 @@ url = "{upstream}/manifest.mpd"
     .expect("解析 JSON");
     assert_eq!(body["enabled"], false);
 }
+
+#[tokio::test]
+async fn resolver_script_overrides_channel_url_with_ttl_cache() {
+    let fixture = fixture_with_extra(
+        r#"
+[[groups]]
+id = "rg"
+name = "解析组"
+mode = "proxy"
+access = "open"
+[[groups.channels]]
+id = "c1"
+name = "脚本频道"
+url = "http://127.0.0.1:9/never"
+resolver_script = "probe.py"
+resolver_arg = "MARKER_PATH"
+resolver_ttl = 60
+[[groups.channels]]
+id = "c2"
+name = "坏脚本频道"
+url = "http://127.0.0.1:9/never"
+resolver_script = "bad.py"
+[[groups.channels]]
+id = "c3"
+name = "缺脚本频道"
+url = "http://127.0.0.1:9/never"
+resolver_script = "missing.py"
+"#,
+    )
+    .await;
+
+    let resolvers = fixture.dir.join("cache/resolvers");
+    std::fs::create_dir_all(&resolvers).expect("建脚本目录");
+    let marker = fixture.dir.join("probe.count");
+    let toml = format!(
+        "import sys\nopen(r'{}', 'a').write('x')\nprint('{}/live.m3u8')\n",
+        marker.display(),
+        fixture.upstream
+    );
+    std::fs::write(resolvers.join("probe.py"), toml).expect("写脚本");
+    std::fs::write(resolvers.join("bad.py"), "print('not-a-url')\n").expect("写脚本");
+
+    // 首次请求：执行脚本，返回代理清单。
+    let response = fixture
+        .client
+        .get(format!("{}/rg/c1.m3u8", fixture.base))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("读正文");
+    assert_eq!(media_lines(&body).len(), 2);
+
+    // 第二次请求命中 TTL 缓存：脚本只执行一次。
+    let response = fixture
+        .client
+        .get(format!("{}/rg/c1.m3u8", fixture.base))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        std::fs::read_to_string(&marker)
+            .expect("读计数")
+            .lines()
+            .count(),
+        1
+    );
+
+    // 脚本输出非 URL → 302 error_url。
+    let response = fixture
+        .client
+        .get(format!("{}/rg/c2.m3u8", fixture.base))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("http://placeholder.test/mistake.mp4")
+    );
+
+    // 脚本缺失 → 302 error_url。
+    let response = fixture
+        .client
+        .get(format!("{}/rg/c3.m3u8", fixture.base))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::FOUND);
+}
