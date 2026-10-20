@@ -127,35 +127,14 @@ async fn collect(state: &Arc<AppState>, config: &Config) -> Result<Summary> {
     let mut errors: Vec<String> = Vec::new();
 
     for source in config.epg.sources.iter().filter(|source| source.enabled) {
-        if source.kind != "xml" {
-            // 脚本源需要外部解释器；按设计不实现（见 design/03 §6.5）。
-            errors.push(format!("{}：仅支持 xml 源", source.name));
-            continue;
-        }
-        if source.url.trim().is_empty() {
-            errors.push(format!("{}：缺少 url", source.name));
-            continue;
-        }
-        sources += 1;
-        let body = match state
-            .http
-            .get(source.url.trim())
-            .send()
-            .await
-            .and_then(|response| response.error_for_status())
-        {
-            Ok(response) => match response.text().await {
-                Ok(text) => text,
-                Err(error) => {
-                    errors.push(format!("{}：读取正文失败 {error}", source.name));
-                    continue;
-                }
-            },
+        let body = match source_body(state, config, source).await {
+            Ok(body) => body,
             Err(error) => {
-                errors.push(format!("{}：抓取失败 {error}", source.name));
+                errors.push(format!("{}：{error:#}", source.name));
                 continue;
             }
         };
+        sources += 1;
         match parse(&body) {
             Ok(document) => {
                 let matched = document.matched(&keys);
@@ -176,7 +155,10 @@ async fn collect(state: &Arc<AppState>, config: &Config) -> Result<Summary> {
     }
 
     if sources == 0 {
-        bail!("没有可用的 EPG 源");
+        if errors.is_empty() {
+            bail!("没有可用的 EPG 源");
+        }
+        bail!("{}", errors.join("；"));
     }
     if !errors.is_empty() && channels.is_empty() {
         bail!("{}", errors.join("；"));
@@ -195,6 +177,77 @@ async fn collect(state: &Arc<AppState>, config: &Config) -> Result<Summary> {
         programmes: programmes.len(),
         kept: programmes.len(),
     })
+}
+
+/// 取 EPG 源正文：`xml` 抓 URL；`script` 跑 `<cache>/epg/scripts/` 下的 Python。
+async fn source_body(
+    state: &Arc<AppState>,
+    config: &Config,
+    source: &crate::config::model::EpgSource,
+) -> Result<String> {
+    match source.kind.as_str() {
+        "xml" => {
+            if source.url.trim().is_empty() {
+                bail!("缺少 url");
+            }
+            let response = state
+                .http
+                .get(source.url.trim())
+                .send()
+                .await
+                .context("抓取失败")?
+                .error_for_status()
+                .context("上游状态异常")?;
+            response.text().await.context("读取正文失败")
+        }
+        "script" => run_script(config, source).await,
+        other => bail!("未知源类型 {other}"),
+    }
+}
+
+async fn run_script(config: &Config, source: &crate::config::model::EpgSource) -> Result<String> {
+    let name = crate::logo::sanitize(&source.script).context("脚本名不合法")?;
+    let dir = Path::new(&config.cache.disk_path)
+        .join("epg")
+        .join("scripts");
+    let script = dir.join(&name);
+    if !script.is_file() {
+        bail!("脚本不存在: {}", script.display());
+    }
+    let timeout = std::time::Duration::from_secs(source.timeout_secs.clamp(5, 3600));
+    let mut command = tokio::process::Command::new("python3");
+    command
+        .arg(&script)
+        .current_dir(&dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let output = tokio::time::timeout(timeout, command.output())
+        .await
+        .with_context(|| format!("脚本超时（{}s）", timeout.as_secs()))?
+        .context("执行 python3 失败")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "脚本退出码 {}: {}",
+            output.status.code().unwrap_or(-1),
+            stderr.trim().chars().take(200).collect::<String>()
+        );
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    if !stdout.trim().is_empty() {
+        return Ok(stdout);
+    }
+    for file in &source.output_files {
+        let Some(name) = crate::logo::sanitize(file) else {
+            continue;
+        };
+        let path = dir.join(name);
+        if path.is_file() {
+            return fs::read_to_string(&path).context("读取脚本产物失败");
+        }
+    }
+    bail!("脚本无输出")
 }
 
 fn write_gzip(path: &Path, data: &[u8]) -> Result<()> {

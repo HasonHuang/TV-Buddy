@@ -2088,3 +2088,193 @@ async fn schedule_crud_and_livestream_toggle() {
         .expect("熄灭");
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn epg_script_source_runs_python_and_merges_output() {
+    let fixture = fixture_with_all(
+        true,
+        r#"
+[[epg.sources]]
+id = "s2"
+name = "脚本源"
+kind = "script"
+script = "gen.py"
+timeout_secs = 30
+"#,
+    )
+    .await;
+
+    let scripts = fixture.dir.join("cache/epg/scripts");
+    std::fs::create_dir_all(&scripts).expect("建脚本目录");
+    std::fs::write(
+        scripts.join("gen.py"),
+        r#"import datetime
+now = datetime.datetime.now(datetime.timezone.utc)
+fmt = "%Y%m%d%H%M%S +0000"
+start = (now - datetime.timedelta(minutes=5)).strftime(fmt)
+end = (now + datetime.timedelta(minutes=30)).strftime(fmt)
+print(f'''<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+<channel id="s2"><display-name>媒体清单频道</display-name></channel>
+<programme start="{start}" stop="{end}" channel="s2"><title>脚本节目</title></programme>
+</tv>''')
+"#,
+    )
+    .expect("写脚本");
+
+    let summary = epg::refresh(&fixture.state).await.expect("采集应成功");
+    assert!(summary.channels >= 2, "两个源都应匹配到频道");
+    let response = fetch(&fixture, "/epg.xml").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("正文");
+    assert!(body.contains("脚本节目"), "脚本源输出应合并进节目单");
+}
+
+#[tokio::test]
+async fn epg_script_source_reports_missing_script() {
+    let fixture = fixture_with_all(
+        false,
+        r#"
+[epg]
+enabled = true
+
+[[epg.sources]]
+id = "s2"
+name = "缺失脚本"
+kind = "script"
+script = "missing.py"
+"#,
+    )
+    .await;
+
+    let error = epg::refresh(&fixture.state).await.expect_err("应失败");
+    assert!(
+        format!("{error:#}").contains("脚本不存在"),
+        "应报告脚本缺失：{error:#}"
+    );
+}
+
+#[tokio::test]
+async fn schedule_from_epg_batch_creates_tasks_and_reports_failures() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/schedule/from-epg", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "items": [
+                    {
+                        "name": "EPG 任务", "group_id": "pg", "channel_id": "c1",
+                        "start_time": "2099-01-01T00:00:00", "end_time": "2099-01-01T00:30:00",
+                        "format": "mkv"
+                    },
+                    {
+                        "name": "坏任务", "group_id": "pg", "channel_id": "none",
+                        "start_time": "2099-01-01T00:00:00", "end_time": "2099-01-01T00:30:00"
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("批量新增");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["created"], 1);
+    assert_eq!(body["failed"][0]["error"], "Channel not found");
+
+    let response = fixture
+        .client
+        .delete(format!("{}/panel/api/schedule/0", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("清理");
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn subtitle_translate_endpoints_report_missing_engine() {
+    let fixture = fixture().await;
+
+    let response = fixture
+        .client
+        .post(format!("{}/subtitle/mtran/test", fixture.base))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "text": "hello" }).to_string())
+        .send()
+        .await
+        .expect("自检");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert!(body["error"]
+        .as_str()
+        .unwrap_or("")
+        .contains("MTranServer 地址"));
+
+    let response = fixture
+        .client
+        .post(format!("{}/subtitle/translate/clear", fixture.base))
+        .send()
+        .await
+        .expect("清空");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["ok"], true);
+
+    let response = fixture
+        .client
+        .get(format!("{}/epg/translate/status", fixture.base))
+        .send()
+        .await
+        .expect("状态");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["enabled"], false);
+
+    let response = fixture
+        .client
+        .post(format!("{}/epg/translate/clear-engine", fixture.base))
+        .send()
+        .await
+        .expect("清空引擎");
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn subtitle_mtran_reports_connection_failure_when_configured() {
+    let fixture = fixture_with_extra(
+        r#"
+[subtitle.translate]
+url = "http://127.0.0.1:9"
+"#,
+    )
+    .await;
+
+    let response = fixture
+        .client
+        .post(format!("{}/subtitle/mtran/test", fixture.base))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "text": "hello" }).to_string())
+        .send()
+        .await
+        .expect("自检");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["targets"][0]["code"], "zh-Hans");
+    assert!(body["targets"][0]["error"]
+        .as_str()
+        .unwrap_or("")
+        .starts_with("请求失败"));
+}

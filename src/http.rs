@@ -139,6 +139,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/subtitle/upload", post(routes::media::upload))
         .route("/panel/api/subtitle/remove", post(routes::media::remove))
         .route("/panel/api/subtitle/raw/:file", get(routes::media::raw))
+        .route("/subtitle/mtran/test", post(routes::media::mtran_test))
+        .route(
+            "/subtitle/translate/clear",
+            post(routes::media::translate_clear),
+        )
+        .route("/epg/translate/status", get(routes::epg::translate_status))
+        .route(
+            "/epg/translate/clear-engine",
+            post(routes::epg::translate_clear),
+        )
         .route(
             "/panel/api/resolver/scripts",
             get(routes::media::resolver_list),

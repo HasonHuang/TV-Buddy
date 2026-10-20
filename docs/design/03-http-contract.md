@@ -325,7 +325,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 项 | 规则 |
 | --- | --- |
-| 源类型 | 只实现 `kind = "xml"`（按 `url` 拉 XMLTV）。`kind = "script"` 需 `python3`，跳过并记日志 |
+| 源类型 | `kind = "xml"`：按 `url` 拉 XMLTV。`kind = "script"`：执行 `<cache>/epg/scripts/<script>`（`python3`，cwd 为脚本目录，stdout 即 XMLTV；为空时读 `output_files`），超时 `timeout_secs`（5–3600 秒） |
 | 时间窗 | 保留 `stop >= 现在 - keep_days` 且 `start <= 现在 + future_days`；`keep_yesterday = true` 时下界不晚于昨天 0 点 |
 | 频道匹配 | `match_by_name = true` 时按频道名匹配；同时接受 `tvg_id`/`tvg-id`/`epg_id` 显式键。未匹配的频道与节目丢弃 |
 | 输出 | `<cache>/epg/epg.xml` 与 `epg.xml.gz`；根节点 `generator-info-name="iptv-proxy"`；保留 `channel/@id` 与 `programme` 的 `start`/`stop`/`channel` |
@@ -336,7 +336,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 > 三个 `/epg/api/*` 的响应形状为本实现自定（目标只登记了路由存在性）。
 > 实现：按请求读取 `epg.xml` 并解析；节目单较大时再改为内存快照。
 >
-> 未实现：翻译接口、脚本源、节目单映射与录制联动（P2）。
+| 翻译 | `GET /epg/translate/status` 返回 `enabled`（未实现引擎）；`POST /epg/translate/clear-engine` 清缓存 |
 
 ### 6.6 备份与恢复（P1 已实现）
 
@@ -508,9 +508,11 @@ MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒�
 | `DELETE` | `/panel/api/schedule/:idx` | `{"ok":true,"was_running"}` |
 | `POST` | `/panel/api/schedule/:idx/stop` | 停止录制 |
 | `GET` | `/panel/api/schedule/download/:filename` | 下载产物 |
-| `POST` | `/panel/api/schedule/from-epg` | 未实现 → `400` |
+| `POST` | `/panel/api/schedule/from-epg` | 批量建任务：`{"items":[…]}` → `{ok,created,ids,failed}` |
 | `GET` | `/panel/api/livestream` | 已点亮频道 |
 | `POST` | `/panel/api/livestream/:gid/:cid/{start,stop}` | 改写频道 `livestream` 并落盘 |
+| `POST` | `/subtitle/mtran/test` | 机翻自检：未配 `[subtitle.translate].url` → `400`；否则调 `<url>/translate/batch` |
+| `POST` | `/subtitle/translate/clear` | 清空 `<cache>/subtitles/.translate/`，返回 `{ok,cleared}` |
 
 任务字段：`id,name,group_id,channel_id,start_time,end_time,format,status,output_file,extra_files,note,error,created_at,file_size,record_secs`。
 时间格式 `YYYY-MM-DDTHH:MM:SS`（按 `[server].timezone_offset_hours` 解释）。

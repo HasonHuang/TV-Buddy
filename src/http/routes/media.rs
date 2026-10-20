@@ -255,3 +255,87 @@ pub async fn resolver_remove(
         .map_err(|error| ApiError::internal(format!("删除失败: {error}")))?;
     Ok(Json(json!({ "ok": true, "removed": 1 })))
 }
+
+/// `POST /subtitle/mtran/test`——字幕机翻自检（S-SUB-03）。
+pub async fn mtran_test(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> Response {
+    let text = body
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("hello")
+        .to_string();
+    let config = state.snapshot();
+    let base = config
+        .extra
+        .get("subtitle")
+        .and_then(|table| table.get("translate"))
+        .and_then(|table| table.get("url"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    if base.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "请先填写 MTranServer 地址(字幕机翻只支持本地 MTranServer)"
+            })),
+        )
+            .into_response();
+    }
+    let endpoint = format!("{base}/translate/batch");
+    let result = state
+        .http
+        .post(&endpoint)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::to_vec(&json!({
+                "texts": [text],
+                "source_lang": "auto",
+                "target_lang": "zh-cn",
+            }))
+            .unwrap_or_default(),
+        )
+        .send()
+        .await;
+    let (ok, error) = match result {
+        Ok(response) if response.status().is_success() => (true, String::new()),
+        Ok(response) => (false, format!("请求失败: HTTP {}", response.status())),
+        Err(error) => (false, format!("请求失败: {error}")),
+    };
+    Json(json!({
+        "base": base,
+        "ok": ok,
+        "targets": [{
+            "code": "zh-Hans",
+            "lang": "zh-cn",
+            "ok": ok,
+            "error": error,
+        }],
+        "version": null,
+    }))
+    .into_response()
+}
+
+/// `POST /subtitle/translate/clear`——清空字幕翻译缓存。
+pub async fn translate_clear(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let cleared = remove_files(&state.cache_dir.join("subtitles").join(".translate"));
+    Json(json!({ "ok": true, "cleared": cleared }))
+}
+
+fn remove_files(dir: &FsPath) -> usize {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut count = 0;
+    for item in read.flatten() {
+        let path = item.path();
+        if path.is_dir() {
+            count += remove_files(&path);
+            let _ = std::fs::remove_dir(&path);
+        } else if std::fs::remove_file(&path).is_ok() {
+            count += 1;
+        }
+    }
+    count
+}

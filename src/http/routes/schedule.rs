@@ -111,9 +111,53 @@ pub async fn download(
     Ok(response)
 }
 
-/// `POST /panel/api/schedule/from-epg`——占位。
-pub async fn from_epg(PanelAuth(_): PanelAuth) -> Result<Json<Value>, ApiError> {
-    Err(ApiError::bad_request("from-epg 尚未实现"))
+/// `POST /panel/api/schedule/from-epg`——按条目批量建任务。
+///
+/// 请求：`{"items":[{name,group_id,channel_id,start_time,end_time,format}]}`。
+pub async fn from_epg(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let items = body
+        .get("items")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ApiError::bad_request("缺少 items 数组"))?;
+    let config = state.snapshot();
+    let mut ids = Vec::new();
+    let mut failed = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let task: Task = match serde_json::from_value(item.clone()) {
+            Ok(task) => task,
+            Err(error) => {
+                failed.push(json!({ "index": index, "error": format!("字段不合法: {error}") }));
+                continue;
+            }
+        };
+        let valid = config
+            .group(&task.group_id)
+            .map(|group| {
+                group
+                    .channels
+                    .iter()
+                    .any(|channel| channel.id == task.channel_id)
+            })
+            .unwrap_or(false);
+        if !valid {
+            failed.push(json!({ "index": index, "error": "Channel not found" }));
+            continue;
+        }
+        match state.schedule.add(task) {
+            Ok(id) => ids.push(id),
+            Err(error) => failed.push(json!({ "index": index, "error": format!("{error:#}") })),
+        }
+    }
+    Ok(Json(json!({
+        "ok": failed.is_empty(),
+        "created": ids.len(),
+        "ids": ids,
+        "failed": failed,
+    })))
 }
 
 /// `GET /panel/api/livestream`——已点亮的频道。

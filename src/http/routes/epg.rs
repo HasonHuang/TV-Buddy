@@ -214,3 +214,38 @@ pub async fn api_search(
         .collect();
     Json(json!({ "q": query, "count": programmes.len(), "programmes": programmes })).into_response()
 }
+
+/// `GET /epg/translate/status`——翻译能力（未启用引擎）。
+pub async fn translate_status(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let config = state.snapshot();
+    let translate = config
+        .extra
+        .get("epg")
+        .and_then(|table| table.get("translate"))
+        .cloned();
+    let enabled = translate
+        .as_ref()
+        .and_then(|table| table.get("enabled"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    Json(json!({
+        "enabled": enabled,
+        "engine": "none",
+        "models": [],
+        "note": "EPG 翻译引擎尚未实现",
+    }))
+}
+
+/// `POST /epg/translate/clear-engine`——清空翻译缓存。
+pub async fn translate_clear(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let dir = state.cache_dir.join("epg").join(".translate");
+    let mut cleared = 0usize;
+    if let Ok(read) = std::fs::read_dir(&dir) {
+        for item in read.flatten() {
+            if std::fs::remove_file(item.path()).is_ok() {
+                cleared += 1;
+            }
+        }
+    }
+    Json(json!({ "ok": true, "cleared": cleared }))
+}

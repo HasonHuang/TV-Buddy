@@ -574,3 +574,14 @@
 验证：`cargo test --offline` 110 项（77 单元 + 33 集成）。
 
 已知缺口（P2）：时移（`/timeshift/*`、`/dash-timeshift/*`）、`schedule/from-epg`、字幕翻译、EPG 脚本源。
+
+## 3af. P2 · EPG 脚本源、批量录制、字幕自检
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| EPG `kind="script"`：`python3 <cache>/epg/scripts/<script>`，stdout=XMLTV，超时与 `output_files` 兜底 | ✅ | `epg::run_script` |
+| 源全失败时返回具体错误（不再只报「没有可用的 EPG 源」） | ✅ | `epg::collect` |
+| `schedule/from-epg`：批量条目建任务，返回 `created/ids/failed` | ✅ | `routes/schedule.rs` |
+| `/subtitle/mtran/test`：未配地址 `400`；已配则调用 MTranServer 并返回逐目标结果 | ✅ | `routes/media.rs` |
+| `/subtitle/translate/clear`、`/epg/translate/{status,clear-engine}` | ✅ | 同上、`routes/epg.rs` |
+| 验证 | ✅ | 4 集成（脚本源 2、批量 1、字幕 3 合 2 项） |
