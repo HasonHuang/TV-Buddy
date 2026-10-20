@@ -13,6 +13,7 @@ pub struct Config {
     pub panel: PanelCfg,
     pub cache: CacheCfg,
     pub auth: AuthCfg,
+    pub epg: EpgCfg,
     pub health: HealthCfg,
     pub stats: StatsCfg,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -323,6 +324,86 @@ impl Default for Channel {
             resolver_catchup: false,
             catchup_days: 7,
             url_pool_size: 1,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[epg]`——节目单（S-EP-05、F-008）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EpgCfg {
+    pub enabled: bool,
+    pub cron: String,
+    pub public_viewer_enabled: bool,
+    pub keep_days: i64,
+    pub future_days: i64,
+    pub keep_yesterday: bool,
+    pub match_by_name: bool,
+    pub allow_scripts: bool,
+    pub python_bin: Option<String>,
+    pub script_timeout_secs: u64,
+    pub record_pad_before_secs: u64,
+    pub record_pad_after_secs: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<EpgSource>,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for EpgCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            cron: "0 */4 * * *".into(),
+            public_viewer_enabled: true,
+            keep_days: 3,
+            future_days: 1,
+            keep_yesterday: true,
+            match_by_name: true,
+            allow_scripts: true,
+            python_bin: None,
+            script_timeout_secs: 300,
+            record_pad_before_secs: 60,
+            record_pad_after_secs: 180,
+            sources: Vec::new(),
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[[epg.sources]]`——采集源。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EpgSource {
+    pub id: String,
+    pub name: String,
+    /// `xml`（按 `url` 拉 XMLTV）或 `script`（跑 Python，需外部依赖）。
+    pub kind: String,
+    pub enabled: bool,
+    pub url: String,
+    pub script: String,
+    pub output_files: Vec<String>,
+    pub cron: String,
+    pub timeout_secs: u64,
+    pub tz_shift_mins: i64,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for EpgSource {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: "新源".into(),
+            kind: "xml".into(),
+            enabled: true,
+            url: String::new(),
+            script: String::new(),
+            output_files: Vec::new(),
+            cron: String::new(),
+            timeout_secs: 0,
+            tz_shift_mins: 0,
             extra: toml::Table::new(),
         }
     }

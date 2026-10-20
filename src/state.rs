@@ -43,6 +43,8 @@ pub struct AppState {
     pub stats: Stats,
     /// 看门狗状态（冷却）。
     pub watchdog: Watchdog,
+    /// 节目单状态。
+    pub epg: crate::epg::EpgState,
     /// 最近日志行。
     pub logs: Arc<RingBuffer>,
     /// 进程启动时刻。
@@ -71,6 +73,7 @@ impl AppState {
             cache_dir,
             stats: Stats::default(),
             watchdog: Watchdog::new(),
+            epg: crate::epg::EpgState::default(),
             logs,
             started: Instant::now(),
             write_lock: Mutex::new(()),

@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod config;
+pub mod epg;
 pub mod http;
 pub mod logging;
 pub mod playlist;

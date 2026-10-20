@@ -16,12 +16,13 @@ use axum::{
     routing::get,
     Router,
 };
-use iptv_proxy::{config, http, logging::RingBuffer, state::AppState};
+use iptv_proxy::{config, epg, http, logging::RingBuffer, state::AppState};
 use reqwest::{redirect::Policy, Client, Response as HttpResponse};
 
 const LIVE: &str = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nseg1.ts\n#EXTINF:4.0,\nseg2.ts\n#EXT-X-ENDLIST\n";
 const MASTER: &str = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080\nv0/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\nv1/index.m3u8\n";
-const VARIANT: &str = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nv1.ts\n#EXT-X-ENDLIST\n";
+const VARIANT: &str =
+    "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nv1.ts\n#EXT-X-ENDLIST\n";
 const SEGMENT: &[u8] = b"segment-bytes";
 
 /// 伪上游：按路径返回清单或切片。
@@ -43,6 +44,7 @@ struct Fixture {
     upstream: String,
     token: String,
     client: Client,
+    state: Arc<AppState>,
 }
 
 impl Drop for Fixture {
@@ -76,10 +78,26 @@ async fn wait_ready(client: &Client, base: &str) {
 }
 
 async fn fixture() -> Fixture {
+    fixture_with(false).await
+}
+
+/// `epg_enabled` 为真时，伪上游额外提供 `/epg.xml`，配置里打开 EPG。
+async fn fixture_with(epg_enabled: bool) -> Fixture {
     let dir = std::env::temp_dir().join(format!("iptv-proxy-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("建临时目录");
 
-    let upstream = serve(Router::new().route("/*path", get(upstream_file))).await;
+    let mut upstream_app = Router::new().route("/*path", get(upstream_file));
+    if epg_enabled {
+        let body = epg_document();
+        upstream_app = upstream_app.route(
+            "/epg.xml",
+            get(move || {
+                let body = body.clone();
+                async move { ([(header::CONTENT_TYPE, "application/xml")], body) }
+            }),
+        );
+    }
+    let upstream = serve(upstream_app).await;
 
     let toml = format!(
         r#"
@@ -149,8 +167,29 @@ access = "public"
 id = "c1"
 name = "透传频道"
 url = "{upstream}/live.m3u8"
+{epg_section}
 "#,
-        dir = dir.display()
+        dir = dir.display(),
+        epg_section = if epg_enabled {
+            format!(
+                r#"
+[epg]
+enabled = true
+keep_days = 3
+future_days = 1
+keep_yesterday = false
+match_by_name = true
+
+[[epg.sources]]
+id = "s1"
+name = "本地源"
+kind = "xml"
+url = "{upstream}/epg.xml"
+"#
+            )
+        } else {
+            String::new()
+        }
     );
     let config_path = dir.join("config.toml");
     std::fs::write(&config_path, toml).expect("写配置");
@@ -161,7 +200,7 @@ url = "{upstream}/live.m3u8"
         cfg,
         Arc::new(RingBuffer::default()),
     ));
-    let base = serve(http::router(state)).await;
+    let base = serve(http::router(state.clone())).await;
 
     let client = Client::builder()
         .redirect(Policy::none())
@@ -192,7 +231,62 @@ url = "{upstream}/live.m3u8"
         upstream,
         token,
         client,
+        state,
     }
+}
+
+/// 生成带动态时间窗的 XMLTV：一条在窗口内，一条在 1990 年。
+fn epg_document() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("取时间")
+        .as_secs() as i64;
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<tv generator-info-name="src">
+  <channel id="cctv1"><display-name lang="zh">媒体清单频道</display-name></channel>
+  <channel id="unused"><display-name>未匹配频道</display-name></channel>
+  <programme start="{start}" stop="{stop}" channel="cctv1">
+    <title lang="zh">新闻</title>
+    <desc>早间新闻</desc>
+  </programme>
+  <programme start="19900101000000 +0000" stop="19900101010000 +0000" channel="cctv1">
+    <title>老节目</title>
+  </programme>
+  <programme start="{start}" stop="{stop}" channel="unused">
+    <title>未匹配节目</title>
+  </programme>
+</tv>"#,
+        start = xmltv_time(now - 1800),
+        stop = xmltv_time(now + 1800),
+    )
+}
+
+/// Unix 秒 → `YYYYMMDDHHMMSS +0000`。
+fn xmltv_time(secs: i64) -> String {
+    let days = secs.div_euclid(86_400);
+    let rest = secs.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}{month:02}{day:02}{:02}{:02}{:02} +0000",
+        rest / 3600,
+        (rest % 3600) / 60,
+        rest % 60
+    )
+}
+
+/// 1970-01-01 起的天数 → 公历。
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 async fn fetch(fixture: &Fixture, path: &str) -> HttpResponse {
@@ -222,16 +316,29 @@ fn media_lines(body: &str) -> Vec<&str> {
 
 /// 断言伪装切片地址形状：绝对地址 + `<16hex>_<32hex>.<ext>`。
 fn assert_disguised(fixture: &Fixture, url: &str) {
-    let prefix = format!("{}/{}/c1/", fixture.base, if url.contains("/pm/") { "pm" } else { "pg" });
-    assert!(url.starts_with(&prefix), "应为 {prefix} 下的绝对地址：{url}");
+    let prefix = format!(
+        "{}/{}/c1/",
+        fixture.base,
+        if url.contains("/pm/") { "pm" } else { "pg" }
+    );
+    assert!(
+        url.starts_with(&prefix),
+        "应为 {prefix} 下的绝对地址：{url}"
+    );
     let tail = url.rsplit('/').next().expect("取文件名");
     let (hash, ext) = tail.split_once('.').expect("应含扩展名");
     assert!(["jpg", "png"].contains(&ext), "扩展名应取自配置：{ext}");
     let (left, right) = hash.split_once('_').expect("应含下划线");
     assert_eq!(left.len(), 16, "前缀长度：{left}");
-    assert!(left.chars().all(|c| c.is_ascii_hexdigit()), "前缀应为十六进制：{left}");
+    assert!(
+        left.chars().all(|c| c.is_ascii_hexdigit()),
+        "前缀应为十六进制：{left}"
+    );
     assert_eq!(right.len(), 32, "后缀长度：{right}");
-    assert!(right.chars().all(|c| c.is_ascii_hexdigit()), "后缀应为十六进制：{right}");
+    assert!(
+        right.chars().all(|c| c.is_ascii_hexdigit()),
+        "后缀应为十六进制：{right}"
+    );
 }
 
 #[tokio::test]
@@ -267,7 +374,10 @@ async fn media_upstream_entry_is_rewritten_media_playlist() {
     let fixture = fixture().await;
     let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(header(&response, "content-type"), "text/plain; charset=utf-8");
+    assert_eq!(
+        header(&response, "content-type"),
+        "text/plain; charset=utf-8"
+    );
     assert_eq!(
         header(&response, "cache-control"),
         "public, max-age=4, s-maxage=4"
@@ -307,10 +417,7 @@ async fn master_upstream_entry_is_synthetic_master_playlist() {
     assert!(body.contains("#EXT-X-VERSION:6"));
     assert!(body.contains("#EXT-X-INDEPENDENT-SEGMENTS"));
     assert!(body.contains("#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080"));
-    assert!(body.contains(&format!(
-        "{}/pm/c1/video/index.txt",
-        fixture.base
-    )));
+    assert!(body.contains(&format!("{}/pm/c1/video/index.txt", fixture.base)));
 }
 
 #[tokio::test]
@@ -318,7 +425,10 @@ async fn master_upstream_variant_playlist_and_index_alias() {
     let fixture = fixture().await;
     let response = fetch(&fixture, "/pm/c1/video/index.txt").await;
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(header(&response, "content-type"), "text/plain; charset=utf-8");
+    assert_eq!(
+        header(&response, "content-type"),
+        "text/plain; charset=utf-8"
+    );
     assert_eq!(
         header(&response, "cache-control"),
         "public, max-age=6, s-maxage=6"
@@ -329,7 +439,11 @@ async fn master_upstream_variant_playlist_and_index_alias() {
     assert_disguised(&fixture, segments[0]);
 
     // `index.m3u8` 是入口别名。
-    let response = fetch(&fixture, &format!("/pm/c1/index.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/pm/c1/index.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         header(&response, "content-type"),
@@ -366,23 +480,38 @@ async fn token_and_unknown_path_semantics() {
     // 未知频道：无 Token → failure；合法 Token → not_found。
     let response = fetch(&fixture, "/pg/ghost.m3u8").await;
     assert_eq!(response.status(), StatusCode::FOUND);
-    assert_eq!(header(&response, "location"), "http://placeholder.test/Failure.mp4");
+    assert_eq!(
+        header(&response, "location"),
+        "http://placeholder.test/Failure.mp4"
+    );
     let response = fetch(&fixture, &format!("/pg/ghost.m3u8?token={}", fixture.token)).await;
     assert_eq!(response.status(), StatusCode::FOUND);
-    assert_eq!(header(&response, "location"), "http://placeholder.test/404.mp4");
+    assert_eq!(
+        header(&response, "location"),
+        "http://placeholder.test/404.mp4"
+    );
 
     // 未知分组同理。
     let response = fetch(&fixture, &format!("/ghost/c1.m3u8?token={}", fixture.token)).await;
-    assert_eq!(header(&response, "location"), "http://placeholder.test/404.mp4");
+    assert_eq!(
+        header(&response, "location"),
+        "http://placeholder.test/404.mp4"
+    );
 
     // 其它未知路径不看 Token。
     let response = fetch(&fixture, "/nope/nope/nope").await;
     assert_eq!(response.status(), StatusCode::FOUND);
-    assert_eq!(header(&response, "location"), "http://placeholder.test/404.mp4");
+    assert_eq!(
+        header(&response, "location"),
+        "http://placeholder.test/404.mp4"
+    );
 
     // 错 Token。
     let response = fetch(&fixture, "/pg/c1.m3u8?token=deadbeef").await;
-    assert_eq!(header(&response, "location"), "http://placeholder.test/Failure.mp4");
+    assert_eq!(
+        header(&response, "location"),
+        "http://placeholder.test/Failure.mp4"
+    );
 
     // open 组免 Token。
     let response = fetch(&fixture, "/op/c1.m3u8").await;
@@ -394,7 +523,10 @@ async fn archived_entry_redirects_to_not_found() {
     let fixture = fixture().await;
     let response = fetch(&fixture, &format!("/ar/c1.m3u8?token={}", fixture.token)).await;
     assert_eq!(response.status(), StatusCode::FOUND);
-    assert_eq!(header(&response, "location"), "http://placeholder.test/404.mp4");
+    assert_eq!(
+        header(&response, "location"),
+        "http://placeholder.test/404.mp4"
+    );
 
     let response = fetch(&fixture, "/ar/playlist.m3u").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -405,11 +537,17 @@ async fn passthrough_requires_token() {
     let fixture = fixture().await;
     let response = fetch(&fixture, "/pt/c1.m3u8").await;
     assert_eq!(response.status(), StatusCode::FOUND);
-    assert_eq!(header(&response, "location"), "http://placeholder.test/Failure.mp4");
+    assert_eq!(
+        header(&response, "location"),
+        "http://placeholder.test/Failure.mp4"
+    );
 
     let response = fetch(&fixture, &format!("/pt/c1.m3u8?token={}", fixture.token)).await;
     assert_eq!(response.status(), StatusCode::FOUND);
-    assert_eq!(header(&response, "location"), format!("{}/live.m3u8", fixture.upstream));
+    assert_eq!(
+        header(&response, "location"),
+        format!("{}/live.m3u8", fixture.upstream)
+    );
 }
 
 #[tokio::test]
@@ -417,4 +555,49 @@ async fn unknown_panel_api_is_404() {
     let fixture = fixture().await;
     let response = fetch(&fixture, "/panel/api/nope").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn epg_disabled_returns_404() {
+    let fixture = fixture().await;
+    for path in ["/epg.xml", "/epg.xml.gz", "/epg"] {
+        let response = fetch(&fixture, path).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn epg_enabled_serves_xmltv_and_filters() {
+    let fixture = fixture_with(true).await;
+
+    let summary = epg::refresh(&fixture.state).await.expect("采集应成功");
+    assert_eq!(summary.channels, 1, "只保留匹配到的频道");
+    assert_eq!(summary.kept, 1, "只保留时间窗内的节目");
+
+    let response = fetch(&fixture, "/epg.xml").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        header(&response, "content-type"),
+        "application/xml; charset=utf-8"
+    );
+    let body = response.text().await.expect("读正文");
+    assert!(body.contains("generator-info-name=\"iptv-proxy\""));
+    assert!(body.contains("<channel id=\"cctv1\">"));
+    assert!(body.contains("<title lang=\"zh\">新闻</title>"));
+    assert!(!body.contains("老节目"));
+    assert!(!body.contains("未匹配节目"));
+
+    let response = fetch(&fixture, "/epg.xml.gz").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header(&response, "content-type"), "application/gzip");
+    let bytes = response.bytes().await.expect("读字节");
+    assert_eq!(&bytes[..2], &[0x1f, 0x8b], "应为 gzip 魔数");
+
+    let response = fetch(&fixture, "/epg").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(header(&response, "content-type").starts_with("text/html"));
+
+    // 面板接口需要会话。
+    let response = fetch(&fixture, "/panel/api/epg/status").await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }

@@ -6,7 +6,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Context;
-use iptv_proxy::{config, http, logging, reload, state};
+use iptv_proxy::{config, epg, http, logging, reload, state};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -25,6 +25,7 @@ async fn main() -> anyhow::Result<()> {
     let bind = cfg.server.bind.clone();
     let state = Arc::new(state::AppState::new(config_path, cfg, logs));
     reload::spawn(state.clone());
+    epg::spawn(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind)
         .await

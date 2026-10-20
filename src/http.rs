@@ -23,6 +23,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         // 公开面
         .route("/health", get(routes::public::health))
         .route("/", get(routes::public::home))
+        .route("/epg.xml", get(routes::epg::xml))
+        .route("/epg.xml.gz", get(routes::epg::xml_gz))
         .route("/playlist.m3u", get(routes::play::total_playlist))
         .route("/:gid/playlist.m3u", get(routes::play::group_playlist))
         // 面板接口：未知路径固定 404 JSON，先于播放通配路由匹配。
@@ -33,8 +35,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         // 内嵌页面（免登录）
         .route("/panel", get(static_assets::panel_page))
         .route("/panel/", get(static_assets::panel_page))
-        .route("/panel/epg", get(static_assets::epg_page))
-        .route("/epg", get(static_assets::epg_page))
+        .route("/panel/epg", get(routes::epg::viewer))
+        .route("/epg", get(routes::epg::viewer))
         .route("/logo", get(static_assets::logo_page))
         .route("/unban", get(static_assets::unban_page))
         .route("/__assets/*path", get(static_assets::asset))
@@ -51,6 +53,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/cache/flush", post(routes::admin::cache_flush))
         .route("/panel/api/stats", get(routes::admin::stats))
         .route("/panel/api/logs", get(routes::admin::logs))
+        .route("/panel/api/epg/status", get(routes::epg::status))
+        .route("/panel/api/epg/refresh", post(routes::epg::refresh))
         .route("/panel/api/groups", post(routes::groups::create_group))
         .route("/panel/api/groups/export", get(routes::groups::export_all))
         .route(

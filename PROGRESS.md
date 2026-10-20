@@ -285,3 +285,17 @@
 
 > 说明：本机访问 `github.com` release 资产与 `static.rust-lang.org` 的 TLS 会被中途断开，
 > 因此不用 `cross`，改用 Docker Hub 可用的 `rust:1-alpine` 完成双架构构建。
+
+## 3i. P1 · EPG（已完成，首个 P1 功能）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 配置：`[epg]` 全字段 + `[[epg.sources]]`（键面对齐目标） | ✅ | `src/config/model.rs` |
+| 采集：拉 XMLTV → 解析 → 时间窗裁剪 → 频道匹配 → 生成 `epg.xml` 与 `epg.xml.gz` | ✅ | `src/epg.rs`（6 项单元测试） |
+| 公开面：`/epg.xml`、`/epg.xml.gz`、`/epg`；关闭时三者 `404`（S-EP-05） | ✅ | `src/http/routes/epg.rs` |
+| 面板：`/panel/api/epg/status`、`/panel/api/epg/refresh`（Bearer） | ✅ | 同上 |
+| 调度：启动即采集；之后按 `0 */N * * *` 或 4 小时 | ✅ | `epg::spawn` |
+| 验证 | ✅ | `scripts/smoke-epg.sh` 13 项全绿；`tests/http_contract.rs` EPG 2 项 |
+| 未做 | ⏳ | 脚本源、翻译接口、映射/录制联动（P2） |
+
+验证：`cargo test` 共 48 项（36 单元 + 12 集成）；`scripts/smoke-epg.sh` 13 项全绿。

@@ -246,6 +246,32 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 热重载：只监视配置文件本身；解析失败保留旧快照并记 `error` 日志（`design/04` §2）。冷却中的频道在配置重载后立即解除冷却（S-MODE-17）。
 
+### 6.5 EPG（P1 已实现）
+
+证据：F-008（S-EP-05、S-EP-12）。目标共 12 个 `/panel/api/epg/*` 端点；本实现先做公开三件与状态/刷新。
+
+| 方法 | 路径 | 鉴权 | 行为 |
+| --- | --- | --- | --- |
+| `GET` | `/epg.xml` | 无 | `200 application/xml; charset=utf-8`；`[epg].enabled = false` 或尚未生成 → `404` |
+| `GET` | `/epg.xml.gz` | 无 | `200 application/gzip`（gzip 魔数 `1f 8b`）；同上 `404` |
+| `GET` | `/epg` | 无 | `200 text/html`（内嵌浏览页）；关闭时 `404` |
+| `GET` | `/panel/api/epg/status` | Bearer | `{"enabled","running","sources","channels","programmes","kept","keep_days","future_days","last_success","last_error"}` |
+| `POST` | `/panel/api/epg/refresh` | Bearer | 同步采集一次；`{"ok":true,"msg":"采集完成","channels","programmes"}`；失败 → `500` + 原因 |
+
+采集规则（F-008 观测值）：
+
+| 项 | 规则 |
+| --- | --- |
+| 源类型 | 只实现 `kind = "xml"`（按 `url` 拉 XMLTV）。`kind = "script"` 需 `python3`，跳过并记日志 |
+| 时间窗 | 保留 `stop >= 现在 - keep_days` 且 `start <= 现在 + future_days`；`keep_yesterday = true` 时下界不晚于昨天 0 点 |
+| 频道匹配 | `match_by_name = true` 时按频道名匹配；同时接受 `tvg_id`/`tvg-id`/`epg_id` 显式键。未匹配的频道与节目丢弃 |
+| 输出 | `<cache>/epg/epg.xml` 与 `epg.xml.gz`；根节点 `generator-info-name="iptv-proxy"`；保留 `channel/@id` 与 `programme` 的 `start`/`stop`/`channel` |
+| 语言 | 文本节点缺 `xml:lang` 时补 `lang="zh"`；显式语言保留 |
+| 原样保留 | `icon`、`credits` 等未建模子节点按原片段输出 |
+| 调度 | 启动即采集一次；之后按 `[epg].cron`，只识别 `0 */N * * *`（N 小时），其它写法回退 4 小时 |
+
+> 未实现：翻译接口、脚本源、节目单映射与录制联动（P2）。
+
 ## 7. 错误串对照
 
 面板错误体保留目标原文，便于前端与外部脚本匹配（F-012 §3、F-013 §5）：
