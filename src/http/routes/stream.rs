@@ -113,7 +113,7 @@ async fn redirect_entry(
         return redirect(&url);
     }
     let resolved = if proxy::modes::wants_best_quality(&group.redirect_mode) {
-        match fetch(state, channel_url).await {
+        match fetch(state, channel_url, &group.id, cid).await {
             Ok(text) => proxy::modes::best_variant(&text, channel_url)
                 .unwrap_or_else(|| channel_url.to_string()),
             // 失败不缓存（S-MODE-08）。
@@ -141,7 +141,7 @@ async fn rewrite_entry(
     if let Some(body) = state.playlists.get(&key) {
         return rewrite_response(body);
     }
-    let upstream = match fetch(state, channel_url).await {
+    let upstream = match fetch(state, channel_url, &group.id, cid).await {
         Ok(text) => text,
         Err(err) => {
             tracing::warn!(url = %channel_url, error = %err, "抓取上游清单失败");
@@ -168,7 +168,7 @@ async fn dash_entry(
     }
     let body = match state.modes.get(&key, 30) {
         Some(body) => body,
-        None => match fetch(state, channel_url).await {
+        None => match fetch(state, channel_url, &group.id, cid).await {
             Ok(body) => {
                 state.watchdog.record_success(&key);
                 state.modes.put(&key, body.clone());
@@ -211,7 +211,7 @@ async fn remux_classify(state: &Arc<AppState>, group: &Group, cid: &str, channel
     if state.modes.get(&key, 3600).is_some() {
         return;
     }
-    let class = match fetch(state, channel_url).await {
+    let class = match fetch(state, channel_url, &group.id, cid).await {
         Ok(body) if proxy::modes::looks_like_hls(&body) => "hls",
         Ok(_) => "raw",
         Err(err) => {
@@ -404,7 +404,7 @@ async fn variant_playlist(
     let Some((_attrs, variant_url)) = proxy::media::best_variant(&upstream, &channel_url) else {
         return redirect(&config.server.error_url);
     };
-    let text = match fetch(state, &variant_url).await {
+    let text = match fetch(state, &variant_url, gid, cid).await {
         Ok(text) => text,
         Err(err) => {
             tracing::warn!(url = %variant_url, error = %err, "抓取变体清单失败");
@@ -429,7 +429,7 @@ async fn upstream_playlist(
     if let Some(text) = state.playlists.get(&key) {
         return Ok(text);
     }
-    let text = fetch(state, url).await?;
+    let text = fetch(state, url, gid, cid).await?;
     state.playlists.put(&key, text.clone());
     Ok(text)
 }
@@ -488,7 +488,7 @@ async fn segment(state: &Arc<AppState>, gid: &str, cid: &str, name: &str) -> Res
         return segment_response(bytes, &ext, SEGMENT_HIT);
     }
     state.stats.record_segment(false);
-    match fetch_bytes(state, &entry.url).await {
+    match fetch_bytes(state, &entry.url, gid, cid).await {
         Ok(bytes) => {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
@@ -593,14 +593,58 @@ fn insert_header(response: &mut Response, name: header::HeaderName, value: &str)
     }
 }
 
+/// 频道自定义上游头：`channel.headers` 中的 `"名称: 值"` 字符串。
+///
+/// 由 M3U 导入写入（`#EXTVLCOPT`、`#EXTHTTP` 与行内头）。
+fn channel_headers(state: &AppState, gid: &str, cid: &str) -> Vec<(String, String)> {
+    let config = state.snapshot();
+    let Some((group, _)) = resolve(&config, gid, cid) else {
+        return Vec::new();
+    };
+    let Some(channel) = group.channels.iter().find(|channel| channel.id == cid) else {
+        return Vec::new();
+    };
+    channel
+        .headers
+        .iter()
+        .filter_map(|value| {
+            let text = value.as_str()?;
+            let (name, value) = text.split_once(':')?;
+            let name = name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            Some((name.to_string(), value.trim().to_string()))
+        })
+        .collect()
+}
+
 /// 抓上游文本。
-async fn fetch(state: &AppState, url: &str) -> Result<String, reqwest::Error> {
-    let response = state.http.get(url).send().await?.error_for_status()?;
+async fn fetch(
+    state: &AppState,
+    url: &str,
+    gid: &str,
+    cid: &str,
+) -> Result<String, reqwest::Error> {
+    let mut request = state.http.get(url);
+    for (name, value) in channel_headers(state, gid, cid) {
+        request = request.header(name, value);
+    }
+    let response = request.send().await?.error_for_status()?;
     response.text().await
 }
 
 /// 抓上游字节。
-async fn fetch_bytes(state: &AppState, url: &str) -> Result<Vec<u8>, reqwest::Error> {
-    let response = state.http.get(url).send().await?.error_for_status()?;
+async fn fetch_bytes(
+    state: &AppState,
+    url: &str,
+    gid: &str,
+    cid: &str,
+) -> Result<Vec<u8>, reqwest::Error> {
+    let mut request = state.http.get(url);
+    for (name, value) in channel_headers(state, gid, cid) {
+        request = request.header(name, value);
+    }
+    let response = request.send().await?.error_for_status()?;
     Ok(response.bytes().await?.to_vec())
 }

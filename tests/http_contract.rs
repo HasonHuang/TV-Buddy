@@ -30,11 +30,23 @@ const SEGMENT: &[u8] = b"segment-bytes";
 async fn upstream_file(
     Path(path): Path<String>,
     Query(query): Query<std::collections::HashMap<String, String>>,
+    incoming: axum::http::HeaderMap,
 ) -> Response {
-    // 回看：把 playseek 回显成注释行，便于断言透传。
+    // 回看与自定义头：回显成注释行，便于断言透传。
     if path == "live.m3u8" {
-        if let Some(seek) = query.get("playseek") {
-            let body = format!("#EXTM3U\n# playseek={seek}\n{LIVE_BODY}");
+        let seek = query.get("playseek");
+        let token = incoming
+            .get("x-token")
+            .and_then(|value| value.to_str().ok());
+        if seek.is_some() || token.is_some() {
+            let mut extra = String::new();
+            if let Some(seek) = seek {
+                extra.push_str(&format!("# playseek={seek}\n"));
+            }
+            if let Some(token) = token {
+                extra.push_str(&format!("# x-token={token}\n"));
+            }
+            let body = format!("#EXTM3U\n{extra}{LIVE_BODY}");
             return (
                 [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
                 body,
@@ -142,6 +154,7 @@ access = "public"
 id = "c1"
 name = "媒体清单频道"
 url = "{upstream}/live.m3u8"
+headers = ["X-Token: abc123"]
 
 [[groups]]
 id = "pm"
@@ -1101,4 +1114,13 @@ async fn backup_and_restore_roundtrip() {
         .await
         .expect("恢复请求");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn channel_headers_are_sent_upstream() {
+    let fixture = fixture().await;
+    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("读正文");
+    assert!(body.contains("# x-token=abc123"), "{body}");
 }

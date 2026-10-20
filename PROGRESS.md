@@ -369,3 +369,14 @@
 | 验证 | ✅ | `scripts/smoke-backup.sh` 10 项；集成测试 `backup_and_restore_roundtrip`；`backup` 3 项单元测试 |
 
 验证：`cargo test` 68 项（48 单元 + 20 集成）。
+
+## 3p. P1 · 频道自定义头转发（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `channel.headers`（`"名称: 值"`）在取上游清单与切片时附加 | ✅ | `stream.rs::channel_headers` + `fetch`/`fetch_bytes` |
+| 覆盖模式：`proxy`、`rewrite`、`dash`、`remux` | ✅ | 同上；302 模式由客户端直连，无法附加 |
+| 非法条目（无冒号、空名）忽略，不影响播放 | ✅ | `channel_headers` |
+| 验证 | ✅ | 集成测试 `channel_headers_are_sent_upstream`（伪上游回显） |
+
+验证：`cargo test` 69 项（48 单元 + 21 集成）。
