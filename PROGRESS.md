@@ -559,7 +559,7 @@
 | 录制：媒体清单增量切片、主清单选最高码率、合并 | ✅ | `schedule::record` |
 | 产物：`<cache>/recordings/`；有 ffmpeg 时 MKV，否则保留 TS | ✅ | 同上 |
 | 直播开关：`livestream/{start,stop}` 改写配置并落盘 | ✅ | `routes/schedule.rs` |
-| 验证 | ✅ | 2 单元 + 1 集成；`scripts/smoke-schedule.sh` 9 项 |
+| 验证 | ✅ | 2 单元 + 1 集成；`smoke-schedule.sh` 9 项、`smoke-record.sh` 5 项（真实 ffmpeg HLS） |
 
 > 时移（`/timeshift/*`、`/dash-timeshift/*`）仍为 P2。
 
@@ -620,4 +620,4 @@
 | arm64 | 3.27 MB |
 | `verify-release.sh` 双架构 | ✅ 面板资源 `panel-CiSNGll5.js`、台标资源、健康 401、分享默认 404 |
 
-验证：`cargo test --offline` 119 项；smoke：assets 13、share 7、panel 7、resolver 5、remux 7、schedule 9、timeshift 8。
+验证：`cargo test --offline` 119 项；smoke：assets 13、share 7、panel 7、resolver 5、remux 7、schedule 9、timeshift 8、record 5。
