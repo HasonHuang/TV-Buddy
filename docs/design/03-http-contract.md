@@ -413,6 +413,31 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 上传上限 | 每个请求 64 MiB（与恢复一致） |
 | 脚本执行 | 只保存与列出；**不执行**（P2） |
 
+### 6.10 多 VPS 分享（P1 已实现）
+
+证据：F-013。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/share/pull?key=<share.key>` | 返回 `{"token","token_old","bans":[],"unbans":[]}` |
+| `POST` | `/api/share/pull` | `405`，`Allow: GET,HEAD` |
+
+门禁与规则：
+
+| 项 | 规则 |
+| --- | --- |
+| 未启用 | `[share].enabled = false` → `404`（形状自定） |
+| 密钥 | `key` 必须等于 `[share].key`；空 key 拒绝 |
+| 源 IP | 必须在 `[share].trust_ips`；支持精确地址、CIDR 与 `*`；不匹配 → `403` + 日志 |
+| 源 IP 取值 | `X-Forwarded-For` 首项 → `X-Real-IP` → TCP 对端 |
+| 载荷 | `token` 为当前播放 Token；`token_old` 为宽限期旧值；`bans` 为封禁中地址；`unbans` 为最近两个周期内解封的地址 |
+| 角色 | `master` 每周期拉取 `follower_urls` 汇总；`follower` 从 `master_url` 采用 Token |
+| 周期 | `[share].poll_secs`，最小 5 秒 |
+| follower 轮换 | `POST /panel/api/security/token/rotate` → `409`（`token 由主机接管`） |
+| 封禁同步 | 对端封禁按 30 天写入本机；解封立即生效 |
+
+> 差异：目标启动后立即同步；本实现延迟 5 秒，避开启动竞态。
+
 ## 7. 错误串对照
 
 面板错误体保留目标原文，便于前端与外部脚本匹配（F-012 §3、F-013 §5）：

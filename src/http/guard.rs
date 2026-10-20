@@ -12,7 +12,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use crate::{http::ext::client_ip, state::AppState};
+use crate::{http::ext::client_ip_with_peer, state::AppState};
 
 /// 记录请求并在封禁期内拒绝。
 pub async fn ip_guard(
@@ -21,7 +21,11 @@ pub async fn ip_guard(
     next: Next,
 ) -> Response {
     if !request.uri().path().starts_with("/panel") {
-        let ip = client_ip(request.headers());
+        let peer = request
+            .extensions()
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|info| info.0);
+        let ip = client_ip_with_peer(request.headers(), peer);
         state.ip_guard.record_request(&ip);
         if state.ip_guard.is_banned(&ip) {
             return (StatusCode::FORBIDDEN, "banned").into_response();

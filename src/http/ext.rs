@@ -45,10 +45,18 @@ impl FromRequestParts<Arc<AppState>> for PanelAuth {
     }
 }
 
-/// 客户端地址：优先 `X-Forwarded-For` 首项，其次 `X-Real-IP`。
+/// 客户端地址：优先 `X-Forwarded-For` 首项，其次 `X-Real-IP`，最后 TCP 对端。
 ///
 /// 本实现不采集 TCP 对端地址；都没有时返回 `unknown`。
 pub fn client_ip(headers: &axum::http::HeaderMap) -> String {
+    client_ip_with_peer(headers, None)
+}
+
+/// 同 [`client_ip`]，但对端地址可作为兜底。
+pub fn client_ip_with_peer(
+    headers: &axum::http::HeaderMap,
+    peer: Option<std::net::SocketAddr>,
+) -> String {
     if let Some(value) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
         if let Some(first) = value.split(',').next() {
             let first = first.trim();
@@ -63,5 +71,8 @@ pub fn client_ip(headers: &axum::http::HeaderMap) -> String {
             return value.to_string();
         }
     }
-    "unknown".to_string()
+    match peer {
+        Some(peer) => peer.ip().to_string(),
+        None => "unknown".to_string(),
+    }
 }

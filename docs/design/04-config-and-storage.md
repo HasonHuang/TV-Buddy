@@ -137,3 +137,15 @@ iptv-proxy-<version>-<arch>/
 | 是否复刻目标的"面板保存"规范化格式 | 用 `toml::to_string_pretty`；不追求与目标逐字节相同 |
 | 安装脚本是否需要 `uninstall` | S-CLI-02 登记；P2 决定 |
 | `disk_path` 变更是否允许热重载 | 当前要求重启（与目标一致） |
+
+## 9. `[share]`
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `enabled` | `false` | 启用分享端点与同步任务 |
+| `role` | `master` | `master` 汇总从机；`follower` 采用主机 Token |
+| `key` | 空 | 分享密钥；对端用 `?key=` 传入 |
+| `trust_ips` | `[]` | 允许拉取的源地址；支持精确地址、CIDR 与 `*` |
+| `master_url` | 空 | follower 拉取的基地址 |
+| `follower_urls` | `[]` | master 汇总的基地址 |
+| `poll_secs` | `300` | 同步周期（秒），最小 5 |

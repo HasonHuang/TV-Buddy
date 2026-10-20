@@ -26,12 +26,18 @@ pub async fn token(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) 
 }
 
 /// `POST /panel/api/security/token/rotate`——换新 Token；旧值保留 1 小时宽限。
+///
+/// follower 的 Token 由主机接管，禁止本地轮换（F-013 §2）。
 pub async fn token_rotate(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
-) -> Json<Value> {
+) -> Result<Json<Value>, ApiError> {
+    let config = state.snapshot();
+    if config.share.enabled && config.share.role.eq_ignore_ascii_case("follower") {
+        return Err(ApiError::conflict("token 由主机接管"));
+    }
     let token = state.play_tokens.rotate();
-    Json(json!({ "ok": true, "token": token }))
+    Ok(Json(json!({ "ok": true, "token": token })))
 }
 
 /// `GET /panel/api/security/ip/stats`。

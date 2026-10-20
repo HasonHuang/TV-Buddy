@@ -87,7 +87,11 @@ async fn serve(app: Router) -> String {
         .expect("绑定端口");
     let addr = listener.local_addr().expect("取端口");
     tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await;
     });
     format!("http://{addr}")
 }
@@ -1541,4 +1545,106 @@ async fn media_assets_subtitles_and_resolver_scripts() {
         get("/panel/api/unknown/list").await.expect("请求").status(),
         StatusCode::NOT_FOUND
     );
+}
+
+#[tokio::test]
+async fn share_pull_checks_key_and_source_ip() {
+    let fixture = fixture_with_extra(
+        r#"
+[share]
+enabled = true
+role = "master"
+key = "REAKEY"
+trust_ips = ["127.0.0.1"]
+poll_secs = 5
+"#,
+    )
+    .await;
+
+    let pull = |query: &str, ip: Option<&str>| {
+        let mut request = fixture
+            .client
+            .get(format!("{}/api/share/pull{query}", fixture.base));
+        if let Some(ip) = ip {
+            request = request.header("x-real-ip", ip);
+        }
+        request.send()
+    };
+
+    // 缺 key / 错 key → 403。
+    assert_eq!(
+        pull("", Some("127.0.0.1")).await.expect("请求").status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        pull("?key=WRONG", Some("127.0.0.1"))
+            .await
+            .expect("请求")
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // key 正确但源 IP 不在白名单 → 403。
+    assert_eq!(
+        pull("?key=REAKEY", Some("10.1.1.1"))
+            .await
+            .expect("请求")
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // 双重门禁通过 → 200 且载荷字段齐全。
+    let response = pull("?key=REAKEY", Some("127.0.0.1")).await.expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(payload["token"].as_str().map(str::len), Some(48));
+    assert!(payload["bans"].is_array());
+    assert!(payload["unbans"].is_array());
+
+    // 只允许 GET/HEAD。
+    let response = fixture
+        .client
+        .post(format!("{}/api/share/pull?key=REAKEY", fixture.base))
+        .header("x-real-ip", "127.0.0.1")
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+#[tokio::test]
+async fn share_disabled_returns_404_and_follower_cannot_rotate() {
+    // 默认配置未启用分享 → 404。
+    let fixture = fixture().await;
+    let response = fixture
+        .client
+        .get(format!("{}/api/share/pull?key=x", fixture.base))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // follower 角色禁止本地轮换 → 409。
+    let follower = fixture_with_extra(
+        r#"
+[share]
+enabled = true
+role = "follower"
+key = "REAKEY"
+master_url = "http://placeholder.test"
+trust_ips = ["127.0.0.1"]
+poll_secs = 5
+"#,
+    )
+    .await;
+    let session = login(&follower).await;
+    let response = follower
+        .client
+        .post(format!("{}/panel/api/security/token/rotate", follower.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::CONFLICT);
 }

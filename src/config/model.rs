@@ -15,6 +15,7 @@ pub struct Config {
     pub auth: AuthCfg,
     pub epg: EpgCfg,
     pub playlist: PlaylistCfg,
+    pub share: ShareCfg,
     pub health: HealthCfg,
     pub stats: StatsCfg,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -461,6 +462,42 @@ impl Default for PlaylistSource {
             enabled: true,
             include: Vec::new(),
             exclude: Vec::new(),
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[share]`——多 VPS 分享（F-013 §10）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShareCfg {
+    pub enabled: bool,
+    /// `master` 或 `follower`。
+    pub role: String,
+    /// 分享密钥；对端用 `?key=` 传入。
+    pub key: String,
+    /// 允许拉取的源地址（精确或 `a.b.c.0/24`）。
+    pub trust_ips: Vec<String>,
+    /// follower 拉取 master 的基地址。
+    pub master_url: String,
+    /// master 汇总的 follower 基地址。
+    pub follower_urls: Vec<String>,
+    /// 同步周期（秒）。
+    pub poll_secs: u64,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for ShareCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            role: "master".into(),
+            key: String::new(),
+            trust_ips: Vec::new(),
+            master_url: String::new(),
+            follower_urls: Vec::new(),
+            poll_secs: 300,
             extra: toml::Table::new(),
         }
     }

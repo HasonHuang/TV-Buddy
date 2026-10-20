@@ -36,6 +36,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/logo/:file", get(routes::logo::file))
         .route("/whoami", get(routes::public::whoami))
         .route("/unban/whoami", get(routes::public::whoami))
+        .route("/api/share/pull", get(routes::share::pull))
         .route("/playlist.m3u", get(routes::play::total_playlist))
         .route("/:gid/playlist.m3u", get(routes::play::group_playlist))
         // 面板接口：未知路径固定 404 JSON，先于播放通配路由匹配。

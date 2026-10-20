@@ -26,6 +26,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(state::AppState::new(config_path, cfg, logs));
     reload::spawn(state.clone());
     epg::spawn(state.clone());
+    iptv_proxy::share::spawn(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
@@ -36,6 +37,10 @@ async fn main() -> anyhow::Result<()> {
         "iptv-proxy 启动"
     );
 
-    axum::serve(listener, http::router(state)).await?;
+    axum::serve(
+        listener,
+        http::router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }

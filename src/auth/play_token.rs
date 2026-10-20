@@ -68,6 +68,20 @@ impl PlayTokenStore {
         fresh
     }
 
+    /// 采用对端的 Token（多 VPS 同步）。旧值只在新值不同时保留宽限。
+    pub fn adopt(&self, current: String, old: Option<String>) -> bool {
+        let mut inner = self.write();
+        if inner.current == current {
+            return false;
+        }
+        inner.old = old
+            .filter(|value| !value.is_empty() && *value != current)
+            .map(|value| (value, Instant::now()))
+            .or_else(|| Some((inner.current.clone(), Instant::now())));
+        inner.current = current;
+        true
+    }
+
     /// 只读快照：`(current, old)`。供 P1 的 Token 管理接口使用。
     #[allow(dead_code)]
     pub fn snapshot(&self) -> (String, Option<String>) {
@@ -100,6 +114,19 @@ fn generate() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adopt_switches_token() {
+        let store = PlayTokenStore::new();
+        let before = store.current();
+        assert!(store.adopt("a".repeat(48), None));
+        assert!(!store.adopt("a".repeat(48), None));
+        assert_eq!(store.current(), "a".repeat(48));
+        let (current, old) = store.snapshot();
+        assert_eq!(current, "a".repeat(48));
+        assert_eq!(old.as_deref(), Some(before.as_str()));
+        assert!(store.verify(&before), "旧值在宽限期内仍有效");
+    }
 
     #[test]
     fn token_is_48_hex() {

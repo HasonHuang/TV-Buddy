@@ -21,6 +21,7 @@ struct Entry {
     requests: u64,
     failures: u64,
     banned_until: Option<Instant>,
+    unbanned_at: Option<Instant>,
 }
 
 impl Entry {
@@ -94,10 +95,41 @@ impl IpGuard {
         match inner.get_mut(ip) {
             Some(entry) => {
                 let was = entry.banned_until.take().is_some();
+                if was {
+                    entry.unbanned_at = Some(Instant::now());
+                }
                 was
             }
             None => false,
         }
+    }
+
+    /// 当前封禁中的地址。
+    pub fn banned_ips(&self) -> Vec<String> {
+        let mut ips: Vec<String> = self
+            .snapshot()
+            .into_iter()
+            .filter(|entry| entry.banned)
+            .map(|entry| entry.ip)
+            .collect();
+        ips.sort();
+        ips
+    }
+
+    /// 最近 `window` 内解封的地址。
+    pub fn recent_unbans(&self, window: Duration) -> Vec<String> {
+        let inner = self.lock();
+        let mut ips: Vec<String> = inner
+            .iter()
+            .filter_map(|(ip, entry)| {
+                entry
+                    .unbanned_at
+                    .filter(|at| at.elapsed() < window)
+                    .map(|_| ip.clone())
+            })
+            .collect();
+        ips.sort();
+        ips
     }
 
     /// 是否处于封禁期。
@@ -183,6 +215,20 @@ mod tests {
         assert!(!guard.is_banned("1.2.3.4"));
         assert!(!guard.unban("1.2.3.4"));
         assert!(!guard.is_banned("9.9.9.9"));
+    }
+
+    #[test]
+    fn tracks_bans_and_unbans() {
+        let guard = IpGuard::new();
+        guard.ban("1.1.1.1", 60);
+        guard.ban("2.2.2.2", 60);
+        assert_eq!(guard.banned_ips(), vec!["1.1.1.1", "2.2.2.2"]);
+        assert!(guard.unban("1.1.1.1"));
+        assert_eq!(guard.banned_ips(), vec!["2.2.2.2"]);
+        assert_eq!(
+            guard.recent_unbans(Duration::from_secs(60)),
+            vec!["1.1.1.1"]
+        );
     }
 
     #[test]

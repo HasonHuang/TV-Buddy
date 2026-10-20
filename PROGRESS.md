@@ -497,3 +497,17 @@
 | 验证 | ✅ | `scripts/smoke-assets.sh` 13 项；集成测试 `media_assets_subtitles_and_resolver_scripts` |
 
 验证：`cargo test --offline` 89 项（62 单元 + 27 集成）。
+
+## 3z. P1 · 多 VPS 分享
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `GET /api/share/pull`：双重门禁（key + trust_ips），`403` 日志 | ✅ | `routes/share.rs`、`share::ip_allowed` |
+| 载荷 `{token, token_old, bans, unbans}` | ✅ | `share::payload` |
+| follower 同步：采用主机 Token；本地轮换 → `409` | ✅ | `share::spawn`、`play_tokens.adopt` |
+| master 汇总：轮询 `follower_urls`，合并封禁/解封 | ✅ | `share::apply` |
+| 源 IP：`X-Forwarded-For` → `X-Real-IP` → TCP 对端 | ✅ | `http::ext::client_ip_with_peer`、`ConnectInfo` |
+| 配置 `[share]`：enabled/role/key/trust_ips/master_url/follower_urls/poll_secs | ✅ | `config/model.rs` |
+| 验证 | ✅ | `scripts/smoke-share.sh` 7 项；集成测试 2 项；单元 3 项 |
+
+验证：`cargo test --offline` 95 项（66 单元 + 29 集成）。
