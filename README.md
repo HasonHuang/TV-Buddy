@@ -53,7 +53,7 @@ tests/             # 路由级集成测试（起真实服务 + 伪上游）
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/health` | `200 text/plain` `ok` |
-| `GET` | `/playlist.m3u` | 总订阅（只含 `access = "public"` 的组） |
+| `GET` | `/playlist.m3u` | 总订阅（只含 `access = "public"` 的组；可聚合 `[playlist].sources`） |
 | `GET` | `/{gid}/playlist.m3u` | 分组订阅（归档组 `404`） |
 | `GET` | `/{gid}/{cid}.m3u8`（`.mpd`） | 入口清单（`public, max-age=5, s-maxage=5`） |
 | `GET` | `/{gid}/{cid}/video/index.txt` | 媒体清单（`text/plain`，切片地址已伪装） |
@@ -71,6 +71,18 @@ tests/             # 路由级集成测试（起真实服务 + 伪上游）
 | `POST` | `/panel/api/cache/flush` | 清空缓存（保留 `dash/`） |
 | `GET` | `/panel/api/stats` | 运行指标 |
 | `GET` | `/panel/api/logs` | 最近运行日志 |
+| `GET` | `/panel/api/security/token` | 当前播放 Token 与宽限旧值 |
+| `POST` | `/panel/api/security/token/rotate` | 轮换 Token |
+| `GET` | `/panel/api/security/ip/stats` | IP 请求统计与封禁状态 |
+| `POST` | `/panel/api/security/ip/{ban,unban}` | 封禁 / 解封地址 |
+| `GET` | `/panel/api/backup?include=` | 导出 gzip(tar) 备份 |
+| `POST` | `/panel/api/restore` | 恢复备份并重载 |
+| `GET` | `/logo/<file>` | 台标（`public, max-age=86400`） |
+| `GET` | `/logo/api/list` | 台标列表 |
+| `POST` | `/panel/api/logo/{upload,delete}` | 上传 / 删除台标 |
+| `GET` | `/epg.xml[.gz]` | 节目单 |
+| `GET` | `/epg/api/{channels,programmes,search}` | 节目单 JSON |
+| `POST` | `/panel/api/groups/import[/m3u]` | 批量导入分组（JSON / M3U） |
 
 ## 目录
 

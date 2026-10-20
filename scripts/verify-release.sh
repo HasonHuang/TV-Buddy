@@ -61,8 +61,22 @@ for _ in $(seq 1 50); do
   if body=$(wget -qO- http://127.0.0.1:19899/health 2>/dev/null); then ok=1; break; fi
   sleep 0.1
 done
-kill $pid 2>/dev/null || true
-[ "$ok" = "1" ] || { echo "健康检查失败"; cat /w/run.log; exit 1; }
-[ "$body" = "ok" ] || { echo "健康检查返回异常：$body"; exit 1; }
+[ "$ok" = "1" ] || { echo "健康检查失败"; cat /w/run.log; kill $pid 2>/dev/null || true; exit 1; }
+[ "$body" = "ok" ] || { echo "健康检查返回异常：$body"; kill $pid 2>/dev/null || true; exit 1; }
 echo "/health = ok"
+
+# 内嵌前端：面板页引用的脚本必须含新分区。
+page=$(wget -qO- http://127.0.0.1:19899/panel)
+asset=$(printf "%s" "$page" | grep -o "/__assets/[^\"]*panel-[^\"]*\.js" | head -1)
+[ -n "$asset" ] || { echo "面板缺少脚本引用"; kill $pid 2>/dev/null || true; exit 1; }
+wget -qO /tmp/panel.js "http://127.0.0.1:19899$asset"
+grep -q "security/token" /tmp/panel.js || { echo "面板资源不含安全分区"; kill $pid 2>/dev/null || true; exit 1; }
+echo "面板资源 = $asset"
+
+# 台标接口可用。
+logos=$(wget -qO- http://127.0.0.1:19899/logo/api/list)
+printf "%s" "$logos" | grep -q count || { echo "台标列表异常：$logos"; kill $pid 2>/dev/null || true; exit 1; }
+echo "/logo/api/list = ok"
+
+kill $pid 2>/dev/null || true
 '

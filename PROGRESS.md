@@ -453,3 +453,13 @@
 | 状态：开关、源数、频道/节目数、保留窗口、最近成功与错误 | ✅ | `frontend/src/ops.tsx` → `EpgPanelPage` |
 | 操作：立即采集（同步）、刷新状态、新窗口打开 `/epg` | ✅ | 同上 |
 | 验证 | ✅ | `pnpm build` 通过 |
+
+## 3v. P1 · 发布重建与校验增强
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 双架构静态包重建（含 EPG、台标、备份、安全、聚合与全部新面板分区） | ✅ | `dist/iptv-proxy-0.1.0-{amd64,arm64}.tar.gz`（3.16 MB / 2.94 MB） |
+| `verify-release.sh` 新增：面板页 200、`panel-*.js` 含 `security/token`、`/logo/api/list` 返回 `count` | ✅ | 两架构均输出 `面板资源 = /__assets/assets/panel-*.js` |
+| 离线构建修复：备份 tar 改内置实现，移除 `tar` 依赖（缓存缺 `linux-raw-sys`） | ✅ | `src/backup/tar.rs`；`cargo test --offline` 83 项 |
+
+验证：`cargo test --offline` 83 项；`verify-release.sh arm64|amd64` 全绿；`smoke-backup`、`smoke-security` 复跑通过。
