@@ -401,3 +401,18 @@ button.danger {
 .toast.err {
   border-left-color: var(--danger);
 }
+
+pre.log {
+  margin-top: 12px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0d11;
+  color: var(--text2);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

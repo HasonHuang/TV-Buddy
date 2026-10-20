@@ -369,6 +369,17 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 容量 | 最多保留 10 000 个地址，超出后忽略新地址 |
 | 未实现 | `ip/unban-batch`、按 IP 的会话上限、自动限流与 `/unban` 自助解封（P2） |
 
+### 6.8 面板分区（前端）
+
+| 分区 | 数据来源 | 状态 |
+| --- | --- | --- |
+| 概览 | `GET /panel/api/status`、`GET/PUT /panel/api/config` | ✅ |
+| 分组管理 | `/panel/api/{groups,channels}` 与导入 | ✅ |
+| 安全管控 | `/panel/api/security/{token,token/rotate,ip/stats,ip/ban,ip/unban}` | ✅ |
+| 运行日志 | `GET /panel/api/logs?limit=`（5 秒轮询） | ✅ |
+| 备份恢复 | `GET /panel/api/backup`、`POST /panel/api/restore`（浏览器内下载/上传） | ✅ |
+| 其它（缓存、录制、热度、素材等） | — | 待实现，侧栏置灰 |
+
 ## 7. 错误串对照
 
 面板错误体保留目标原文，便于前端与外部脚本匹配（F-012 §3、F-013 §5）：

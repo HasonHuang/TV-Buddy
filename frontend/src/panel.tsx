@@ -3,20 +3,23 @@ import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getToken, setToken, UNAUTHORIZED_EVENT } from './api';
 import { GroupsPage } from './groups';
+import { BackupPage, LogsPage, SecurityPage } from './ops';
 import './style.css';
 
 /** 侧栏分区。已实现的分区可切换，其余显示为待实现。 */
-type SectionId = 'dashboard' | 'groups';
+type SectionId = 'dashboard' | 'groups' | 'security' | 'logs' | 'backup';
 
 const NAV: { id: SectionId; label: string }[] = [
   { id: 'dashboard', label: '概览' },
   { id: 'groups', label: '分组管理' },
+  { id: 'security', label: '安全管控' },
+  { id: 'logs', label: '运行日志' },
+  { id: 'backup', label: '备份恢复' },
 ];
 
 const PENDING = [
   '缓存状态',
   '系统设置',
-  '安全管控',
   '频道热度',
   '定时录制',
   '节目指南',
@@ -24,7 +27,6 @@ const PENDING = [
   '订阅聚合',
   '回看管理',
   '视频素材',
-  '运行日志',
 ];
 
 type Status = Record<string, unknown>;
@@ -196,7 +198,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         </div>
       </aside>
       <main className="content">
-        {section === 'groups' ? <GroupsPage /> : <Overview />}
+        {section === 'groups' && <GroupsPage />}
+        {section === 'security' && <SecurityPage />}
+        {section === 'logs' && <LogsPage />}
+        {section === 'backup' && <BackupPage />}
+        {section === 'dashboard' && <Overview />}
       </main>
     </div>
   );

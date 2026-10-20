@@ -423,3 +423,15 @@
 | 验证 | ✅ | `scripts/smoke-aggregate.sh` 5 项；集成测试 2 项 |
 
 验证：`cargo test` 81 项（56 单元 + 25 集成）。
+
+## 3s. P1 · 面板分区（安全/日志/备份）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 安全管控页：Token 展示与轮换、IP 统计表、封禁与解封 | ✅ | `frontend/src/ops.tsx` |
+| 运行日志页：`/panel/api/logs?limit=`，5 秒轮询、可改行数 | ✅ | 同上 |
+| 备份恢复页：作用域选择、浏览器内下载；上传 tar.gz 恢复并提示文件数 | ✅ | 同上 |
+| 侧栏：已实现分区可切换，其余置灰「待实现」 | ✅ | `frontend/src/panel.tsx` |
+| 验证 | ✅ | `pnpm build` 通过；实测 `/panel` 引用 `panel-*.js` 且内含 `security/token` |
+
+验证：`cargo test` 81 项不变（前端不参与单元测试）。
