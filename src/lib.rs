@@ -4,6 +4,7 @@
 //! 可执行入口在 `src/main.rs`，只负责启动。
 
 pub mod auth;
+pub mod backup;
 pub mod config;
 pub mod epg;
 pub mod http;

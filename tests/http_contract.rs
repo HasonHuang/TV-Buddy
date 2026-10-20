@@ -997,3 +997,108 @@ async fn logo_library_upload_serve_and_delete() {
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn backup_and_restore_roundtrip() {
+    let fixture = fixture().await;
+    let token = login(&fixture).await;
+    let auth = format!("Bearer {token}");
+
+    // 备份。
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/backup?include=all", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("备份请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header(&response, "content-type"), "application/gzip");
+    assert!(header(&response, "content-disposition").contains("iptv-proxy-backup-"));
+    let data = response.bytes().await.expect("读字节");
+    assert_eq!(&data[..2], &[0x1f, 0x8b], "应为 gzip 魔数");
+
+    // 改动配置：导入一个分组。
+    let import = serde_json::json!([{ "id": "tmp", "name": "临时组", "mode": "proxy" }]);
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/groups/import", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", &auth)
+        .body(import.to_string())
+        .send()
+        .await
+        .expect("导入请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let groups = |fixture: &Fixture| {
+        let request = fixture
+            .client
+            .get(format!("{}/panel/api/config", fixture.base))
+            .header("authorization", &auth);
+        request.send()
+    };
+    let config: serde_json::Value = serde_json::from_str(
+        &groups(&fixture)
+            .await
+            .expect("取配置")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert!(
+        config["groups"]
+            .as_array()
+            .expect("分组")
+            .iter()
+            .any(|group| group["id"] == "tmp"),
+        "导入后应有临时组"
+    );
+
+    // 恢复。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/restore", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/gzip")
+        .body(data)
+        .send()
+        .await
+        .expect("恢复请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let result: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["config_reloaded"], true);
+
+    // 恢复后临时组消失，原分组仍在。
+    let config: serde_json::Value = serde_json::from_str(
+        &groups(&fixture)
+            .await
+            .expect("取配置")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let ids: Vec<&str> = config["groups"]
+        .as_array()
+        .expect("分组")
+        .iter()
+        .filter_map(|group| group["id"].as_str())
+        .collect();
+    assert!(!ids.contains(&"tmp"), "恢复后不应有临时组：{ids:?}");
+    assert!(ids.contains(&"pg"), "恢复后应保留原分组：{ids:?}");
+
+    // 非法内容 → 400。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/restore", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/gzip")
+        .body("not gzip")
+        .send()
+        .await
+        .expect("恢复请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

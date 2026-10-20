@@ -250,7 +250,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | EPG | `/panel/api/epg/{status,refresh,regenerate,mappings,programmes,scripts,match-report,mapping,extra,script,script-delete,cron-preview}`、`/epg/{suggest,search,viewer-channels,source-channels,tz-preview}` | P1 |
 | 安全 | `/panel/api/security/{token,token/rotate,ip/stats,ip/ban,ip/unban,ip/unban-batch}` | P1 |
 | 指标 | `/panel/api/{stats,logs,health}` | ✅ M4（`health` 在 M0） |
-| 备份 | `/panel/api/{backup,restore}` | P2 |
+| 备份 | `GET /panel/api/backup?include=all\|epg-scripts\|resolver`、`POST /panel/api/restore` | ✅ P1（见 §6.6） |
 | 导入 | `POST /panel/api/groups/import/m3u` | ✅ P1（见 §6.2） |
 | 导入 | `/groups/{import,import/force}`（JSON 分组数组） | ✅ P1（`/groups/import/m3u` 相邻） |
 | 订阅聚合 | `POST /panel/api/subs/{groups,preview}` | P2 |
@@ -303,6 +303,20 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 > 实现：按请求读取 `epg.xml` 并解析；节目单较大时再改为内存快照。
 >
 > 未实现：翻译接口、脚本源、节目单映射与录制联动（P2）。
+
+### 6.6 备份与恢复（P1 已实现）
+
+| 项 | 规则 |
+| --- | --- |
+| 备份请求 | `GET /panel/api/backup?include=all|epg-scripts|resolver`；其它值回退 `all` |
+| 备份响应 | `200 application/gzip`；`Content-Disposition: attachment; filename="iptv-proxy-backup-YYYYmmdd-HHMMSS.tar.gz"`（UTC） |
+| 包内布局 | `iptv-proxy-backup/config.toml`、`logos/*`、`epg/scripts/*.py`、`epg/epg_map.json`、`resolvers/*.py`、`manifest.json`（`generator`/`version`/`created`/`scope`） |
+| 恢复请求 | `POST /panel/api/restore`，`Content-Type: application/gzip`，体为 tar.gz 原文；上限 64 MiB |
+| 恢复步骤 | 解包 → 解析并**校验** `config.toml` → 旧文件另存 `config.toml.bak` → 原子写入 → 恢复台标 → 重载快照（立即解除看门狗冷却） |
+| 恢复响应 | `{"ok":true,"config_reloaded":true,"report":{"files":[…],"skipped":[…]},"groups":N}` |
+| 失败 | 无 `config.toml`、配置不合法、非 gzip → `400`；未登录 → `401` |
+
+> 台标以外的脚本类文件（`epg/scripts`、`resolvers`）只备份，不在恢复时执行。
 
 ## 7. 错误串对照
 

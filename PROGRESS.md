@@ -357,3 +357,15 @@
 | 验证 | ✅ | `scripts/smoke-logo.sh` 15 项；集成测试 `logo_library_upload_serve_and_delete` |
 
 验证：`cargo test` 64 项（45 单元 + 19 集成）。
+
+## 3o. P1 · 备份与恢复（已完成）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `GET /panel/api/backup`：gzip(tar)，`all`/`epg-scripts`/`resolver` 三种作用域，文件名带 UTC 时间戳 | ✅ | `src/backup.rs`、`routes/backup.rs` |
+| 包布局：`config.toml`、`logos/`、`epg/scripts/`、`epg/epg_map.json`、`resolvers/`、`manifest.json` | ✅ | 同上 |
+| `POST /panel/api/restore`：解包 → 校验配置 → `config.toml.bak` → 原子写 → 恢复台标 → 重载 | ✅ | 同上 |
+| 请求体上限 64 MiB；非法内容 → `400` | ✅ | `http.rs` |
+| 验证 | ✅ | `scripts/smoke-backup.sh` 10 项；集成测试 `backup_and_restore_roundtrip`；`backup` 3 项单元测试 |
+
+验证：`cargo test` 68 项（48 单元 + 20 集成）。

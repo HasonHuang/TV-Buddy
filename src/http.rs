@@ -63,6 +63,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/cache/flush", post(routes::admin::cache_flush))
         .route("/panel/api/stats", get(routes::admin::stats))
         .route("/panel/api/logs", get(routes::admin::logs))
+        .route("/panel/api/backup", get(routes::backup::backup))
+        .route(
+            "/panel/api/restore",
+            post(routes::backup::restore)
+                .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         .route("/panel/api/logo/list", get(routes::logo::panel_list))
         .route("/panel/api/logo/upload", post(routes::logo::upload))
         .route("/panel/api/logo/delete", post(routes::logo::delete))
