@@ -64,13 +64,41 @@ pub async fn scan_url(
     inspect(&state, url, "", "").await.map(Json)
 }
 
-/// `GET /panel/api/dash-timeshift/status`——回看能力（P2 占位）。
-pub async fn timeshift_status(PanelAuth(_): PanelAuth) -> Json<Value> {
+/// `GET /panel/api/dash-timeshift/status`——回看能力（代理频道已实现，DASH 未实现）。
+pub async fn timeshift_status(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    let config = state.snapshot();
+    let channels: Vec<Value> = config
+        .groups
+        .iter()
+        .flat_map(|group| {
+            group
+                .channels
+                .iter()
+                .filter(|channel| channel.livestream)
+                .map(|channel| {
+                    json!({
+                        "group_id": group.id,
+                        "channel_id": channel.id,
+                        "hours": channel.timeshift_hours,
+                        "segments": state.timeshift.count(&group.id, &channel.id),
+                        "mode": group.mode,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let ready = channels
+        .iter()
+        .any(|channel| channel["segments"].as_u64().unwrap_or(0) > 0);
     Json(json!({
         "ok": true,
-        "enabled": false,
-        "ready": false,
-        "note": "DASH 回看按需转封装，尚未实现（P2）",
+        "enabled": !channels.is_empty(),
+        "ready": ready,
+        "channels": channels,
+        "note": "代理频道回看可用；DASH 回看尚未实现（P2）",
     }))
 }
 

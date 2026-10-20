@@ -222,5 +222,9 @@ pub async fn livestream_switch(
     if !found {
         return Err(ApiError::not_found("Channel not found"));
     }
+    if enable {
+        // 立即开始缓冲，用户随后即可回看。
+        state.timeshift.ensure(&state, &gid, &cid);
+    }
     Ok(Json(json!({ "ok": true, "livestream": enable })))
 }

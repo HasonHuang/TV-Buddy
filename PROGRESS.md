@@ -585,3 +585,18 @@
 | `/subtitle/mtran/test`：未配地址 `400`；已配则调用 MTranServer 并返回逐目标结果 | ✅ | `routes/media.rs` |
 | `/subtitle/translate/clear`、`/epg/translate/{status,clear-engine}` | ✅ | 同上、`routes/epg.rs` |
 | 验证 | ✅ | 4 集成（脚本源 2、批量 1、字幕 3 合 2 项） |
+
+## 3ag. P1 · 直播回看（代理频道）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `livestream=true` 时持续缓冲：媒体清单增量下载、主清单选最高码率 | ✅ | `src/timeshift.rs` |
+| 回看参数：`start/end`、`playseek`（本地时区） | ✅ | `timeshift::range` |
+| VOD 清单：`PLAYLIST-TYPE:VOD`、`TARGETDURATION`、`ENDLIST` | ✅ | `Session::playlist` |
+| 切片：`/{gid}/{cid}/timeshift/<16hex>.<ext>`，图片类型，`private, max-age=3600` | ✅ | `Manager::serve` |
+| 越界 → 实时清单；空闲 15 分钟回收 | ✅ | `routes/stream.rs`、`Manager` |
+| 启动预热与点亮即缓冲 | ✅ | `timeshift::warm`、`livestream_switch` |
+| 面板状态：`/panel/api/dash-timeshift/status` 报告频道与已缓冲片数 | ✅ | `routes/dash.rs` |
+| 验证 | ✅ | 3 单元 + 1 集成；`scripts/smoke-timeshift.sh` 8 项（真实 ffmpeg HLS） |
+
+> DASH 回看（`dash_timeshift`）仍为 P2。

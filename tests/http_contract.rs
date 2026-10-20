@@ -2278,3 +2278,82 @@ url = "http://127.0.0.1:9"
         .unwrap_or("")
         .starts_with("请求失败"));
 }
+
+#[tokio::test]
+async fn timeshift_buffers_livestream_and_serves_vod_playlist() {
+    let fixture = fixture_with_extra(
+        r#"
+[[groups]]
+id = "ts"
+name = "回看组"
+mode = "proxy"
+access = "open"
+[[groups.channels]]
+id = "c1"
+name = "回看频道"
+url = "{upstream}/live.m3u8"
+livestream = true
+timeshift_hours = 4
+"#,
+    )
+    .await;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("时钟")
+        .as_secs() as i64;
+    let url = format!(
+        "{}/ts/c1.m3u8?start={}&end={}",
+        fixture.base,
+        now - 60,
+        now + 60
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut body = String::new();
+    loop {
+        let response = fixture.client.get(&url).send().await.expect("回看请求");
+        assert_eq!(response.status(), StatusCode::OK);
+        body = response.text().await.expect("正文");
+        if body.contains("#EXT-X-PLAYLIST-TYPE:VOD") || Instant::now() > deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        body.contains("#EXT-X-PLAYLIST-TYPE:VOD"),
+        "应产出 VOD 清单：{body}"
+    );
+    assert!(body.contains("#EXT-X-ENDLIST"));
+    assert!(body.contains("#EXT-X-TARGETDURATION:4"));
+    let segment = body
+        .lines()
+        .find(|line| line.starts_with("/ts/c1/timeshift/"))
+        .expect("回看切片路径")
+        .to_string();
+    assert!(segment.len() > "/ts/c1/timeshift/".len());
+
+    let response = fixture
+        .client
+        .get(format!("{}{}", fixture.base, segment))
+        .send()
+        .await
+        .expect("回看切片");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header(&response, "cache-control"), "private, max-age=3600");
+    assert!(header(&response, "content-type").starts_with("image/"));
+
+    // 越界 → 落回实时清单。
+    let response = fixture
+        .client
+        .get(format!("{}/ts/c1.m3u8?start=0&end=60", fixture.base))
+        .send()
+        .await
+        .expect("越界请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("正文");
+    assert!(
+        !body.contains("#EXT-X-PLAYLIST-TYPE:VOD"),
+        "越界应落回实时：{body}"
+    );
+}

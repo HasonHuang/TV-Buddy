@@ -65,7 +65,18 @@ pub async fn entry(
     };
     let base = resolved.unwrap_or_else(|| channel.url.clone());
     // 回看：只把 `playseek` 原样追加到上游（S-EP-04），其余回看参数丢弃。
-    let upstream = with_playseek(&base, &query);
+    let mut upstream = with_playseek(&base, &query);
+    // 本地回看：点亮 `livestream` 的频道优先读缓冲；未命中落回实时（S-TS-01）。
+    if channel.livestream {
+        if let Some((start, end)) =
+            crate::timeshift::range(&query, config.server.timezone_offset_hours as i64)
+        {
+            if let Some(body) = state.timeshift.playlist(&state, &gid, &cid, start, end) {
+                return crate::timeshift::vad_response(body);
+            }
+            upstream = base.clone();
+        }
+    }
     // Passthrough 原样下发上游地址（S-MODE-11）。
     if group.mode == "passthrough" {
         return redirect(&upstream);
@@ -256,6 +267,12 @@ pub async fn wildcard(
     Path((gid, cid, rest)): Path<(String, String, String)>,
 ) -> Response {
     let rest = rest.trim_start_matches('/').to_string();
+    if let Some(name) = rest.strip_prefix("timeshift/") {
+        return state
+            .timeshift
+            .serve(&gid, &cid, name)
+            .unwrap_or_else(|| (StatusCode::NOT_FOUND, "Segment not found").into_response());
+    }
     if let Some(response) = state.remux.serve(&gid, &cid, &rest) {
         return response;
     }

@@ -43,6 +43,8 @@ pub struct AppState {
     pub remux: Arc<crate::remux::Manager>,
     /// 定时录制任务。
     pub schedule: Arc<crate::schedule::Store>,
+    /// 直播回看会话。
+    pub timeshift: Arc<crate::timeshift::Manager>,
     /// 直连地址与模式分类缓存（每项自带 TTL）。
     pub modes: AddressCache,
     /// 缓存根目录（`[cache].disk_path`）。
@@ -84,6 +86,7 @@ impl AppState {
             resolver: crate::resolver::Cache::default(),
             remux: Arc::new(crate::remux::Manager::default()),
             schedule: Arc::new(crate::schedule::Store::load(&cache_dir, offset_hours)),
+            timeshift: Arc::new(crate::timeshift::Manager::default()),
             modes: AddressCache::new(),
             cache_dir,
             stats: Stats::default(),

@@ -528,6 +528,21 @@ MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒�
 | 失败 | 无切片（如静态 MPD）→ `failed`，`note` 记录原因 |
 | 时移 | 未实现（P2） |
 
+### 6.15 直播回看（P1 已实现，代理频道）
+
+证据：F-009 §1.8。
+
+| 项 | 规则 |
+| --- | --- |
+| 启用 | 频道 `livestream = true`；启动时或点亮后开始缓冲 |
+| 缓冲 | 抓上游媒体清单，增量下载切片；主清单取最高码率；窗口 `timeshift_hours`，容量 `timeshift_max_gb`（0 = 不限） |
+| 参数 | `?start=<unix>&end=<unix>` 或 `?playseek=<本地 yyyymmddHHMMSS-yyyymmddHHMMSS>` |
+| 清单 | `#EXT-X-PLAYLIST-TYPE:VOD`、`#EXT-X-TARGETDURATION`、`#EXT-X-ENDLIST`；`Cache-Control: no-cache, must-revalidate` |
+| 切片 | `/{gid}/{cid}/timeshift/<16hex>.<png|gif|bmp|jpg|webp>`；图片 Content-Type；`Cache-Control: private, max-age=3600` |
+| 越界 | 缓冲区无交集 → 落回实时清单，不报错 |
+| 会话 | 键 `gid/cid`；15 分钟无访问回收；索引在内存，重启后从空开始 |
+| 范围 | 代理频道；DASH 回看未实现（`/panel/api/dash-timeshift/status` 只报告） |
+
 ## 7. 错误串对照
 
 面板错误体保留目标原文，便于前端与外部脚本匹配（F-012 §3、F-013 §5）：
