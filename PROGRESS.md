@@ -334,3 +334,14 @@
 | 文档 | ✅ | `docs/design/03-http-contract.md` §6.2.1 |
 
 验证：`cargo test` 59 项（41 单元 + 18 集成）全绿。
+
+## 3m. 发布产物重建（P1 批次后）
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 修复 `build-release.sh` 无参数时把 `amd64 arm64` 当作单架构的问题 | ✅ | `scripts/build-release.sh` |
+| 重建双架构静态包（含 EPG 页面与 P1 接口） | ✅ | `dist/iptv-proxy-0.1.0-{amd64,arm64}.tar.gz`（3.0/2.8 MB） |
+| 校验：ELF 无 `PT_INTERP`、能启动、`/health = ok` | ✅ | `scripts/verify-release.sh amd64/arm64` |
+| 校验：发布包内 `/epg` 页面引用新资源，`/__assets/assets/epg-*.js` 返回 2866 字节且含页面文案 | ✅ | alpine:3.20 + amd64 包实测 |
+
+> `dist/` 不入库（`.gitignore`）。
