@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: ["rust", "main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 1
+
+  rust:
+    name: 格式、静态检查与测试
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets
+      - run: cargo test --all-targets
+
+  release:
+    name: 双架构发布包
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - name: 安装 musl 与交叉工具链
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools gcc-aarch64-linux-gnu
+      - name: 构建 amd64
+        run: cargo build --release --target x86_64-unknown-linux-musl
+      - name: 构建 arm64
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target aarch64-unknown-linux-musl
+      - name: 打包
+        run: |
+          mkdir -p out
+          cp target/x86_64-unknown-linux-musl/release/iptv-proxy out/iptv-proxy-amd64
+          cp target/aarch64-unknown-linux-musl/release/iptv-proxy out/iptv-proxy-arm64
+          cp packaging/config.toml.example out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iptv-proxy-release
+          path: out
+          retention-days: 7
