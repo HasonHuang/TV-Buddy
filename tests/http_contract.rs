@@ -1355,6 +1355,127 @@ enabled = true
     assert!(body.contains("媒体清单频道"));
 }
 
+#[tokio::test]
+async fn subs_status_lists_configured_sources() {
+    let extra = r#"
+[[playlist.sources]]
+id = "s1"
+name = "远端源"
+url = "{upstream}/extra.m3u8"
+enabled = true
+include = ["group:远端组"]
+"#;
+    let fixture = fixture_with_extra(extra).await;
+    let response = fetch(&fixture, "/subs/status").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    let sources = body["sources"].as_array().expect("sources");
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0]["id"], "s1");
+    assert_eq!(sources[0]["enabled"], true);
+    assert_eq!(sources[0]["include"][0], "group:远端组");
+}
+
+#[tokio::test]
+async fn subs_groups_lists_upstream_groups() {
+    let fixture = fixture().await;
+    let response = fixture
+        .client
+        .post(format!("{}/subs/groups", fixture.base))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "url": format!("{}/extra.m3u8", fixture.upstream) }).to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["total"], 3);
+    assert_eq!(body["groups"][0]["name"], "远端组");
+    assert_eq!(body["groups"][0]["count"], 3);
+}
+
+#[tokio::test]
+async fn subs_preview_applies_group_map_and_filters() {
+    let extra = r#"
+[playlist]
+global_exclude = ["id:excluded"]
+
+[[playlist.sources]]
+id = "s1"
+name = "远端源"
+url = "{upstream}/extra.m3u8"
+enabled = true
+exclude = ["id:skip"]
+"#;
+    let fixture = fixture_with_extra(extra).await;
+    let response = fixture
+        .client
+        .post(format!("{}/subs/preview", fixture.base))
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "source": {
+                    "id": "s1",
+                    "group_map": { "远端组": "映射组" }
+                }
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["trace"]["total"], 3);
+    assert_eq!(body["trace"]["after_group"], 3);
+    assert_eq!(body["trace"]["after_global_exclude"], 2);
+    assert_eq!(body["trace"]["after_include"], 1);
+    assert_eq!(body["kept"], 1);
+    assert_eq!(body["out_groups"][0]["name"], "映射组");
+    assert_eq!(body["out_groups"][0]["count"], 1);
+    assert_eq!(body["sample"][0]["name"], "远端频道");
+}
+
+#[tokio::test]
+async fn subs_preview_drops_mapped_group_and_rejects_bad_url() {
+    let fixture = fixture().await;
+    let response = fixture
+        .client
+        .post(format!("{}/subs/preview", fixture.base))
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "source": {
+                    "url": format!("{}/extra.m3u8", fixture.upstream),
+                    "group_map": { "远端组": null }
+                }
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["kept"], 0);
+    assert_eq!(body["trace"]["after_group"], 0);
+    assert_eq!(body["dropped_groups"][0], "远端组");
+
+    let response = fixture
+        .client
+        .post(format!("{}/subs/preview", fixture.base))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "source": { "url": "file:///etc/passwd" } }).to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
 #[test]
 fn placeholder() {}
 

@@ -46,6 +46,9 @@
 | 方法 | 路径 | 鉴权 | 响应 | 阶段 | 依据 |
 | --- | --- | --- | --- | --- | --- |
 | GET | `/playlist.m3u` | 无 | `200` M3U | M1 | S-EP-02 |
+| GET | `/subs/status` | 无 | `200` JSON 源列表 | ✅ P3 | S-GAP-07 |
+| POST | `/subs/groups` | 无 | `200` JSON 分组；非 http(s) → `400`；抓取失败 → `502` | ✅ P3 | S-GAP-07 |
+| POST | `/subs/preview` | 无 | `200` JSON 预检 | ✅ P3 | S-GAP-07 |
 | GET | `/{gid}/playlist.m3u` | 无 | `200` M3U / `404`（归档组） | M1 | S-EP-02、F-009 |
 | GET | `/{gid}/{cid}.{ext}` | 按 token 开关 | `200` 清单 / `302` 占位 | M2 | S-EP-03 |
 | GET | `/{gid}/{cid}/index.m3u8` | 同上 | 同上（兼容旧路径） | M2 | F-012 §3 |
@@ -554,6 +557,26 @@ MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒�
 | 越界 | 缓冲区无交集 → 落回实时清单，不报错 |
 | 会话 | 键 `gid/cid`；15 分钟无访问回收；索引在内存，重启后从空开始 |
 | 范围 | 代理频道；DASH 频道设 `dash_timeshift = true` 时，用 ffmpeg 转本地 HLS 后缓冲（需 ffmpeg 含 DASH 解复用器） |
+
+## 6.16 订阅源预检（P3 已实现）
+
+证据：S-GAP-07。目标只验证了 `GET /subs/status` → `{sources:[]}`。其余响应形状自定。
+
+| 方法 | 路径 | 请求 | 响应 |
+| --- | --- | --- | --- |
+| GET | `/subs/status` | — | `{"sources":[{"id","name","url","enabled","include","exclude"}]}` |
+| POST | `/subs/groups` | `{"url":"<m3u>"}` | `{"groups":[{"name","count"}],"total":<n>}` |
+| POST | `/subs/preview` | `{"source":{"id"?,"url"?,"group_map":{…},"unlisted_groups"?,"include"?,"exclude"?}}` | `{"kept","sample":[{"name","group","url"}]×≤5,"trace":{"total","after_group","after_global_exclude","after_include"},"dropped_groups":[],"out_groups":[{"name","count"}]}` |
+
+规则：
+
+- `source.id` 命中 `[playlist].sources` 时，空 `url`、`include`、`exclude` 用配置补齐。
+- 没有 `group_map` 时保留全部分组。
+- 有 `group_map` 时，未列出的分组按 `unlisted_groups` 处理：`drop`（默认）或 `keep`。
+- `group_map` 值为 `null` 或空串时丢弃该分组，并记入 `dropped_groups`。
+- 顺序固定：分组映射 → `global_exclude` → 源 `include` / `exclude`。
+- 过滤词：频道名包含；`group:<文本>` 分组包含；`id:<tvg-id>` 精确匹配。
+- 源抓取超时 20 秒。`sample` 最多 5 条。
 
 ## 7. 错误串对照
 

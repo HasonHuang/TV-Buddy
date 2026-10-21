@@ -15,3 +15,4 @@ pub mod schedule;
 pub mod security;
 pub mod share;
 pub mod stream;
+pub mod subs;

@@ -24,7 +24,7 @@
 flowchart LR
   P0["P0 逆向与核心<br/>✅ 完成"] --> P1["P1 流处理与增值<br/>✅ 完成"]
   P1 --> P2["P2 运维与管理面<br/>✅ 完成"]
-  P2 --> P3["P3 兼容性补全<br/>🔄 1/8"]
+  P2 --> P3["P3 兼容性补全<br/>🔄 2/8"]
 ```
 
 | 阶段 | 范围 | 进度 |
@@ -32,13 +32,13 @@ flowchart LR
 | P0 | 逆向、代理/直连、Token、缓存、播放链路、打包 | ██████████ 100% |
 | P1 | EPG、回看、remux、录制、台标、分享、安全面 | ██████████ 100% |
 | P2 | 订阅聚合、面板分区、DASH 回看、EPG/字幕翻译 | ██████████ 100% |
-| P3 | 目标剩余端点与兼容细节（见 §0.6） | █░░░░░░░░░ 1/8 |
+| P3 | 目标剩余端点与兼容细节（见 §0.6） | ██░░░░░░░░ 2/8 |
 
 ### 0.3 质量门（2026-10-21）
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 132 项（88 单元 + 44 集成） |
+| `cargo test --offline` | ✅ 140 项（92 单元 + 48 集成） |
 | 冒烟脚本 | ✅ 13 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
@@ -74,7 +74,7 @@ flowchart LR
 | ID | 交付 | 规模 | 依赖 | 验收 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | P3-01 | CI 质量门 | S | GitHub Actions | `fmt`/`clippy`/`test`/双架构构建；失败阻断合并 | ✅ 运行 `39593785498` |
-| P3-02 | `/subs/{status,groups,preview}` | M | 无 | 形状按 S-GAP-07；复用 `[playlist]` 聚合；集成测试覆盖保留/丢弃/分组映射 | ⏳ |
+| P3-02 | `/subs/{status,groups,preview}` | M | 无 | 形状按 S-GAP-07；复用 `[playlist]` 聚合；集成测试覆盖保留/丢弃/分组映射 | ✅ |
 | P3-03 | `GET /panel/api/link-info` | S | 无 | 返回 `aliases`、`random_id_enabled`、`token`、`token_enabled`、`use_alias`；测试 | ⏳ |
 | P3-04 | 安全面补全 | M | 无 | 登录失败 429 锁、每 IP 会话上限、`/unban` 每月 3 次、`l1/l2` 窗口；测试 | ⏳ |
 | P3-05 | 字幕格式扩展 | M | 可选 ffmpeg | ASS/SSA 转 SRT/VTT；`compat_mode` 与 `srt_ua_keywords`；测试 | ⏳ |
@@ -710,6 +710,21 @@ flowchart LR
 
 P2 已关闭；后续计划见 §0.6。
 
+## 3at. P3 · 订阅源预检端点（已完成）
+
+证据：S-GAP-07。
+
+| 项 | 结果 | 位置 |
+| --- | --- | --- |
+| `GET /subs/status` | 返回配置源：`id`、`name`、`url`、`enabled`、`include`、`exclude` | `src/http/routes/subs.rs` |
+| `POST /subs/groups` | 抓取源，返回分组与条目数 | 同上 |
+| `POST /subs/preview` | 分组映射、`global_exclude`、白/黑名单，返回 `trace` 与 `sample` | `src/subs.rs` |
+| 错误 | 非 http(s) → `400`；抓取失败或非成功状态 → `502` | `ApiError::BadGateway` |
+| 规则 | 无映射保留全部；有映射时未列出分组默认丢弃；顺序固定 | `src/subs.rs` |
+| 测试 | 4 单元 + 4 集成 | `src/subs.rs`、`tests/http_contract.rs` |
+
+验证：`cargo test --offline` 140 项（92 单元 + 48 集成）。
+
 ## 4. 进度日志
 
 | 日期 | 事项 | 结果 |
@@ -745,6 +760,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **质量门**：132 项测试、13 个冒烟、DASH 容器复验、双架构重出包 | ✅ §3ar、§3as |
 | 2026-10-21 | **文档重排**：总览看板（进度图、质量门、里程碑、差异）、P3 任务计划；附录 A/B 合并到文末 | ✅ 本节 |
 | 2026-10-21 | **P3-01 CI**：新增 `.github/workflows/ci.yml`（前端构建 → fmt/clippy/test → 原生 amd64/arm64 musl 包）；首跑全绿 | ✅ 运行 `39593785498` |
+| 2026-10-21 | **P3-02 订阅源预检**：`/subs/status`、`/subs/groups`、`/subs/preview`；映射/排除/白黑名单与 `trace` | ✅ §3at |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）
 
