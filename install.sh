@@ -13,7 +13,9 @@ set -eu
 
 PREFIX=${PREFIX:-/opt/iptv-proxy}
 ARCHIVE=${ARCHIVE:-}
+CLI_LINK=${CLI_LINK:-/usr/local/bin/iptv-proxy}
 DO_SERVICE=1
+DO_LINK=1
 DO_START=0
 TMP_DIR=
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -26,12 +28,14 @@ usage() {
   --prefix <目录>    安装目录（默认 /opt/iptv-proxy）
   --archive <路径>   指定 tar.gz 安装包；也接受 http(s) URL
   --no-service       不注册 systemd/OpenRC 服务
+  --no-link          不创建 iptv-proxy 命令软链
   --start            安装后立即启动服务
   -h, --help         显示本帮助
 
 环境变量：
   PREFIX             同 --prefix
   ARCHIVE            同 --archive
+  CLI_LINK           命令软链位置（默认 /usr/local/bin/iptv-proxy）
 EOF
 }
 
@@ -63,6 +67,10 @@ while [ "$#" -gt 0 ]; do
             DO_SERVICE=0
             shift
             ;;
+        --no-link)
+            DO_LINK=0
+            shift
+            ;;
         --start)
             DO_START=1
             shift
@@ -85,6 +93,10 @@ case "$PREFIX" in
 esac
 case "$PREFIX" in
     *" "*|*"	"*) fail "安装目录不能含空白：$PREFIX" ;;
+esac
+case "$CLI_LINK" in
+    /*) ;;
+    *) fail "CLI_LINK 必须是绝对路径：$CLI_LINK" ;;
 esac
 # 供 sed 替换服务单元中的默认目录。
 PREFIX_SED=$(printf '%s' "$PREFIX" | sed 's/[\\&|]/\\&/g')
@@ -165,7 +177,7 @@ elif [ -x "$SCRIPT_DIR/iptv-proxy" ] && [ -f "$SCRIPT_DIR/config.toml.example" ]
 else
     # 仓库根目录：使用 dist/ 中最新的同架构包。
     LATEST=$(ls -t "$SCRIPT_DIR"/dist/iptv-proxy-*-"$ARCH".tar.gz 2>/dev/null | head -n 1 || true)
-    [ -n "$LATEST" ] || fail "未找到安装包。先运行 scripts/build-release.sh $ARCH，或用 --archive 指定 tar.gz"
+    [ -n "$LATEST" ] || fail "未找到安装包。先运行 scripts/build-release.sh ${ARCH}，或用 --archive 指定 tar.gz"
     verify_digest "$LATEST"
     extract_archive "$LATEST"
 fi
@@ -189,6 +201,25 @@ if [ -f "$PREFIX/config.toml" ]; then
 else
     install -m 0644 "$ASSET_DIR/config.toml.example" "$PREFIX/config.toml"
     echo "已生成配置：$PREFIX/config.toml（请修改后重启）"
+fi
+
+if [ "$DO_LINK" = 1 ]; then
+    link_dir=$(dirname "$CLI_LINK")
+    if [ -e "$CLI_LINK" ] && [ ! -L "$CLI_LINK" ]; then
+        echo "跳过命令软链：$CLI_LINK 已存在且不是软链"
+    elif [ -d "$link_dir" ] || mkdir -p "$link_dir" 2>/dev/null; then
+        if [ -w "$link_dir" ] || [ "$(id -u)" -eq 0 ]; then
+            if ln -sf "$PREFIX/iptv-proxy.sh" "$CLI_LINK"; then
+                echo "命令：$CLI_LINK"
+            else
+                echo "警告：无法创建命令软链：$CLI_LINK"
+            fi
+        else
+            echo "警告：无权限创建命令软链：$CLI_LINK"
+        fi
+    else
+        echo "警告：无法创建目录：$link_dir"
+    fi
 fi
 
 SERVICE_KIND=none

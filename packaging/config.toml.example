@@ -9,7 +9,7 @@ log_level = "info"
 token_enabled = false
 
 [cache]
-disk_path = "/opt/iptv-proxy/cache"
+disk_path = "./cache"
 
 [[groups]]
 id = "demo"

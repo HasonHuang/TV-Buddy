@@ -39,7 +39,7 @@ flowchart LR
 | 项 | 结果 |
 | --- | --- |
 | `cargo test --offline` | ✅ 153 项（100 单元 + 53 集成） |
-| 冒烟脚本 | ✅ 13 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security） |
+| 冒烟脚本 | ✅ 14 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security、cli） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
 | 发布包 | ✅ amd64 3.4 MB、arm64 3.2 MB；`verify-release.sh` 通过 |
@@ -832,6 +832,29 @@ P2 已关闭；后续计划见 §0.6。
 - 重复安装保留已有 `config.toml`。
 - 双架构发布包重新生成，包内均含新 `install.sh`。
 
+## 3ba. CLI 子命令（已完成）
+
+| 项 | 结果 | 位置 |
+| --- | --- | --- |
+| 入口 | 安装后软链 `/usr/local/bin/iptv-proxy` → `<prefix>/iptv-proxy.sh` | `install.sh` |
+| 启停 | `start`、`stop`、`restart`、`status`；systemd/OpenRC 优先，缺失时 PID 文件 | `packaging/iptv-proxy.sh` |
+| 日志/地址 | `log [行数]`、`url`；`url` 输出面板地址与账号 | 同上 |
+| 端口 | `port <N>` 改 `[server].bind` 并重启 | 同上 |
+| 密码 | `pass <密码> [账号]` 写 `password_sha256` / `username` 并重启 | 同上 |
+| 更新 | `update` 换二进制、保留配置；来源 `IPTV_PROXY_{BIN,ARCHIVE,URL}` 或本地 `dist/` | 同上 |
+| 重装 | `reinstall` 备份 `config.toml.bak`，重置配置，可选换二进制 | 同上 |
+| 卸载 | `uninstall` 移除服务与软链；选 `N` 保留数据 | 同上 |
+| 非交互 | `IPTV_PROXY_YES=1` 跳过重装/删除确认；`uninstall` 也接受管道 `y` | 同上 |
+| 配置写入 | 按段定位，不误改同名字段；密码 SHA-256；无明文 | 同上 |
+| 样例配置 | `disk_path` 改为 `./cache`，支持自定义安装目录 | `packaging/config.toml.example` |
+
+验证：
+- `sh -n`、`dash -n` 通过。
+- `scripts/smoke-cli.sh`：端口、非法端口、短密码、密码/账号、`url`、更新、重装、卸载保留数据均通过。
+- CI 增加 CLI 冒烟步骤。
+
+不覆盖：目标 `iptv-proxy` 交互菜单。子命令行为已覆盖；菜单不阻塞脚本化运维。
+
 ## 4. 进度日志
 
 | 日期 | 事项 | 结果 |
@@ -874,6 +897,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **P3-07 上游代理**：分组级与频道级 `proxy`，频道优先；播放/回看/Remux/录制共用 | ✅ §3ax |
 | 2026-10-21 | **P3-08 差分复验**：`compare-p0.sh` 22 项差异 0；新增端点差异登记 | ✅ §3ay |
 | 2026-10-21 | **一键安装**：根目录 `install.sh` 支持发布包/`dist`/URL，注册服务并保留配置；README 补说明 | ✅ §3az |
+| 2026-10-21 | **CLI 子命令**：`iptv-proxy` 支持启停、日志、地址、端口、密码、更新、重装、卸载；安装时创建软链 | ✅ §3ba |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）
 

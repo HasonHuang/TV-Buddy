@@ -120,7 +120,7 @@
 iptv-proxy-<version>-<arch>/
 ├─ iptv-proxy            静态 musl 二进制
 ├─ config.toml.example   首次安装复制为 config.toml
-├─ iptv-proxy.sh         启停脚本（start/stop/restart/status/log）
+├─ iptv-proxy.sh         管理 CLI（启停、端口、密码、更新、卸载）
 ├─ install.sh            安装到 /opt/iptv-proxy，注册服务
 ├─ iptv-proxy.service    systemd 单元
 └─ iptv-proxy.openrc     Alpine OpenRC 服务
@@ -135,7 +135,7 @@ iptv-proxy-<version>-<arch>/
 | 问题 | 处理 |
 | --- | --- |
 | 是否复刻目标的"面板保存"规范化格式 | 用 `toml::to_string_pretty`；不追求与目标逐字节相同 |
-| 安装脚本是否需要 `uninstall` | S-CLI-02 登记；P2 决定 |
+| CLI `update` 的下载源 | 用 `IPTV_PROXY_{BIN,ARCHIVE,URL}` 覆盖；本仓库未发布 release 资产 |
 | `disk_path` 变更是否允许热重载 | 当前要求重启（与目标一致） |
 
 ## 9. `[share]`

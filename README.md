@@ -69,6 +69,7 @@ sudo ./install.sh --archive https://example.com/iptv-proxy-0.1.0-arm64.tar.gz
 | `--prefix <目录>` | 安装目录；默认 `/opt/iptv-proxy` |
 | `--archive <路径或 URL>` | 指定 tar.gz 安装包 |
 | `--no-service` | 不注册 systemd/OpenRC 服务 |
+| `--no-link` | 不创建 `iptv-proxy` 命令软链 |
 | `--start` | 安装后立即启动服务 |
 | `-h`、`--help` | 显示帮助 |
 
@@ -77,7 +78,8 @@ sudo ./install.sh --archive https://example.com/iptv-proxy-0.1.0-arm64.tar.gz
 - 二进制：`<prefix>/iptv-proxy`
 - 配置：`<prefix>/config.toml`；已有配置不覆盖
 - 缓存：`<prefix>/cache/`
-- 启停脚本：`<prefix>/iptv-proxy.sh`
+- 管理脚本：`<prefix>/iptv-proxy.sh`
+- 命令软链：`/usr/local/bin/iptv-proxy`；可用 `--no-link` 跳过
 - 服务单元：systemd 或 OpenRC；按系统自动选择
 
 示例：
@@ -90,6 +92,52 @@ sudo ./install.sh --prefix /srv/iptv --start
 ./install.sh --prefix "$HOME/iptv" --no-service
 ```
 
+## 命令行管理
+
+安装后可用 `iptv-proxy` 管理服务。命令由 `<prefix>/iptv-proxy.sh` 提供。
+
+| 命令 | 作用 |
+| --- | --- |
+| `iptv-proxy start` | 启动服务 |
+| `iptv-proxy stop` | 停止服务 |
+| `iptv-proxy restart` | 重启服务 |
+| `iptv-proxy status` | 查看状态 |
+| `iptv-proxy log [行数]` | 查看日志；终端下持续跟随 |
+| `iptv-proxy url` | 打印面板地址与账号 |
+| `iptv-proxy port <N>` | 修改面板端口并重启 |
+| `iptv-proxy pass <密码> [账号]` | 修改密码，可同时改账号 |
+| `iptv-proxy update` | 更换二进制，保留配置 |
+| `iptv-proxy reinstall` | 备份配置后重装 |
+| `iptv-proxy uninstall` | 移除服务；询问是否删除数据 |
+
+`port` 与 `pass` 直接改 `config.toml`，随后重启服务。旧登录会话失效。
+
+`update` 需要更新源。按优先级读取：
+
+```bash
+# 本地二进制
+IPTV_PROXY_BIN=/path/to/iptv-proxy iptv-proxy update
+
+# 本地 tar.gz
+IPTV_PROXY_ARCHIVE=/path/to/iptv-proxy.tar.gz iptv-proxy update
+
+# 远程 tar.gz 或二进制；{arch} 替换为 amd64/arm64
+IPTV_PROXY_URL=https://example.com/iptv-proxy-{arch}.tar.gz iptv-proxy update
+```
+
+未设置更新源时，脚本检查 `<prefix>/dist` 与 `<prefix>/../dist` 下的最新同架构包。
+
+`uninstall` 选择 `N` 只停服务并保留 `<prefix>`。配置与缓存不会删除。
+无人值守时设 `IPTV_PROXY_YES=1`，直接重装或删除数据。
+
+示例：
+
+```bash
+sudo iptv-proxy port 8080
+sudo iptv-proxy pass 'new-password' admin
+sudo iptv-proxy log 200
+```
+
 ## 测试
 
 ```bash
@@ -98,6 +146,7 @@ scripts/smoke-m1.sh   # 分组/频道 CRUD、导出、订阅与 access 过滤、
 scripts/smoke-m2.sh   # 播放链路、切片伪装、缓存窗口、302 占位（含伪上游）
 scripts/smoke-m3.sh   # 直连模式：redirect/rewrite/passthrough、remux/dash 就绪语义
 scripts/smoke-m4.sh   # 热重载、看门狗冷却、缓存状态与清空、指标与日志
+scripts/smoke-cli.sh  # CLI：端口、密码、启停、更新、重装、卸载保留数据
 scripts/smoke-epg.sh  # EPG：采集、/epg.xml[.gz]、/epg 页面与 /epg/api/*、状态与刷新
 scripts/smoke-logo.sh # 台标库：上传、公开取图与列表、删除
 scripts/smoke-backup.sh # 备份与恢复：导出 gzip、改动后回滚、拒绝非法内容
