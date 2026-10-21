@@ -391,6 +391,7 @@ impl Manager {
             if let Ok(xml) = crate::http::routes::stream::fetch(state, &upstream, gid, cid).await {
                 if let Ok(presentation) = dash::parse_presentation(&xml, &upstream) {
                     let formats = disguise_formats(state);
+                    let mut segment_count = 0;
                     for (index, stream) in presentation.streams.iter().enumerate() {
                         let rendered = render_media(
                             &presentation,
@@ -405,8 +406,10 @@ impl Manager {
                                 track_index: index,
                             },
                         );
+                        segment_count = segment_count.max(rendered.segment_count);
                         self.set_entries(gid, cid, rendered.entries);
                     }
+                    self.set_ready(gid, cid, segment_count);
                 }
             }
             entry = self.entry(gid, cid, rest);

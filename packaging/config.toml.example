@@ -28,6 +28,24 @@ disk_path = "./cache"
 # target = "zh-cn"
 # mtran_batch = 50
 
+# DASH 分组把 MPD 转成 HLS。`format = "mpd"` 时订阅用 `.mpd` 扩展名。
+# `mpd_keep_seconds > 0` 只保留媒体清单末尾的时间窗；`0` 保留全部。
+# `url_pool_size > 1` 且 MPD 有多个 <BaseURL> 时，视频用首选，音频/字幕轮询其余。
+#
+# [[groups]]
+# id = "dash"
+# name = "DASH 示例"
+# mode = "dash"
+# access = "public"
+# format = "mpd"
+# mpd_keep_seconds = 0
+#
+# [[groups.channels]]
+# id = "d1"
+# name = "DASH 频道"
+# url = "http://example.com/live.mpd"
+# url_pool_size = 1
+
 [[groups]]
 id = "demo"
 name = "示例分组"
