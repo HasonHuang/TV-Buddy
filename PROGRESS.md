@@ -38,7 +38,7 @@ flowchart LR
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 170 项（113 单元 + 57 集成） |
+| `cargo test --offline` | ✅ 171 项（114 单元 + 57 集成） |
 | 冒烟脚本 | ✅ 14 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
@@ -920,9 +920,9 @@ P2 已关闭；后续计划见 §0.6。
 | 限制 | CENC 不解密；`proxy`+MPD 仍原样透传；目标 URL 池正常取用方式未观测 | §0.5 |
 
 验证：
-- 单元：MPD 摘要、Timeline/BaseURL、`r=-1` + `timeShiftBufferDepth`、多 BaseURL、SegmentList、主/媒体清单、时间窗、URL 池轮询、媒体序号、动态清单无 `ENDLIST`。
+- 单元：MPD 摘要、Timeline/BaseURL、`r=-1` + `timeShiftBufferDepth`、多 BaseURL、SegmentList、主/媒体清单、时间窗、URL 池轮询、媒体序号、动态清单无 `ENDLIST`、BaseURL 查询串继承。
 - 集成：`dash_mode_converts_mpd_to_hls_and_proxies_segments` 覆盖主清单、媒体清单、init、切片、状态与 `keep_seconds=4`；`dash_mode_resolver_url_is_used_for_media_playlist` 覆盖解析脚本地址沿用到媒体清单。
-- `cargo test --offline` 170 项（113 单元 + 57 集成）。
+- `cargo test --offline` 171 项（114 单元 + 57 集成）。
 
 ## 4. 进度日志
 

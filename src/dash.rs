@@ -129,8 +129,20 @@ fn resolve_url(base: &str, reference: &str) -> String {
     if reference.starts_with("http://") || reference.starts_with("https://") {
         return reference.to_string();
     }
-    match Url::parse(base).and_then(|base| base.join(reference)) {
-        Ok(url) => url.to_string(),
+    let Ok(base_url) = Url::parse(base) else {
+        return reference.to_string();
+    };
+    let base_query = base_url.query().map(str::to_string);
+    match base_url.join(reference) {
+        Ok(mut url) => {
+            // 目录级 BaseURL 的签名/Token 查询串应带到相对切片地址。
+            if !reference.contains('?') && url.query().is_none() {
+                if let Some(query) = base_query {
+                    url.set_query(Some(&query));
+                }
+            }
+            url.to_string()
+        }
         Err(_) => reference.to_string(),
     }
 }
@@ -749,6 +761,27 @@ mod tests {
         assert!(presentation.is_live);
         assert_eq!(presentation.streams[0].segments.len(), 3);
         assert_eq!(presentation.streams[0].segments[0].time, 1000);
+    }
+
+    #[test]
+    fn carries_base_query_to_relative_segments() {
+        let xml = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT2S">
+  <BaseURL>http://cdn.example/dash/?token=abc</BaseURL>
+  <Period>
+    <AdaptationSet contentType="video">
+      <SegmentTemplate timescale="1000" media="s-$Number$.m4s" startNumber="1">
+        <SegmentTimeline><S d="2000" r="0"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v0" width="640" height="360"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        let presentation = parse_presentation(xml, "http://origin.example/live.mpd").expect("解析");
+        assert_eq!(
+            presentation.streams[0].segments[0].urls[0],
+            "http://cdn.example/dash/s-1.m4s?token=abc"
+        );
     }
 
     #[test]
