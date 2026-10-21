@@ -828,19 +828,23 @@ P2 已关闭；后续计划见 §0.6。
 - `sh -n install.sh` 通过。
 - Alpine 容器内从仓库自动选包、显式 `--archive`、URL（带/不带 `.sha256`）、解包目录内脚本均安装成功。
 - 重复安装保留已有 `config.toml`。
-- 双架构发布包重新生成，包内均含新 `install.sh`。
+- 双架构发布包重新生成，包内均含新 `install.sh` 与交互菜单 CLI。
 
-## 3ba. CLI 子命令（已完成）
+## 3ba. CLI 子命令与交互菜单（已完成）
 
 | 项 | 结果 | 位置 |
 | --- | --- | --- |
 | 入口 | 安装后软链 `/usr/local/bin/iptv-proxy` → `<prefix>/iptv-proxy.sh` | `install.sh` |
+| 交互菜单 | 无参数或 `menu` 打开；更新、地址、启停、状态、日志、端口、账号密码、重装、卸载 | `packaging/iptv-proxy.sh` |
+| 目标证据 | 公开 `IPTV Proxy/iptv-proxy.sh` v1.1.0 菜单结构；未复制脚本；v0.8.2 菜单未单独取证 | 2026-10-21 观测 |
+| 菜单差异 | 文案与编号按本项目调整；安装委托 `install.sh`；非 TTY 不暂停 | 同上 |
 | 启停 | `start`、`stop`、`restart`、`status`；systemd/OpenRC 优先，缺失时 PID 文件 | `packaging/iptv-proxy.sh` |
 | 日志/地址 | `log [行数]`、`url`；`url` 输出面板地址与账号 | 同上 |
 | 端口 | `port <N>` 改 `[server].bind` 并重启 | 同上 |
-| 密码 | `pass <密码> [账号]` 写 `password_sha256` / `username` 并重启 | 同上 |
+| 密码 | `pass [密码] [账号]` 写 `password_sha256` / `username` 并重启；无参数交互 | 同上 |
 | 更新 | `update` 换二进制、保留配置；来源 `IPTV_PROXY_{BIN,ARCHIVE,URL}` 或本地 `dist/` | 同上 |
 | 重装 | `reinstall` 备份 `config.toml.bak`，重置配置，可选换二进制 | 同上 |
+| 安装/修复 | 发布包目录执行 `install [参数]`，调用同目录 `install.sh`，成功后打开已安装菜单 | 同上 |
 | 卸载 | `uninstall` 移除服务与软链；选 `N` 保留数据 | 同上 |
 | 非交互 | `IPTV_PROXY_YES=1` 跳过重装/删除确认；`uninstall` 也接受管道 `y` | 同上 |
 | 配置写入 | 按段定位，不误改同名字段；密码 SHA-256；无明文 | 同上 |
@@ -849,10 +853,11 @@ P2 已关闭；后续计划见 §0.6。
 
 验证：
 - `sh -n`、`dash -n` 通过。
-- `scripts/smoke-cli.sh`：端口、非法端口、短密码、密码/账号、`url`、更新、重装、卸载保留数据均通过。
+- `scripts/smoke-cli.sh`：端口、非法端口、短密码、密码/账号、`url`、更新、重装、卸载保留数据均通过；菜单入口、状态、错误恢复与卸载取消均覆盖。
 - CI 增加 CLI 冒烟步骤。
-
-不覆盖：目标 `iptv-proxy` 交互菜单。子命令行为已覆盖；菜单不阻塞脚本化运维。
+- 交互菜单在非 TTY 下可脚本化：不暂停，按行读取选项。
+- 发布包 amd64 容器内验证：菜单安装到 `/opt/iptv-proxy`、启动服务并打开已安装菜单。
+- 双架构发布包重新生成，`verify-release.sh` 全绿。
 
 ## 3bb. MTranServer 翻译联调（已完成）
 
@@ -922,6 +927,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **P3-08 差分复验**：`compare-p0.sh` 22 项差异 0；新增端点差异登记 | ✅ §3ay |
 | 2026-10-21 | **一键安装**：根目录 `install.sh` 支持发布包/`dist`/URL，注册服务并保留配置；README 补说明 | ✅ §3az |
 | 2026-10-21 | **CLI 子命令**：`iptv-proxy` 支持启停、日志、地址、端口、密码、更新、重装、卸载；安装时创建软链 | ✅ §3ba |
+| 2026-10-21 | **交互菜单**：无参数或 `menu` 打开；覆盖更新、地址、启停、状态、日志、端口、账号密码、重装、卸载与安装修复 | ✅ §3ba |
 | 2026-10-21 | **翻译服务**：兼容 MTranServer v5、旧接口与单条回退；支持 Token；真实服务联调通过 | ✅ §3bb |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）

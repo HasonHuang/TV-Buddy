@@ -33,9 +33,22 @@ CLI_LINK=${CLI_LINK:-/usr/local/bin/iptv-proxy}
 DEFAULT_PORT=19899
 DEFAULT_USER=admin
 DEFAULT_PASS=admin
+VERSION=${IPTV_PROXY_CLI_VERSION:-0.1.0}
 TMP_DIR=
 
+if [ -t 1 ]; then
+    RESET=$(printf '\033[0m')
+    BLUE=$(printf '\033[36m')
+    GREEN=$(printf '\033[32m')
+    YELLOW=$(printf '\033[1;33m')
+    RED=$(printf '\033[31m')
+    DIM=$(printf '\033[2m')
+else
+    RESET= BLUE= GREEN= YELLOW= RED= DIM=
+fi
+
 cleanup() {
+    stty echo 2>/dev/null || true
     if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
         rm -rf "$TMP_DIR"
     fi
@@ -53,6 +66,7 @@ iptv-proxy 管理 CLI
 用法：iptv-proxy <命令> [参数]
 
 命令：
+  menu                  打开交互菜单（无参数默认）
   start                 启动服务
   stop                  停止服务
   restart               重启服务
@@ -60,9 +74,10 @@ iptv-proxy 管理 CLI
   log [行数]            查看日志；终端下持续跟随
   url                   打印面板地址与账号
   port <N>              修改面板端口并重启
-  pass <密码> [账号]    修改面板密码，可同时改账号
+  pass [密码] [账号]    修改面板密码，可同时改账号；无参数进入交互
   update                更新二进制，保留配置
   reinstall             备份配置后重装
+  install [参数]        调用同目录 install.sh 安装或修复
   uninstall             卸载服务；询问是否删除数据
 
 update 来源（按优先级）：
@@ -102,6 +117,16 @@ svc_managed() {
     return 1
 }
 
+svc_active() {
+    if has_systemd && [ -f "$SERVICE_FILE" ]; then
+        systemctl is-active --quiet "$SERVICE_NAME"
+    elif has_openrc && [ -f "$OPENRC_FILE" ]; then
+        rc-service "$SERVICE_NAME" status >/dev/null 2>&1
+    else
+        daemon_running
+    fi
+}
+
 svc_do() {
     if has_systemd && [ -f "$SERVICE_FILE" ]; then
         systemctl "$1" "$SERVICE_NAME"
@@ -112,8 +137,13 @@ svc_do() {
     fi
 }
 
+is_installed() {
+    [ -x "$BIN" ] && [ -f "$CFG" ]
+}
+
 require_installed() {
     [ -x "$BIN" ] || fail "未安装：$BIN"
+    [ -f "$CFG" ] || fail "缺少配置文件：$CFG"
 }
 
 ensure_mutable() {
@@ -443,6 +473,34 @@ install_binary() {
 
 # ---- 命令实现 ----
 
+find_installer() {
+    for candidate in "$BASE_DIR/install.sh" "$BASE_DIR/../install.sh" "$BASE_DIR/../../install.sh"; do
+        [ -f "$candidate" ] && {
+            printf '%s' "$candidate"
+            return 0
+        }
+    done
+    return 1
+}
+
+cmd_install() {
+    installer=$(find_installer) || {
+        if is_installed; then
+            info "已安装：$BASE_DIR"
+            info "更新用 iptv-proxy update；重装用 iptv-proxy reinstall"
+            return 0
+        fi
+        fail "找不到 install.sh；请从发布包运行 ./install.sh"
+    }
+    info "运行安装脚本：$installer"
+    sh "$installer" --start "$@"
+    if [ -x "$CLI_LINK" ]; then
+        info "安装完成，打开已安装菜单"
+        exec "$CLI_LINK" menu
+    fi
+    info "安装完成；重新运行 iptv-proxy 打开菜单"
+}
+
 cmd_start() {
     if svc_managed; then
         need_root
@@ -472,15 +530,15 @@ cmd_status() {
     if svc_managed; then
         if has_systemd && [ -f "$SERVICE_FILE" ]; then
             systemctl status "$SERVICE_NAME" --no-pager -l 2>/dev/null || true
-            systemctl is-active --quiet "$SERVICE_NAME" || exit 1
+            systemctl is-active --quiet "$SERVICE_NAME" || return 1
         else
-            rc-service "$SERVICE_NAME" status 2>/dev/null || exit 1
+            rc-service "$SERVICE_NAME" status 2>/dev/null || return 1
         fi
     elif daemon_running; then
         info "运行中（pid $(cat "$PID_FILE")）"
     else
         info "未运行"
-        exit 1
+        return 1
     fi
 }
 
@@ -529,17 +587,46 @@ cmd_port() {
     show_url
 }
 
+cmd_pass_interactive() {
+    require_installed
+    current=$(cfg_get panel username || true)
+    printf '当前账号：%s\n' "${current:-$DEFAULT_USER}"
+    printf '新账号 [回车=不改]：'
+    read -r account || account=
+    printf '新密码（至少 4 位，回车=不改）：'
+    stty -echo 2>/dev/null || true
+    read -r password || password=
+    stty echo 2>/dev/null || true
+    printf '\n'
+
+    if [ -z "$account" ] && [ -z "$password" ]; then
+        info "未修改"
+        return 0
+    fi
+    if [ -n "$password" ]; then
+        [ "${#password}" -ge 4 ] || fail "密码太短（至少 4 位）"
+    fi
+    ensure_mutable
+    if [ -n "$password" ]; then
+        hash=$(sha256hex "$password")
+        cfg_set panel password_sha256 "\"$hash\""
+    fi
+    if [ -n "$account" ]; then
+        cfg_set panel username "\"$(toml_escape "$account")\""
+    fi
+    restart_runtime || fail "配置已写入，但重启失败；见 $LOG_FILE"
+    [ -n "$password" ] && info "密码已更新，旧登录会话失效"
+    [ -n "$account" ] && info "账号已改为：$account"
+}
+
 cmd_pass() {
     require_installed
     password=${1:-}
     account=${2:-}
     if [ -z "$password" ]; then
         [ -t 0 ] || fail "用法：iptv-proxy pass <密码> [账号]"
-        printf '新密码：'
-        stty -echo 2>/dev/null || true
-        read -r password
-        stty echo 2>/dev/null || true
-        printf '\n'
+        cmd_pass_interactive
+        return
     fi
     [ "${#password}" -ge 4 ] || fail "密码太短（至少 4 位）"
     ensure_mutable
@@ -716,10 +803,106 @@ cmd_uninstall() {
     esac
 }
 
+# ---- 交互菜单 ----
+
+state_line() {
+    if ! is_installed; then
+        printf '%s未安装%s' "$DIM" "$RESET"
+        return
+    fi
+    if svc_managed; then
+        if svc_active; then
+            printf '%s● 运行中%s' "$GREEN" "$RESET"
+        else
+            printf '%s○ 已停止%s' "$RED" "$RESET"
+        fi
+    elif daemon_running; then
+        printf '%s● 运行中（PID %s）%s' "$GREEN" "$(cat "$PID_FILE" 2>/dev/null || true)" "$RESET"
+    else
+        printf '%s○ 已安装，未运行%s' "$YELLOW" "$RESET"
+    fi
+}
+
+pause() {
+    [ -t 0 ] || return 0
+    printf '\n按回车返回 ...'
+    read -r _ || true
+}
+
+main_menu() {
+    while :; do
+        if [ -t 1 ]; then
+            clear 2>/dev/null || true
+        fi
+        printf '%s=============================================%s\n' "$BLUE" "$RESET"
+        printf '       iptv-proxy 安装 · 管理   %sv%s%s\n' "$DIM" "$VERSION" "$RESET"
+        printf '%s=============================================%s\n' "$BLUE" "$RESET"
+        printf '  状态: %s\n' "$(state_line)"
+        if is_installed; then
+            account=$(cfg_get panel username || true)
+            printf '  目录: %s%s%s\n' "$DIM" "$BASE_DIR" "$RESET"
+            printf '  端口: %s    账号: %s\n' "$(get_port)" "${account:-$DEFAULT_USER}"
+        fi
+        printf '%s---------------------------------------------%s\n' "$BLUE" "$RESET"
+        if is_installed; then
+            printf '   1) 更新二进制(保留配置)  2) 查看面板地址\n'
+            printf '   3) 启动   4) 停止   5) 重启   6) 状态   7) 日志\n'
+            printf '%s--- 面板设置 --------------------------------%s\n' "$BLUE" "$RESET"
+            printf '   8) 改端口        9) 改账号密码\n'
+            printf '%s---------------------------------------------%s\n' "$BLUE" "$RESET"
+            printf '   r) %s重装(清空配置重来)%s   u) %s卸载%s\n' "$YELLOW" "$RESET" "$RED" "$RESET"
+        else
+            printf '   1) 安装/修复 iptv-proxy\n'
+        fi
+        printf '   0) 退出\n'
+        printf '%s---------------------------------------------%s\n' "$BLUE" "$RESET"
+        printf '请输入: '
+        if ! read -r opt; then
+            printf '\n'
+            return 0
+        fi
+        printf '\n'
+
+        if ! is_installed; then
+            case "$opt" in
+                1) cmd_install || true; pause ;;
+                0|q|Q) return 0 ;;
+                *) warn "无效输入"; [ -t 0 ] && sleep 1 || true ;;
+            esac
+            continue
+        fi
+
+        case "$opt" in
+            1) ( cmd_update ) || true; pause ;;
+            2) ( cmd_url ) || true; pause ;;
+            3) ( cmd_start ) || true; pause ;;
+            4) ( cmd_stop ) || true; pause ;;
+            5) ( cmd_restart ) || true; pause ;;
+            6) ( cmd_status ) || true; pause ;;
+            7) ( cmd_log ) || true ;;
+            8) ( cmd_port ) || true; pause ;;
+            9) ( cmd_pass ) || true; pause ;;
+            r|R) ( cmd_reinstall ) || true; pause ;;
+            u|U)
+                printf '确认卸载？[y/N] '
+                if read -r answer && { [ "$answer" = "y" ] || [ "$answer" = "Y" ]; }; then
+                    ( cmd_uninstall ) || true
+                    pause
+                else
+                    warn "已取消"
+                fi
+                ;;
+            0|q|Q) return 0 ;;
+            *) warn "无效输入"; [ -t 0 ] && sleep 1 || true ;;
+        esac
+    done
+}
+
 cmd=${1:-}
 [ "$#" -gt 0 ] && shift
 case "$cmd" in
-    ""|menu|help|-h|--help) usage ;;
+    ""|menu) main_menu ;;
+    help|-h|--help) usage ;;
     start) cmd_start ;;
     stop) cmd_stop ;;
     restart|reload) cmd_restart ;;
@@ -730,6 +913,7 @@ case "$cmd" in
     pass) cmd_pass "$@" ;;
     update) cmd_update ;;
     reinstall) cmd_reinstall ;;
+    install) cmd_install "$@" ;;
     uninstall|remove) cmd_uninstall ;;
     *)
         usage >&2

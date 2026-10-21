@@ -98,6 +98,7 @@ sudo ./install.sh --prefix /srv/iptv --start
 
 | 命令 | 作用 |
 | --- | --- |
+| `iptv-proxy` / `iptv-proxy menu` | 打开交互菜单 |
 | `iptv-proxy start` | 启动服务 |
 | `iptv-proxy stop` | 停止服务 |
 | `iptv-proxy restart` | 重启服务 |
@@ -105,10 +106,13 @@ sudo ./install.sh --prefix /srv/iptv --start
 | `iptv-proxy log [行数]` | 查看日志；终端下持续跟随 |
 | `iptv-proxy url` | 打印面板地址与账号 |
 | `iptv-proxy port <N>` | 修改面板端口并重启 |
-| `iptv-proxy pass <密码> [账号]` | 修改密码，可同时改账号 |
+| `iptv-proxy pass [密码] [账号]` | 修改密码，可同时改账号；无参数进入交互 |
 | `iptv-proxy update` | 更换二进制，保留配置 |
 | `iptv-proxy reinstall` | 备份配置后重装 |
+| `iptv-proxy install [参数]` | 在发布包目录调用 `install.sh` 安装或修复 |
 | `iptv-proxy uninstall` | 移除服务；询问是否删除数据 |
+
+无参数或 `menu` 打开交互菜单。菜单含更新、面板地址、启停、状态、日志、改端口、改账号密码、重装与卸载。
 
 `port` 与 `pass` 直接改 `config.toml`，随后重启服务。旧登录会话失效。
 
@@ -133,6 +137,7 @@ IPTV_PROXY_URL=https://example.com/iptv-proxy-{arch}.tar.gz iptv-proxy update
 示例：
 
 ```bash
+sudo iptv-proxy                 # 打开菜单
 sudo iptv-proxy port 8080
 sudo iptv-proxy pass 'new-password' admin
 sudo iptv-proxy log 200

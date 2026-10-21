@@ -47,6 +47,22 @@ contains() {
 "$CLI" start >/dev/null
 "$CLI" status | grep -q '运行中' || fail "status 未显示运行中"
 
+printf '0\n' | "$CLI" >"$WORK/menu.out"
+contains "$WORK/menu.out" "iptv-proxy 安装 · 管理"
+contains "$WORK/menu.out" "1) 更新二进制"
+printf '6\n0\n' | "$CLI" menu >"$WORK/menu-status.out"
+contains "$WORK/menu-status.out" "运行中"
+printf 'x\n0\n' | "$CLI" menu >"$WORK/menu-invalid.out" 2>&1
+contains "$WORK/menu-invalid.out" "无效输入"
+printf 'u\nn\n0\n' | "$CLI" menu >"$WORK/menu-cancel.out" 2>&1
+contains "$WORK/menu-cancel.out" "已取消"
+[ -x "$WORK/iptv-proxy" ] || fail "菜单取消卸载后二进制丢失"
+"$CLI" stop >/dev/null
+printf '6\n3\n0\n' | "$CLI" menu >"$WORK/menu-recover.out" 2>&1
+contains "$WORK/menu-recover.out" "未运行"
+contains "$WORK/menu-recover.out" "已启动"
+"$CLI" status | grep -q '运行中' || fail "菜单启动后未运行"
+
 if "$CLI" port 70000 >/dev/null 2>&1; then
     fail "非法端口未被拒绝"
 fi

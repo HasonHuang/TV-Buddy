@@ -102,7 +102,7 @@
 | `edge` | `X-IPP-Edge-Secret` 校验、CF 网段 | P2 | S-EDGE-01…03 |
 | `backup` | tar.gz 备份与恢复 | P2 | S-BAK-01/02 |
 | `assets` | 素材转换、`ffmpeg-status` | P2 | S-DEP-01/04 |
-| `cli` | `update`/`port`/`pass`/`log`/`url`/`uninstall` | P2 | S-CLI-01/02、S-AUTH-08 |
+| `cli` | 交互菜单、`install`/`update`/`port`/`pass`/`log`/`url`/`uninstall` | P2 | S-CLI-01/02、S-AUTH-08 |
 
 ## 5. 请求流水线
 

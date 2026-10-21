@@ -107,7 +107,7 @@
 ├─ config.toml         首次启动生成默认配置
 ├─ iptv-proxy.log
 ├─ cache/
-└─ iptv-proxy.sh       启停脚本
+└─ iptv-proxy.sh       管理 CLI（无参数打开菜单）
 ```
 
 | 项 | 实现 | 依据 |
@@ -125,7 +125,7 @@
 iptv-proxy-<version>-<arch>/
 ├─ iptv-proxy            静态 musl 二进制
 ├─ config.toml.example   首次安装复制为 config.toml
-├─ iptv-proxy.sh         管理 CLI（启停、端口、密码、更新、卸载）
+├─ iptv-proxy.sh         管理 CLI（菜单、启停、端口、密码、更新、卸载）
 ├─ install.sh            安装到 /opt/iptv-proxy，注册服务
 ├─ iptv-proxy.service    systemd 单元
 └─ iptv-proxy.openrc     Alpine OpenRC 服务
