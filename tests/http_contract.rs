@@ -2811,6 +2811,58 @@ target = "zh-cn"
 }
 
 #[tokio::test]
+async fn subtitle_translation_converts_ass_to_vtt() {
+    let extra = r#"
+[subtitle.translate]
+enabled = true
+url = "{upstream}"
+target = "zh-cn"
+"#;
+    let fixture = fixture_with_all(false, extra).await;
+    let auth = format!("Bearer {}", login(&fixture).await);
+    let directory = fixture.dir.join("cache/subtitles");
+    std::fs::create_dir_all(&directory).expect("字幕目录");
+    std::fs::write(
+        directory.join("demo.ass"),
+        "[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,{\\i1}Hello\\NWorld\n",
+    )
+    .expect("写字幕");
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/subtitle/translate", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "file": "demo.ass" }).to_string())
+        .send()
+        .await
+        .expect("翻译");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["format"], "vtt");
+    let download = body["download"].as_str().expect("下载地址").to_string();
+    let text = fixture
+        .client
+        .get(format!("{}{download}", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("下载")
+        .text()
+        .await
+        .expect("正文");
+    assert!(text.starts_with("WEBVTT\n\n"), "{text}");
+    assert!(
+        text.contains(
+            "00:00:01.000 --> 00:00:03.500\nHello\n[zh-cn]译:Hello\nWorld\n[zh-cn]译:World\n"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("{\\i1}"), "{text}");
+}
+
+#[tokio::test]
 async fn subtitle_translation_requires_engine_config() {
     let fixture = fixture().await;
     let auth = format!("Bearer {}", login(&fixture).await);

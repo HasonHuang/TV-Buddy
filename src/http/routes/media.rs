@@ -373,6 +373,8 @@ pub async fn translate_status(
         "source": cfg.source,
         "targets": cfg.targets,
         "translation_first": cfg.translation_first,
+        "formats": ["srt", "vtt", "ass", "ssa"],
+        "converts_ass": true,
         "cached": cached,
     }))
 }
@@ -413,8 +415,15 @@ pub async fn translate_subtitle(
     })?;
     let text =
         String::from_utf8(bytes).map_err(|_| ApiError::bad_request("字幕不是 UTF-8 文本"))?;
-    let format =
+    let detected =
         subtitle::detect(&text).map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
+    let (text, format) = if detected == subtitle::Format::Ass {
+        let converted = subtitle::convert_ass_to_vtt(&text)
+            .map_err(|error| ApiError::bad_request(format!("ASS 转换失败: {error:#}")))?;
+        (converted, subtitle::Format::Vtt)
+    } else {
+        (text, detected)
+    };
 
     let directory = subtitle_cache_dir(&state);
     let name = subtitle_cache_name(&file, &target, cfg.translation_first, format);

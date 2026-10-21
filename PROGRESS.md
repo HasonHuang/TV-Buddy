@@ -24,7 +24,7 @@
 flowchart LR
   P0["P0 逆向与核心<br/>✅ 完成"] --> P1["P1 流处理与增值<br/>✅ 完成"]
   P1 --> P2["P2 运维与管理面<br/>✅ 完成"]
-  P2 --> P3["P3 兼容性补全<br/>🔄 4/8"]
+  P2 --> P3["P3 兼容性补全<br/>🔄 5/8"]
 ```
 
 | 阶段 | 范围 | 进度 |
@@ -32,13 +32,13 @@ flowchart LR
 | P0 | 逆向、代理/直连、Token、缓存、播放链路、打包 | ██████████ 100% |
 | P1 | EPG、回看、remux、录制、台标、分享、安全面 | ██████████ 100% |
 | P2 | 订阅聚合、面板分区、DASH 回看、EPG/字幕翻译 | ██████████ 100% |
-| P3 | 目标剩余端点与兼容细节（见 §0.6） | ████░░░░░░ 4/8 |
+| P3 | 目标剩余端点与兼容细节（见 §0.6） | █████░░░░░ 5/8 |
 
 ### 0.3 质量门（2026-10-21）
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 148 项（97 单元 + 51 集成） |
+| `cargo test --offline` | ✅ 150 项（98 单元 + 52 集成） |
 | 冒烟脚本 | ✅ 13 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
@@ -67,6 +67,7 @@ flowchart LR
 | DASH URL 池 `pool≥2` | 环境受限 | 目标侧 503，取用方式未观测（F-015） |
 | `/epg/api/*` 响应形状 | 自定 | 目标仅登记路由（S-EP-16） |
 | `l1/l2` 限流与每 IP 会话上限 | 不实现 | 触发条件未复现（F-010 §5） |
+| 播放侧 `compat_mode` 与 `srt_ua_keywords` | 不实现 | 目标未测出行为（D19 §3.5） |
 
 ### 0.6 任务计划（P3）
 
@@ -78,7 +79,7 @@ flowchart LR
 | P3-02 | `/subs/{status,groups,preview}` | M | 无 | 形状按 S-GAP-07；复用 `[playlist]` 聚合；集成测试覆盖保留/丢弃/分组映射 | ✅ |
 | P3-03 | `GET /panel/api/link-info` | S | 无 | 返回 `aliases`、`random_id_enabled`、`token`、`token_enabled`、`use_alias`；测试 | ✅ |
 | P3-04 | 安全面补全 | M | 无 | 登录失败 429 锁、`/unban` 每月 3 次；`l1/l2` 记为不实现 | ✅ |
-| P3-05 | 字幕格式扩展 | M | 可选 ffmpeg | ASS/SSA 转 SRT/VTT；`compat_mode` 与 `srt_ua_keywords`；测试 | ⏳ |
+| P3-05 | 字幕格式扩展 | M | 无 | 翻译端点接受 ASS/SSA 并转 VTT；`compat_mode` 记为不实现 | ✅ |
 | P3-06 | 真实翻译联调 | S | 本地 MTranServer | EPG 与字幕各跑一次；确认响应形状、分批、缓存、失败回退 | ⏳ |
 | P3-07 | 每频道代理覆盖 | M | 本地代理夹具 | `channel.proxy{kind,addr,user,pass}` 覆盖全局；所有上游请求生效 | ⏳ |
 | P3-08 | 目标差分回归 | S | v0.8.2 容器与样本 | 重跑 22 项对拍与新增端点；差异 0 或登记 | ⏳ |
@@ -758,6 +759,23 @@ P2 已关闭；后续计划见 §0.6。
 
 验证：`cargo test --offline` 148 项（97 单元 + 51 集成）。
 
+## 3aw. P3 · ASS/SSA 字幕翻译（已完成）
+
+证据：D19 §3.5 登记 ASS/SSA 未测。行为为本实现自定。
+
+| 项 | 结果 | 位置 |
+| --- | --- | --- |
+| 检测 | `[Script Info]` 或 `[Events]` → ASS/SSA | `src/subtitle.rs` |
+| 转换 | 读 `Format:` 与 `Dialogue:`；去 `{\…}`；`\N` 转换行；`\h` 转空格 | 同上 |
+| 时间 | `H:MM:SS.cc` → `HH:MM:SS.mmm` | 同上 |
+| 翻译 | 转 WebVTT 后走既有逐行流程；缓存后缀 `.vtt` | `src/http/routes/media.rs` |
+| 状态 | `/subtitle/translate/status` 增 `formats`、`converts_ass` | 同上 |
+| 测试 | 1 个单元 + 1 个集成 | `src/subtitle.rs`、`tests/http_contract.rs` |
+
+不实现：播放侧 `compat_mode` 与 `srt_ua_keywords`。目标行为未观测（D19 §3.5）。
+
+验证：`cargo test --offline` 150 项（98 单元 + 52 集成）。
+
 ## 4. 进度日志
 
 | 日期 | 事项 | 结果 |
@@ -796,6 +814,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **P3-02 订阅源预检**：`/subs/status`、`/subs/groups`、`/subs/preview`；映射/排除/白黑名单与 `trace` | ✅ §3at |
 | 2026-10-21 | **P3-03 链接审计**：`GET /panel/api/link-info` 返回目标形状；Token 关闭时为空串 | ✅ §3au |
 | 2026-10-21 | **P3-04 安全面**：登录失败 429 锁、自助解封 30 天 3 次、封禁期可访问 `/unban` | ✅ §3av |
+| 2026-10-21 | **P3-05 字幕格式**：ASS/SSA 检测与转 VTT；翻译缓存后缀 `.vtt` | ✅ §3aw |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）
 
