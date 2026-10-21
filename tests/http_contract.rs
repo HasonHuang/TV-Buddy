@@ -2234,6 +2234,29 @@ url = "{upstream}/dash/live.mpd"
     // keep_seconds = 4，仅保留最后两段。
     assert_eq!(body.matches("#EXTINF:").count(), 2, "{body}");
 
+    let session = login(&fixture).await;
+    let status: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/dash/status", fixture.base))
+            .header("authorization", format!("Bearer {session}"))
+            .send()
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析状态");
+    assert!(status.as_array().is_some(), "{status}");
+    assert_eq!(status[0]["stream_key"], "dg2_c1");
+    assert_eq!(status[0]["phase"], "ready");
+    assert!(status[0]["active_tracks"]
+        .as_array()
+        .expect("轨道数组")
+        .iter()
+        .any(|track| track["name"] == "video_720p" && track["kind"] == "video"));
+
     let segment_url = body
         .lines()
         .find(|line| {
