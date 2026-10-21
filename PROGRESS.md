@@ -735,4 +735,15 @@
 
 验证：`cargo test --offline` 132 项（88 单元 + 44 集成）。
 
-剩余（P2）：无。`dist/` 两个发布包构建于 `77c12c5`，早于翻译引擎；本机只有 arm64 工具链，arm64 与 amd64 包需在双架构镜像可用时重出。
+## 3as. 重新出包（P2 翻译引擎 + DASH 复验）
+
+| 项 | 状态 |
+| --- | --- |
+| amd64 | 3.4 MB |
+| arm64 | 3.2 MB |
+| 构建 | `scripts/build-release.sh`：`rust:1-alpine` 双架构，`--offline`，内嵌最新前端 |
+| `verify-release.sh` | ✅ 静态链接、`/health`、面板/台标资源、健康 401、分享默认 404 |
+
+验证：`cargo test --offline` 132 项；DASH 容器冒烟 4 项 × 3 次。
+
+剩余（P2）：无。
