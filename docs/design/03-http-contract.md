@@ -362,6 +362,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 方法 | 路径 | 响应 |
 | --- | --- | --- |
+| `GET` | `/panel/api/link-info` | `{"aliases":{},"random_id_enabled":false,"token":"","token_enabled":false,"use_alias":false}`；形状与目标一致（S-GAP-04）；Token 关闭时 `token` 为空串 |
 | `GET` | `/panel/api/security/token` | `{"enabled","ttl_hours","current","old"}`；`old` 为宽限期内的旧值 |
 | `POST` | `/panel/api/security/token/rotate` | `{"ok":true,"token":"<48hex>"}`；旧值保留 1 小时宽限（S-AUTH-09） |
 | `GET` | `/panel/api/security/ip/stats` | `{"count","banned","entries":[{"ip","requests","failures","banned","remaining_secs"}]}`，按请求数降序 |

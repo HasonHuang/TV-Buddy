@@ -13,6 +13,34 @@ use crate::{
     state::AppState,
 };
 
+/// `GET /panel/api/link-info`——播放链接与别名审计（S-GAP-04）。
+///
+/// 形状与目标一致：`aliases`、`random_id_enabled`、`token`、`token_enabled`、`use_alias`。
+/// Token 关闭时返回空串。
+pub async fn link_info(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
+    let config = state.snapshot();
+    let aliases = config
+        .auth
+        .extra
+        .get("aliases")
+        .and_then(|value| value.as_table())
+        .cloned()
+        .unwrap_or_default();
+    let use_alias = !aliases.is_empty();
+    let token = if config.auth.token_enabled {
+        state.play_tokens.current()
+    } else {
+        String::new()
+    };
+    Json(json!({
+        "aliases": aliases,
+        "random_id_enabled": config.auth.random_id_enabled,
+        "token": token,
+        "token_enabled": config.auth.token_enabled,
+        "use_alias": use_alias,
+    }))
+}
+
 /// `GET /panel/api/security/token`——当前 Token 与宽限期内的旧 Token。
 pub async fn token(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();

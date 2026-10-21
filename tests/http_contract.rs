@@ -1192,6 +1192,30 @@ async fn channel_headers_are_sent_upstream() {
 }
 
 #[tokio::test]
+async fn link_info_matches_target_shape() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/link-info", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert!(body["aliases"].is_object(), "{body}");
+    assert_eq!(body["random_id_enabled"], false);
+    assert_eq!(body["token_enabled"], true);
+    assert_eq!(body["use_alias"], false);
+    assert_eq!(body["token"].as_str().expect("token").len(), 48);
+
+    let response = fetch(&fixture, "/panel/api/link-info").await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn security_token_rotation_and_ip_ban() {
     let fixture = fixture().await;
     let session = login(&fixture).await;

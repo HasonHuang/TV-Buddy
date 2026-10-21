@@ -111,6 +111,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/stats", get(routes::admin::stats))
         .route("/panel/api/logs", get(routes::admin::logs))
         .route("/panel/api/security/token", get(routes::security::token))
+        .route("/panel/api/link-info", get(routes::security::link_info))
         .route(
             "/panel/api/security/token/rotate",
             post(routes::security::token_rotate),
