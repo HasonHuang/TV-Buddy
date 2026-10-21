@@ -493,12 +493,11 @@ cmd_install() {
         fail "找不到 install.sh；请从发布包运行 ./install.sh"
     }
     info "运行安装脚本：$installer"
-    sh "$installer" --start "$@"
+    sh "$installer" "$@"
+    info "安装脚本完成"
     if [ -x "$CLI_LINK" ]; then
-        info "安装完成，打开已安装菜单"
-        exec "$CLI_LINK" menu
+        info "命令：$CLI_LINK"
     fi
-    info "安装完成；重新运行 iptv-proxy 打开菜单"
 }
 
 cmd_start() {
@@ -865,7 +864,15 @@ main_menu() {
 
         if ! is_installed; then
             case "$opt" in
-                1) cmd_install || true; pause ;;
+                1)
+                    if ( cmd_install --start ); then
+                        if [ -x "$CLI_LINK" ]; then
+                            info "安装完成，打开已安装菜单"
+                            exec "$CLI_LINK" menu
+                        fi
+                    fi
+                    pause
+                    ;;
                 0|q|Q) return 0 ;;
                 *) warn "无效输入"; [ -t 0 ] && sleep 1 || true ;;
             esac

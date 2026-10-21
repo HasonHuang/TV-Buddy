@@ -844,7 +844,7 @@ P2 已关闭；后续计划见 §0.6。
 | 密码 | `pass [密码] [账号]` 写 `password_sha256` / `username` 并重启；无参数交互 | 同上 |
 | 更新 | `update` 换二进制、保留配置；来源 `IPTV_PROXY_{BIN,ARCHIVE,URL}` 或本地 `dist/` | 同上 |
 | 重装 | `reinstall` 备份 `config.toml.bak`，重置配置，可选换二进制 | 同上 |
-| 安装/修复 | 发布包目录执行 `install [参数]`，调用同目录 `install.sh`，成功后打开已安装菜单 | 同上 |
+| 安装/修复 | 发布包目录执行 `install [参数]`，调用同目录 `install.sh`；菜单安装成功后打开已安装菜单 | 同上 |
 | 卸载 | `uninstall` 移除服务与软链；选 `N` 保留数据 | 同上 |
 | 非交互 | `IPTV_PROXY_YES=1` 跳过重装/删除确认；`uninstall` 也接受管道 `y` | 同上 |
 | 配置写入 | 按段定位，不误改同名字段；密码 SHA-256；无明文 | 同上 |
