@@ -744,6 +744,6 @@
 | 构建 | `scripts/build-release.sh`：`rust:1-alpine` 双架构，`--offline`，内嵌最新前端 |
 | `verify-release.sh` | ✅ 静态链接、`/health`、面板/台标资源、健康 401、分享默认 404 |
 
-验证：`cargo test --offline` 132 项；DASH 容器冒烟 4 项 × 3 次。
+验证：`cargo test --offline` 132 项；smoke 13 个脚本全通过（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security）；DASH 容器冒烟 4 项 × 3 次。
 
 剩余（P2）：无。
