@@ -267,7 +267,7 @@ src/
   proxy.rs         清单改写、切片索引与字节缓存；proxy/{media,modes,segments}.rs
   auth.rs          面板会话、播放 Token；auth/{play_token,session}.rs
   http.rs          路由、提取器、错误映射、内嵌静态资源；http/routes.rs 与 http/routes/*.rs
-frontend/          Vite + React + TS 面板（4 页）
+frontend/          Vite + React + TS 面板（12 个管理分区 + 独立台标/解封页）
 scripts/           构建与冒烟测试脚本
 ```
 
@@ -290,13 +290,15 @@ scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
 - 日志：标准输出与 `<配置目录>/iptv-proxy.log`；超过 5 MB 截断。`[server].log_level` 控制级别。
 - 看门狗：同一频道连续失败 5 次后冷却 3600 秒；改配置立即解除。
 
-## 已知限制（M4）
+## 已知限制
 
-- `remux` 恒 `503 remux warming up`，`dash` 只做 30 s 就绪门与正文透传：转封装需 `ffmpeg`，属 P1。
-- `proxy` 链路面向 HLS：媒体清单按行改写；MPD 正文原样透传。
-- 缓存无容量上限（与目标一致，见 F-015）。
+- `remux` 为纯 Rust 切片；冷启动在首批切片产出前返回 `503 remux warming up`，不是恒 503。
+- `dash` 已把 MPD 转成 HLS；需要 `SegmentTimeline`，或 `SegmentTemplate@duration` 加总时长。CENC/ClearKey 不做解密，当前按原字节代理。
+- `proxy` 模式面向 HLS：媒体清单按行改写；MPD 正文原样透传（MPD 的完整代理分支未实现）。
+- `mpd_keep_seconds` 已用于 DASH 媒体清单的时间窗；`url_pool_size` 已用于多个 `<BaseURL>` 的音视频分流与故障回退。目标侧正常取用方式仍未观测。
+- 缓存无容量上限（与目标一致，见 F-015）；`cache.backend=memory` 只回显，实际仍落盘。
 - 运维接口的响应形状为本实现自定；目标只登记存在性（见 `design/03` §6.4）。
-- 面板只实现概览与分组管理；其余分区显示为「待实现」。
-- EPG：只实现 `kind = "xml"` 源；脚本源、翻译接口、映射与录制联动未实现（`design/03` §6.5）。
+- 面板有 12 个管理分区，另有独立 `/logo` 与 `/unban` 页面；目标前端代码与文案不复制。
+- EPG：支持 `kind = "xml"` 与 `kind = "script"`、EPG 翻译；EPG 手工映射、订阅 `x-tvg-url` 与录制联动未实现（`design/03` §6.5）。
+- `l1/l2` 限流、每 IP 会话上限、`random_id_enabled` 的随机 ID 行为、`compat_mode`、`srt_ua_keywords`、`socks5` 未实现或仅保留配置键。
 - 与目标的差异以 `docs/design/reconciliation-report.md` 为准（22 项用例差异 0）。
-- `/epg`、`/logo`、`/unban` 仍是骨架页；EPG 未接入，订阅不输出 `x-tvg-url`。

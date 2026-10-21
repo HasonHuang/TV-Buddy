@@ -38,7 +38,7 @@ flowchart LR
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 158 项（103 单元 + 55 集成） |
+| `cargo test --offline` | ✅ 166 项（110 单元 + 56 集成） |
 | 冒烟脚本 | ✅ 14 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
@@ -64,10 +64,17 @@ flowchart LR
 | 切片前缀 `<P>` 算法 | 未解 | F-017；只依赖 `(gid,cid)`，低影响 |
 | 缓存容量上限 | 不实现 | 目标配置存在但未生效（F-015） |
 | 旧数据迁移 `./var/dash` | 不实现 | 仅 088 行为，v0.8.2 无 |
-| DASH URL 池 `pool≥2` | 环境受限 | 目标侧 503，取用方式未观测（F-015） |
+| DASH URL 池 `pool≥2` | 已实现（目标取用未验） | 多个 `<BaseURL>`；视频用 `pool[0]`，音频/字幕轮询其余；目标正常取用未观测（F-015） |
+| DASH `mpd_keep_seconds` | 已实现 | 媒体清单按末尾时间窗裁剪；目标 proxy+MPD 分支未验 |
+| `proxy` 模式 MPD 完整改写 | 未实现 | 仍原样透传；DASH 模式已完成 MPD→HLS |
+| CENC ClearKey 解密 | 不实现 | 目标只检测 KID、不解密；本实现按原字节代理 |
+| 多 CDN 故障切换 | 未复刻 | 目标未观测到切换；DASH 多 BaseURL 仅做顺序回退 |
 | `/epg/api/*` 响应形状 | 自定 | 目标仅登记路由（S-EP-16） |
 | `l1/l2` 限流与每 IP 会话上限 | 不实现 | 触发条件未复现（F-010 §5） |
+| `random_id_enabled` 随机 ID | 仅回显 | 目标行为未观测；`link-info` 形状已对齐 |
+| `cache.backend=memory` | 仅回显 | 实际缓存仍落盘；目标 memory 统计恒 0（F-015） |
 | 播放侧 `compat_mode` 与 `srt_ua_keywords` | 不实现 | 目标未测出行为（D19 §3.5） |
+| `socks5` 代理 | 不支持 | 未知类型直连并告警；目标行为未验 |
 
 ### 0.6 任务计划（P3）
 
@@ -85,6 +92,15 @@ flowchart LR
 | P3-08 | 目标差分回归 | S | v0.8.2 容器与样本 | 重跑 22 项对拍与新增端点；差异 0 或登记 | ✅ 22/22 差异 0 |
 
 顺序：P3-01 → P3-02 → P3-03 → P3-04 → P3-05 → P3-06 → P3-07 → P3-08。P3-01 无外部依赖，先做；P3-08 需容器环境，最后做。
+
+### 0.6.1 P4 计划（DASH 完整链路）
+
+| ID | 交付 | 规模 | 验收 | 状态 |
+| --- | --- | --- | --- | --- |
+| P4-01 | MPD 完整解析与 DASH→HLS | L | `BaseURL`、`SegmentTimeline`、`SegmentList`、init/切片代理、`/dash/status` | ✅ §3bc |
+| P4-02 | `mpd_keep_seconds` 与 `url_pool_size` | M | 媒体清单时间窗；多 `<BaseURL>` 音视频分流与顺序回退 | ✅ §3bc |
+| P4-03 | 目标 proxy+MPD 分支 | M | MPD 正文改写/裁剪与 ClearKey 行为 | 未实现（登记） |
+| P4-04 | CENC 解密 | L | ClearKey 解密与出口策略 | 不实现（目标不解密） |
 
 ### 0.7 待环境
 
@@ -884,6 +900,28 @@ P2 已关闭；后续计划见 §0.6。
 
 注意：`translate.ipacel.cc` 是社区试用服务，可用性与额度不保证。生产建议自建 MTranServer。
 
+## 3bc. P4 · DASH→HLS 与 URL 池（已完成）
+
+证据：F-016、S-MODE-06、S-DASH-01。
+
+| 项 | 结果 | 位置 |
+| --- | --- | --- |
+| MPD 摘要 | `AdaptationSet`/`Representation` 轨道列表；面板接口不变 | `src/dash.rs` |
+| 完整解析 | MPD/Period/AdaptationSet/Representation 逐层 `BaseURL`；`SegmentTemplate` 继承；`SegmentTimeline`（含 `r=-1`）；`SegmentList`；`$Number%05d$` 等占位符 | 同上 |
+| HLS 主清单 | `#EXT-X-MEDIA` 音轨/字幕 + `#EXT-X-STREAM-INF` 视频变体；轨道名 `video_{高}p`/`audio-{n}`/`text-{n}` | `src/dash_hls.rs` |
+| HLS 媒体清单 | `#EXT-X-MAP`、`#EXT-X-MEDIA-SEQUENCE`、`#EXTINF`；静态 MPD 加 `#EXT-X-ENDLIST`；动态不加 | 同上 |
+| 切片代理 | init/切片落 `cache/dash/`；伪装图片扩展名；命中缓存；多 URL 顺序回退 | 同上 |
+| 时间窗 | `[groups].mpd_keep_seconds` 按末尾累计时长裁剪媒体清单 | 同上 |
+| URL 池 | 多个 `<BaseURL>`；视频固定首选，音频/字幕在其余地址轮询；`url_pool_size` 控制启用 | 同上 |
+| 状态接口 | `GET /panel/api/dash/status` 返回会话、`phase`、`segment_count`、`active_tracks` 等 | `src/http/routes/dash.rs` |
+| 看门狗 | 主清单失败累计；连续 5 次冷却 3600 s；改配置解除 | `src/http/routes/stream.rs` |
+| 限制 | CENC 不解密；`proxy`+MPD 仍原样透传；目标 URL 池正常取用方式未观测 | §0.5 |
+
+验证：
+- 单元：MPD 摘要、Timeline/BaseURL、SegmentList、主/媒体清单、时间窗、URL 池轮询、媒体序号。
+- 集成：`dash_mode_converts_mpd_to_hls_and_proxies_segments` 覆盖主清单、媒体清单、init、切片与 `keep_seconds=4`。
+- `cargo test --offline` 166 项（110 单元 + 56 集成）。
+
 ## 4. 进度日志
 
 | 日期 | 事项 | 结果 |
@@ -928,6 +966,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **一键安装**：根目录 `install.sh` 支持发布包/`dist`/URL，注册服务并保留配置；README 补说明 | ✅ §3az |
 | 2026-10-21 | **CLI 子命令**：`iptv-proxy` 支持启停、日志、地址、端口、密码、更新、重装、卸载；安装时创建软链 | ✅ §3ba |
 | 2026-10-21 | **交互菜单**：无参数或 `menu` 打开；覆盖更新、地址、启停、状态、日志、端口、账号密码、重装、卸载与安装修复 | ✅ §3ba |
+| 2026-10-21 | **P4 DASH→HLS**：MPD 完整解析、HLS 主/媒体清单、init/切片代理、`mpd_keep_seconds`、多 `<BaseURL>` 池、`/dash/status` | ✅ §3bc |
 | 2026-10-21 | **翻译服务**：兼容 MTranServer v5、旧接口与单条回退；支持 Token；真实服务联调通过 | ✅ §3bb |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）

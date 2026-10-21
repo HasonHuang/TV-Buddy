@@ -149,10 +149,10 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 | `passthrough` | `302` 到上游 URL | **校验 Token**（与其它模式一致），不缓存上游清单 | S-MODE-11、F-018 |
 | `rewrite` | `200 text/plain; charset=utf-8` + `no-cache, must-revalidate` | 相对地址改绝对，切片客户端直连；清单缓存 ≈5 s | S-MODE-09/14、F-018 |
 | `remux` | 预热期 `503` + `Retry-After: 2`，体 `remux warming up`；就绪后 `200` 清单 | 纯 Rust 把连续 TS 切成 HLS；HLS 上游永不就绪（S-MODE-18） | S-MODE-16/18 |
-| `dash` | 上游正文透传（`application/dash+xml`） | 就绪门 30 s，超时 → `503 timeout waiting for master playlist`；MPD→HLS 转封装属 P1 | S-MODE-15 |
+| `dash` | `200 application/vnd.apple.mpegurl` + `no-cache, no-store` | MPD→HLS；主清单指向 `/{gid}/{cid}/{track}/index.txt`；轨道名 `video_{高}p` / `audio-{n}`；init/切片伪装为图片；就绪门 30 s，超时 → `503 timeout waiting for master playlist` | S-MODE-06/15 |
 | `proxy` | 代理链路（§4） | — | S-MODE-03 |
 
-> `remux` 已实现（纯 Rust 切片，不调用 ffmpeg）；`dash` 仍按原样透传 MPD。`proxy` 模式下的 MPD 正文与 `dash` 一样**原样透传**，避免按行改写破坏 XML。
+> `remux` 已实现（纯 Rust 切片，不调用 ffmpeg）。`dash` 已实现 MPD→HLS：解析 `BaseURL`、`SegmentTemplate`/`SegmentTimeline`、`SegmentList`，按需代理 init 与切片。`proxy` 模式下的 MPD 正文仍**原样透传**，避免按行改写破坏 XML。
 
 ## 5. 订阅契约
 
@@ -465,13 +465,14 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/panel/api/health` | `{ok, version, uptime_secs, time, bind, groups, channels, sessions, cache, epg, security, share}` |
+| `GET` | `/panel/api/dash/status` | 运行中的 DASH 会话数组；`stream_key`、`source_url`、`phase`、`segment_count`、`active_tracks` 等 |
 | `GET` | `/panel/api/dash/tracks/:gid/:cid` | 抓频道 MPD 并列出轨道；未知频道 → `404 Channel not found` |
 | `POST` | `/panel/api/dash/scan-url` | `{"url"}`；只解析，不改配置；非 HTTP(S) → `400` |
 | `GET` | `/panel/api/dash-timeshift/status` | `{ok,enabled,ready,channels[{group_id,channel_id,hours,segments,mode}],note}`；代理频道直接缓冲，DASH 频道经 ffmpeg 转 HLS 后缓冲 |
 
 轨道对象：`{id, kind, codecs, bandwidth, lang, width, height}`。
 `kind` 取 `video`/`audio`/`text`/`unknown`。
-MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒体。
+`tracks`/`scan-url` 只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒体；播放链路的 `dash` 模式按需解析完整 MPD 并代理 init/切片。
 
 ### 6.12 上游解析脚本（P1 已实现）
 

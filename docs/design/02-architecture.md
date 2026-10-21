@@ -90,7 +90,8 @@
 
 | 模块 | 职责 | 阶段 | 规格 |
 | --- | --- | --- | --- |
-| `proxy::dash` | MPD 解析、转封装 HLS、ClearKey KID 检测 | P1 | S-GAP-01、S-DASH-01 |
+| `dash` | MPD 摘要与完整演示解析（BaseURL、SegmentTemplate/Timeline、SegmentList） | P4 | S-MODE-06、S-DASH-01 |
+| `dash_hls` | MPD→HLS 主/媒体清单、init/切片代理、时间窗与 URL 池 | P4 | S-MODE-06、S-GAP-01 |
 | `proxy::remux` | 连续流切 HLS（不用 ffmpeg） | P1 | F-014（D16） |
 | `epg::*` | 采集、匹配、XMLTV 生成、脚本源 | P1 | S-EPG-01…07 |
 | `record` | 定时录制（ffmpeg `-c copy` → MKV） | P1 | S-REC-01/02 |

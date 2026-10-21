@@ -44,6 +44,20 @@ const MPD: &str = r#"<?xml version="1.0"?>
   </Period>
 </MPD>"#;
 
+/// 伪 DASH 清单：带 SegmentTimeline 与相对 init/切片。
+const DASH_MPD: &str = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT8S">
+  <Period>
+    <AdaptationSet contentType="video" maxWidth="1280" maxHeight="720">
+      <SegmentTemplate timescale="1000" initialization="init-$RepresentationID$.mp4"
+        media="chunk-$RepresentationID$-$Number$.m4s" startNumber="1">
+        <SegmentTimeline><S d="2000" r="3"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v0" codecs="avc1.4d401f" bandwidth="2500000" width="1280" height="720"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+
 /// 伪翻译服务：给每条文本加目标语言前缀。
 async fn upstream_translate(axum::Json(body): axum::Json<serde_json::Value>) -> Response {
     let target = body
@@ -156,6 +170,12 @@ async fn upstream_file(
         "seg1.ts" | "seg2.ts" | "v0/v1.ts" => ("video/mp2t", SEGMENT),
         "extra.m3u8" => ("application/vnd.apple.mpegurl", EXTRA.as_bytes()),
         "manifest.mpd" => ("application/dash+xml", MPD.as_bytes()),
+        "dash/live.mpd" => ("application/dash+xml", DASH_MPD.as_bytes()),
+        "dash/init-v0.mp4" => ("video/mp4", b"dash-init"),
+        "dash/chunk-v0-1.m4s"
+        | "dash/chunk-v0-2.m4s"
+        | "dash/chunk-v0-3.m4s"
+        | "dash/chunk-v0-4.m4s" => ("video/mp4", b"dash-segment"),
         "live.ts" => (
             "video/mp2t",
             TS_STREAM.get_or_init(|| ts_stream(8)).as_slice(),
@@ -2175,6 +2195,81 @@ url = "{upstream}/manifest.mpd"
 }
 
 #[tokio::test]
+async fn dash_mode_converts_mpd_to_hls_and_proxies_segments() {
+    let fixture = fixture_with_extra(
+        r#"
+[[groups]]
+id = "dg2"
+name = "DASH 转封装"
+mode = "dash"
+access = "open"
+mpd_keep_seconds = 4
+
+[[groups.channels]]
+id = "c1"
+name = "DASH 频道"
+url = "{upstream}/dash/live.mpd"
+"#,
+    )
+    .await;
+
+    let master = fetch(&fixture, "/dg2/c1.m3u8").await;
+    assert_eq!(master.status(), StatusCode::OK);
+    assert_eq!(
+        master
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/vnd.apple.mpegurl")
+    );
+    let body = master.text().await.expect("读主清单");
+    assert!(body.contains("#EXT-X-STREAM-INF"), "{body}");
+    assert!(body.contains("/dg2/c1/video_720p/index.txt"), "{body}");
+
+    let media = fetch(&fixture, "/dg2/c1/video_720p/index.txt").await;
+    assert_eq!(media.status(), StatusCode::OK);
+    let body = media.text().await.expect("读媒体清单");
+    assert!(body.contains("#EXT-X-MAP:URI="), "{body}");
+    assert!(body.contains("#EXT-X-ENDLIST"), "{body}");
+    // keep_seconds = 4，仅保留最后两段。
+    assert_eq!(body.matches("#EXTINF:").count(), 2, "{body}");
+
+    let segment_url = body
+        .lines()
+        .find(|line| {
+            line.contains("/dg2/c1/video_720p/") && line.ends_with(".jpg") || line.ends_with(".png")
+        })
+        .expect("切片地址")
+        .to_string();
+    let segment = fixture
+        .client
+        .get(&segment_url)
+        .send()
+        .await
+        .expect("请求切片");
+    assert_eq!(segment.status(), StatusCode::OK);
+    assert_eq!(
+        segment.bytes().await.expect("读切片").as_ref(),
+        b"dash-segment"
+    );
+
+    let init_url = body
+        .lines()
+        .find_map(|line| line.strip_prefix("#EXT-X-MAP:URI=\""))
+        .and_then(|rest| rest.strip_suffix("\""))
+        .expect("init 地址")
+        .to_string();
+    let init = fixture
+        .client
+        .get(&init_url)
+        .send()
+        .await
+        .expect("请求 init");
+    assert_eq!(init.status(), StatusCode::OK);
+    assert_eq!(init.bytes().await.expect("读 init").as_ref(), b"dash-init");
+}
+
+#[tokio::test]
 async fn resolver_script_overrides_channel_url_with_ttl_cache() {
     let fixture = fixture_with_extra(
         r#"
@@ -2716,7 +2811,7 @@ timeshift_hours = 4
     );
 
     let deadline = Instant::now() + Duration::from_secs(15);
-    let mut body = String::new();
+    let mut body;
     loop {
         let response = fixture.client.get(&url).send().await.expect("回看请求");
         assert_eq!(response.status(), StatusCode::OK);

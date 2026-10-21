@@ -95,6 +95,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/panel/api/playlist",
             get(routes::playlist::get).put(routes::playlist::update),
         )
+        .route("/panel/api/dash/status", get(routes::dash::status))
         .route(
             "/panel/api/dash/tracks/:gid/:cid",
             get(routes::dash::tracks),

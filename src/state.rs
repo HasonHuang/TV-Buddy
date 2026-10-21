@@ -41,6 +41,8 @@ pub struct AppState {
     pub resolver: crate::resolver::Cache,
     /// Remux 会话。
     pub remux: Arc<crate::remux::Manager>,
+    /// DASH→HLS 会话与切片索引。
+    pub dash_hls: Arc<crate::dash_hls::Manager>,
     /// 定时录制任务。
     pub schedule: Arc<crate::schedule::Store>,
     /// 直播回看会话。
@@ -91,6 +93,7 @@ impl AppState {
             sources: TtlCache::new(std::time::Duration::from_secs(3600)),
             resolver: crate::resolver::Cache::default(),
             remux: Arc::new(crate::remux::Manager::default()),
+            dash_hls: Arc::new(crate::dash_hls::Manager::new()),
             schedule: Arc::new(crate::schedule::Store::load(&cache_dir, offset_hours)),
             timeshift: Arc::new(crate::timeshift::Manager::default()),
             modes: AddressCache::new(),

@@ -40,6 +40,11 @@ async fn inspect(state: &AppState, url: &str, gid: &str, cid: &str) -> Result<Va
     }))
 }
 
+/// `GET /panel/api/dash/status`——运行中的 DASH 会话。
+pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
+    Json(Value::Array(state.dash_hls.status()))
+}
+
 /// `GET /panel/api/dash/tracks/:gid/:cid`。
 pub async fn tracks(
     PanelAuth(_): PanelAuth,

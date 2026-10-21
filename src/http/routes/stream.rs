@@ -96,7 +96,7 @@ pub async fn entry(
             }
         }
         // 就绪门：30 秒内拿到上游主清单，否则 503（S-MODE-15）。
-        "dash" => dash_entry(&state, &config, group, &cid, &upstream).await,
+        "dash" => dash_entry(&state, group, &gid, &cid, &upstream, &self_base).await,
         // 代理：上游是主清单则自造单变体主清单；上游是媒体清单则直接改写。
         _ => proxy_entry(&state, &config, &gid, &cid, &upstream, &self_base, &ext).await,
     }
@@ -177,44 +177,47 @@ async fn rewrite_entry(
     rewrite_response(rendered.body)
 }
 
-/// DASH 模式：30 秒就绪门。转封装需 ffmpeg（P1），当前透传上游正文。
+/// DASH 模式：MPD→HLS。30 秒就绪门与看门狗沿用目标行为（S-MODE-15/17）。
 async fn dash_entry(
     state: &Arc<AppState>,
-    config: &Config,
     group: &Group,
+    gid: &str,
     cid: &str,
     channel_url: &str,
+    self_base: &str,
 ) -> Response {
     let key = format!("dash:{}:{cid}", group.id);
     if state.watchdog.is_cooling(&key) {
         return not_ready();
     }
-    let body = match state.modes.get(&key, 30) {
-        Some(body) => body,
-        None => match fetch(state, channel_url, &group.id, cid).await {
-            Ok(body) => {
-                state.watchdog.record_success(&key);
-                state.modes.put(&key, body.clone());
-                body
+    match state
+        .dash_hls
+        .master(state, gid, cid, channel_url, self_base)
+        .await
+    {
+        Ok(body) => {
+            state.watchdog.record_success(&key);
+            let mut response = Response::new(Body::from(body));
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/vnd.apple.mpegurl"),
+            );
+            insert_header(&mut response, header::CACHE_CONTROL, MASTER_CACHE);
+            response
+        }
+        Err(error) => {
+            tracing::warn!(url = %channel_url, error = %error, "DASH 主清单失败");
+            state.stats.record_upstream_failure();
+            if state.watchdog.record_failure(&key) {
+                tracing::warn!(group = %group.id, %cid, "连续失败 5 次，进入冷却 3600s");
             }
-            Err(err) => {
-                tracing::warn!(url = %channel_url, error = %err, "等待上游主清单超时");
-                state.stats.record_upstream_failure();
-                if state.watchdog.record_failure(&key) {
-                    tracing::warn!(group = %group.id, %cid, "连续失败 5 次，进入冷却 3600s");
-                }
-                let _ = config;
-                return not_ready();
+            if error.starts_with("MPD 解析失败") {
+                (StatusCode::BAD_GATEWAY, "Upstream Error").into_response()
+            } else {
+                not_ready()
             }
-        },
-    };
-    let mut response = Response::new(Body::from(body));
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/dash+xml"),
-    );
-    insert_header(&mut response, header::CACHE_CONTROL, ENTRY_CACHE);
-    response
+        }
+    }
 }
 
 /// Rewrite 响应：`text/plain` + `no-cache, must-revalidate`（S-MODE-09）。
@@ -276,6 +279,20 @@ pub async fn wildcard(
     if let Some(response) = state.remux.serve(&gid, &cid, &rest) {
         return response;
     }
+    {
+        let config = state.snapshot();
+        if let Some((group, _)) = resolve(&config, &gid, &cid) {
+            if group.mode == "dash" {
+                if let Some(response) = state
+                    .dash_hls
+                    .serve(&state, &gid, &cid, &rest, &self_base(&headers))
+                    .await
+                {
+                    return response;
+                }
+            }
+        }
+    }
     match rest.as_str() {
         // 变体媒体清单：只有上游是主清单时存在（S-PROXY-07）。
         "video/index.txt" => variant_playlist(&state, &gid, &cid, &self_base(&headers)).await,
@@ -291,6 +308,8 @@ pub async fn wildcard(
                     Some(body) => remux_playlist(body),
                     None => warming_up(),
                 }
+            } else if group.mode == "dash" {
+                dash_entry(&state, &group, &gid, &cid, &url, &self_base(&headers)).await
             } else if group.mode == "proxy" {
                 proxy_entry(
                     &state,
@@ -667,7 +686,7 @@ pub(crate) async fn fetch(
 }
 
 /// 抓上游字节。
-async fn fetch_bytes(
+pub(crate) async fn fetch_bytes(
     state: &AppState,
     url: &str,
     gid: &str,

@@ -8,6 +8,7 @@ pub mod auth;
 pub mod backup;
 pub mod config;
 pub mod dash;
+pub mod dash_hls;
 pub mod epg;
 pub mod http;
 pub mod logging;
