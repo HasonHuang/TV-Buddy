@@ -42,7 +42,7 @@ package() { # 参数：架构（amd64/arm64）
   install -m 0755 "target/pack-$platform/release/iptv-proxy" "$stage/iptv-proxy"
   install -m 0644 packaging/config.toml.example "$stage/config.toml.example"
   install -m 0755 packaging/iptv-proxy.sh "$stage/iptv-proxy.sh"
-  install -m 0755 packaging/install.sh "$stage/install.sh"
+  install -m 0755 install.sh "$stage/install.sh"
   install -m 0644 packaging/iptv-proxy.service "$stage/iptv-proxy.service"
   install -m 0755 packaging/iptv-proxy.openrc "$stage/iptv-proxy.openrc"
   tar -C "$OUT" -czf "$OUT/iptv-proxy-$VERSION-$platform.tar.gz" "iptv-proxy-$VERSION-$platform"

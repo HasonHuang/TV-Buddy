@@ -31,6 +31,65 @@ target/release/iptv-proxy config.toml
 
 默认监听 `[::]:19899`。面板入口 `http://<host>:19899/panel`，默认口令 `admin` / `admin`。
 
+## 一键安装（Linux）
+
+`install.sh` 只支持 Linux **amd64/arm64**。它支持三种来源：已解包的发布目录、仓库 `dist/`、指定归档（本地路径或 URL）。
+
+### 从发布包安装（推荐）
+
+```bash
+tar -xzf iptv-proxy-0.1.0-arm64.tar.gz
+cd iptv-proxy-0.1.0-arm64
+sudo ./install.sh
+```
+
+### 从仓库安装
+
+先构建发布包，再执行根目录脚本：
+
+```bash
+scripts/build-frontend.sh
+scripts/build-release.sh              # 或只构建当前架构：scripts/build-release.sh arm64
+sudo ./install.sh                     # 自动使用 dist/ 中最新的同架构包
+```
+
+### 指定归档或 URL
+
+```bash
+sudo ./install.sh --archive dist/iptv-proxy-0.1.0-arm64.tar.gz
+sudo ./install.sh --archive https://example.com/iptv-proxy-0.1.0-arm64.tar.gz
+```
+
+归档旁有同名 `.sha256` 文件时，脚本自动校验。
+
+### 选项
+
+| 选项 | 说明 |
+| --- | --- |
+| `--prefix <目录>` | 安装目录；默认 `/opt/iptv-proxy` |
+| `--archive <路径或 URL>` | 指定 tar.gz 安装包 |
+| `--no-service` | 不注册 systemd/OpenRC 服务 |
+| `--start` | 安装后立即启动服务 |
+| `-h`、`--help` | 显示帮助 |
+
+### 安装内容
+
+- 二进制：`<prefix>/iptv-proxy`
+- 配置：`<prefix>/config.toml`；已有配置不覆盖
+- 缓存：`<prefix>/cache/`
+- 启停脚本：`<prefix>/iptv-proxy.sh`
+- 服务单元：systemd 或 OpenRC；按系统自动选择
+
+示例：
+
+```bash
+# 自定义目录并立即启动
+sudo ./install.sh --prefix /srv/iptv --start
+
+# 容器或普通用户：只装文件，不注册服务
+./install.sh --prefix "$HOME/iptv" --no-service
+```
+
 ## 测试
 
 ```bash
@@ -123,7 +182,7 @@ scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
 
 - 构建用 Docker `rust:1-alpine`：镜像宿主三元组即 `*-linux-musl`，直接产出静态二进制。
 - 容器无外网，依赖来自宿主 `~/.cargo` 缓存（`--offline`）。
-- 安装：解包后 `sudo ./install.sh`，默认装到 `/opt/iptv-proxy`。
+- 安装：解包后 `sudo ./install.sh`，默认装到 `/opt/iptv-proxy`。详见上文「一键安装」。
 
 ## 运维
 

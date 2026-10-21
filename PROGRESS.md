@@ -813,6 +813,25 @@ P2 已关闭；后续计划见 §0.6。
 
 详见 [`docs/design/reconciliation-report.md`](docs/design/reconciliation-report.md)。
 
+## 3az. 一键安装脚本（已完成）
+
+| 项 | 结果 | 位置 |
+| --- | --- | --- |
+| 来源 | 已解包目录、仓库 `dist/` 最新同架构包、`--archive` 本地路径或 URL | `install.sh` |
+| 参数 | `--prefix`、`--archive`、`--no-service`、`--start`；`PREFIX`/`ARCHIVE` 环境变量 | 同上 |
+| 平台 | 只接受 Linux amd64/arm64；其他架构直接报错 | 同上 |
+| 校验 | 归档旁有同名 `.sha256` 时校验；缺失则跳过 | 同上 |
+| 安装 | 二进制、`config.toml`、缓存目录、启停脚本；已有配置不覆盖 | 同上 |
+| 服务 | systemd 或 OpenRC；按 `PREFIX` 替换单元内路径 | 同上 |
+| 打包 | 发布包改为携带根目录 `install.sh`；删除 `packaging/install.sh` | `scripts/build-release.sh` |
+| 文档 | README 新增「一键安装」：来源、选项、安装内容、示例 | `README.md` |
+
+验证：
+- `sh -n install.sh` 通过。
+- Alpine 容器内从仓库自动选包、显式 `--archive`、URL（带/不带 `.sha256`）、解包目录内脚本均安装成功。
+- 重复安装保留已有 `config.toml`。
+- 双架构发布包重新生成，包内均含新 `install.sh`。
+
 ## 4. 进度日志
 
 | 日期 | 事项 | 结果 |
@@ -854,6 +873,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **P3-05 字幕格式**：ASS/SSA 检测与转 VTT；翻译缓存后缀 `.vtt` | ✅ §3aw |
 | 2026-10-21 | **P3-07 上游代理**：分组级与频道级 `proxy`，频道优先；播放/回看/Remux/录制共用 | ✅ §3ax |
 | 2026-10-21 | **P3-08 差分复验**：`compare-p0.sh` 22 项差异 0；新增端点差异登记 | ✅ §3ay |
+| 2026-10-21 | **一键安装**：根目录 `install.sh` 支持发布包/`dist`/URL，注册服务并保留配置；README 补说明 | ✅ §3az |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）
 
