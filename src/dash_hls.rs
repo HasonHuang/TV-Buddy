@@ -118,6 +118,8 @@ struct Session {
     pool_size: u32,
     entries: HashMap<String, Entry>,
     tracks: Vec<TrackStatus>,
+    ready: bool,
+    segment_count: usize,
     started: Instant,
     last: Instant,
 }
@@ -165,6 +167,8 @@ impl Manager {
                 pool_size: pool,
                 entries: HashMap::new(),
                 tracks: Vec::new(),
+                ready: false,
+                segment_count: 0,
                 started: Instant::now(),
                 last: Instant::now(),
             });
@@ -187,11 +191,22 @@ impl Manager {
                 pool_size: 1,
                 entries: HashMap::new(),
                 tracks: Vec::new(),
+                ready: false,
+                segment_count: 0,
                 started: Instant::now(),
                 last: Instant::now(),
             });
         session.entries.extend(entries);
         session.last = Instant::now();
+    }
+
+    fn set_ready(&self, gid: &str, cid: &str, segment_count: usize) {
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(session) = sessions.get_mut(&Self::key(gid, cid)) {
+            session.ready = true;
+            session.segment_count = segment_count;
+            session.last = Instant::now();
+        }
     }
 
     fn set_tracks(&self, gid: &str, cid: &str, tracks: Vec<TrackStatus>) {
@@ -214,8 +229,8 @@ impl Manager {
                 serde_json::json!({
                     "stream_key": format!("{gid}_{cid}"),
                     "source_url": session.upstream,
-                    "phase": if session.entries.is_empty() { "starting" } else { "ready" },
-                    "segment_count": session.entries.len(),
+                    "phase": if session.ready { "ready" } else { "starting" },
+                    "segment_count": session.segment_count,
                     "last_error": serde_json::Value::Null,
                     "checked_ms": 0,
                     "uptime_secs": session.started.elapsed().as_secs(),
@@ -275,6 +290,16 @@ impl Manager {
         let body = render_master(&presentation, gid, cid, self_base);
         self.upsert(gid, cid, upstream.to_string(), keep, pool);
         self.set_tracks(gid, cid, track_statuses(&presentation));
+        self.set_ready(
+            gid,
+            cid,
+            presentation
+                .streams
+                .iter()
+                .map(|stream| stream.segments.len())
+                .max()
+                .unwrap_or(0),
+        );
         self.ensure_janitor();
         info!(
             gid,
@@ -344,13 +369,13 @@ impl Manager {
             );
             self.upsert(gid, cid, upstream, keep, pool);
             self.set_tracks(gid, cid, track_statuses(&presentation));
+            self.set_ready(gid, cid, rendered.segment_count);
             self.set_entries(gid, cid, rendered.entries);
             self.touch(gid, cid);
             let mut response = Response::new(Body::from(rendered.body));
-            response.headers_mut().insert(
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("text/plain; charset=utf-8"),
-            );
+            response
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain"));
             let cache = if presentation.is_live {
                 "public, max-age=2, s-maxage=2"
             } else {
@@ -436,6 +461,7 @@ fn disguise_formats(state: &AppState) -> Vec<String> {
 struct RenderedMedia {
     body: String,
     entries: Vec<(String, Entry)>,
+    segment_count: usize,
 }
 
 /// 生成 HLS master。
@@ -624,7 +650,11 @@ fn render_media(
     if !is_live {
         body.push_str("#EXT-X-ENDLIST\n");
     }
-    RenderedMedia { body, entries }
+    RenderedMedia {
+        body,
+        entries,
+        segment_count: picked.len(),
+    }
 }
 
 fn choose_urls(urls: &[String], kind: &str, index: usize, pool_size: u32) -> Vec<String> {

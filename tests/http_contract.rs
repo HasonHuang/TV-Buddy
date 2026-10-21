@@ -2251,6 +2251,7 @@ url = "{upstream}/dash/live.mpd"
     assert!(status.as_array().is_some(), "{status}");
     assert_eq!(status[0]["stream_key"], "dg2_c1");
     assert_eq!(status[0]["phase"], "ready");
+    assert_eq!(status[0]["segment_count"], 2);
     assert!(status[0]["active_tracks"]
         .as_array()
         .expect("轨道数组")

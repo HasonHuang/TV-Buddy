@@ -915,7 +915,7 @@ P2 已关闭；后续计划见 §0.6。
 | 切片代理 | init/切片落 `cache/dash/`；伪装图片扩展名；命中缓存；多 URL 顺序回退 | 同上 |
 | 时间窗 | `[groups].mpd_keep_seconds` 按末尾累计时长裁剪媒体清单 | 同上 |
 | URL 池 | 多个 `<BaseURL>`；视频固定首选，音频/字幕在其余地址轮询；`url_pool_size` 控制启用 | 同上 |
-| 状态接口 | `GET /panel/api/dash/status` 返回会话、`phase`、`segment_count`、`active_tracks[]`（name/kind/lang/label/width/height/bandwidth/codecs/frame_rate/audio_channels） | `src/http/routes/dash.rs` |
+| 状态接口 | `GET /panel/api/dash/status` 返回会话、`phase=ready/starting`、`segment_count`、`active_tracks[]`（name/kind/lang/label/width/height/bandwidth/codecs/frame_rate/audio_channels） | `src/http/routes/dash.rs` |
 | 看门狗 | 主清单失败累计；连续 5 次冷却 3600 s；改配置解除 | `src/http/routes/stream.rs` |
 | 限制 | CENC 不解密；`proxy`+MPD 仍原样透传；目标 URL 池正常取用方式未观测 | §0.5 |
 
