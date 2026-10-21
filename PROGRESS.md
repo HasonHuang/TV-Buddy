@@ -24,7 +24,7 @@
 flowchart LR
   P0["P0 逆向与核心<br/>✅ 完成"] --> P1["P1 流处理与增值<br/>✅ 完成"]
   P1 --> P2["P2 运维与管理面<br/>✅ 完成"]
-  P2 --> P3["P3 兼容性补全<br/>🔄 7/8（1 待环境）"]
+  P2 --> P3["P3 兼容性补全<br/>✅ 完成"]
 ```
 
 | 阶段 | 范围 | 进度 |
@@ -32,17 +32,17 @@ flowchart LR
 | P0 | 逆向、代理/直连、Token、缓存、播放链路、打包 | ██████████ 100% |
 | P1 | EPG、回看、remux、录制、台标、分享、安全面 | ██████████ 100% |
 | P2 | 订阅聚合、面板分区、DASH 回看、EPG/字幕翻译 | ██████████ 100% |
-| P3 | 目标剩余端点与兼容细节（见 §0.6） | ███████░░░ 7/8（P3-06 待环境） |
+| P3 | 目标剩余端点与兼容细节（见 §0.6） | ██████████ 100% |
 
 ### 0.3 质量门（2026-10-21）
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 153 项（100 单元 + 53 集成） |
-| 冒烟脚本 | ✅ 14 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security、cli） |
+| `cargo test --offline` | ✅ 158 项（103 单元 + 55 集成） |
+| 冒烟脚本 | ✅ 14 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
-| 发布包 | ✅ amd64 3.4 MB、arm64 3.2 MB；`verify-release.sh` 通过 |
+| 发布包 | ✅ amd64 3.5 MB、arm64 3.3 MB；`verify-release.sh` 通过 |
 | CI | ✅ 最新运行 `39596643133`：前端、fmt/clippy/test、双架构包全绿 |
 
 ### 0.4 里程碑
@@ -80,7 +80,7 @@ flowchart LR
 | P3-03 | `GET /panel/api/link-info` | S | 无 | 返回 `aliases`、`random_id_enabled`、`token`、`token_enabled`、`use_alias`；测试 | ✅ |
 | P3-04 | 安全面补全 | M | 无 | 登录失败 429 锁、`/unban` 每月 3 次；`l1/l2` 记为不实现 | ✅ |
 | P3-05 | 字幕格式扩展 | M | 无 | 翻译端点接受 ASS/SSA 并转 VTT；`compat_mode` 记为不实现 | ✅ |
-| P3-06 | 真实翻译联调 | S | 本地 MTranServer | EPG 与字幕各跑一次；确认响应形状、分批、缓存、失败回退 | ⏳ 阻塞：缺少本地 MTranServer |
+| P3-06 | 真实翻译联调 | S | MTranServer（可用试用服务） | EPG 与字幕各跑一次；确认响应形状、分批、缓存、失败回退 | ✅ §3bb |
 | P3-07 | 每频道代理覆盖 | M | 本地代理夹具 | 分组/频道 `proxy` 覆盖直连；播放、回看、Remux、录制生效 | ✅ |
 | P3-08 | 目标差分回归 | S | v0.8.2 容器与样本 | 重跑 22 项对拍与新增端点；差异 0 或登记 | ✅ 22/22 差异 0 |
 
@@ -88,9 +88,7 @@ flowchart LR
 
 ### 0.7 待环境
 
-| 项 | 缺口 | 解除条件 |
-| --- | --- | --- |
-| P3-06 真实翻译联调 | 当前环境没有运行中的 MTranServer | 启动本地 MTranServer 后，配置 `[epg.translate]` 与 `[subtitle.translate]`，各跑一次并核对缓存与失败回退 |
+当前无阻塞项。
 
 ## 1. 已完成（分阶段）
 
@@ -846,6 +844,7 @@ P2 已关闭；后续计划见 §0.6。
 | 卸载 | `uninstall` 移除服务与软链；选 `N` 保留数据 | 同上 |
 | 非交互 | `IPTV_PROXY_YES=1` 跳过重装/删除确认；`uninstall` 也接受管道 `y` | 同上 |
 | 配置写入 | 按段定位，不误改同名字段；密码 SHA-256；无明文 | 同上 |
+| 进程 | PID 文件记录真实二进制 PID，停止后不残留 | 同上 |
 | 样例配置 | `disk_path` 改为 `./cache`，支持自定义安装目录 | `packaging/config.toml.example` |
 
 验证：
@@ -854,6 +853,31 @@ P2 已关闭；后续计划见 §0.6。
 - CI 增加 CLI 冒烟步骤。
 
 不覆盖：目标 `iptv-proxy` 交互菜单。子命令行为已覆盖；菜单不阻塞脚本化运维。
+
+## 3bb. MTranServer 翻译联调（已完成）
+
+| 项 | 结果 | 位置 |
+| --- | --- | --- |
+| 协议 | 优先 MTranServer v5：`{from,to,texts}` → `{results}` | `src/translate.rs` |
+| 兼容 | 旧 `{texts,source_lang,target_lang}` 与旧响应形状 | 同上 |
+| 回退 | `/translate/batch` 不可用时逐条调 `/translate` | 同上 |
+| 地址 | 支持根地址、`/translate`、`/translate/batch` | 同上 |
+| Token | `Authorization: Bearer` | 同上 |
+| EPG 配置 | `url` 或 `engine="mtran"` + `mtran_url`；`mtran_token`、`mtran_source`、`mtran_batch` | `src/epg.rs` |
+| 字幕配置 | `url`、`token`、`batch`/`mtran_batch` | `src/http/routes/media.rs` |
+| 自检 | `/subtitle/mtran/test`、`/epg/translate/{probe,mtran/test}` 返回真实译文 | 路由层 |
+| 样例 | `config.toml.example` 增加注释配置；README 增加说明 | 文档 |
+
+验证：
+- 单元/集成：v5 `{results}`、旧形状、完整 `/translate` 地址、Bearer Token、单条回退均覆盖。
+- 真实服务 `https://translate.ipacel.cc/translate`：
+  - 自检 `Hello world` → `你好，世界`。
+  - EPG 采集：`Hello world` → `你好，世界`，缓存写入 `epg/.translate/cache.json`；重跑 `translated: 1`。
+  - EPG 探测 → `ok: true`。
+  - 字幕 `live.srt` → 输出包含 `你好，世界`。
+- `scripts/smoke-translate-live.sh` 可重复联调；CI 不跑外网。
+
+注意：`translate.ipacel.cc` 是社区试用服务，可用性与额度不保证。生产建议自建 MTranServer。
 
 ## 4. 进度日志
 
@@ -898,6 +922,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **P3-08 差分复验**：`compare-p0.sh` 22 项差异 0；新增端点差异登记 | ✅ §3ay |
 | 2026-10-21 | **一键安装**：根目录 `install.sh` 支持发布包/`dist`/URL，注册服务并保留配置；README 补说明 | ✅ §3az |
 | 2026-10-21 | **CLI 子命令**：`iptv-proxy` 支持启停、日志、地址、端口、密码、更新、重装、卸载；安装时创建软链 | ✅ §3ba |
+| 2026-10-21 | **翻译服务**：兼容 MTranServer v5、旧接口与单条回退；支持 Token；真实服务联调通过 | ✅ §3bb |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）
 

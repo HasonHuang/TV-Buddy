@@ -136,7 +136,11 @@ daemon_start() {
     if daemon_running; then
         return 0
     fi
-    ( cd "$BASE_DIR" && "$BIN" "$CFG" >>"$LOG_FILE" 2>&1 & echo $! >"$PID_FILE" )
+    (
+        cd "$BASE_DIR" || exit 1
+        exec "$BIN" "$CFG" >>"$LOG_FILE" 2>&1
+    ) &
+    echo $! >"$PID_FILE"
     i=0
     while [ "$i" -lt 20 ]; do
         daemon_running && return 0

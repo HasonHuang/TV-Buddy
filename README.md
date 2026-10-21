@@ -138,6 +138,51 @@ sudo iptv-proxy pass 'new-password' admin
 sudo iptv-proxy log 200
 ```
 
+## 翻译服务（MTranServer）
+
+支持 MTranServer v5 与旧批量接口。客户端优先请求 `/translate/batch`，失败时回退 `/translate`。地址可写根地址、完整 `/translate` 或 `/translate/batch`。
+
+字幕翻译：
+
+```toml
+[subtitle.translate]
+enabled = true
+url = "https://translate.ipacel.cc/translate"
+target = "zh-cn"
+source = "auto"
+# token = "可选；以 Authorization: Bearer 发送"
+```
+
+EPG 翻译：
+
+```toml
+[epg.translate]
+enabled = true
+engine = "mtran"
+mtran_url = "https://translate.ipacel.cc"
+target = "zh-cn"
+mtran_batch = 50
+# mtran_token = "可选"
+```
+
+`engine = "mtran"` 时才读取 `mtran_url`。也可以直接写 `[epg.translate].url`。
+
+`https://translate.ipacel.cc/translate` 是社区试用服务。可用性、速度和额度不保证。生产环境建议自建 MTranServer。
+
+联调：
+
+```bash
+scripts/smoke-translate-live.sh
+
+# 指定其他服务
+TRANSLATE_URL=http://127.0.0.1:8989/translate scripts/smoke-translate-live.sh
+
+# 需要 Token 时
+TRANSLATE_URL=http://127.0.0.1:8989 TRANSLATE_TOKEN=secret scripts/smoke-translate-live.sh
+```
+
+脚本检查 `/subtitle/mtran/test`、EPG 采集与缓存、EPG 探测和字幕翻译。
+
 ## 测试
 
 ```bash
@@ -147,6 +192,7 @@ scripts/smoke-m2.sh   # 播放链路、切片伪装、缓存窗口、302 占位�
 scripts/smoke-m3.sh   # 直连模式：redirect/rewrite/passthrough、remux/dash 就绪语义
 scripts/smoke-m4.sh   # 热重载、看门狗冷却、缓存状态与清空、指标与日志
 scripts/smoke-cli.sh  # CLI：端口、密码、启停、更新、重装、卸载保留数据
+scripts/smoke-translate-live.sh # 真实 MTranServer 联调（需外网）
 scripts/smoke-epg.sh  # EPG：采集、/epg.xml[.gz]、/epg 页面与 /epg/api/*、状态与刷新
 scripts/smoke-logo.sh # 台标库：上传、公开取图与列表、删除
 scripts/smoke-backup.sh # 备份与恢复：导出 gzip、改动后回滚、拒绝非法内容

@@ -267,9 +267,11 @@ pub async fn resolver_remove(
 struct SubtitleTranslate {
     enabled: bool,
     url: String,
+    token: String,
     source: String,
     targets: Vec<String>,
     translation_first: bool,
+    batch: usize,
 }
 
 impl SubtitleTranslate {
@@ -299,6 +301,12 @@ fn subtitle_translate(config: &crate::config::Config) -> SubtitleTranslate {
         .trim()
         .trim_end_matches('/')
         .to_string();
+    let token = get("token")
+        .or_else(|| get("mtran_token"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let source = get("source")
         .and_then(|value| value.as_str())
         .unwrap_or("auto")
@@ -327,12 +335,20 @@ fn subtitle_translate(config: &crate::config::Config) -> SubtitleTranslate {
     if targets.is_empty() {
         targets.push("zh-cn".to_string());
     }
+    let batch = get("batch")
+        .or_else(|| get("mtran_batch"))
+        .and_then(|value| value.as_integer())
+        .filter(|value| *value > 0)
+        .unwrap_or(40)
+        .min(500) as usize;
     SubtitleTranslate {
         enabled,
         url,
+        token,
         source,
         targets,
         translation_first,
+        batch,
     }
 }
 
@@ -448,10 +464,17 @@ pub async fn translate_subtitle(
         return Err(ApiError::bad_request("没有可翻译的字幕文本"));
     }
     let mut translations: HashMap<String, String> = HashMap::new();
-    for chunk in lines.chunks(40) {
-        let values = translate::batch(&state.http, &cfg.url, &cfg.source, &target, chunk)
-            .await
-            .map_err(|error| ApiError::internal(format!("翻译失败: {error:#}")))?;
+    for chunk in lines.chunks(cfg.batch) {
+        let values = translate::batch_with_token(
+            &state.http,
+            &cfg.url,
+            &cfg.source,
+            &target,
+            chunk,
+            Some(cfg.token.as_str()),
+        )
+        .await
+        .map_err(|error| ApiError::internal(format!("翻译失败: {error:#}")))?;
         for (line, value) in chunk.iter().zip(values) {
             translations.insert(line.clone(), value);
         }
@@ -514,17 +537,8 @@ pub async fn mtran_test(State(state): State<Arc<AppState>>, Json(body): Json<Val
         .unwrap_or("hello")
         .to_string();
     let config = state.snapshot();
-    let base = config
-        .extra
-        .get("subtitle")
-        .and_then(|table| table.get("translate"))
-        .and_then(|table| table.get("url"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .trim()
-        .trim_end_matches('/')
-        .to_string();
-    if base.is_empty() {
+    let cfg = subtitle_translate(&config);
+    if cfg.url.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({
@@ -533,32 +547,31 @@ pub async fn mtran_test(State(state): State<Arc<AppState>>, Json(body): Json<Val
         )
             .into_response();
     }
-    let endpoint = format!("{base}/translate/batch");
-    let result = state
-        .http
-        .post(&endpoint)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(
-            serde_json::to_vec(&json!({
-                "texts": [text],
-                "source_lang": "auto",
-                "target_lang": "zh-cn",
-            }))
-            .unwrap_or_default(),
-        )
-        .send()
-        .await;
-    let (ok, error) = match result {
-        Ok(response) if response.status().is_success() => (true, String::new()),
-        Ok(response) => (false, format!("请求失败: HTTP {}", response.status())),
-        Err(error) => (false, format!("请求失败: {error}")),
+    let target = cfg.target(None);
+    let translated = translate::batch_with_token(
+        &state.http,
+        &cfg.url,
+        "auto",
+        &target,
+        &[text],
+        Some(cfg.token.as_str()),
+    )
+    .await;
+    let (ok, error, result) = match translated {
+        Ok(values) => (
+            true,
+            String::new(),
+            values.first().cloned().unwrap_or_default(),
+        ),
+        Err(error) => (false, format!("请求失败: {error:#}"), String::new()),
     };
     Json(json!({
-        "base": base,
+        "base": cfg.url,
         "ok": ok,
+        "result": result,
         "targets": [{
             "code": "zh-Hans",
-            "lang": "zh-cn",
+            "lang": target,
             "ok": ok,
             "error": error,
         }],

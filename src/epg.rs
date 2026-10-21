@@ -282,9 +282,11 @@ fn write_gzip(path: &Path, data: &[u8]) -> Result<()> {
 pub struct TranslateCfg {
     pub enabled: bool,
     pub url: String,
+    pub token: String,
     pub source: String,
     pub targets: Vec<String>,
     pub translation_first: bool,
+    pub batch: usize,
 }
 
 /// 解析 `[epg.translate]`；`targets` 为空时回退到 `target`。
@@ -294,13 +296,35 @@ pub fn translate_config(config: &Config) -> TranslateCfg {
     let enabled = get("enabled")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
-    let url = get("url")
+    let engine = get("engine")
         .and_then(|value| value.as_str())
         .unwrap_or("")
         .trim()
-        .trim_end_matches('/')
+        .to_ascii_lowercase();
+    let explicit_url = get("url")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+    let url = if !explicit_url.is_empty() {
+        explicit_url.trim_end_matches('/').to_string()
+    } else if engine.is_empty() || engine == "mtran" {
+        get("mtran_url")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim()
+            .trim_end_matches('/')
+            .to_string()
+    } else {
+        String::new()
+    };
+    let token = get("token")
+        .or_else(|| get("mtran_token"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
         .to_string();
     let source = get("source")
+        .or_else(|| get("mtran_source"))
         .and_then(|value| value.as_str())
         .unwrap_or("auto")
         .to_string();
@@ -325,23 +349,26 @@ pub fn translate_config(config: &Config) -> TranslateCfg {
             }
         }
     }
+    let batch = get("mtran_batch")
+        .and_then(|value| value.as_integer())
+        .filter(|value| *value > 0)
+        .unwrap_or(40)
+        .min(500) as usize;
     TranslateCfg {
         enabled,
         url,
+        token,
         source,
         targets,
         translation_first,
+        batch,
     }
 }
 
 /// 翻译服务端点；未配置时返回空串。
 pub fn translate_endpoint(config: &Config) -> String {
     let cfg = translate_config(config);
-    if cfg.url.is_empty() {
-        String::new()
-    } else {
-        format!("{}/translate/batch", cfg.url)
-    }
+    crate::translate::endpoint(&cfg.url)
 }
 
 /// 翻译缓存条目数（状态页用）。
@@ -412,9 +439,16 @@ async fn translate_programmes(
                 }
             }
         }
-        for chunk in pending.chunks(40) {
-            let values =
-                crate::translate::batch(&state.http, &cfg.url, &cfg.source, target, chunk).await?;
+        for chunk in pending.chunks(cfg.batch) {
+            let values = crate::translate::batch_with_token(
+                &state.http,
+                &cfg.url,
+                &cfg.source,
+                target,
+                chunk,
+                Some(cfg.token.as_str()),
+            )
+            .await?;
             for (text, value) in chunk.iter().zip(values) {
                 cache.insert(translate_key(target, text), value);
             }
@@ -859,6 +893,35 @@ mod tests {
         assert_eq!(cfg.source, "auto");
         assert!(!cfg.translation_first);
         assert_eq!(translate_endpoint(&config), "http://mtran/translate/batch");
+    }
+
+    #[test]
+    fn translate_config_reads_mtran_aliases() {
+        let mut config = Config::default();
+        let mut translate = toml::Table::new();
+        translate.insert("enabled".into(), toml::Value::Boolean(true));
+        translate.insert("engine".into(), toml::Value::String("mtran".into()));
+        translate.insert(
+            "mtran_url".into(),
+            toml::Value::String("https://translate.example/translate".into()),
+        );
+        translate.insert("mtran_token".into(), toml::Value::String("secret".into()));
+        translate.insert("mtran_source".into(), toml::Value::String("en".into()));
+        translate.insert("mtran_batch".into(), toml::Value::Integer(50));
+        translate.insert("target".into(), toml::Value::String("zh-cn".into()));
+        let mut epg = toml::Table::new();
+        epg.insert("translate".into(), toml::Value::Table(translate));
+        config.epg.extra = epg;
+
+        let cfg = translate_config(&config);
+        assert_eq!(cfg.url, "https://translate.example/translate");
+        assert_eq!(cfg.token, "secret");
+        assert_eq!(cfg.source, "en");
+        assert_eq!(cfg.batch, 50);
+        assert_eq!(
+            translate_endpoint(&config),
+            "https://translate.example/translate/batch"
+        );
     }
 
     #[test]

@@ -11,6 +11,23 @@ token_enabled = false
 [cache]
 disk_path = "./cache"
 
+# 字幕机翻（可选）。url 可写根地址、/translate 或 /translate/batch。
+# [subtitle.translate]
+# enabled = true
+# url = "https://translate.ipacel.cc/translate"
+# target = "zh-cn"
+# source = "auto"
+# token = ""
+
+# EPG 翻译（可选）。engine = "mtran" 时使用 mtran_url。
+# [epg.translate]
+# enabled = true
+# engine = "mtran"
+# mtran_url = "https://translate.ipacel.cc"
+# mtran_token = ""
+# target = "zh-cn"
+# mtran_batch = 50
+
 [[groups]]
 id = "demo"
 name = "示例分组"

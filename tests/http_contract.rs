@@ -68,6 +68,59 @@ async fn upstream_translate(axum::Json(body): axum::Json<serde_json::Value>) -> 
         .into_response()
 }
 
+/// 伪单条翻译：只提供 `/translate`，用于回退测试。
+async fn upstream_translate_single(axum::Json(body): axum::Json<serde_json::Value>) -> Response {
+    let target = body
+        .get("to")
+        .or_else(|| body.get("target_lang"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("zh-cn");
+    let text = body
+        .get("text")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        serde_json::json!({ "result": format!("[{target}]译:{text}") }).to_string(),
+    )
+        .into_response()
+}
+
+/// 伪 MTranServer v5：要求 Bearer Token，返回 `{results}`。
+async fn upstream_translate_v5(
+    headers: axum::http::HeaderMap,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> Response {
+    if headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        != Some("Bearer demo-token")
+    {
+        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    }
+    let target = body
+        .get("to")
+        .or_else(|| body.get("target_lang"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("zh-cn");
+    let results: Vec<String> = body
+        .get("texts")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|text| format!("[{target}]译:{text}"))
+                .collect()
+        })
+        .unwrap_or_default();
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        serde_json::json!({ "results": results, "detected_languages": ["en"] }).to_string(),
+    )
+        .into_response()
+}
+
 /// 伪上游：按路径返回清单或切片。
 async fn upstream_file(
     Path(path): Path<String>,
@@ -179,6 +232,14 @@ async fn fixture_with_all(epg_enabled: bool, extra_section: &str) -> Fixture {
 
     let mut upstream_app = Router::new()
         .route("/translate/batch", axum::routing::post(upstream_translate))
+        .route(
+            "/v5/translate/batch",
+            axum::routing::post(upstream_translate_v5),
+        )
+        .route(
+            "/single/translate",
+            axum::routing::post(upstream_translate_single),
+        )
         .route("/*path", get(upstream_file));
     if epg_enabled {
         let body = epg_document();
@@ -2861,6 +2922,90 @@ target = "zh-cn"
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
     assert_eq!(body["cached"], true);
+}
+
+#[tokio::test]
+async fn subtitle_translation_accepts_mtran_v5_and_token() {
+    let extra = r#"
+[subtitle.translate]
+enabled = true
+url = "{upstream}/v5"
+token = "demo-token"
+target = "zh-cn"
+"#;
+    let fixture = fixture_with_all(false, extra).await;
+    let auth = format!("Bearer {}", login(&fixture).await);
+    let directory = fixture.dir.join("cache/subtitles");
+    std::fs::create_dir_all(&directory).expect("字幕目录");
+    std::fs::write(
+        directory.join("v5.srt"),
+        "1\n00:00:01,000 --> 00:00:03,000\nHello\n",
+    )
+    .expect("写字幕");
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/subtitle/translate", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "file": "v5.srt" }).to_string())
+        .send()
+        .await
+        .expect("翻译");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    let download = body["download"].as_str().expect("下载地址").to_string();
+    let text = fixture
+        .client
+        .get(format!("{}{download}", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("下载")
+        .text()
+        .await
+        .expect("正文");
+    assert!(text.contains("[zh-cn]译:Hello"), "{text}");
+
+    let response = fixture
+        .client
+        .post(format!("{}/subtitle/mtran/test", fixture.base))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "text": "Hello" }).to_string())
+        .send()
+        .await
+        .expect("自检");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["result"], "[zh-cn]译:Hello");
+}
+
+#[tokio::test]
+async fn subtitle_mtran_falls_back_to_single_endpoint() {
+    let fixture = fixture_with_extra(
+        r#"
+[subtitle.translate]
+url = "{upstream}/single"
+"#,
+    )
+    .await;
+
+    let response = fixture
+        .client
+        .post(format!("{}/subtitle/mtran/test", fixture.base))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "text": "Hello" }).to_string())
+        .send()
+        .await
+        .expect("自检");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["result"], "[zh-cn]译:Hello");
 }
 
 #[tokio::test]

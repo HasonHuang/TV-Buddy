@@ -23,6 +23,8 @@
 | `[cache]` | `backend`、`disk_path`、`m3u8/segment_max_entries`、`disk_max_mb`、`disguise.*` | 缓存与伪装 |
 | `[auth]` | `token_enabled`、`token_ttl_hours`、`token_failure_url`、`whitelist` | 播放 Token |
 | `[health]`/`[stats]` | `enabled`、`interval_secs`、`online_window_secs` | 健康与指标 |
+| `[epg.translate]` | `enabled`、`url`/`mtran_url`、`token`/`mtran_token`、`source`、`target(s)`、`mtran_batch` | EPG 机翻 |
+| `[subtitle.translate]` | `enabled`、`url`、`token`、`source`、`target(s)`、`batch` | 字幕机翻 |
 | `[[groups]]`/`[[groups.channels]]` | 见 `02-architecture.md` §4.1 | 数据面 |
 
 ## 2. 热重载矩阵
@@ -34,6 +36,7 @@
 | `[[groups]]`/`[[groups.channels]]` | 立即 | 面板改动的实测行为 |
 | `[cache]`（`disk_path`） | 需重启 | 目标同 |
 | `[epg]` | **需重启**（`enabled` 与源列表在启动时读取） | F-008 |
+| `[epg.translate]`/`[subtitle.translate]` | 立即（下次翻译生效） | 设计决策 |
 | `[panel]` | 立即（新会话按新口令） | 设计决策 |
 
 实现：`notify` 监视配置文件。事件到达后重读；解析失败只记日志、保留旧快照。自身写盘时先登记内容摘要，忽略自己触发的下一次事件（避免写回循环）。
@@ -52,7 +55,9 @@
 ├─ livestream/    本地回看
 ├─ recordings/    录制产物 + schedule.json
 ├─ logos/         台标文件（含 .orig/ 原图备份）
-└─ resolvers/     解析脚本缓存
+├─ resolvers/     解析脚本缓存
+├─ epg/.translate/ EPG 翻译缓存
+└─ subtitles/.translate/ 字幕翻译缓存
 ```
 
 | 项 | 设计 | 依据 |

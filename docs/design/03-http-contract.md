@@ -342,7 +342,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 > 三个 `/epg/api/*` 的响应形状为本实现自定（目标只登记了路由存在性）。
 > 实现：按请求读取 `epg.xml` 并解析；节目单较大时再改为内存快照。
 >
-| 翻译 | 读 `[epg.translate]`：`enabled`、`url`、`source`、`target`/`targets`、`translation_first`。采集后把节目文本批量发到 `<url>/translate/batch`，译文按目标语言追加为 `lang="<target>"` 的文本节点；`translation_first = true` 时排在原文前。结果缓存在 `<cache>/epg/.translate/cache.json`，命中不发请求 |
+| 翻译 | 读 `[epg.translate]`：`enabled`、`url`（或 `engine="mtran"` 时的 `mtran_url`）、`token`/`mtran_token`、`source`/`mtran_source`、`target`/`targets`、`translation_first`、`mtran_batch`。采集后把节目文本批量发到 MTranServer v5 `/translate/batch`（`{from,to,texts}` → `{results}`），兼容旧 `{texts,source_lang,target_lang}`；`/translate/batch` 不可用时回退单条 `/translate`。译文按目标语言追加为 `lang="<target>"` 的文本节点；`translation_first = true` 时排在原文前。结果缓存在 `<cache>/epg/.translate/cache.json`，命中不发请求 |
 | 翻译接口 | `GET /epg/translate/{status,models}` 报告引擎与目标语言；`POST /epg/translate/{run,probe,mtran/test,clear,clear-engine}`。`run/probe` 需面板会话；未启用或未配地址 → `400`。`clear*` 清空缓存 |
 
 ### 6.6 备份与恢复（P1 已实现）
@@ -430,7 +430,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 脚本执行 | 只保存与列出；**不执行**（P2） |
 | 字幕翻译 | 只翻字幕块正文；时间行、序号、`NOTE`/`STYLE` 块与 WebVTT 设置行原样保留 |
 | ASS/SSA | 读 `[Events]` 的 `Format:` 与 `Dialogue:`；去 `{\…}` 标签，`\N` 转换行；输出 WebVTT |
-| 字幕译法 | 每个正文行单独翻译并按 40 行分批；按 `translation_first` 输出「原文 + 译文」或「译文 + 原文」 |
+| 字幕译法 | 每个正文行单独翻译并按 `batch`/`mtran_batch` 分批（默认 40）；按 `translation_first` 输出「原文 + 译文」或「译文 + 原文」 |
 | 字幕缓存 | `<cache>/subtitles/.translate/<sha256(file,target,order,format)[..32]>.<ext>`；ASS/SSA 输出 `.vtt`；命中不发请求；`clear` 清空 |
 
 ### 6.10 多 VPS 分享（P1 已实现）
@@ -531,7 +531,7 @@ MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒�
 | `POST` | `/panel/api/schedule/from-epg` | 批量建任务：`{"items":[…]}` → `{ok,created,ids,failed}` |
 | `GET` | `/panel/api/livestream` | 已点亮频道 |
 | `POST` | `/panel/api/livestream/:gid/:cid/{start,stop}` | 改写频道 `livestream` 并落盘 |
-| `POST` | `/subtitle/mtran/test` | 机翻自检：未配 `[subtitle.translate].url` → `400`；否则调 `<url>/translate/batch` |
+| `POST` | `/subtitle/mtran/test` | 机翻自检：未配 `[subtitle.translate].url` → `400`；否则调 MTranServer，返回 `{ok,result,...}`。地址可写根地址或 `/translate`；`token` 以 Bearer 发送 |
 | `POST` | `/subtitle/translate/clear` | 清空 `<cache>/subtitles/.translate/`，返回 `{ok,cleared}` |
 
 任务字段：`id,name,group_id,channel_id,start_time,end_time,format,status,output_file,extra_files,note,error,created_at,file_size,record_secs`。

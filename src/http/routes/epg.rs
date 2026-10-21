@@ -273,37 +273,38 @@ pub async fn translate_probe(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     let config = state.snapshot();
+    let translate = epg::translate_config(&config);
     let endpoint = epg::translate_endpoint(&config);
     if endpoint.is_empty() {
         return Err(ApiError::bad_request("请先填写翻译服务地址"));
     }
-    let translate = epg::translate_config(&config);
     let target = translate
         .targets
         .first()
         .cloned()
         .unwrap_or_else(|| "zh-cn".to_string());
-    let result = state
-        .http
-        .post(&endpoint)
-        .header(axum::http::header::CONTENT_TYPE, "application/json")
-        .body(
-            serde_json::to_vec(&json!({
-                "texts": ["hello"],
-                "source_lang": translate.source,
-                "target_lang": target,
-            }))
-            .unwrap_or_default(),
-        )
-        .send()
-        .await;
+    let result = crate::translate::batch_with_token(
+        &state.http,
+        &translate.url,
+        &translate.source,
+        &target,
+        &["hello".to_string()],
+        Some(translate.token.as_str()),
+    )
+    .await;
     Ok(Json(match result {
-        Ok(response) => json!({
-            "ok": response.status().is_success(),
+        Ok(values) => json!({
+            "ok": true,
             "endpoint": endpoint,
-            "status": response.status().as_u16(),
+            "status": 200,
+            "result": values.first().cloned().unwrap_or_default(),
         }),
-        Err(error) => json!({ "ok": false, "endpoint": endpoint, "error": format!("{error}") }),
+        Err(error) => json!({
+            "ok": false,
+            "endpoint": endpoint,
+            "status": Value::Null,
+            "error": format!("请求失败: {error:#}"),
+        }),
     }))
 }
 
@@ -317,7 +318,7 @@ pub async fn translate_mtran(
         .and_then(Value::as_str)
         .unwrap_or("hello")
         .to_string();
-    let base = translate_url(&state.snapshot());
+    let (base, token) = translate_credentials(&state.snapshot());
     if base.is_empty() {
         return (
             axum::http::StatusCode::BAD_REQUEST,
@@ -327,54 +328,57 @@ pub async fn translate_mtran(
         )
             .into_response();
     }
-    let endpoint = format!("{base}/translate/batch");
-    let result = state
-        .http
-        .post(&endpoint)
-        .header(axum::http::header::CONTENT_TYPE, "application/json")
-        .body(
-            serde_json::to_vec(&json!({
-                "texts": [text],
-                "source_lang": "auto",
-                "target_lang": "zh-cn",
-            }))
-            .unwrap_or_default(),
-        )
-        .send()
-        .await;
-    let (ok, error) = match result {
-        Ok(response) if response.status().is_success() => (true, String::new()),
-        Ok(response) => (false, format!("请求失败: HTTP {}", response.status())),
-        Err(error) => (false, format!("请求失败: {error}")),
+    let translated = crate::translate::batch_with_token(
+        &state.http,
+        &base,
+        "auto",
+        "zh-cn",
+        &[text],
+        Some(token.as_str()),
+    )
+    .await;
+    let (ok, error, result) = match translated {
+        Ok(values) => (
+            true,
+            String::new(),
+            values.first().cloned().unwrap_or_default(),
+        ),
+        Err(error) => (false, format!("请求失败: {error:#}"), String::new()),
     };
     Json(json!({
         "base": base,
         "ok": ok,
+        "result": result,
         "targets": [{ "code": "zh-Hans", "lang": "zh-cn", "ok": ok, "error": error }],
         "version": null,
     }))
     .into_response()
 }
 
-fn translate_url(config: &crate::config::Config) -> String {
-    config
-        .epg
+/// EPG 翻译优先；未配置时回退到字幕翻译配置。
+fn translate_credentials(config: &crate::config::Config) -> (String, String) {
+    let epg = epg::translate_config(config);
+    if !epg.url.is_empty() {
+        return (epg.url, epg.token);
+    }
+    let table = config
         .extra
-        .get("translate")
-        .and_then(|table| table.get("url"))
+        .get("subtitle")
+        .and_then(|table| table.get("translate"));
+    let get = |key: &str| table.and_then(|table| table.get(key));
+    let url = get("url")
         .and_then(|value| value.as_str())
-        .or_else(|| {
-            config
-                .extra
-                .get("subtitle")
-                .and_then(|table| table.get("translate"))
-                .and_then(|table| table.get("url"))
-                .and_then(|value| value.as_str())
-        })
         .unwrap_or("")
         .trim()
         .trim_end_matches('/')
-        .to_string()
+        .to_string();
+    let token = get("token")
+        .or_else(|| get("mtran_token"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    (url, token)
 }
 
 /// `POST /epg/translate/clear`——清空翻译结果缓存。
