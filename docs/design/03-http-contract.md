@@ -62,8 +62,9 @@
 | GET | `/logo` | 无 | `200` `text/html` | ✅ P1 | S-EP-06 |
 | GET | `/logo/<file>` | 无 | `200` 图片 + `public, max-age=86400`；缺文件、越界名、非白名单扩展 → `404` | ✅ P1 | F-011 §6 |
 | GET | `/logo/api/list` | 无 | `{"allowed_exts","count","logos":[{"file","name","ext","bytes","mtime","url"}]}` | ✅ P1 | F-011 |
-| GET | `/unban` | 无 | `200` `text/html` | P1 | S-EP-07 |
-| GET | `/unban/whoami`、`/whoami` | 无 | `200` `{"ip":"<地址>"}`；取 `X-Forwarded-For` 首项或 `X-Real-IP`，都没有时 `unknown` | ✅ P1 | S-EP-15 |
+| GET | `/unban` | 无 | `200` `text/html`；封禁期也可访问 | ✅ P3 | S-EP-07 |
+| POST | `/unban` | 无 | `200` 解封结果；配额用完 → `429` | ✅ P3 | S-AUTH-07 |
+| GET | `/unban/whoami`、`/whoami` | 无 | `200` `{"ip":"<地址>"}`；取 `X-Forwarded-For` 首项、`X-Real-IP`，都没有时取 TCP 对端 | ✅ P1 | S-EP-15 |
 | GET | `/health` | 无 | `200` `ok`（`text/plain`） | ✅ M0 | S-EP-10 |
 | GET | `/panel`、`/panel/`、`/panel/epg` | 无 | `200` `text/html` | ✅ M0 | S-EP-01 |
 | GET | `/__assets/*path` | 无 | `200` 静态资源 / `404` | ✅ M0 | S-EP-16 |
@@ -226,12 +227,14 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
-| POST | `/panel/api/login` | `{"username","password"}` | `{"token":"<uuid>"}`；错 → `401` |
+| POST | `/panel/api/login` | `{"username","password"}` | `{"token":"<uuid>"}`；错 → `401`；失败过多 → `429`（`locked_for_secs`） |
 | POST | `/panel/api/logout` | — | `{"ok":true}` |
 | GET | `/panel/api/status` | — | 状态 JSON（含 `version`、`entry_exts`） |
 | GET | `/panel/api/config` | — | 全量配置 JSON |
 | PUT | `/panel/api/config` | 全量配置 | `{"ok":true}`；非法 → `400` |
 | POST | `/panel/api/reload` | — | `{"ok":true}` |
+
+登录锁：窗口内失败数达到 `auth_fail_free_per_window + auth_fail_ban_threshold` 后，后续登录返回 `429`。默认窗口 60 秒、免费 15 次、阈值 6、锁定 300 秒。既有 Bearer 会话不受影响。
 
 ### 6.2 M1 落地
 
@@ -578,6 +581,20 @@ MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒�
 - 顺序固定：分组映射 → `global_exclude` → 源 `include` / `exclude`。
 - 过滤词：频道名包含；`group:<文本>` 分组包含；`id:<tvg-id>` 精确匹配。
 - 源抓取超时 20 秒。`sample` 最多 5 条。
+
+### 6.17 自助解封（P3 已实现）
+
+证据：S-EP-07、S-AUTH-07。
+
+| 项 | 规则 |
+| --- | --- |
+| 入口 | `GET /unban` 免登录；封禁期也可访问 |
+| 提交 | `POST /unban` 免登录；只解封调用方地址 |
+| 配额 | 每个 IP 30 天最多 3 次；成功解封才消耗 |
+| 未封禁 | `200` `{"ok":false,"ip","reason":"not_banned","remaining","window_secs"}` |
+| 成功 | `200` `{"ok":true,"ip","remaining","window_secs":2592000}` |
+| 配额用完 | `429` `{"error":"本月解封次数已用完","remaining":0,"window_secs"}` |
+| 计数 | 保存在内存；进程重启后清零 |
 
 ## 7. 错误串对照
 

@@ -173,6 +173,14 @@ pub struct AuthCfg {
     pub limit_url: String,
     pub ban_url: String,
     pub whitelist: Vec<String>,
+    /// 登录失败统计窗口（秒）。
+    pub auth_fail_window_secs: u64,
+    /// 窗口内免费失败次数。
+    pub auth_fail_free_per_window: u64,
+    /// 超出免费次数后，再累计多少次触发锁定。
+    pub auth_fail_ban_threshold: u64,
+    /// 锁定秒数。
+    pub auth_fail_lock_secs: u64,
     #[serde(flatten)]
     pub extra: toml::Table,
 }
@@ -190,6 +198,10 @@ impl Default for AuthCfg {
             limit_url: "https://material.yang-1989.eu.org/v/limit.mp4".into(),
             ban_url: "https://material.yang-1989.eu.org/v/Ban.mp4".into(),
             whitelist: Vec::new(),
+            auth_fail_window_secs: 60,
+            auth_fail_free_per_window: 15,
+            auth_fail_ban_threshold: 6,
+            auth_fail_lock_secs: 300,
             extra: toml::Table::new(),
         }
     }

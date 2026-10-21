@@ -24,7 +24,7 @@
 flowchart LR
   P0["P0 逆向与核心<br/>✅ 完成"] --> P1["P1 流处理与增值<br/>✅ 完成"]
   P1 --> P2["P2 运维与管理面<br/>✅ 完成"]
-  P2 --> P3["P3 兼容性补全<br/>🔄 3/8"]
+  P2 --> P3["P3 兼容性补全<br/>🔄 4/8"]
 ```
 
 | 阶段 | 范围 | 进度 |
@@ -32,13 +32,13 @@ flowchart LR
 | P0 | 逆向、代理/直连、Token、缓存、播放链路、打包 | ██████████ 100% |
 | P1 | EPG、回看、remux、录制、台标、分享、安全面 | ██████████ 100% |
 | P2 | 订阅聚合、面板分区、DASH 回看、EPG/字幕翻译 | ██████████ 100% |
-| P3 | 目标剩余端点与兼容细节（见 §0.6） | ███░░░░░░░ 3/8 |
+| P3 | 目标剩余端点与兼容细节（见 §0.6） | ████░░░░░░ 4/8 |
 
 ### 0.3 质量门（2026-10-21）
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 141 项（92 单元 + 49 集成） |
+| `cargo test --offline` | ✅ 148 项（97 单元 + 51 集成） |
 | 冒烟脚本 | ✅ 13 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
@@ -66,6 +66,7 @@ flowchart LR
 | 旧数据迁移 `./var/dash` | 不实现 | 仅 088 行为，v0.8.2 无 |
 | DASH URL 池 `pool≥2` | 环境受限 | 目标侧 503，取用方式未观测（F-015） |
 | `/epg/api/*` 响应形状 | 自定 | 目标仅登记路由（S-EP-16） |
+| `l1/l2` 限流与每 IP 会话上限 | 不实现 | 触发条件未复现（F-010 §5） |
 
 ### 0.6 任务计划（P3）
 
@@ -76,7 +77,7 @@ flowchart LR
 | P3-01 | CI 质量门 | S | GitHub Actions | `fmt`/`clippy`/`test`/双架构构建；失败阻断合并 | ✅ 运行 `39593785498` |
 | P3-02 | `/subs/{status,groups,preview}` | M | 无 | 形状按 S-GAP-07；复用 `[playlist]` 聚合；集成测试覆盖保留/丢弃/分组映射 | ✅ |
 | P3-03 | `GET /panel/api/link-info` | S | 无 | 返回 `aliases`、`random_id_enabled`、`token`、`token_enabled`、`use_alias`；测试 | ✅ |
-| P3-04 | 安全面补全 | M | 无 | 登录失败 429 锁、每 IP 会话上限、`/unban` 每月 3 次、`l1/l2` 窗口；测试 | ⏳ |
+| P3-04 | 安全面补全 | M | 无 | 登录失败 429 锁、`/unban` 每月 3 次；`l1/l2` 记为不实现 | ✅ |
 | P3-05 | 字幕格式扩展 | M | 可选 ffmpeg | ASS/SSA 转 SRT/VTT；`compat_mode` 与 `srt_ua_keywords`；测试 | ⏳ |
 | P3-06 | 真实翻译联调 | S | 本地 MTranServer | EPG 与字幕各跑一次；确认响应形状、分批、缓存、失败回退 | ⏳ |
 | P3-07 | 每频道代理覆盖 | M | 本地代理夹具 | `channel.proxy{kind,addr,user,pass}` 覆盖全局；所有上游请求生效 | ⏳ |
@@ -740,6 +741,23 @@ P2 已关闭；后续计划见 §0.6。
 
 验证：`cargo test --offline` 141 项（92 单元 + 49 集成）。
 
+## 3av. P3 · 登录锁与自助解封（已完成）
+
+证据：F-010 §4、S-EP-07、S-AUTH-07。
+
+| 项 | 结果 | 位置 |
+| --- | --- | --- |
+| 登录锁 | 窗口 60 秒、免费 15 次、阈值 6；失败数达到两者之和后，后续登录返回 `429`，锁 300 秒 | `src/auth/login_guard.rs` |
+| 锁定范围 | 只拦 `/panel/api/login`；既有 Bearer 会话仍可用 | `src/http/routes/panel.rs` |
+| 自助解封 | `GET /unban` 与 `POST /unban` 免登录；封禁期也可访问 | `src/http/routes/public.rs`、`src/http/guard.rs` |
+| 配额 | 每个 IP 30 天 3 次；成功解封才计数；内存保存 | `src/auth/unban.rs` |
+| 前端 | 显示当前地址、剩余次数与结果 | `frontend/src/unban.tsx` |
+| 测试 | 3 + 2 个单元；2 个集成 | `src/auth/*`、`tests/http_contract.rs` |
+
+不实现：`l1/l2` 限流与每 IP 会话上限。目标触发条件未复现（F-010 §5）。
+
+验证：`cargo test --offline` 148 项（97 单元 + 51 集成）。
+
 ## 4. 进度日志
 
 | 日期 | 事项 | 结果 |
@@ -777,6 +795,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **P3-01 CI**：新增 `.github/workflows/ci.yml`（前端构建 → fmt/clippy/test → 原生 amd64/arm64 musl 包）；首跑全绿 | ✅ 运行 `39593785498` |
 | 2026-10-21 | **P3-02 订阅源预检**：`/subs/status`、`/subs/groups`、`/subs/preview`；映射/排除/白黑名单与 `trace` | ✅ §3at |
 | 2026-10-21 | **P3-03 链接审计**：`GET /panel/api/link-info` 返回目标形状；Token 关闭时为空串 | ✅ §3au |
+| 2026-10-21 | **P3-04 安全面**：登录失败 429 锁、自助解封 30 天 3 次、封禁期可访问 `/unban` | ✅ §3av |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）
 

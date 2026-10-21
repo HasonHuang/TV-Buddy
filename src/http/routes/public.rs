@@ -1,14 +1,20 @@
-//! 公开面：健康检查、首页跳转、兜底。
+//! 公开面：健康检查、首页跳转、自助解封、兜底。
 
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::State,
-    http::{header, HeaderValue, StatusCode, Uri},
+    extract::{ConnectInfo, State},
+    http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
     response::{IntoResponse, Response},
+    Json,
 };
+use serde_json::{json, Value};
 
-use crate::state::AppState;
+use crate::{
+    auth::unban::WINDOW_SECS,
+    http::{error::ApiError, ext::client_ip_with_peer},
+    state::AppState,
+};
 
 /// `302 Found`。目标用 302 做占位跳转（S-DIS-15）。
 fn found(url: &str) -> Response {
@@ -57,6 +63,41 @@ pub async fn fallback(State(_): State<Arc<AppState>>, uri: Uri) -> Response {
 /// `GET /whoami`、`GET /unban/whoami`——返回调用方地址。
 ///
 /// 响应形状为本实现自定。目标只登记了路由存在性（S-EP-15）。
-pub async fn whoami(headers: axum::http::HeaderMap) -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({ "ip": crate::http::ext::client_ip(&headers) }))
+pub async fn whoami(ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap) -> Json<Value> {
+    Json(json!({ "ip": client_ip_with_peer(&headers, Some(peer)) }))
+}
+
+/// `POST /unban`——调用方自助解封。
+///
+/// 免登录（S-EP-07）。每个 IP 30 天最多 3 次（S-AUTH-07）。
+/// 只解封调用方地址；不提供解封他人地址的能力。
+pub async fn unban(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let ip = client_ip_with_peer(&headers, Some(peer));
+    if !state.ip_guard.is_banned(&ip) {
+        return Ok(Json(json!({
+            "ok": false,
+            "ip": ip,
+            "reason": "not_banned",
+            "remaining": state.unban_quota.remaining(&ip),
+            "window_secs": WINDOW_SECS,
+        })));
+    }
+    if !state.unban_quota.consume(&ip) {
+        return Err(ApiError::too_many(json!({
+            "error": "本月解封次数已用完",
+            "remaining": 0,
+            "window_secs": WINDOW_SECS,
+        })));
+    }
+    state.ip_guard.unban(&ip);
+    Ok(Json(json!({
+        "ok": true,
+        "ip": ip,
+        "remaining": state.unban_quota.remaining(&ip),
+        "window_secs": WINDOW_SECS,
+    })))
 }

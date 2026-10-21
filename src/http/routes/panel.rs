@@ -1,10 +1,10 @@
 //! 面板接口。全部需要会话（登录端点除外）。
 
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
-    extract::State,
-    http::StatusCode,
+    extract::{ConnectInfo, State},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use crate::{
     config,
-    http::{error::ApiError, ext::PanelAuth},
+    http::{error::ApiError, ext::client_ip_with_peer, ext::PanelAuth},
     state::AppState,
 };
 
@@ -35,11 +35,27 @@ pub struct LoginReq {
 }
 
 /// `POST /panel/api/login` → `{"token":"<uuid>"}`（S-AUTH-01）。
+///
+/// 失败次数超过窗口配额后返回 `429`，并带 `locked_for_secs`（S-AUTH-04、F-010 §4）。
 pub async fn login(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(req): Json<LoginReq>,
 ) -> Result<Json<Value>, ApiError> {
     let cfg = state.snapshot();
+    let ip = client_ip_with_peer(&headers, Some(peer));
+    let window = Duration::from_secs(cfg.auth.auth_fail_window_secs.max(1));
+    let lock = Duration::from_secs(cfg.auth.auth_fail_lock_secs.max(1));
+    if let Some(secs) = state.login_guard.check(
+        &ip,
+        window,
+        cfg.auth.auth_fail_free_per_window,
+        cfg.auth.auth_fail_ban_threshold,
+        lock,
+    ) {
+        return Err(login_locked(secs));
+    }
     if !cfg.panel.enabled {
         return Err(ApiError::Forbidden("面板未启用".into()));
     }
@@ -47,14 +63,24 @@ pub async fn login(
     let user_ok = req.username.trim() == cfg.panel.username;
     let pass_ok = config::sha256_hex(&req.password) == cfg.panel.password_sha256;
     if !(user_ok && pass_ok) {
+        state.login_guard.failure(&ip, window);
         return Err(ApiError::Unauthorized(
             json!({ "error": "用户名或密码错误" }),
         ));
     }
 
+    state.login_guard.success(&ip);
     let token = state.sessions.issue();
     tracing::info!(user = %cfg.panel.username, "面板登录成功");
     Ok(Json(json!({ "token": token })))
+}
+
+/// 构造登录锁定的 `429` 响应。
+fn login_locked(secs: u64) -> ApiError {
+    ApiError::too_many(json!({
+        "error": format!("登录失败次数过多，请 {secs}s 后再试"),
+        "locked_for_secs": secs,
+    }))
 }
 
 /// `POST /panel/api/logout`。

@@ -53,7 +53,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/epg", get(routes::epg::viewer))
         .route("/epg", get(routes::epg::viewer))
         .route("/logo", get(static_assets::logo_page))
-        .route("/unban", get(static_assets::unban_page))
+        .route(
+            "/unban",
+            get(static_assets::unban_page).post(routes::public::unban),
+        )
         .route("/__assets/*path", get(static_assets::asset))
         // 面板接口（需要会话）
         .route("/panel/api/login", post(routes::panel::login))

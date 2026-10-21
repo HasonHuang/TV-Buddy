@@ -803,7 +803,8 @@ async fn whoami_reports_forwarded_ip() {
     assert_eq!(response.status(), StatusCode::OK);
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
-    assert_eq!(body["ip"], "unknown");
+    let ip = body["ip"].as_str().expect("ip");
+    assert!(!ip.is_empty() && ip != "unknown", "{body}");
 }
 
 #[tokio::test]
@@ -1189,6 +1190,126 @@ async fn channel_headers_are_sent_upstream() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.expect("读正文");
     assert!(body.contains("# x-token=abc123"), "{body}");
+}
+
+#[tokio::test]
+async fn self_service_unban_respects_quota() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let ban = |ip: &str| {
+        fixture
+            .client
+            .post(format!("{}/panel/api/security/ip/ban", fixture.base))
+            .header("content-type", "application/json")
+            .header("authorization", &auth)
+            .body(format!(r#"{{"ip":"{ip}","seconds":60}}"#))
+    };
+
+    // 未封禁时只报告状态，不消耗配额。
+    let response = fixture
+        .client
+        .post(format!("{}/unban", fixture.base))
+        .header("x-forwarded-for", "8.8.8.8")
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["remaining"], 3);
+
+    for round in 0..3 {
+        assert_eq!(
+            ban("8.8.8.8").send().await.expect("请求").status(),
+            StatusCode::OK
+        );
+
+        // 封禁期内仍可打开解封页。
+        let response = fixture
+            .client
+            .get(format!("{}/unban", fixture.base))
+            .header("x-forwarded-for", "8.8.8.8")
+            .send()
+            .await
+            .expect("请求");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = fixture
+            .client
+            .post(format!("{}/unban", fixture.base))
+            .header("x-forwarded-for", "8.8.8.8")
+            .send()
+            .await
+            .expect("请求");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+        assert_eq!(body["ok"], true);
+        assert_eq!(body["remaining"], 2 - round);
+    }
+
+    assert_eq!(
+        ban("8.8.8.8").send().await.expect("请求").status(),
+        StatusCode::OK
+    );
+    let response = fixture
+        .client
+        .post(format!("{}/unban", fixture.base))
+        .header("x-forwarded-for", "8.8.8.8")
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let response = fixture
+        .client
+        .get(format!("{}/playlist.m3u", fixture.base))
+        .header("x-forwarded-for", "8.8.8.8")
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn login_locks_after_repeated_failures() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    for _ in 0..21 {
+        let response = fixture
+            .client
+            .post(format!("{}/panel/api/login", fixture.base))
+            .header("content-type", "application/json")
+            .body(r#"{"username":"admin","password":"wrong"}"#)
+            .send()
+            .await
+            .expect("请求");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/login", fixture.base))
+        .header("content-type", "application/json")
+        .body(r#"{"username":"admin","password":"admin"}"#)
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    let locked = body["locked_for_secs"].as_u64().expect("locked_for_secs");
+    assert!(locked >= 1 && locked <= 300, "{body}");
+
+    // 既有会话不受登录锁影响。
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/status", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

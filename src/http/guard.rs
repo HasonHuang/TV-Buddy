@@ -1,6 +1,6 @@
 //! 请求前置检查：IP 统计与封禁。
 //!
-//! 只作用于非 `/panel` 路径，避免管理员误封自己后无法解封。
+//! 只作用于非 `/panel` 与非 `/unban` 路径，避免管理员或用户无法解封。
 //! 封禁期内返回 `403`（形状为本实现自定）。
 
 use std::sync::Arc;
@@ -20,7 +20,7 @@ pub async fn ip_guard(
     request: Request,
     next: Next,
 ) -> Response {
-    if !request.uri().path().starts_with("/panel") {
+    if !request.uri().path().starts_with("/panel") && !request.uri().path().starts_with("/unban") {
         let peer = request
             .extensions()
             .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()

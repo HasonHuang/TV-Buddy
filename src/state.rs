@@ -57,6 +57,10 @@ pub struct AppState {
     pub epg: crate::epg::EpgState,
     /// IP 统计与封禁。
     pub ip_guard: crate::auth::IpGuard,
+    /// 面板登录失败锁。
+    pub login_guard: crate::auth::LoginGuard,
+    /// 自助解封配额。
+    pub unban_quota: crate::auth::UnbanQuota,
     /// 最近日志行。
     pub logs: Arc<RingBuffer>,
     /// 进程启动时刻。
@@ -93,6 +97,8 @@ impl AppState {
             watchdog: Watchdog::new(),
             epg: crate::epg::EpgState::default(),
             ip_guard: crate::auth::IpGuard::new(),
+            login_guard: crate::auth::LoginGuard::new(),
+            unban_quota: crate::auth::UnbanQuota::new(),
             logs,
             started: Instant::now(),
             write_lock: Mutex::new(()),
