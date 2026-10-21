@@ -43,7 +43,7 @@ flowchart LR
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
 | 发布包 | ✅ amd64 3.5 MB、arm64 3.3 MB；`verify-release.sh` 通过 |
-| CI | ✅ 本地全绿；最新推送运行待登记 |
+| CI | ⚠️ GitHub Webhooks 降级，最新推送未触发运行；本地 fmt/clippy/test、CLI 冒烟、真实翻译与双架构 `verify-release.sh` 全绿 |
 
 ### 0.4 里程碑
 
