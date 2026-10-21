@@ -35,6 +35,17 @@ impl Config {
     pub fn group_mut(&mut self, gid: &str) -> Option<&mut Group> {
         self.groups.iter_mut().find(|group| group.id == gid)
     }
+
+    /// 频道的有效上游代理：频道级优先，其次分组级。
+    pub fn proxy_for(&self, gid: &str, cid: &str) -> Option<&ProxyCfg> {
+        let group = self.group(gid)?;
+        group
+            .channels
+            .iter()
+            .find(|channel| channel.id == cid)
+            .and_then(|channel| channel.proxy.as_ref())
+            .or(group.proxy.as_ref())
+    }
 }
 
 /// `[server]`。
@@ -251,6 +262,30 @@ impl Default for StatsCfg {
     }
 }
 
+/// 上游代理覆盖（分组或频道级）。
+///
+/// 证据：S-GAP-05。目标字段为 `proxy{kind,addr,user,pass}`；行为未验。
+/// 本实现只用 `http`/`https`；其它 `kind` 忽略并记日志。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ProxyCfg {
+    pub kind: String,
+    pub addr: String,
+    pub user: String,
+    pub pass: String,
+}
+
+impl Default for ProxyCfg {
+    fn default() -> Self {
+        Self {
+            kind: "http".into(),
+            addr: String::new(),
+            user: String::new(),
+            pass: String::new(),
+        }
+    }
+}
+
 /// `[[groups]]`——工作模式属于分组（S-MODE-02）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -268,6 +303,9 @@ pub struct Group {
     pub redirect_ttl: u64,
     pub redirect_mode: String,
     pub headers: Vec<toml::Value>,
+    /// 分组级上游代理；频道级优先。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyCfg>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub channels: Vec<Channel>,
     #[serde(flatten)]
@@ -287,6 +325,7 @@ impl Default for Group {
             redirect_ttl: 0,
             redirect_mode: "direct".into(),
             headers: Vec::new(),
+            proxy: None,
             channels: Vec::new(),
             extra: toml::Table::new(),
         }
@@ -301,6 +340,9 @@ pub struct Channel {
     pub name: String,
     pub url: String,
     pub headers: Vec<toml::Value>,
+    /// 频道级上游代理；覆盖分组级。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyCfg>,
     pub selected_tracks: Vec<String>,
     pub dash_mode: String,
     pub livestream: bool,
@@ -325,6 +367,7 @@ impl Default for Channel {
             name: String::new(),
             url: String::new(),
             headers: Vec::new(),
+            proxy: None,
             selected_tracks: Vec::new(),
             dash_mode: "continuous".into(),
             livestream: false,
@@ -512,5 +555,64 @@ impl Default for ShareCfg {
             poll_secs: 300,
             extra: toml::Table::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_proxy_overrides_group_proxy() {
+        let mut config = Config::default();
+        let mut group = Group {
+            id: "g".into(),
+            ..Group::default()
+        };
+        group.proxy = Some(ProxyCfg {
+            addr: "http://group:8080".into(),
+            ..ProxyCfg::default()
+        });
+        group.channels.push(Channel {
+            id: "c".into(),
+            proxy: Some(ProxyCfg {
+                addr: "http://channel:8080".into(),
+                ..ProxyCfg::default()
+            }),
+            ..Channel::default()
+        });
+        config.groups.push(group);
+
+        assert_eq!(
+            config.proxy_for("g", "c").expect("频道代理").addr,
+            "http://channel:8080"
+        );
+        assert_eq!(
+            config.proxy_for("g", "other").expect("分组代理").addr,
+            "http://group:8080"
+        );
+        assert!(config.proxy_for("missing", "c").is_none());
+    }
+
+    #[test]
+    fn proxy_is_parsed_from_toml() {
+        let text = r#"
+[[groups]]
+id = "g"
+name = "组"
+[groups.proxy]
+kind = "http"
+addr = "http://127.0.0.1:8080"
+user = "u"
+pass = "p"
+[[groups.channels]]
+id = "c"
+name = "频道"
+url = "http://up/live.m3u8"
+"#;
+        let config: Config = toml::from_str(text).expect("解析配置");
+        let proxy = config.proxy_for("g", "c").expect("代理");
+        assert_eq!(proxy.kind, "http");
+        assert_eq!(proxy.user, "u");
     }
 }

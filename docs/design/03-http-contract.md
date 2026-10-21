@@ -597,6 +597,19 @@ MPD 解析只读取 `AdaptationSet` 与 `Representation` 属性，不下载媒�
 | 配额用完 | `429` `{"error":"本月解封次数已用完","remaining":0,"window_secs"}` |
 | 计数 | 保存在内存；进程重启后清零 |
 
+### 6.18 上游代理覆盖（P3 已实现）
+
+证据：S-GAP-05。目标只登记字段，行为未验。
+
+| 项 | 规则 |
+| --- | --- |
+| 字段 | `[[groups]]` 或 `[[groups.channels]]` 的 `proxy{kind,addr,user,pass}` |
+| 优先级 | 频道级 > 分组级 > 直连 |
+| 支持 | `http` 与 `https`；`user` 非空时用 basic auth |
+| 生效范围 | 清单、切片、回看、Remux、录制、DASH 回看 |
+| 不支持 | `socks5` 等类型；遇到时不代理并记告警 |
+| 客户端缓存 | 键为 `kind\|addr\|user\|pass`，配置热重载后按新键重建 |
+
 ## 7. 错误串对照
 
 面板错误体保留目标原文，便于前端与外部脚本匹配（F-012 §3、F-013 §5）：

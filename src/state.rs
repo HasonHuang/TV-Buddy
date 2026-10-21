@@ -61,6 +61,8 @@ pub struct AppState {
     pub login_guard: crate::auth::LoginGuard,
     /// 自助解封配额。
     pub unban_quota: crate::auth::UnbanQuota,
+    /// 按代理配置缓存的 HTTP 客户端。
+    proxy_clients: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
     /// 最近日志行。
     pub logs: Arc<RingBuffer>,
     /// 进程启动时刻。
@@ -99,6 +101,7 @@ impl AppState {
             ip_guard: crate::auth::IpGuard::new(),
             login_guard: crate::auth::LoginGuard::new(),
             unban_quota: crate::auth::UnbanQuota::new(),
+            proxy_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
             logs,
             started: Instant::now(),
             write_lock: Mutex::new(()),
@@ -108,6 +111,57 @@ impl AppState {
     /// 取当前配置快照。
     pub fn snapshot(&self) -> Arc<Config> {
         self.config.load_full()
+    }
+
+    /// 选择频道上游客户端。
+    ///
+    /// 频道级代理优先于分组级。没有代理或代理无效时返回全局客户端。
+    pub fn http_for(&self, gid: &str, cid: &str) -> reqwest::Client {
+        let config = self.snapshot();
+        let Some(proxy) = config.proxy_for(gid, cid) else {
+            return self.http.clone();
+        };
+        let addr = proxy.addr.trim();
+        if addr.is_empty() {
+            return self.http.clone();
+        }
+        if !matches!(proxy.kind.as_str(), "" | "http" | "https") {
+            tracing::warn!(kind = %proxy.kind, "不支持的代理类型；改用直连");
+            return self.http.clone();
+        }
+        let key = format!("{}|{}|{}|{}", proxy.kind, addr, proxy.user, proxy.pass);
+        {
+            let cache = self
+                .proxy_clients
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(client) = cache.get(&key) {
+                return client.clone();
+            }
+        }
+        let built = reqwest::Proxy::all(addr).and_then(|mut candidate| {
+            if !proxy.user.is_empty() {
+                candidate = candidate.basic_auth(&proxy.user, &proxy.pass);
+            }
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(20))
+                .proxy(candidate)
+                .build()
+        });
+        match built {
+            Ok(client) => {
+                let mut cache = self
+                    .proxy_clients
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                cache.insert(key, client.clone());
+                client
+            }
+            Err(error) => {
+                tracing::warn!(%error, "代理客户端创建失败；改用直连");
+                self.http.clone()
+            }
+        }
     }
 
     /// 原子替换配置。同时解除全部冷却（S-MODE-17）。

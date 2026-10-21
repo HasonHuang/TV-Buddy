@@ -280,7 +280,7 @@ async fn record(state: Arc<AppState>, task: Task, end: i64, stop: Arc<AtomicBool
         crate::http::routes::stream::channel_headers(&state, &task.group_id, &task.channel_id);
 
     while now_epoch() < end && !stop.load(Ordering::SeqCst) {
-        let mut request = state.http.get(&url);
+        let mut request = state.http_for(&task.group_id, &task.channel_id).get(&url);
         for (name, value) in &headers {
             request = request.header(name, value);
         }
@@ -321,7 +321,9 @@ async fn record(state: Arc<AppState>, task: Task, end: i64, stop: Arc<AtomicBool
             if !seen.insert(segment.clone()) {
                 continue;
             }
-            let mut request = state.http.get(&segment);
+            let mut request = state
+                .http_for(&task.group_id, &task.channel_id)
+                .get(&segment);
             for (name, value) in &headers {
                 request = request.header(name, value);
             }

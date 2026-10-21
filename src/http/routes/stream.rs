@@ -658,7 +658,7 @@ pub(crate) async fn fetch(
     gid: &str,
     cid: &str,
 ) -> Result<String, reqwest::Error> {
-    let mut request = state.http.get(url);
+    let mut request = state.http_for(gid, cid).get(url);
     for (name, value) in channel_headers(state, gid, cid) {
         request = request.header(name, value);
     }
@@ -673,7 +673,7 @@ async fn fetch_bytes(
     gid: &str,
     cid: &str,
 ) -> Result<Vec<u8>, reqwest::Error> {
-    let mut request = state.http.get(url);
+    let mut request = state.http_for(gid, cid).get(url);
     for (name, value) in channel_headers(state, gid, cid) {
         request = request.header(name, value);
     }

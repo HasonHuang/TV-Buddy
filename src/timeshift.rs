@@ -410,7 +410,7 @@ fn spawn_poller(
                     }
                 }
             } else {
-                let mut request = state.http.get(&base);
+                let mut request = state.http_for(&session.gid, &session.cid).get(&base);
                 for (name, value) in &headers {
                     request = request.header(name, value);
                 }
@@ -432,7 +432,7 @@ fn spawn_poller(
                 if crate::proxy::media::is_master(&text) {
                     if let Some((_, variant)) = crate::proxy::media::best_variant(&text, &base) {
                         base = variant;
-                        let mut request = state.http.get(&base);
+                        let mut request = state.http_for(&session.gid, &session.cid).get(&base);
                         for (name, value) in &headers {
                             request = request.header(name, value);
                         }
@@ -473,7 +473,7 @@ fn spawn_poller(
                 let bytes = if let Some(dir) = &dash_live {
                     fs::read(dir.join(line)).ok()
                 } else {
-                    let mut request = state.http.get(&identifier);
+                    let mut request = state.http_for(&session.gid, &session.cid).get(&identifier);
                     for (name, value) in &headers {
                         request = request.header(name, value);
                     }

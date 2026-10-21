@@ -5,7 +5,10 @@
 
 use std::{
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -1498,6 +1501,56 @@ enabled = true
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.expect("读正文");
     assert!(body.contains("媒体清单频道"));
+}
+
+/// 伪 HTTP 转发代理：记录次数，并按绝对 URI 取上游。
+async fn proxy_forward(
+    axum::extract::State((client, count)): axum::extract::State<(Client, Arc<AtomicUsize>)>,
+    request: axum::extract::Request,
+) -> Response {
+    count.fetch_add(1, Ordering::SeqCst);
+    let uri = request.uri().to_string();
+    match client.get(uri).send().await {
+        Ok(response) => {
+            let status = response.status();
+            let bytes = response.bytes().await.unwrap_or_default();
+            (status, bytes.to_vec()).into_response()
+        }
+        Err(error) => (StatusCode::BAD_GATEWAY, error.to_string()).into_response(),
+    }
+}
+
+#[tokio::test]
+async fn channel_proxy_is_used_for_upstream() {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let proxy = serve(
+        Router::new()
+            .fallback(proxy_forward)
+            .with_state((Client::new(), counter.clone())),
+    )
+    .await;
+    let extra = format!(
+        r#"
+[[groups]]
+id = "px"
+name = "代理组"
+mode = "proxy"
+access = "open"
+
+[groups.proxy]
+kind = "http"
+addr = "{proxy}"
+
+[[groups.channels]]
+id = "c1"
+name = "代理频道"
+url = "{{upstream}}/live.m3u8"
+"#
+    );
+    let fixture = fixture_with_extra(&extra).await;
+    let response = fetch(&fixture, "/px/c1.m3u8").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(counter.load(Ordering::SeqCst) > 0, "上游请求应经过频道代理");
 }
 
 #[tokio::test]

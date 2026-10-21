@@ -281,7 +281,7 @@ fn spawn_reader(session: Arc<Session>, state: Arc<AppState>, url: String) {
             if session.stop.load(Ordering::SeqCst) || session.idle_for() > IDLE {
                 break;
             }
-            let mut request = state.http.get(&url);
+            let mut request = state.http_for(&session.gid, &session.cid).get(&url);
             for (name, value) in channel_headers(&state, &session.gid, &session.cid) {
                 request = request.header(name, value);
             }
