@@ -43,7 +43,7 @@ flowchart LR
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
 | 发布包 | ✅ amd64 3.5 MB、arm64 3.3 MB；`verify-release.sh` 通过 |
-| CI | ✅ 最新运行 `39596643133`：前端、fmt/clippy/test、双架构包全绿 |
+| CI | ✅ 本地全绿；最新推送运行待登记 |
 
 ### 0.4 里程碑
 
