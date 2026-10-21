@@ -2293,6 +2293,46 @@ url = "{upstream}/dash/live.mpd"
 }
 
 #[tokio::test]
+async fn dash_mode_resolver_url_is_used_for_media_playlist() {
+    let fixture = fixture_with_extra(
+        r#"
+[[groups]]
+id = "dgr"
+name = "DASH 解析组"
+mode = "dash"
+access = "open"
+[[groups.channels]]
+id = "c1"
+name = "DASH 解析频道"
+url = "http://127.0.0.1:9/never"
+resolver_script = "dash_probe.py"
+resolver_ttl = 60
+"#,
+    )
+    .await;
+    let resolvers = fixture.dir.join("cache/resolvers");
+    std::fs::create_dir_all(&resolvers).expect("建脚本目录");
+    std::fs::write(
+        resolvers.join("dash_probe.py"),
+        format!("print('{}/dash/live.mpd')\n", fixture.upstream),
+    )
+    .expect("写脚本");
+
+    let master = fetch(&fixture, "/dgr/c1.m3u8").await;
+    assert_eq!(master.status(), StatusCode::OK);
+    assert!(master
+        .text()
+        .await
+        .expect("主清单")
+        .contains("/dgr/c1/video_720p/index.txt"));
+
+    // 媒体清单必须沿用解析脚本算出的地址，而不是频道原始死地址。
+    let media = fetch(&fixture, "/dgr/c1/video_720p/index.txt").await;
+    assert_eq!(media.status(), StatusCode::OK);
+    assert!(media.text().await.expect("媒体清单").contains("#EXTINF:"));
+}
+
+#[tokio::test]
 async fn resolver_script_overrides_channel_url_with_ttl_cache() {
     let fixture = fixture_with_extra(
         r#"

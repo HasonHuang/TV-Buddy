@@ -227,6 +227,14 @@ impl Manager {
             .collect()
     }
 
+    fn upstream(&self, gid: &str, cid: &str) -> Option<String> {
+        let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        sessions
+            .get(&Self::key(gid, cid))
+            .map(|session| session.upstream.clone())
+            .filter(|upstream| !upstream.is_empty())
+    }
+
     fn entry(&self, gid: &str, cid: &str, path: &str) -> Option<Entry> {
         let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         sessions
@@ -288,7 +296,8 @@ impl Manager {
         rest: &str,
         self_base: &str,
     ) -> Option<Response> {
-        let (upstream, keep, pool) = Self::settings(state, gid, cid)?;
+        let (configured, keep, pool) = Self::settings(state, gid, cid)?;
+        let upstream = self.upstream(gid, cid).unwrap_or(configured);
         let (track, file) = rest.split_once('/')?;
         if track.is_empty() || file.is_empty() {
             return None;
