@@ -80,11 +80,17 @@ flowchart LR
 | P3-03 | `GET /panel/api/link-info` | S | 无 | 返回 `aliases`、`random_id_enabled`、`token`、`token_enabled`、`use_alias`；测试 | ✅ |
 | P3-04 | 安全面补全 | M | 无 | 登录失败 429 锁、`/unban` 每月 3 次；`l1/l2` 记为不实现 | ✅ |
 | P3-05 | 字幕格式扩展 | M | 无 | 翻译端点接受 ASS/SSA 并转 VTT；`compat_mode` 记为不实现 | ✅ |
-| P3-06 | 真实翻译联调 | S | 本地 MTranServer | EPG 与字幕各跑一次；确认响应形状、分批、缓存、失败回退 | ⏳ |
+| P3-06 | 真实翻译联调 | S | 本地 MTranServer | EPG 与字幕各跑一次；确认响应形状、分批、缓存、失败回退 | ⏳ 阻塞：缺少本地 MTranServer |
 | P3-07 | 每频道代理覆盖 | M | 本地代理夹具 | 分组/频道 `proxy` 覆盖直连；播放、回看、Remux、录制生效 | ✅ |
 | P3-08 | 目标差分回归 | S | v0.8.2 容器与样本 | 重跑 22 项对拍与新增端点；差异 0 或登记 | ✅ 22/22 差异 0 |
 
 顺序：P3-01 → P3-02 → P3-03 → P3-04 → P3-05 → P3-06 → P3-07 → P3-08。P3-01 无外部依赖，先做；P3-08 需容器环境，最后做。
+
+### 0.7 待环境
+
+| 项 | 缺口 | 解除条件 |
+| --- | --- | --- |
+| P3-06 真实翻译联调 | 当前环境没有运行中的 MTranServer | 启动本地 MTranServer 后，配置 `[epg.translate]` 与 `[subtitle.translate]`，各跑一次并核对缓存与失败回退 |
 
 ## 1. 已完成（分阶段）
 
