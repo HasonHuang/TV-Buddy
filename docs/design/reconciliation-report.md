@@ -75,3 +75,17 @@ scripts/compare-p0.sh
 - 覆盖 P0 数据面：代理链路、六种模式的行为、Token 与 `access`、缓存窗口、切片。
 - 未覆盖：EPG、录制、推流、DASH 转封装、面板 UI 逐项交互、`remux`/`dash` 的实际转封装（需 `ffmpeg`）。
 - 目标为 linux/amd64，本机跑 arm64 二进制；两侧都只经 HTTP 观测，不比较内部状态。
+
+## P3 复验（2026-10-21）
+
+命令：`scripts/compare-p0.sh`。结果：**22 项，差异 0**。
+
+新增端点：
+
+| 端点 | 结论 |
+| --- | --- |
+| `GET /subs/status` | 空配置下两侧都返回 `{"sources":[]}`；形状一致 |
+| `POST /subs/{groups,preview}` | 目标行为未验；本实现形状自定（`design/03` §6.16） |
+| `GET /panel/api/link-info` | 形状一致；`token` 在启用时返回当前值，目标样本为空串（有意差异） |
+
+未重跑：面板 UI 逐项交互、录制与回放（依赖 `ffmpeg` 与运行环境）。
