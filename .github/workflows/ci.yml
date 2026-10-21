@@ -52,9 +52,22 @@ jobs:
       - run: cargo test --all-targets
 
   release:
-    name: 双架构发布包
+    name: 发布包 ${{ matrix.name }}
     needs: frontend
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            name: amd64
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            name: arm64
+            target: aarch64-unknown-linux-musl
+    env:
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -63,26 +76,21 @@ jobs:
           path: frontend/dist
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: 安装 musl 与交叉工具链
+      - name: 安装 musl 工具链
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools gcc-aarch64-linux-gnu
-      - name: 构建 amd64
-        run: cargo build --release --target x86_64-unknown-linux-musl
-      - name: 构建 arm64
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --release --target aarch64-unknown-linux-musl
+          sudo apt-get install -y --no-install-recommends musl-tools
+      - name: 构建
+        run: cargo build --release --target ${{ matrix.target }}
       - name: 打包
         run: |
           mkdir -p out
-          cp target/x86_64-unknown-linux-musl/release/iptv-proxy out/iptv-proxy-amd64
-          cp target/aarch64-unknown-linux-musl/release/iptv-proxy out/iptv-proxy-arm64
+          cp "target/${{ matrix.target }}/release/iptv-proxy" "out/iptv-proxy-${{ matrix.name }}"
           cp packaging/config.toml.example out/
       - uses: actions/upload-artifact@v4
         with:
-          name: iptv-proxy-release
+          name: iptv-proxy-${{ matrix.name }}
           path: out
           retention-days: 7
