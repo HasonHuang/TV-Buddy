@@ -659,6 +659,8 @@
 
 ## 3an. P2 · EPG 翻译接口面
 
+> 本节为初版接口面；引擎本体见 §3ap，状态与行为以 §3ap 为准。
+
 | 端点 | 行为 |
 | --- | --- |
 | `GET /epg/translate/status` | `enabled`（读 `[epg.translate].enabled`）、`engine=none` |
@@ -680,4 +682,22 @@
 
 验证：`cargo test --offline` 121 项；smoke：assets 13、share 7、panel 7、resolver 5、remux 7、schedule 9、timeshift 8、record 5。
 
-剩余（P2）：EPG 翻译引擎本体（接口面已就绪）、字幕翻译引擎本体。
+## 3ap. P2 · EPG 翻译引擎本体
+
+| 项 | 行为 |
+| --- | --- |
+| 配置 | `[epg.translate]`：`enabled`、`url`、`source`（默认 `auto`）、`target` 或 `targets`、`translation_first` |
+| 采集钩子 | 频道匹配与时间窗过滤之后、写文件之前翻译；只翻节目文本节点 |
+| 请求 | `POST <url>/translate/batch`，正文 `{texts, source_lang, target_lang}`；按 40 条分批 |
+| 响应 | 接受顶层数组，或 `translations`/`texts`/`result`/`text`/`data` 数组；元素可为字符串或含 `text`/`translation` 的对象 |
+| 输出 | 译文追加为 `lang="<target>"` 的文本节点；`translation_first = true` 时排原文前 |
+| 缓存 | `<cache>/epg/.translate/cache.json`，键为 `sha256("<target>\\u{1f}<text>")`；命中不发请求；原子写 |
+| 失败 | 翻译失败只记告警，不阻断节目单生成；原文保留 |
+| 接口 | `status` 报 `engine=http`、目标语言、缓存条数；`models` 返回目标语言；`run` 同步采集并返回 `translated`；`probe` 探测端点 |
+| 门禁 | `POST /epg/translate/{run,probe}` 需面板会话；`status`/`models`/`clear*`/`mtran/test` 公开 |
+
+| 验证 | ✅ 3 单元（配置、目标优先级、响应形状）+ 1 集成（译文写入、缓存复用、`run`） |
+
+验证：`cargo test --offline` 125 项（83 单元 + 42 集成）。
+
+剩余（P2）：字幕翻译引擎本体；DASH 回看在具备解复用器的 ffmpeg 环境复验。

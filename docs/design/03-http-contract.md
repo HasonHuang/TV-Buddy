@@ -336,7 +336,8 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 > 三个 `/epg/api/*` 的响应形状为本实现自定（目标只登记了路由存在性）。
 > 实现：按请求读取 `epg.xml` 并解析；节目单较大时再改为内存快照。
 >
-| 翻译 | `GET /epg/translate/{status,models}` 报告能力；`POST /epg/translate/{run,probe,mtran/test,clear,clear-engine}`。未配置引擎时 `run/probe/mtran/test` → `400`；`clear*` 清缓存 |
+| 翻译 | 读 `[epg.translate]`：`enabled`、`url`、`source`、`target`/`targets`、`translation_first`。采集后把节目文本批量发到 `<url>/translate/batch`，译文按目标语言追加为 `lang="<target>"` 的文本节点；`translation_first = true` 时排在原文前。结果缓存在 `<cache>/epg/.translate/cache.json`，命中不发请求 |
+| 翻译接口 | `GET /epg/translate/{status,models}` 报告引擎与目标语言；`POST /epg/translate/{run,probe,mtran/test,clear,clear-engine}`。`run/probe` 需面板会话；未启用或未配地址 → `400`。`clear*` 清空缓存 |
 
 ### 6.6 备份与恢复（P1 已实现）
 

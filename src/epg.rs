@@ -7,7 +7,7 @@
 //! `<cache>/epg/epg.xml` 与 `epg.xml.gz`，由公开路由直接下发。
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -20,6 +20,7 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use roxmltree::Document;
+use sha2::{Digest, Sha256};
 
 use crate::{config::Config, state::AppState};
 
@@ -44,6 +45,8 @@ pub struct Summary {
     pub channels: usize,
     pub programmes: usize,
     pub kept: usize,
+    /// 写入的翻译条目数。
+    pub translated: usize,
 }
 
 /// 采集中标记：离开作用域自动清除。
@@ -164,6 +167,21 @@ async fn collect(state: &Arc<AppState>, config: &Config) -> Result<Summary> {
         bail!("{}", errors.join("；"));
     }
 
+    let translate = translate_config(config);
+    let mut translated = 0usize;
+    if translate.enabled && !translate.url.is_empty() {
+        match translate_programmes(state, config, &mut programmes, &translate).await {
+            Ok(count) => translated = count,
+            Err(error) => {
+                tracing::warn!(%error, "EPG 翻译失败");
+                errors.push(format!("翻译失败 {error:#}"));
+            }
+        }
+    }
+    for line in &errors {
+        tracing::warn!(%line, "EPG 源告警");
+    }
+
     let directory = output_dir(Path::new(&config.cache.disk_path));
     fs::create_dir_all(&directory).with_context(|| format!("建目录 {}", directory.display()))?;
     let xml = render(&channels, &programmes);
@@ -176,6 +194,7 @@ async fn collect(state: &Arc<AppState>, config: &Config) -> Result<Summary> {
         channels: channels.len(),
         programmes: programmes.len(),
         kept: programmes.len(),
+        translated,
     })
 }
 
@@ -256,6 +275,230 @@ fn write_gzip(path: &Path, data: &[u8]) -> Result<()> {
     encoder.write_all(data)?;
     encoder.finish()?;
     Ok(())
+}
+
+/// 翻译配置（读 `[epg.translate]`）。
+#[derive(Debug, Clone)]
+pub struct TranslateCfg {
+    pub enabled: bool,
+    pub url: String,
+    pub source: String,
+    pub targets: Vec<String>,
+    pub translation_first: bool,
+}
+
+/// 解析 `[epg.translate]`；`targets` 为空时回退到 `target`。
+pub fn translate_config(config: &Config) -> TranslateCfg {
+    let table = config.epg.extra.get("translate");
+    let get = |key: &str| table.and_then(|table| table.get(key));
+    let enabled = get("enabled")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let url = get("url")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    let source = get("source")
+        .and_then(|value| value.as_str())
+        .unwrap_or("auto")
+        .to_string();
+    let translation_first = get("translation_first")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let mut targets: Vec<String> = get("targets")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(|text| text.trim().to_string()))
+                .filter(|text| !text.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    if targets.is_empty() {
+        if let Some(target) = get("target").and_then(|value| value.as_str()) {
+            let target = target.trim();
+            if !target.is_empty() {
+                targets.push(target.to_string());
+            }
+        }
+    }
+    TranslateCfg {
+        enabled,
+        url,
+        source,
+        targets,
+        translation_first,
+    }
+}
+
+/// 翻译服务端点；未配置时返回空串。
+pub fn translate_endpoint(config: &Config) -> String {
+    let cfg = translate_config(config);
+    if cfg.url.is_empty() {
+        String::new()
+    } else {
+        format!("{}/translate/batch", cfg.url)
+    }
+}
+
+/// 翻译缓存条目数（状态页用）。
+pub fn translate_cache_len(config: &Config) -> usize {
+    load_translate_cache(config).len()
+}
+
+fn translate_cache_path(config: &Config) -> PathBuf {
+    output_dir(Path::new(&config.cache.disk_path))
+        .join(".translate")
+        .join("cache.json")
+}
+
+fn load_translate_cache(config: &Config) -> HashMap<String, String> {
+    fs::read_to_string(translate_cache_path(config))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn save_translate_cache(config: &Config, cache: &HashMap<String, String>) -> Result<()> {
+    let path = translate_cache_path(config);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let text = serde_json::to_string(cache)?;
+    let temp = path.with_extension("json.tmp");
+    fs::write(&temp, text)?;
+    fs::rename(&temp, &path)?;
+    Ok(())
+}
+
+fn translate_key(target: &str, text: &str) -> String {
+    let digest = Sha256::digest(format!("{target}\u{1f}{text}").as_bytes());
+    hex::encode(digest)
+}
+
+/// 逐目标翻译节目文本，并把译文追加到 `programme.texts`。
+async fn translate_programmes(
+    state: &Arc<AppState>,
+    config: &Config,
+    programmes: &mut [Programme],
+    cfg: &TranslateCfg,
+) -> Result<usize> {
+    if cfg.targets.is_empty() {
+        bail!("未配置翻译目标语言");
+    }
+    let mut cache = load_translate_cache(config);
+    let mut translated = 0usize;
+    for target in &cfg.targets {
+        let mut pending: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        for programme in programmes.iter() {
+            for (_, lang, text) in &programme.texts {
+                if lang.as_deref() == Some(target.as_str()) {
+                    continue;
+                }
+                let text = text.trim();
+                if text.is_empty() {
+                    continue;
+                }
+                let key = translate_key(target, text);
+                if cache.contains_key(&key) {
+                    continue;
+                }
+                if seen.insert(key) {
+                    pending.push(text.to_string());
+                }
+            }
+        }
+        for chunk in pending.chunks(40) {
+            let values = translate_batch(state, cfg, target, chunk).await?;
+            for (text, value) in chunk.iter().zip(values) {
+                cache.insert(translate_key(target, text), value);
+            }
+        }
+        for programme in programmes.iter_mut() {
+            let mut additions = Vec::new();
+            for (name, lang, text) in &programme.texts {
+                if lang.as_deref() == Some(target.as_str()) {
+                    continue;
+                }
+                if let Some(value) = cache.get(&translate_key(target, text.trim())) {
+                    additions.push((name.clone(), Some(target.clone()), value.clone()));
+                }
+            }
+            translated += additions.len();
+            if cfg.translation_first {
+                let mut merged = additions;
+                merged.extend(std::mem::take(&mut programme.texts));
+                programme.texts = merged;
+            } else {
+                programme.texts.extend(additions);
+            }
+        }
+    }
+    save_translate_cache(config, &cache)?;
+    Ok(translated)
+}
+
+async fn translate_batch(
+    state: &Arc<AppState>,
+    cfg: &TranslateCfg,
+    target: &str,
+    texts: &[String],
+) -> Result<Vec<String>> {
+    let endpoint = format!("{}/translate/batch", cfg.url);
+    let body = serde_json::to_vec(&serde_json::json!({
+        "texts": texts,
+        "source_lang": cfg.source,
+        "target_lang": target,
+    }))?;
+    let response = state
+        .http
+        .post(&endpoint)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body)
+        .send()
+        .await
+        .context("请求翻译服务失败")?;
+    if !response.status().is_success() {
+        bail!("翻译服务返回 {}", response.status());
+    }
+    let text = response.text().await.context("读取翻译响应失败")?;
+    let value: serde_json::Value = serde_json::from_str(&text).context("翻译响应不是 JSON")?;
+    let mut values = extract_translations(&value);
+    values.resize(texts.len(), String::new());
+    for (value, original) in values.iter_mut().zip(texts) {
+        if value.trim().is_empty() {
+            *value = original.clone();
+        }
+    }
+    Ok(values)
+}
+
+fn extract_translations(value: &serde_json::Value) -> Vec<String> {
+    let array = value.as_array().or_else(|| {
+        ["translations", "texts", "result", "text", "data"]
+            .iter()
+            .find_map(|key| value.get(*key).and_then(|item| item.as_array()))
+    });
+    array
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| match item {
+                    serde_json::Value::String(text) => text.clone(),
+                    other => other
+                        .get("text")
+                        .or_else(|| other.get("translation"))
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// 启动后台采集：启用时立即跑一次，之后按 `cron`（只识别 `0 */N * * *`）或 4 小时。
@@ -654,6 +897,61 @@ mod tests {
         assert_eq!(matched.channels.len(), 1);
         assert_eq!(matched.channels[0].id, "cctv1");
         assert_eq!(matched.programmes.len(), 1);
+    }
+
+    #[test]
+    fn translate_config_reads_targets_and_endpoint() {
+        let mut config = Config::default();
+        let mut translate = toml::Table::new();
+        translate.insert("enabled".into(), toml::Value::Boolean(true));
+        translate.insert("url".into(), toml::Value::String("http://mtran/".into()));
+        translate.insert("target".into(), toml::Value::String(" ja ".into()));
+        let mut epg = toml::Table::new();
+        epg.insert("translate".into(), toml::Value::Table(translate));
+        config.epg.extra = epg;
+
+        let cfg = translate_config(&config);
+        assert!(cfg.enabled);
+        assert_eq!(cfg.url, "http://mtran");
+        assert_eq!(cfg.targets, vec!["ja"]);
+        assert_eq!(cfg.source, "auto");
+        assert!(!cfg.translation_first);
+        assert_eq!(translate_endpoint(&config), "http://mtran/translate/batch");
+    }
+
+    #[test]
+    fn translate_config_prefers_explicit_targets() {
+        let mut config = Config::default();
+        let mut translate = toml::Table::new();
+        translate.insert(
+            "targets".into(),
+            toml::Value::Array(vec![
+                toml::Value::String("zh-cn".into()),
+                toml::Value::String("".into()),
+                toml::Value::String("en".into()),
+            ]),
+        );
+        translate.insert("target".into(), toml::Value::String("ja".into()));
+        let mut epg = toml::Table::new();
+        epg.insert("translate".into(), toml::Value::Table(translate));
+        config.epg.extra = epg;
+
+        assert_eq!(translate_config(&config).targets, vec!["zh-cn", "en"]);
+    }
+
+    #[test]
+    fn extract_translations_accepts_common_shapes() {
+        let array = serde_json::json!(["一", "二"]);
+        assert_eq!(extract_translations(&array), vec!["一", "二"]);
+
+        let wrapped = serde_json::json!({ "translations": ["一", "二"] });
+        assert_eq!(extract_translations(&wrapped), vec!["一", "二"]);
+
+        let objects = serde_json::json!({ "result": [{"text": "一"}, {"translation": "二"}] });
+        assert_eq!(extract_translations(&objects), vec!["一", "二"]);
+
+        let unknown = serde_json::json!({ "value": "x" });
+        assert!(extract_translations(&unknown).is_empty());
     }
 
     #[test]

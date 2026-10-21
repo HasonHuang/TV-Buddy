@@ -98,6 +98,7 @@ pub async fn refresh(
             "msg": "采集完成",
             "channels": summary.channels,
             "programmes": summary.kept,
+            "translated": summary.translated,
         }))),
         Err(error) => Err(ApiError::internal(format!("{error:#}"))),
     }
@@ -215,53 +216,73 @@ pub async fn api_search(
     Json(json!({ "q": query, "count": programmes.len(), "programmes": programmes })).into_response()
 }
 
-/// `GET /epg/translate/status`——翻译能力（未启用引擎）。
+/// `GET /epg/translate/status`——翻译能力与缓存状态。
 pub async fn translate_status(State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
-    let translate = config
-        .extra
-        .get("epg")
-        .and_then(|table| table.get("translate"))
-        .cloned();
-    let enabled = translate
-        .as_ref()
-        .and_then(|table| table.get("enabled"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
+    let translate = epg::translate_config(&config);
     Json(json!({
-        "enabled": enabled,
-        "engine": "none",
-        "models": [],
-        "note": "EPG 翻译引擎尚未实现",
+        "enabled": translate.enabled,
+        "engine": if translate.url.is_empty() { "none" } else { "http" },
+        "url": translate.url,
+        "source": translate.source,
+        "targets": translate.targets,
+        "translation_first": translate.translation_first,
+        "models": translate.targets,
+        "cache": epg::translate_cache_len(&config),
     }))
 }
 
-/// `GET /epg/translate/models`——可用翻译模型（未接入引擎）。
+/// `GET /epg/translate/models`——可用翻译目标语言。
 pub async fn translate_models(State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
-    let enabled = translate_enabled(&config);
+    let translate = epg::translate_config(&config);
     Json(json!({
-        "enabled": enabled,
-        "models": [],
-        "note": "EPG 翻译引擎尚未实现",
+        "enabled": translate.enabled,
+        "engine": if translate.url.is_empty() { "none" } else { "http" },
+        "models": translate.targets,
     }))
 }
 
-/// `POST /epg/translate/run`——触发翻译。
-pub async fn translate_run(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiError> {
-    if !translate_enabled(&state.snapshot()) {
+/// `POST /epg/translate/run`——立即采集并翻译。
+pub async fn translate_run(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, ApiError> {
+    let config = state.snapshot();
+    let translate = epg::translate_config(&config);
+    if !translate.enabled {
         return Err(ApiError::bad_request("EPG 翻译未启用"));
     }
-    Err(ApiError::bad_request("EPG 翻译引擎不可用"))
+    if translate.url.is_empty() {
+        return Err(ApiError::bad_request("请先填写翻译服务地址"));
+    }
+    match epg::refresh(&state).await {
+        Ok(summary) => Ok(Json(json!({
+            "ok": true,
+            "channels": summary.channels,
+            "programmes": summary.kept,
+            "translated": summary.translated,
+        }))),
+        Err(error) => Err(ApiError::internal(format!("{error:#}"))),
+    }
 }
 
 /// `POST /epg/translate/probe`——探测翻译服务。
-pub async fn translate_probe(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiError> {
-    let base = translate_url(&state.snapshot());
-    if base.is_empty() {
+pub async fn translate_probe(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, ApiError> {
+    let config = state.snapshot();
+    let endpoint = epg::translate_endpoint(&config);
+    if endpoint.is_empty() {
         return Err(ApiError::bad_request("请先填写翻译服务地址"));
     }
-    let endpoint = format!("{base}/translate/batch");
+    let translate = epg::translate_config(&config);
+    let target = translate
+        .targets
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "zh-cn".to_string());
     let result = state
         .http
         .post(&endpoint)
@@ -269,8 +290,8 @@ pub async fn translate_probe(State(state): State<Arc<AppState>>) -> Result<Json<
         .body(
             serde_json::to_vec(&json!({
                 "texts": ["hello"],
-                "source_lang": "auto",
-                "target_lang": "zh-cn",
+                "source_lang": translate.source,
+                "target_lang": target,
             }))
             .unwrap_or_default(),
         )
@@ -279,10 +300,10 @@ pub async fn translate_probe(State(state): State<Arc<AppState>>) -> Result<Json<
     Ok(Json(match result {
         Ok(response) => json!({
             "ok": response.status().is_success(),
-            "base": base,
+            "endpoint": endpoint,
             "status": response.status().as_u16(),
         }),
-        Err(error) => json!({ "ok": false, "base": base, "error": format!("{error}") }),
+        Err(error) => json!({ "ok": false, "endpoint": endpoint, "error": format!("{error}") }),
     }))
 }
 
@@ -333,16 +354,6 @@ pub async fn translate_mtran(
         "version": null,
     }))
     .into_response()
-}
-
-fn translate_enabled(config: &crate::config::Config) -> bool {
-    config
-        .epg
-        .extra
-        .get("translate")
-        .and_then(|table| table.get("enabled"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
 }
 
 fn translate_url(config: &crate::config::Config) -> String {

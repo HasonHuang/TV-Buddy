@@ -41,6 +41,30 @@ const MPD: &str = r#"<?xml version="1.0"?>
   </Period>
 </MPD>"#;
 
+/// 伪翻译服务：给每条文本加目标语言前缀。
+async fn upstream_translate(axum::Json(body): axum::Json<serde_json::Value>) -> Response {
+    let target = body
+        .get("target_lang")
+        .and_then(|value| value.as_str())
+        .unwrap_or("zh-cn");
+    let translations: Vec<String> = body
+        .get("texts")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|text| format!("[{target}]译:{text}"))
+                .collect()
+        })
+        .unwrap_or_default();
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        serde_json::json!({ "translations": translations }).to_string(),
+    )
+        .into_response()
+}
+
 /// 伪上游：按路径返回清单或切片。
 async fn upstream_file(
     Path(path): Path<String>,
@@ -150,7 +174,9 @@ async fn fixture_with_all(epg_enabled: bool, extra_section: &str) -> Fixture {
     let dir = std::env::temp_dir().join(format!("iptv-proxy-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("建临时目录");
 
-    let mut upstream_app = Router::new().route("/*path", get(upstream_file));
+    let mut upstream_app = Router::new()
+        .route("/translate/batch", axum::routing::post(upstream_translate))
+        .route("/*path", get(upstream_file));
     if epg_enabled {
         let body = epg_document();
         upstream_app = upstream_app.route(
@@ -2434,6 +2460,7 @@ async fn playlist_config_roundtrip_and_validation() {
 #[tokio::test]
 async fn epg_translate_endpoints_report_unconfigured_engine() {
     let fixture = fixture().await;
+    let auth = login(&fixture).await;
 
     let response = fixture
         .client
@@ -2446,14 +2473,11 @@ async fn epg_translate_endpoints_report_unconfigured_engine() {
         serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
     assert_eq!(body["models"].as_array().map(Vec::len), Some(0));
 
-    for path in [
-        "/epg/translate/run",
-        "/epg/translate/probe",
-        "/epg/translate/mtran/test",
-    ] {
+    for path in ["/epg/translate/run", "/epg/translate/probe"] {
         let response = fixture
             .client
             .post(format!("{}{path}", fixture.base))
+            .header("authorization", format!("Bearer {auth}"))
             .header("content-type", "application/json")
             .body(serde_json::json!({ "text": "hello" }).to_string())
             .send()
@@ -2461,6 +2485,16 @@ async fn epg_translate_endpoints_report_unconfigured_engine() {
             .expect("请求");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
     }
+
+    let response = fixture
+        .client
+        .post(format!("{}/epg/translate/mtran/test", fixture.base))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "text": "hello" }).to_string())
+        .send()
+        .await
+        .expect("自检");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let response = fixture
         .client
@@ -2472,4 +2506,68 @@ async fn epg_translate_endpoints_report_unconfigured_engine() {
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
     assert_eq!(body["ok"], true);
+}
+
+#[tokio::test]
+async fn epg_translation_engine_appends_target_texts_and_reuses_cache() {
+    let extra = r#"
+[epg.translate]
+enabled = true
+url = "{upstream}"
+target = "zh-cn"
+source = "auto"
+"#;
+    let fixture = fixture_with_all(true, extra).await;
+    let auth = login(&fixture).await;
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/epg/refresh", fixture.base))
+        .header("authorization", format!("Bearer {auth}"))
+        .send()
+        .await
+        .expect("采集");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert!(
+        body["translated"].as_u64().unwrap_or(0) > 0,
+        "应写入译文：{body}"
+    );
+
+    let xml = fixture
+        .client
+        .get(format!("{}/epg.xml", fixture.base))
+        .send()
+        .await
+        .expect("取节目单")
+        .text()
+        .await
+        .expect("正文");
+    assert!(
+        xml.contains(r#"<title lang="zh-cn">[zh-cn]译:新闻</title>"#),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(r#"<desc lang="zh-cn">[zh-cn]译:早间新闻</desc>"#),
+        "{xml}"
+    );
+
+    let cache = fixture.dir.join("cache/epg/.translate/cache.json");
+    let entries: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&cache).expect("缓存文件")).expect("JSON");
+    assert_eq!(entries.as_object().map(|map| map.len()), Some(2));
+
+    let response = fixture
+        .client
+        .post(format!("{}/epg/translate/run", fixture.base))
+        .header("authorization", format!("Bearer {auth}"))
+        .send()
+        .await
+        .expect("翻译");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["ok"], true);
+    assert!(body["translated"].as_u64().unwrap_or(0) > 0);
 }
