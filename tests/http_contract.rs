@@ -2458,6 +2458,109 @@ async fn playlist_config_roundtrip_and_validation() {
 }
 
 #[tokio::test]
+async fn subtitle_translation_engine_translates_and_caches() {
+    let extra = r#"
+[subtitle.translate]
+enabled = true
+url = "{upstream}"
+target = "zh-cn"
+"#;
+    let fixture = fixture_with_all(false, extra).await;
+    let auth = format!("Bearer {}", login(&fixture).await);
+    let directory = fixture.dir.join("cache/subtitles");
+    std::fs::create_dir_all(&directory).expect("字幕目录");
+    std::fs::write(
+        directory.join("demo.srt"),
+        "1\n00:00:01,000 --> 00:00:03,000\nHello\nWorld\n\n2\n00:00:04,000 --> 00:00:05,000\nHello\n",
+    )
+    .expect("写字幕");
+
+    let response = fixture
+        .client
+        .get(format!(
+            "{}/panel/api/subtitle/translate/status",
+            fixture.base
+        ))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("状态");
+    assert_eq!(response.status(), StatusCode::OK);
+    let status: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(status["enabled"], true);
+    assert_eq!(status["engine"], "mtran");
+    assert_eq!(status["targets"][0], "zh-cn");
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/subtitle/translate", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "file": "demo.srt" }).to_string())
+        .send()
+        .await
+        .expect("翻译");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["cached"], false);
+    assert_eq!(body["format"], "srt");
+    assert_eq!(body["lines"], 2);
+    let download = body["download"].as_str().expect("下载地址").to_string();
+
+    let text = fixture
+        .client
+        .get(format!("{}{download}", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("下载")
+        .text()
+        .await
+        .expect("正文");
+    assert!(
+        text.contains(
+            "00:00:01,000 --> 00:00:03,000\nHello\n[zh-cn]译:Hello\nWorld\n[zh-cn]译:World\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("2\n00:00:04,000 --> 00:00:05,000\nHello\n[zh-cn]译:Hello\n"),
+        "{text}"
+    );
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/subtitle/translate", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "file": "demo.srt" }).to_string())
+        .send()
+        .await
+        .expect("再次翻译");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["cached"], true);
+}
+
+#[tokio::test]
+async fn subtitle_translation_requires_engine_config() {
+    let fixture = fixture().await;
+    let auth = format!("Bearer {}", login(&fixture).await);
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/subtitle/translate", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "file": "demo.srt" }).to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn epg_translate_endpoints_report_unconfigured_engine() {
     let fixture = fixture().await;
     let auth = login(&fixture).await;

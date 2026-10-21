@@ -700,4 +700,21 @@
 
 验证：`cargo test --offline` 125 项（83 单元 + 42 集成）。
 
-剩余（P2）：字幕翻译引擎本体；DASH 回看在具备解复用器的 ffmpeg 环境复验。
+## 3aq. P2 · 字幕翻译引擎本体
+
+| 项 | 行为 |
+| --- | --- |
+| 配置 | `[subtitle.translate]`：`enabled`、`url`、`source`（默认 `auto`）、`target` 或 `targets`、`translation_first` |
+| 输入 | 已上传的 `srt`/`vtt`；UTF-8 文本；其它格式或编码 → `400` |
+| 解析 | 只取时间行之后的字幕正文；跳过序号、`NOTE`/`STYLE` 块、WebVTT 设置行与纯符号行 |
+| 翻译 | 正文行去重后按 40 行分批；调用 `<url>/translate/batch`；译文为空时回退原文 |
+| 输出 | `translation_first=false` → 原文 + 译文；`true` → 译文 + 原文；时间轴原样保留 |
+| 缓存 | `<cache>/subtitles/.translate/<hash>.<ext>`；命中直接返回；原子写 |
+| 接口 | `GET …/translate/status`、`POST …/translate`、`GET …/translate/raw/<name>`；前两者需面板会话 |
+| 面板 | 字幕分区显示目标语言选择与逐文件「翻译」按钮；下载走带会话头的 Blob |
+
+| 验证 | ✅ 4 单元（格式识别、取行、双语顺序、结尾换行）+ 2 集成（翻译/缓存/下载、未配置 → `400`） |
+
+验证：`cargo test --offline` 132 项（88 单元 + 44 集成）；前端 panel 39.44 kB。
+
+剩余（P2）：DASH 回看在具备解复用器的 ffmpeg 环境复验。

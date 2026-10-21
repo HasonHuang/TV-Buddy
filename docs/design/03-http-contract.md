@@ -405,6 +405,9 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | `GET` | `/panel/api/assets/raw/<file>` | 面板内下载（`private, max-age=0`） |
 | `GET` | `/panel/api/assets/ffmpeg-status` | `{"installed","version","remux_ready","note"}`；每次实时执行 `ffmpeg -version` |
 | `GET` | `/panel/api/subtitle/list`、`…/upload`、`…/remove`、`…/raw/<file>` | 与视频同形；扩展名 `srt/ass/ssa/vtt` |
+| `GET` | `/panel/api/subtitle/translate/status` | `{enabled,engine,url,source,targets,translation_first,cached}` |
+| `POST` | `/panel/api/subtitle/translate` | `{"file","target"}`：翻译 SRT/VTT，返回 `{ok,file,target,format,cached,lines?,bytes,download}`；未启用/无地址/非 UTF-8 → `400` |
+| `GET` | `/panel/api/subtitle/translate/raw/<name>` | 下载译文；名称须为 32 位十六进制 + `.srt`/`.vtt` |
 | `GET` | `/panel/api/resolver/scripts` | `{"count","scripts":[{"name","bytes"}]}`（`<cache>/resolvers/*.py`） |
 | `POST` | `/panel/api/resolver/script` | `{"name","content"}`；写 `<name>.py`；空内容 → `400` |
 | `POST` | `/panel/api/resolver/remove` | `{"name"}`；缺文件 → `404` |
@@ -418,6 +421,9 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 视频扩展 | `mp4/mkv/ts/mov/webm/m4v`；其它进 `failed`，不落盘 |
 | 上传上限 | 每个请求 64 MiB（与恢复一致） |
 | 脚本执行 | 只保存与列出；**不执行**（P2） |
+| 字幕翻译 | 只翻 `srt`/`vtt` 字幕块正文；时间行、序号、`NOTE`/`STYLE` 块与 WebVTT 设置行原样保留 |
+| 字幕译法 | 每个正文行单独翻译并按 40 行分批；按 `translation_first` 输出「原文 + 译文」或「译文 + 原文」 |
+| 字幕缓存 | `<cache>/subtitles/.translate/<sha256(file,target,order,format)[..32]>.<ext>`；命中不发请求；`clear` 清空 |
 
 ### 6.10 多 VPS 分享（P1 已实现）
 

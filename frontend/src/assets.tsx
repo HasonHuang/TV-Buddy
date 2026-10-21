@@ -1,7 +1,8 @@
 /**
  * 视频素材与字幕管理分区。
  *
- * 接口：`/panel/api/{assets,subtitle}/{list,upload,remove,raw/:file}` 与
+ * 接口：`/panel/api/{assets,subtitle}/{list,upload,remove,raw/:file}`、
+ * `/panel/api/subtitle/translate{/status,/raw/:name}` 与
  * `/panel/api/assets/ffmpeg-status`。
  */
 
@@ -43,6 +44,31 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** 带会话头下载面板文件。 */
+async function download(path: string, name: string): Promise<void> {
+  const token = localStorage.getItem('iptv_token') ?? '';
+  const response = await fetch(`/panel/api${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    throw new Error(`下载失败：${response.status}`);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+type TranslationInfo = {
+  enabled: boolean;
+  engine: string;
+  targets: string[];
+  cached: number;
+};
+
 function Library({
   kind,
   accept,
@@ -55,6 +81,21 @@ function Library({
   const [files, setFiles] = useState<Entry[]>([]);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [translation, setTranslation] = useState<TranslationInfo | null>(null);
+  const [target, setTarget] = useState('');
+  const [busy, setBusy] = useState('');
+
+  useEffect(() => {
+    if (kind !== 'subtitle') {
+      return;
+    }
+    void api<TranslationInfo>('GET', '/subtitle/translate/status')
+      .then((info) => {
+        setTranslation(info);
+        setTarget(info.targets[0] ?? '');
+      })
+      .catch(() => setTranslation(null));
+  }, [kind]);
 
   const load = useCallback(async () => {
     try {
@@ -108,23 +149,62 @@ function Library({
     }
   }
 
+  async function translateFile(file: Entry) {
+    if (!target) {
+      return;
+    }
+    setBusy(file.file);
+    setMessage('');
+    setError('');
+    try {
+      const result = await api<{ download: string; cached: boolean }>(
+        'POST',
+        '/subtitle/translate',
+        { file: file.file, target },
+      );
+      await download(result.download, `${file.name}.${target}.${file.ext}`);
+      setMessage(`${file.file} → ${target}（${result.cached ? '复用缓存' : '新译'}）`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
   return (
     <div className="card">
       <div className="row between">
         <h2>{LABEL[kind]}</h2>
-        <label className="tag" style={{ cursor: 'pointer' }}>
-          上传
-          <input
-            type="file"
-            accept={accept}
-            multiple
-            style={{ display: 'none' }}
-            onChange={(event) => void upload(event.target.files)}
-          />
-        </label>
+        <div className="row">
+          {kind === 'subtitle' && translation?.enabled && translation.targets.length > 1 && (
+            <select value={target} onChange={(event) => setTarget(event.target.value)}>
+              {translation.targets.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+          )}
+          <label className="tag" style={{ cursor: 'pointer' }}>
+            上传
+            <input
+              type="file"
+              accept={accept}
+              multiple
+              style={{ display: 'none' }}
+              onChange={(event) => void upload(event.target.files)}
+            />
+          </label>
+        </div>
       </div>
       {kind === 'assets' && !ffmpegReady && (
         <p className="muted">未检测到 ffmpeg：转封装（remux/dash）保持 503 预热。</p>
+      )}
+      {kind === 'subtitle' && translation && !translation.enabled && (
+        <p className="muted">字幕翻译未启用：请在配置中打开 [subtitle.translate].enabled。</p>
+      )}
+      {kind === 'subtitle' && translation?.enabled && translation.engine === 'none' && (
+        <p className="muted">未配置 MTranServer 地址：翻译请求会返回 400。</p>
       )}
       <table className="table">
         <thead>
@@ -151,6 +231,17 @@ function Library({
                 <button className="icon-btn" onClick={() => void remove(file.file)}>
                   删除
                 </button>
+                {kind === 'subtitle' &&
+                  translation?.enabled &&
+                  ['.srt', '.vtt'].includes(`.${file.ext}`) && (
+                    <button
+                      className="icon-btn"
+                      disabled={busy === file.file}
+                      onClick={() => void translateFile(file)}
+                    >
+                      {busy === file.file ? '翻译中' : '翻译'}
+                    </button>
+                  )}
               </td>
             </tr>
           ))}

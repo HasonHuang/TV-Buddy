@@ -413,7 +413,8 @@ async fn translate_programmes(
             }
         }
         for chunk in pending.chunks(40) {
-            let values = translate_batch(state, cfg, target, chunk).await?;
+            let values =
+                crate::translate::batch(&state.http, &cfg.url, &cfg.source, target, chunk).await?;
             for (text, value) in chunk.iter().zip(values) {
                 cache.insert(translate_key(target, text), value);
             }
@@ -440,65 +441,6 @@ async fn translate_programmes(
     }
     save_translate_cache(config, &cache)?;
     Ok(translated)
-}
-
-async fn translate_batch(
-    state: &Arc<AppState>,
-    cfg: &TranslateCfg,
-    target: &str,
-    texts: &[String],
-) -> Result<Vec<String>> {
-    let endpoint = format!("{}/translate/batch", cfg.url);
-    let body = serde_json::to_vec(&serde_json::json!({
-        "texts": texts,
-        "source_lang": cfg.source,
-        "target_lang": target,
-    }))?;
-    let response = state
-        .http
-        .post(&endpoint)
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .body(body)
-        .send()
-        .await
-        .context("请求翻译服务失败")?;
-    if !response.status().is_success() {
-        bail!("翻译服务返回 {}", response.status());
-    }
-    let text = response.text().await.context("读取翻译响应失败")?;
-    let value: serde_json::Value = serde_json::from_str(&text).context("翻译响应不是 JSON")?;
-    let mut values = extract_translations(&value);
-    values.resize(texts.len(), String::new());
-    for (value, original) in values.iter_mut().zip(texts) {
-        if value.trim().is_empty() {
-            *value = original.clone();
-        }
-    }
-    Ok(values)
-}
-
-fn extract_translations(value: &serde_json::Value) -> Vec<String> {
-    let array = value.as_array().or_else(|| {
-        ["translations", "texts", "result", "text", "data"]
-            .iter()
-            .find_map(|key| value.get(*key).and_then(|item| item.as_array()))
-    });
-    array
-        .map(|items| {
-            items
-                .iter()
-                .map(|item| match item {
-                    serde_json::Value::String(text) => text.clone(),
-                    other => other
-                        .get("text")
-                        .or_else(|| other.get("translation"))
-                        .and_then(|value| value.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 /// 启动后台采集：启用时立即跑一次，之后按 `cron`（只识别 `0 */N * * *`）或 4 小时。
@@ -937,21 +879,6 @@ mod tests {
         config.epg.extra = epg;
 
         assert_eq!(translate_config(&config).targets, vec!["zh-cn", "en"]);
-    }
-
-    #[test]
-    fn extract_translations_accepts_common_shapes() {
-        let array = serde_json::json!(["一", "二"]);
-        assert_eq!(extract_translations(&array), vec!["一", "二"]);
-
-        let wrapped = serde_json::json!({ "translations": ["一", "二"] });
-        assert_eq!(extract_translations(&wrapped), vec!["一", "二"]);
-
-        let objects = serde_json::json!({ "result": [{"text": "一"}, {"translation": "二"}] });
-        assert_eq!(extract_translations(&objects), vec!["一", "二"]);
-
-        let unknown = serde_json::json!({ "value": "x" });
-        assert!(extract_translations(&unknown).is_empty());
     }
 
     #[test]

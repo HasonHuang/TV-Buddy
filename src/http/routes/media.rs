@@ -3,7 +3,11 @@
 //! 目标路由只登记了存在性（F-011、S-EP-16），响应形状为本实现自定。
 //! 视频与字幕存在 `<cache>/{assets,subtitles}/`，解析脚本存在 `<cache>/resolvers/`。
 
-use std::{path::Path as FsPath, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path as FsPath, PathBuf},
+    sync::Arc,
+};
 
 use axum::{
     extract::{OriginalUri, Path, State},
@@ -12,11 +16,13 @@ use axum::{
     Json,
 };
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::{
     assets::{self, Kind},
     http::{error::ApiError, ext::PanelAuth},
     state::AppState,
+    subtitle, translate,
 };
 
 /// 由请求路径判定素材种类（路由静态注册，避免与 `/panel/api/*rest` 冲突）。
@@ -254,6 +260,241 @@ pub async fn resolver_remove(
     std::fs::remove_file(&path)
         .map_err(|error| ApiError::internal(format!("删除失败: {error}")))?;
     Ok(Json(json!({ "ok": true, "removed": 1 })))
+}
+
+/// 字幕翻译配置（读 `[subtitle.translate]`）。
+#[derive(Debug, Clone)]
+struct SubtitleTranslate {
+    enabled: bool,
+    url: String,
+    source: String,
+    targets: Vec<String>,
+    translation_first: bool,
+}
+
+impl SubtitleTranslate {
+    /// 请求指定的目标；缺省取第一项目标语言。
+    fn target(&self, requested: Option<&str>) -> String {
+        requested
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| self.targets.first().cloned())
+            .unwrap_or_else(|| "zh-cn".to_string())
+    }
+}
+
+fn subtitle_translate(config: &crate::config::Config) -> SubtitleTranslate {
+    let table = config
+        .extra
+        .get("subtitle")
+        .and_then(|table| table.get("translate"));
+    let get = |key: &str| table.and_then(|table| table.get(key));
+    let enabled = get("enabled")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let url = get("url")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    let source = get("source")
+        .and_then(|value| value.as_str())
+        .unwrap_or("auto")
+        .to_string();
+    let translation_first = get("translation_first")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let mut targets: Vec<String> = get("targets")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(|text| text.trim().to_string()))
+                .filter(|text| !text.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    if targets.is_empty() {
+        if let Some(target) = get("target").and_then(|value| value.as_str()) {
+            let target = target.trim();
+            if !target.is_empty() {
+                targets.push(target.to_string());
+            }
+        }
+    }
+    if targets.is_empty() {
+        targets.push("zh-cn".to_string());
+    }
+    SubtitleTranslate {
+        enabled,
+        url,
+        source,
+        targets,
+        translation_first,
+    }
+}
+
+fn subtitle_cache_dir(state: &AppState) -> PathBuf {
+    state.cache_dir.join("subtitles").join(".translate")
+}
+
+/// 缓存文件名：源文件 + 目标 + 排列 + 格式的哈希。
+fn subtitle_cache_name(
+    file: &str,
+    target: &str,
+    translation_first: bool,
+    format: subtitle::Format,
+) -> String {
+    let digest =
+        Sha256::digest(format!("{file}\u{1f}{target}\u{1f}{translation_first}").as_bytes());
+    format!("{}.{}", &hex::encode(digest)[..32], format.ext())
+}
+
+/// `GET /panel/api/subtitle/translate/status`——字幕翻译能力。
+pub async fn translate_status(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    let config = state.snapshot();
+    let cfg = subtitle_translate(&config);
+    let cached = std::fs::read_dir(subtitle_cache_dir(&state))
+        .map(|read| {
+            read.filter_map(|item| item.ok())
+                .filter(|item| item.path().is_file())
+                .count()
+        })
+        .unwrap_or(0);
+    Json(json!({
+        "enabled": cfg.enabled,
+        "engine": if cfg.url.is_empty() { "none" } else { "mtran" },
+        "url": cfg.url,
+        "source": cfg.source,
+        "targets": cfg.targets,
+        "translation_first": cfg.translation_first,
+        "cached": cached,
+    }))
+}
+
+/// `POST /panel/api/subtitle/translate`——翻译一个已上传的字幕文件。
+pub async fn translate_subtitle(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let file = body
+        .get("file")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if file.is_empty() {
+        return Err(ApiError::bad_request("file 不能为空"));
+    }
+    let config = state.snapshot();
+    let cfg = subtitle_translate(&config);
+    if !cfg.enabled {
+        return Err(ApiError::bad_request("字幕翻译未启用"));
+    }
+    if cfg.url.is_empty() {
+        return Err(ApiError::bad_request(
+            "请先填写 MTranServer 地址(字幕机翻只支持本地 MTranServer)",
+        ));
+    }
+    let target = cfg.target(body.get("target").and_then(Value::as_str));
+    let bytes = assets::read(&config.cache.disk_path, Kind::Subtitle, &file).map_err(|error| {
+        let message = format!("{error:#}");
+        if message.contains("不存在") {
+            ApiError::not_found("文件不存在")
+        } else {
+            ApiError::bad_request(message)
+        }
+    })?;
+    let text =
+        String::from_utf8(bytes).map_err(|_| ApiError::bad_request("字幕不是 UTF-8 文本"))?;
+    let format =
+        subtitle::detect(&text).map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
+
+    let directory = subtitle_cache_dir(&state);
+    let name = subtitle_cache_name(&file, &target, cfg.translation_first, format);
+    let path = directory.join(&name);
+    let download = format!("/panel/api/subtitle/translate/raw/{name}");
+    if path.is_file() {
+        let bytes = std::fs::read(&path)
+            .map_err(|error| ApiError::internal(format!("读缓存失败: {error}")))?;
+        return Ok(Json(json!({
+            "ok": true,
+            "file": file,
+            "target": target,
+            "format": format.ext(),
+            "cached": true,
+            "bytes": bytes.len(),
+            "download": download,
+        })));
+    }
+
+    let lines = subtitle::text_lines(&text);
+    if lines.is_empty() {
+        return Err(ApiError::bad_request("没有可翻译的字幕文本"));
+    }
+    let mut translations: HashMap<String, String> = HashMap::new();
+    for chunk in lines.chunks(40) {
+        let values = translate::batch(&state.http, &cfg.url, &cfg.source, &target, chunk)
+            .await
+            .map_err(|error| ApiError::internal(format!("翻译失败: {error:#}")))?;
+        for (line, value) in chunk.iter().zip(values) {
+            translations.insert(line.clone(), value);
+        }
+    }
+    let output = subtitle::render(&text, &translations, cfg.translation_first);
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| ApiError::internal(format!("建目录失败: {error}")))?;
+    let temp = path.with_extension("tmp");
+    std::fs::write(&temp, output.as_bytes())
+        .map_err(|error| ApiError::internal(format!("写缓存失败: {error}")))?;
+    std::fs::rename(&temp, &path)
+        .map_err(|error| ApiError::internal(format!("保存缓存失败: {error}")))?;
+    Ok(Json(json!({
+        "ok": true,
+        "file": file,
+        "target": target,
+        "format": format.ext(),
+        "cached": false,
+        "lines": lines.len(),
+        "bytes": output.len(),
+        "download": download,
+    })))
+}
+
+/// `GET /panel/api/subtitle/translate/raw/<name>`——下载翻译结果。
+pub async fn translate_raw(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Response, ApiError> {
+    let Some((stem, ext)) = name.rsplit_once('.') else {
+        return Err(ApiError::bad_request("文件名不合法"));
+    };
+    if stem.len() != 32 || !stem.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(ApiError::bad_request("文件名不合法"));
+    }
+    if !matches!(ext, "srt" | "vtt") {
+        return Err(ApiError::bad_request("文件名不合法"));
+    }
+    let path = subtitle_cache_dir(&state).join(&name);
+    let bytes = std::fs::read(&path).map_err(|_| ApiError::not_found("文件不存在"))?;
+    let mime = if ext == "vtt" {
+        "text/vtt"
+    } else {
+        "application/x-subrip"
+    };
+    let mut response = (StatusCode::OK, [("content-type", mime)], bytes).into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=0"),
+    );
+    Ok(response)
 }
 
 /// `POST /subtitle/mtran/test`——字幕机翻自检（S-SUB-03）。

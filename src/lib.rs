@@ -22,5 +22,7 @@ pub mod schedule;
 pub mod share;
 pub mod state;
 pub mod stats;
+pub mod subtitle;
 pub mod timeshift;
+pub mod translate;
 pub mod watchdog;
