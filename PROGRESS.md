@@ -243,10 +243,12 @@ flowchart LR
 | `redirect` + `解析最佳画质`：取主清单挑最高 `BANDWIDTH` 变体 | ✅ | `proxy::modes::best_variant`（单元测试 + 冒烟） |
 | `passthrough`：302 上游；**校验 Token**（F-018 修正）；不追加 Token | ✅ | `smoke-m3.sh` |
 | `rewrite`：入口 200 `text/plain`，相对地址改绝对，切片客户端直连；清单缓存 ≈5 s | ✅ | `smoke-m3.sh` |
-| `remux`：恒 `503` + `Retry-After: 2` + `remux warming up`；首次抓上游分类记日志 | ✅ | `smoke-m3.sh` |
-| `dash`：30 s 就绪门；失败 `503 timeout waiting for master playlist`；正文透传 `application/dash+xml` | ✅ | `smoke-m3.sh` |
-| MPD 正文（proxy 与 dash）原样透传，不按行改写 | ✅ | `stream.rs` 的 `looks_like_mpd` 分支 |
-| 未做（属 P1）：`remux`/`dash` 的 `ffmpeg` 转封装、DASH 轨道命名与片段容错 | ⏳ | ADR-04、S-MODE-06 |
+| `remux`：冷启动 `503` + `Retry-After: 2` + `remux warming up`；首批切片后 `200` | ✅ | `smoke-m3.sh`、§3ac |
+| `dash`：MPD→HLS；30 s 就绪门；失败 `503 timeout waiting for master playlist` | ✅ | `smoke-m3.sh`、§3bc |
+| MPD：`proxy` 正文原样透传；`dash` 解析并转 HLS | ✅ | `stream.rs`、`dash_hls.rs` |
+| `remux`/`dash` 转封装、DASH 轨道命名与片段容错 | ✅ | ADR-04、S-MODE-06、§3bc |
+
+> 本节保留 M3 当时的验证记录；`remux` 与 `dash` 的最终状态以 §3ac、§3bc 为准。
 
 验证：`cargo test` 23 项；`smoke-m0.sh`…`smoke-m3.sh` 在 debug 与 release 均全绿。
 

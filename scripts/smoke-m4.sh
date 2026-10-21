@@ -20,9 +20,19 @@ cat > "$WORK/up/live.m3u8" <<'EOF'
 seg1.ts
 EOF
 head -c 1024 /dev/urandom > "$WORK/up/seg1.ts"
+head -c 1024 /dev/urandom > "$WORK/up/dash-1.m4s"
 cat > "$WORK/up/main.mpd" <<'EOF'
 <?xml version="1.0" encoding="utf-8"?>
-<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static"><Period id="0"/></MPD>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT2S">
+  <Period id="0">
+    <AdaptationSet contentType="video" maxWidth="640" maxHeight="360">
+      <SegmentTemplate timescale="1000" media="dash-$Number$.m4s" startNumber="1">
+        <SegmentTimeline><S d="2000" r="0"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v0" codecs="avc1.42c01e" bandwidth="1000000" width="640" height="360"/>
+    </AdaptationSet>
+  </Period>
+</MPD>
 EOF
 
 write_config() { # 参数 1：DASH 频道地址

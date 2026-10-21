@@ -47,11 +47,19 @@ seg1.ts
 EOF
 cat > "$WORK/up/main.mpd" <<'EOF'
 <?xml version="1.0" encoding="utf-8"?>
-<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static">
-  <Period id="0"><AdaptationSet><Representation id="v0" bandwidth="1000000"/></AdaptationSet></Period>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT2S">
+  <Period id="0">
+    <AdaptationSet contentType="video" maxWidth="640" maxHeight="360">
+      <SegmentTemplate timescale="1000" media="dash-$Number$.m4s" startNumber="1">
+        <SegmentTimeline><S d="2000" r="0"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v0" codecs="avc1.42c01e" bandwidth="1000000" width="640" height="360"/>
+    </AdaptationSet>
+  </Period>
 </MPD>
 EOF
 head -c 2048 /dev/urandom > "$WORK/up/seg1.ts"
+head -c 2048 /dev/urandom > "$WORK/up/dash-1.m4s"
 
 cat > "$CFG" <<EOF
 [server]
@@ -202,8 +210,11 @@ check "remux 保持预热" "503" "$(status "$B/rm/c5.m3u8")"
 # --- DASH ---
 CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/dh/c6.m3u8")
 check "dash 就绪 200" "200" "$CODE"
-check "dash 类型" "application/dash+xml" "$(hfile "$WORK/h" content-type)"
-check "dash 正文" "1" "$(grep -c '<MPD' "$WORK/body")"
+check "dash 类型" "application/vnd.apple.mpegurl" "$(hfile "$WORK/h" content-type)"
+check "dash 主清单" "1" "$(grep -c '^#EXT-X-STREAM-INF:' "$WORK/body")"
+check "dash 轨道" "1" "$(grep -c '/dh/c6/video_360p/index.txt' "$WORK/body")"
+check "dash 媒体清单 200" "200" "$(status "$B/dh/c6/video_360p/index.txt")"
+check "dash 媒体清单切片" "1" "$(grep -c '#EXTINF:2.000000,' "$WORK/body")"
 check "dash 未就绪 503" "503" "$(status "$B/dh/c7.m3u8")"
 check "dash 未就绪文案" "timeout waiting for master playlist" "$(cat "$WORK/body")"
 
