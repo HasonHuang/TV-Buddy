@@ -38,7 +38,7 @@ flowchart LR
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 166 项（110 单元 + 56 集成） |
+| `cargo test --offline` | ✅ 169 项（113 单元 + 56 集成） |
 | 冒烟脚本 | ✅ 14 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
@@ -907,20 +907,20 @@ P2 已关闭；后续计划见 §0.6。
 | 项 | 结果 | 位置 |
 | --- | --- | --- |
 | MPD 摘要 | `AdaptationSet`/`Representation` 轨道列表；面板接口不变 | `src/dash.rs` |
-| 完整解析 | MPD/Period/AdaptationSet/Representation 逐层 `BaseURL`；`SegmentTemplate` 继承；`SegmentTimeline`（含 `r=-1`）；`SegmentList`；`$Number%05d$` 等占位符 | 同上 |
+| 完整解析 | MPD/Period/AdaptationSet/Representation 逐层 `BaseURL`；`SegmentTemplate` 继承；`SegmentTimeline`（含 `r=-1` 与 `timeShiftBufferDepth` 展开）；`SegmentList`；`$Number%05d$` 等占位符 | 同上 |
 | HLS 主清单 | `#EXT-X-MEDIA` 音轨/字幕 + `#EXT-X-STREAM-INF` 视频变体；轨道名 `video_{高}p`/`audio-{n}`/`text-{n}` | `src/dash_hls.rs` |
 | HLS 媒体清单 | `#EXT-X-MAP`、`#EXT-X-MEDIA-SEQUENCE`、`#EXTINF`；静态 MPD 加 `#EXT-X-ENDLIST`；动态不加 | 同上 |
 | 切片代理 | init/切片落 `cache/dash/`；伪装图片扩展名；命中缓存；多 URL 顺序回退 | 同上 |
 | 时间窗 | `[groups].mpd_keep_seconds` 按末尾累计时长裁剪媒体清单 | 同上 |
 | URL 池 | 多个 `<BaseURL>`；视频固定首选，音频/字幕在其余地址轮询；`url_pool_size` 控制启用 | 同上 |
-| 状态接口 | `GET /panel/api/dash/status` 返回会话、`phase`、`segment_count`、`active_tracks` 等 | `src/http/routes/dash.rs` |
+| 状态接口 | `GET /panel/api/dash/status` 返回会话、`phase`、`segment_count`、`active_tracks[]`（name/kind/lang/label/width/height/bandwidth/codecs/frame_rate/audio_channels） | `src/http/routes/dash.rs` |
 | 看门狗 | 主清单失败累计；连续 5 次冷却 3600 s；改配置解除 | `src/http/routes/stream.rs` |
 | 限制 | CENC 不解密；`proxy`+MPD 仍原样透传；目标 URL 池正常取用方式未观测 | §0.5 |
 
 验证：
-- 单元：MPD 摘要、Timeline/BaseURL、SegmentList、主/媒体清单、时间窗、URL 池轮询、媒体序号。
+- 单元：MPD 摘要、Timeline/BaseURL、`r=-1` + `timeShiftBufferDepth`、多 BaseURL、SegmentList、主/媒体清单、时间窗、URL 池轮询、媒体序号、动态清单无 `ENDLIST`。
 - 集成：`dash_mode_converts_mpd_to_hls_and_proxies_segments` 覆盖主清单、媒体清单、init、切片与 `keep_seconds=4`。
-- `cargo test --offline` 166 项（110 单元 + 56 集成）。
+- `cargo test --offline` 169 项（113 单元 + 56 集成）。
 
 ## 4. 进度日志
 

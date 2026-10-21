@@ -23,6 +23,7 @@ use axum::{
     http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
@@ -58,13 +59,65 @@ impl Entry {
     }
 }
 
+/// `/panel/api/dash/status` 的轨道摘要。目标字段见 F-016 §1。
+#[derive(Debug, Clone, Serialize)]
+pub struct TrackStatus {
+    pub name: String,
+    pub kind: String,
+    pub lang: Option<String>,
+    pub label: String,
+    pub width: Option<u64>,
+    pub height: Option<u64>,
+    pub bandwidth: Option<u64>,
+    pub codecs: Option<String>,
+    pub frame_rate: Option<String>,
+    pub audio_channels: Option<String>,
+}
+
+fn track_status(stream: &Stream) -> TrackStatus {
+    let label = match stream.kind.as_str() {
+        "video" => stream
+            .height
+            .map(|height| format!("{height}p"))
+            .unwrap_or_else(|| stream.name.clone()),
+        "audio" => audio_label(stream),
+        "text" => stream.lang.clone().unwrap_or_else(|| stream.name.clone()),
+        _ => stream.name.clone(),
+    };
+    TrackStatus {
+        name: stream.name.clone(),
+        kind: stream.kind.clone(),
+        lang: stream.lang.clone(),
+        label,
+        width: stream.width,
+        height: stream.height,
+        bandwidth: stream.bandwidth,
+        codecs: stream.codecs.clone(),
+        frame_rate: stream.frame_rate.clone(),
+        audio_channels: stream.audio_channels.clone(),
+    }
+}
+
+fn track_statuses(presentation: &Presentation) -> Vec<TrackStatus> {
+    presentation.streams.iter().map(track_status).collect()
+}
+
+fn audio_label(stream: &Stream) -> String {
+    match stream.audio_channels.as_deref() {
+        Some("1") => format!("{} (Mono)", stream.name),
+        Some("2") => format!("{} (Stereo)", stream.name),
+        Some(channels) => format!("{} ({}ch)", stream.name, channels),
+        None => stream.name.clone(),
+    }
+}
+
 #[derive(Debug)]
 struct Session {
     upstream: String,
     keep_seconds: u64,
     pool_size: u32,
     entries: HashMap<String, Entry>,
-    tracks: Vec<String>,
+    tracks: Vec<TrackStatus>,
     started: Instant,
     last: Instant,
 }
@@ -141,7 +194,7 @@ impl Manager {
         session.last = Instant::now();
     }
 
-    fn set_tracks(&self, gid: &str, cid: &str, tracks: Vec<String>) {
+    fn set_tracks(&self, gid: &str, cid: &str, tracks: Vec<TrackStatus>) {
         let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(session) = sessions.get_mut(&Self::key(gid, cid)) {
             session.tracks = tracks;
@@ -213,15 +266,7 @@ impl Manager {
             .map_err(|error| format!("MPD 解析失败: {error:#}"))?;
         let body = render_master(&presentation, gid, cid, self_base);
         self.upsert(gid, cid, upstream.to_string(), keep, pool);
-        self.set_tracks(
-            gid,
-            cid,
-            presentation
-                .streams
-                .iter()
-                .map(|stream| stream.name.clone())
-                .collect(),
-        );
+        self.set_tracks(gid, cid, track_statuses(&presentation));
         self.ensure_janitor();
         info!(
             gid,
@@ -289,7 +334,7 @@ impl Manager {
                 },
             );
             self.upsert(gid, cid, upstream, keep, pool);
-            self.set_tracks(gid, cid, vec![track.to_string()]);
+            self.set_tracks(gid, cid, track_statuses(&presentation));
             self.set_entries(gid, cid, rendered.entries);
             self.touch(gid, cid);
             let mut response = Response::new(Body::from(rendered.body));
@@ -401,7 +446,7 @@ pub fn render_master(presentation: &Presentation, gid: &str, cid: &str, self_bas
         body.push_str(&format!(
             "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",LANGUAGE=\"{}\",NAME=\"{}\",DEFAULT={},AUTOSELECT=YES",
             escape(stream.lang.as_deref().unwrap_or("und")),
-            escape(&stream.name),
+            escape(&audio_label(stream)),
             if index == 0 { "YES" } else { "NO" },
         ));
         if let Some(channels) = channels(stream) {
@@ -416,7 +461,7 @@ pub fn render_master(presentation: &Presentation, gid: &str, cid: &str, self_bas
         body.push_str(&format!(
             "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",LANGUAGE=\"{}\",NAME=\"{}\",DEFAULT={},AUTOSELECT=YES,URI=\"{}\"\n",
             escape(stream.lang.as_deref().unwrap_or("und")),
-            escape(&stream.name),
+            escape(&audio_label(stream)),
             if index == 0 { "YES" } else { "NO" },
             media_url(self_base, gid, cid, &stream.name)
         ));
@@ -782,6 +827,41 @@ mod tests {
         assert_eq!(choose_urls(&urls, "video", 1, 3)[0], "http://a/1");
         assert_eq!(choose_urls(&urls, "audio", 0, 3)[0], "http://b/1");
         assert_eq!(choose_urls(&urls, "audio", 1, 3)[0], "http://c/1");
+    }
+
+    #[test]
+    fn live_media_has_no_endlist() {
+        let p = parse_presentation(
+            r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="dynamic" timeShiftBufferDepth="PT4S">
+  <Period>
+    <AdaptationSet contentType="video">
+      <SegmentTemplate timescale="1000" media="s-$Number$.m4s" startNumber="1">
+        <SegmentTimeline><S d="2000" r="-1"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v0" width="640" height="360"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#,
+            "http://origin.example/live.mpd",
+        )
+        .expect("MPD");
+        let stream = &p.streams[0];
+        let rendered = render_media(
+            &p,
+            stream,
+            MediaOptions {
+                gid: "g",
+                cid: "c",
+                self_base: "",
+                keep_seconds: 0,
+                pool_size: 1,
+                formats: &["jpg".to_string()],
+                track_index: 0,
+            },
+        );
+        assert!(!rendered.body.contains("#EXT-X-ENDLIST"));
+        assert_eq!(rendered.body.matches("#EXTINF:").count(), 2);
     }
 
     #[test]

@@ -191,6 +191,9 @@ pub fn parse_presentation(xml: &str, mpd_url: &str) -> Result<Presentation> {
     let duration = root
         .attribute("mediaPresentationDuration")
         .and_then(parse_iso_duration);
+    let time_shift_depth = root
+        .attribute("timeShiftBufferDepth")
+        .and_then(parse_iso_duration);
     let root_bases = resolve_bases(&[mpd_url.to_string()], &base_urls(root));
     let root_bases = if root_bases.is_empty() {
         vec![mpd_url.to_string()]
@@ -225,7 +228,7 @@ pub fn parse_presentation(xml: &str, mpd_url: &str) -> Result<Presentation> {
             let width = number(set.attribute("maxWidth"));
             let height = number(set.attribute("maxHeight"));
             let frame_rate = set.attribute("frameRate").map(str::to_string);
-            let audio_channels = set.attribute("audioSamplingRate").map(str::to_string);
+            let set_audio_channels = audio_channels(set);
 
             for representation in children(set, "Representation") {
                 let rep_base = resolve_bases(&set_base, &base_urls(representation));
@@ -247,6 +250,7 @@ pub fn parse_presentation(xml: &str, mpd_url: &str) -> Result<Presentation> {
                         bandwidth,
                         &template,
                         period_duration,
+                        time_shift_depth,
                         &rep_base,
                     );
                     if let Some(initialization) = template.initialization.as_deref() {
@@ -299,10 +303,8 @@ pub fn parse_presentation(xml: &str, mpd_url: &str) -> Result<Presentation> {
                         .attribute("frameRate")
                         .map(str::to_string)
                         .or_else(|| frame_rate.clone()),
-                    audio_channels: representation
-                        .attribute("audioSamplingRate")
-                        .map(str::to_string)
-                        .or_else(|| audio_channels.clone()),
+                    audio_channels: audio_channels(representation)
+                        .or_else(|| set_audio_channels.clone()),
                     init,
                     segments,
                 });
@@ -319,6 +321,12 @@ pub fn parse_presentation(xml: &str, mpd_url: &str) -> Result<Presentation> {
         duration,
         streams,
     })
+}
+
+fn audio_channels(node: Node<'_, '_>) -> Option<String> {
+    child(node, "AudioChannelConfiguration")
+        .and_then(|config| config.attribute("value"))
+        .map(str::to_string)
 }
 
 fn set_kind(set: Node<'_, '_>) -> String {
@@ -511,6 +519,7 @@ fn build_template_segments(
     bandwidth: Option<u64>,
     template: &Template,
     period_duration: Option<f64>,
+    time_shift_depth: Option<f64>,
     bases: &[String],
 ) -> Vec<Segment> {
     let timescale = template.timescale.unwrap_or(1).max(1);
@@ -530,11 +539,18 @@ fn build_template_segments(
             }
             let repeat = if entry.r < 0 {
                 let next_time = timeline.get(index + 1).and_then(|next| next.t);
-                let end_time = next_time.or_else(|| {
-                    period_duration.map(|duration| (duration * timescale as f64) as u64)
-                });
+                let end_time = next_time
+                    .or_else(|| {
+                        time_shift_depth
+                            .map(|depth| time.saturating_add((depth * timescale as f64) as u64))
+                    })
+                    .or_else(|| {
+                        period_duration.map(|duration| {
+                            time.saturating_add((duration * timescale as f64) as u64)
+                        })
+                    });
                 match end_time {
-                    Some(end) if end > time => (end - time).div_ceil(entry.d).max(1),
+                    Some(end) if end > time => (end - time).div_ceil(entry.d).max(1).min(10_000),
                     _ => 1,
                 }
             } else {
@@ -714,6 +730,47 @@ mod tests {
             "http://origin.example/dash/chunk-v0-007.m4s"
         );
         assert_eq!(stream.init[0], "http://origin.example/dash/init-v0.mp4");
+    }
+
+    #[test]
+    fn expands_negative_repeat_with_time_shift_depth() {
+        let xml = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="dynamic" timeShiftBufferDepth="PT6S">
+  <Period>
+    <AdaptationSet contentType="video">
+      <SegmentTemplate timescale="1000" media="s-$Number$.m4s" startNumber="1">
+        <SegmentTimeline><S t="1000" d="2000" r="-1"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v0" width="640" height="360"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        let presentation = parse_presentation(xml, "http://origin.example/live.mpd").expect("解析");
+        assert!(presentation.is_live);
+        assert_eq!(presentation.streams[0].segments.len(), 3);
+        assert_eq!(presentation.streams[0].segments[0].time, 1000);
+    }
+
+    #[test]
+    fn keeps_multiple_base_urls_for_pool() {
+        let xml = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT4S">
+  <BaseURL>http://cdn-a.example/dash/</BaseURL>
+  <BaseURL>http://cdn-b.example/dash/</BaseURL>
+  <Period>
+    <AdaptationSet contentType="audio">
+      <SegmentTemplate timescale="1000" media="a-$Number$.m4s" startNumber="1">
+        <SegmentTimeline><S d="2000" r="1"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="a0" bandwidth="128000"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        let presentation = parse_presentation(xml, "http://origin.example/live.mpd").expect("解析");
+        let segment = &presentation.streams[0].segments[0];
+        assert_eq!(segment.urls.len(), 2);
+        assert_eq!(segment.urls[0], "http://cdn-a.example/dash/a-1.m4s");
+        assert_eq!(segment.urls[1], "http://cdn-b.example/dash/a-1.m4s");
     }
 
     #[test]
