@@ -43,6 +43,7 @@ flowchart LR
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
 | 发布包 | ✅ amd64 3.4 MB、arm64 3.2 MB；`verify-release.sh` 通过 |
+| CI | ✅ 运行 `39593785498`：前端、fmt/clippy/test、双架构包全绿 |
 
 ### 0.4 里程碑
 
@@ -72,7 +73,7 @@ flowchart LR
 
 | ID | 交付 | 规模 | 依赖 | 验收 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| P3-01 | CI 质量门 | S | GitHub Actions | `fmt`/`clippy`/`test`/双架构构建；失败阻断合并 | ✅ |
+| P3-01 | CI 质量门 | S | GitHub Actions | `fmt`/`clippy`/`test`/双架构构建；失败阻断合并 | ✅ 运行 `39593785498` |
 | P3-02 | `/subs/{status,groups,preview}` | M | 无 | 形状按 S-GAP-07；复用 `[playlist]` 聚合；集成测试覆盖保留/丢弃/分组映射 | ⏳ |
 | P3-03 | `GET /panel/api/link-info` | S | 无 | 返回 `aliases`、`random_id_enabled`、`token`、`token_enabled`、`use_alias`；测试 | ⏳ |
 | P3-04 | 安全面补全 | M | 无 | 登录失败 429 锁、每 IP 会话上限、`/unban` 每月 3 次、`l1/l2` 窗口；测试 | ⏳ |
@@ -743,7 +744,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **P2 批次**：订阅聚合、面板分区、DASH 回看、EPG/字幕翻译引擎 | ✅ §3ak–§3aq |
 | 2026-10-21 | **质量门**：132 项测试、13 个冒烟、DASH 容器复验、双架构重出包 | ✅ §3ar、§3as |
 | 2026-10-21 | **文档重排**：总览看板（进度图、质量门、里程碑、差异）、P3 任务计划；附录 A/B 合并到文末 | ✅ 本节 |
-| 2026-10-21 | **P3-01 CI**：新增 `.github/workflows/ci.yml`（前端构建 → fmt/clippy/test → 双架构 musl 包） | ✅ `.github/workflows/ci.yml` |
+| 2026-10-21 | **P3-01 CI**：新增 `.github/workflows/ci.yml`（前端构建 → fmt/clippy/test → 原生 amd64/arm64 musl 包）；首跑全绿 | ✅ 运行 `39593785498` |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）
 
