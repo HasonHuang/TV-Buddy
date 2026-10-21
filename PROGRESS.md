@@ -573,7 +573,7 @@
 
 验证：`cargo test --offline` 121 项（80 单元 + 41 集成）。
 
-已知缺口（P2）：EPG 翻译引擎、订阅聚合 UI。
+已知缺口（P2）：见 §3ak 订阅聚合面板、§3ap EPG 翻译引擎、§3aq 字幕翻译引擎（均已补齐）。
 
 ## 3af. P2 · EPG 脚本源、批量录制、字幕自检
 
@@ -606,7 +606,7 @@
 | `dash_timeshift=true` 时用 ffmpeg 转本地 HLS（`-hls_time 4`，滑动窗口 120 片） | ✅ | `timeshift::spawn_ffmpeg` |
 | 本地 HLS 增量入缓冲，VOD 清单与伪装切片复用 | ✅ | `spawn_poller` |
 | 会话回收时结束 ffmpeg | ✅ | `Session::shutdown` |
-| 冒烟 | ⚠️ | `scripts/smoke-dash-timeshift.sh` 在 ffmpeg 缺少 DASH 解复用器时跳过 |
+| 冒烟 | ✅ | `scripts/smoke-dash-timeshift.sh` 4 项通过（Linux arm64 容器，见 §3ar） |
 
 ## 3ah. P1 · 面板「录制与回看」分区
 
@@ -717,4 +717,22 @@
 
 验证：`cargo test --offline` 132 项（88 单元 + 44 集成）；前端 panel 39.44 kB。
 
-剩余（P2）：DASH 回看在具备解复用器的 ffmpeg 环境复验。
+## 3ar. P2 · DASH 回看端到端复验
+
+本机 ffmpeg 无 `dash` 解复用器。改用 Linux arm64 容器复验。
+
+| 项 | 做法 |
+| --- | --- |
+| 二进制 | `target/dash-arm64/debug/iptv-proxy`（Docker `rust:1-alpine` 构建，`--offline`） |
+| 运行时 | `charmingcheung000/mpd-hls`（arm64，自带 ffmpeg：`dash` 解复用器 + `libx264` + dash 封装器） |
+| 上游 | `ffmpeg -f lavfi -i testsrc -f dash -use_timeline 1` 生成 MPD；`python3 -m http.server` 提供 |
+| 配置 | `mode = "dash"`、`dash_timeshift = true`、`dash_timeshift_hours = 4`、`access = "open"` |
+| 断言 | 回看清单 `200` 且含 `#EXT-X-PLAYLIST-TYPE:VOD`；切片 `200` 且 `Content-Type: image/*` |
+| 脚本 | `scripts/smoke-dash-timeshift-docker.sh` + `scripts/dash-smoke-container.py`；先等上游 MPD 可读，再起本实现 |
+
+| 结果 | ✅ 4/4，连续 3 次通过（清单 200、VOD 类型、切片 200、图片类型） |
+| 限制 | 容器内无 `bash`/`curl`，用等价 Python 断言复现 `smoke-dash-timeshift.sh` |
+
+验证：`cargo test --offline` 132 项（88 单元 + 44 集成）。
+
+剩余（P2）：无。`dist/` 两个发布包构建于 `77c12c5`，早于翻译引擎；本机只有 arm64 工具链，arm64 与 amd64 包需在双架构镜像可用时重出。

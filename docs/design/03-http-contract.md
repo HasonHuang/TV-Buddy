@@ -459,7 +459,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | `GET` | `/panel/api/health` | `{ok, version, uptime_secs, time, bind, groups, channels, sessions, cache, epg, security, share}` |
 | `GET` | `/panel/api/dash/tracks/:gid/:cid` | 抓频道 MPD 并列出轨道；未知频道 → `404 Channel not found` |
 | `POST` | `/panel/api/dash/scan-url` | `{"url"}`；只解析，不改配置；非 HTTP(S) → `400` |
-| `GET` | `/panel/api/dash-timeshift/status` | `{ok, enabled, ready, note}`；DASH 回看未实现（P2） |
+| `GET` | `/panel/api/dash-timeshift/status` | `{ok,enabled,ready,channels[{group_id,channel_id,hours,segments,mode}],note}`；代理频道直接缓冲，DASH 频道经 ffmpeg 转 HLS 后缓冲 |
 
 轨道对象：`{id, kind, codecs, bandwidth, lang, width, height}`。
 `kind` 取 `video`/`audio`/`text`/`unknown`。
