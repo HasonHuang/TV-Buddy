@@ -280,4 +280,4 @@ formats = ["jpg","png","gif","bmp","webp"]
 | S-GAP-07 | **订阅合并** `subscription-merge`：`[playlist]{merge_ttl_secs,merge_position,sources[],global_exclude[]}` + `/subs/{preview,groups,status}` | 字段/端点 | ✅【观测】`GET /subs/status`→`{sources:[]}`；`POST /subs/groups {url}`→`{groups:[{name,count}],total}`；`POST /subs/preview {source:{id,url,group_map,…}}`→`{kept,sample,trace{total,after_group,after_global_exclude,after_include},dropped_groups,out_groups}`；`unlisted_groups` 默认 `drop` |
 | S-GAP-08 | **双层限流窗口** `l1/l2` 与会话计数（`active_sessions`/`online_viewers`）；缓存分层（`m3u8`/`sub_url`/`seg_url`/`seg_bytes`） | 字段/端点 | 🔶 键面已录；`l1/l2` 触发条件未定（见 11 §5） |
 
-> 来源：二进制 strings/字段与面板 JS 的**全量盘点**（见 `PROGRESS.md` §5）。这些能力在基线文档中缺失，先按"存在"登记；行为验证见对应 `D-*` 路线图项。
+> 来源：二进制 strings/字段与面板 JS 的**全量盘点**（见 `PROGRESS.md` 附录 A）。这些能力在基线文档中缺失，先按"存在"登记；行为验证见对应 `D-*` 路线图项。
