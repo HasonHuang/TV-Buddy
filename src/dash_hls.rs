@@ -291,30 +291,7 @@ impl Manager {
             Self::settings(state, gid, cid).unwrap_or_else(|| (upstream.to_string(), 0, 1));
         let dash = state.snapshot().cache.dash.clone();
         let keep = effective_keep(keep, dash.retain_min_secs);
-        let timeout = Duration::from_secs(dash.mpd_timeout_secs.clamp(1, 120));
-        let mut xml = None;
-        let mut last_error = String::new();
-        for attempt in 0..=dash.retry_max.min(32) {
-            match tokio::time::timeout(
-                timeout,
-                crate::http::routes::stream::fetch(state, upstream, gid, cid),
-            )
-            .await
-            {
-                Ok(Ok(body)) => {
-                    xml = Some(body);
-                    break;
-                }
-                Ok(Err(error)) => last_error = error.to_string(),
-                Err(_) => last_error = "MPD timeout".to_string(),
-            }
-            if attempt < dash.retry_max.min(32) {
-                tokio::time::sleep(retry_delay(&dash, attempt)).await;
-            }
-        }
-        let Some(xml) = xml else {
-            return Err(format!("Upstream Error: {last_error}"));
-        };
+        let xml = fetch_mpd(state, gid, cid, upstream, &dash).await?;
         let presentation = dash::parse_presentation(&xml, upstream)
             .map_err(|error| format!("MPD 解析失败: {error:#}"))?;
         let body = render_master(&presentation, gid, cid, self_base);
@@ -352,13 +329,18 @@ impl Manager {
         self_base: &str,
     ) -> Option<Response> {
         let (configured, keep, pool) = Self::settings(state, gid, cid)?;
+        let segment_cache = format!(
+            "public, max-age={}",
+            state.snapshot().cache.ttl.segment_secs.max(1)
+        );
         let upstream = self.upstream(gid, cid).unwrap_or(configured);
         let (track, file) = rest.split_once('/')?;
         if track.is_empty() || file.is_empty() {
             return None;
         }
         if file == "index.txt" || file == "index.m3u8" {
-            let xml = match crate::http::routes::stream::fetch(state, &upstream, gid, cid).await {
+            let dash = state.snapshot().cache.dash.clone();
+            let xml = match fetch_mpd(state, gid, cid, &upstream, &dash).await {
                 Ok(xml) => xml,
                 Err(error) => {
                     warn!(gid, cid, error = %error, "DASH 媒体清单抓取失败");
@@ -450,7 +432,7 @@ impl Manager {
         let path = cache_path(&state.cache_dir, gid, cid, rest);
         if let Ok(bytes) = std::fs::read(&path) {
             self.touch(gid, cid);
-            return Some(bytes_response(bytes, &entry, "public, max-age=300"));
+            return Some(bytes_response(bytes, &entry, &segment_cache));
         }
         let mut last_error = None;
         let dash = state.snapshot().cache.dash.clone();
@@ -470,7 +452,7 @@ impl Manager {
                         }
                         let _ = std::fs::write(&path, &bytes);
                         self.touch(gid, cid);
-                        return Some(bytes_response(bytes, &entry, "public, max-age=300"));
+                        return Some(bytes_response(bytes, &entry, &segment_cache));
                     }
                     Ok(Err(error)) => {
                         last_error = Some(error.to_string());
@@ -855,6 +837,35 @@ fn effective_keep(group_keep: u64, retain_min_secs: f64) -> u64 {
     } else {
         retain_min_secs.ceil().max(1.0) as u64
     }
+}
+
+/// 拉取 MPD，按 `[cache.dash]` 的超时与重试参数执行。
+async fn fetch_mpd(
+    state: &Arc<AppState>,
+    gid: &str,
+    cid: &str,
+    url: &str,
+    config: &crate::config::model::CacheDashCfg,
+) -> Result<String, String> {
+    let timeout = Duration::from_secs(config.mpd_timeout_secs.clamp(1, 120));
+    let attempts = config.retry_max.min(32);
+    let mut last_error = String::new();
+    for attempt in 0..=attempts {
+        match tokio::time::timeout(
+            timeout,
+            crate::http::routes::stream::fetch(state, url, gid, cid),
+        )
+        .await
+        {
+            Ok(Ok(body)) => return Ok(body),
+            Ok(Err(error)) => last_error = error.to_string(),
+            Err(_) => last_error = "MPD timeout".to_string(),
+        }
+        if attempt < attempts {
+            tokio::time::sleep(retry_delay(config, attempt)).await;
+        }
+    }
+    Err(format!("Upstream Error: {last_error}"))
 }
 
 #[cfg(test)]
