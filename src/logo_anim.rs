@@ -281,7 +281,8 @@ fn encode_apng(
         fctl.extend_from_slice(&0u32.to_be_bytes());
         fctl.extend_from_slice(&(delay_ms.min(u16::MAX as u64) as u16).to_be_bytes());
         fctl.extend_from_slice(&1_000u16.to_be_bytes());
-        fctl.extend_from_slice(&[0, 0]);
+        // 每帧前清空画布，避免带透明区域的动效留下拖影。
+        fctl.extend_from_slice(&[1, 0]);
         chunk(&mut out, b"fcTL", &fctl);
         if index == 0 {
             chunk(&mut out, b"IDAT", &compressed);
