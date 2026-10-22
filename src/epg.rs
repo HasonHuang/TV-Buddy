@@ -493,18 +493,21 @@ fn match_source(
                 Some(channel) => (Some(channel), "manual", true),
                 None => (None, "none", false),
             }
-        } else if let Some(tvg_id) = &target.tvg_id {
-            match by_id.get(tvg_id) {
-                Some(channel) => (Some(*channel), "tvg-id", false),
-                None => (None, "none", false),
-            }
-        } else if config.epg.match_by_name {
-            match by_name.get(&target.normalized) {
-                Some(channel) => (Some(*channel), "name", false),
-                None => (None, "none", false),
-            }
         } else {
-            (None, "none", false)
+            let by_tvg = target
+                .tvg_id
+                .as_ref()
+                .and_then(|tvg_id| by_id.get(tvg_id).copied());
+            if let Some(channel) = by_tvg {
+                (Some(channel), "tvg-id", false)
+            } else if config.epg.match_by_name {
+                match by_name.get(&target.normalized) {
+                    Some(channel) => (Some(*channel), "name", false),
+                    None => (None, "none", false),
+                }
+            } else {
+                (None, "none", false)
+            }
         };
         if let Some(channel) = channel {
             candidates.push(Candidate {
@@ -1350,7 +1353,12 @@ mod tests {
         let mut e3 = crate::config::model::Channel::default();
         e3.id = "e3".into();
         e3.name = "CCTV-3 综艺".into();
-        group.channels = vec![e1, e2, e3];
+        let mut e4 = crate::config::model::Channel::default();
+        e4.id = "e4".into();
+        e4.name = "CCTV-1 综合".into();
+        e4.extra
+            .insert("tvg_id".into(), toml::Value::String("missing".into()));
+        group.channels = vec![e1, e2, e3, e4];
         config.groups.push(group);
         let targets = channel_targets(&config);
         let document = parse(
@@ -1370,10 +1378,11 @@ mod tests {
             0,
             4_000_000_000,
         );
-        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates.len(), 4);
         assert_eq!(candidates[0].via, "tvg-id");
         assert_eq!(candidates[1].via, "name");
-        assert_eq!(owners["cctv1"], 1, "配置顺序最后的同名频道获得节目");
+        assert_eq!(candidates[3].via, "name", "tvg_id 未命中时回退名称");
+        assert_eq!(owners["cctv1"], 3, "配置顺序最后的同名频道获得节目");
         assert_eq!(programmes["cctv1"].len(), 2);
         assert_eq!(programmes["cctv3"].len(), 1);
     }
