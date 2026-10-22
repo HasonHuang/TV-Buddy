@@ -294,11 +294,12 @@ scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
 
 - `remux` 为纯 Rust 切片；冷启动在首批切片产出前返回 `503 remux warming up`，不是恒 503。
 - `dash` 已把 MPD 转成 HLS；需要 `SegmentTimeline`，或 `SegmentTemplate@duration` 加总时长。CENC/ClearKey 不做解密，当前按原字节代理。
-- `proxy` 模式面向 HLS：媒体清单按行改写；MPD 正文原样透传（MPD 的完整代理分支未实现）。
+- `proxy` 模式面向 HLS：媒体清单按行改写；MPD 的相对 `<BaseURL>` 改写到本服务并代理 init/切片，绝对地址仍直连上游。
 - `mpd_keep_seconds` 已用于 DASH 媒体清单的时间窗；`url_pool_size` 已用于多个 `<BaseURL>` 的音视频分流与故障回退。目标侧正常取用方式仍未观测。
 - 缓存无容量上限（与目标一致，见 F-015）；`cache.backend=memory` 只回显，实际仍落盘。
 - 运维接口的响应形状为本实现自定；目标只登记存在性（见 `design/03` §6.4）。
 - 面板有 12 个管理分区，另有独立 `/logo` 与 `/unban` 页面；目标前端代码与文案不复制。
 - EPG：支持 `kind = "xml"` 与 `kind = "script"`、EPG 翻译；EPG 手工映射、订阅 `x-tvg-url` 与录制联动未实现（`design/03` §6.5）。
+- 定时录制面向 HLS 切片；DASH 频道的并轨与 mp4 合成未实现。
 - `l1/l2` 限流、每 IP 会话上限、`random_id_enabled` 的随机 ID 行为、`compat_mode`、`srt_ua_keywords`、`socks5` 未实现或仅保留配置键。
 - 与目标的差异以 `docs/design/reconciliation-report.md` 为准（22 项用例差异 0）。

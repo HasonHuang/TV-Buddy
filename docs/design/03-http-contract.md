@@ -152,7 +152,7 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 | `dash` | `200 application/vnd.apple.mpegurl` + `no-cache, no-store` | MPD→HLS；主清单指向 `/{gid}/{cid}/{track}/index.txt`；轨道名 `video_{高}p` / `audio-{n}`；init/切片伪装为图片；就绪门 30 s，超时 → `503 timeout waiting for master playlist` | S-MODE-06/15 |
 | `proxy` | 代理链路（§4） | — | S-MODE-03 |
 
-> `remux` 已实现（纯 Rust 切片，不调用 ffmpeg）。`dash` 已实现 MPD→HLS：解析 `BaseURL`、`SegmentTemplate`/`SegmentTimeline`、`SegmentList`，按需代理 init 与切片。`proxy` 模式下的 MPD 正文仍**原样透传**，避免按行改写破坏 XML。
+> `remux` 已实现（纯 Rust 切片，不调用 ffmpeg）。`dash` 已实现 MPD→HLS：解析 `BaseURL`、`SegmentTemplate`/`SegmentTimeline`、`SegmentList`，按需代理 init 与切片。`proxy` 模式下的 MPD 保留正文，只把相对 `<BaseURL>` 改写到 `/{gid}/{cid}/mpd/` 并代理 init/切片；绝对 `<BaseURL>` 仍直连上游。proxy+MPD 的 `mpd_keep_seconds` 裁剪未实现。
 
 ## 5. 订阅契约
 

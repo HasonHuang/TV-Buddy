@@ -44,6 +44,20 @@ const MPD: &str = r#"<?xml version="1.0"?>
   </Period>
 </MPD>"#;
 
+/// 伪 DASH 清单：带相对 `<BaseURL>`。
+const DASH_BASE_MPD: &str = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT2S">
+  <BaseURL>sub/</BaseURL>
+  <Period>
+    <AdaptationSet contentType="video" maxWidth="640" maxHeight="360">
+      <SegmentTemplate timescale="1000" media="chunk-$Number$.m4s" startNumber="1">
+        <SegmentTimeline><S d="2000" r="0"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v0" codecs="avc1.42c01e" bandwidth="1000000" width="640" height="360"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+
 /// 伪 DASH 清单：带 SegmentTimeline 与相对 init/切片。
 const DASH_MPD: &str = r#"<?xml version="1.0"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT8S">
@@ -171,7 +185,9 @@ async fn upstream_file(
         "extra.m3u8" => ("application/vnd.apple.mpegurl", EXTRA.as_bytes()),
         "manifest.mpd" => ("application/dash+xml", MPD.as_bytes()),
         "dash/live.mpd" => ("application/dash+xml", DASH_MPD.as_bytes()),
+        "dash/base.mpd" => ("application/dash+xml", DASH_BASE_MPD.as_bytes()),
         "dash/init-v0.mp4" => ("video/mp4", b"dash-init"),
+        "dash/sub/chunk-1.m4s" => ("video/mp4", b"dash-base-segment"),
         "dash/chunk-v0-1.m4s"
         | "dash/chunk-v0-2.m4s"
         | "dash/chunk-v0-3.m4s"
@@ -2291,6 +2307,77 @@ url = "{upstream}/dash/live.mpd"
         .expect("请求 init");
     assert_eq!(init.status(), StatusCode::OK);
     assert_eq!(init.bytes().await.expect("读 init").as_ref(), b"dash-init");
+}
+
+#[tokio::test]
+async fn proxy_mode_rewrites_mpd_base_url_and_proxies_segments() {
+    let fixture = fixture_with_extra(
+        r#"
+[[groups]]
+id = "mpg"
+name = "代理 MPD"
+mode = "proxy"
+access = "open"
+[[groups.channels]]
+id = "c1"
+name = "无 BaseURL"
+url = "{upstream}/dash/live.mpd"
+[[groups.channels]]
+id = "c2"
+name = "相对 BaseURL"
+url = "{upstream}/dash/base.mpd"
+"#,
+    )
+    .await;
+
+    let manifest = fetch(&fixture, "/mpg/c1.mpd").await;
+    assert_eq!(manifest.status(), StatusCode::OK);
+    assert_eq!(
+        manifest
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/dash+xml")
+    );
+    let body = manifest.text().await.expect("读 MPD");
+    assert!(
+        body.contains(&format!("<BaseURL>{}/mpg/c1/mpd/</BaseURL>", fixture.base)),
+        "{body}"
+    );
+    assert!(
+        body.contains("chunk-$RepresentationID$-$Number$.m4s"),
+        "{body}"
+    );
+
+    let init = fetch(&fixture, "/mpg/c1/mpd/init-v0.mp4").await;
+    assert_eq!(init.status(), StatusCode::OK);
+    assert_eq!(init.bytes().await.expect("读 init").as_ref(), b"dash-init");
+    let segment = fetch(&fixture, "/mpg/c1/mpd/chunk-v0-1.m4s").await;
+    assert_eq!(segment.status(), StatusCode::OK);
+    assert_eq!(
+        segment.bytes().await.expect("读切片").as_ref(),
+        b"dash-segment"
+    );
+
+    // 已有的相对 BaseURL 改写后仍保留 `sub/`，切片继续经本服务代理。
+    let body = fetch(&fixture, "/mpg/c2.mpd")
+        .await
+        .text()
+        .await
+        .expect("读 MPD");
+    assert!(
+        body.contains(&format!(
+            "<BaseURL>{}/mpg/c2/mpd/sub/</BaseURL>",
+            fixture.base
+        )),
+        "{body}"
+    );
+    let segment = fetch(&fixture, "/mpg/c2/mpd/sub/chunk-1.m4s").await;
+    assert_eq!(segment.status(), StatusCode::OK);
+    assert_eq!(
+        segment.bytes().await.expect("读切片").as_ref(),
+        b"dash-base-segment"
+    );
 }
 
 #[tokio::test]

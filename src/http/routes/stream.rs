@@ -10,6 +10,7 @@ use axum::{
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
+use url::Url;
 
 use crate::{
     config::{model::Group, Config},
@@ -293,6 +294,9 @@ pub async fn wildcard(
             }
         }
     }
+    if let Some(path) = rest.strip_prefix("mpd/") {
+        return mpd_segment(&state, &gid, &cid, path).await;
+    }
     match rest.as_str() {
         // 变体媒体清单：只有上游是主清单时存在（S-PROXY-07）。
         "video/index.txt" => variant_playlist(&state, &gid, &cid, &self_base(&headers)).await,
@@ -350,9 +354,8 @@ async fn proxy_entry(
             return (StatusCode::BAD_GATEWAY, "Upstream Error").into_response();
         }
     };
-    // MPD/XML 原样透传，避免按行改写破坏正文（转封装属 P1）。
     if proxy::modes::looks_like_mpd(&upstream) {
-        return dash_body(upstream);
+        return proxy_mpd(&upstream, gid, cid, self_base);
     }
     if proxy::media::is_master(&upstream) {
         return master_entry(&upstream, channel_url, gid, cid, self_base, ext);
@@ -483,6 +486,139 @@ async fn upstream_playlist(
     let text = fetch(state, url, gid, cid).await?;
     state.playlists.put(&key, text.clone());
     Ok(text)
+}
+
+/// `proxy` 模式的 MPD：保留正文，把相对 `<BaseURL>` 指到本服务的 `mpd/` 路径。
+///
+/// 目标在 proxy+MPD 下的取用方式未完整观测（F-015、S-MODE-04）。这里只做
+/// 最小改写：绝对 `<BaseURL>` 保持不动，相对地址与本服务同源代理。
+fn proxy_mpd(body: &str, gid: &str, cid: &str, self_base: &str) -> Response {
+    let body = rewrite_mpd_base_urls(body, gid, cid, self_base);
+    let mut response = Response::new(Body::from(body));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/dash+xml"),
+    );
+    insert_header(&mut response, header::CACHE_CONTROL, ENTRY_CACHE);
+    response
+}
+
+fn rewrite_mpd_base_urls(xml: &str, gid: &str, cid: &str, self_base: &str) -> String {
+    let prefix = format!("{}/{}/{}/mpd/", self_base.trim_end_matches('/'), gid, cid);
+    let prefix = if self_base.is_empty() {
+        format!("/{gid}/{cid}/mpd/")
+    } else {
+        prefix
+    };
+    let Ok(document) = roxmltree::Document::parse(xml) else {
+        return xml.to_string();
+    };
+    let mut replacements = Vec::new();
+    for node in document
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "BaseURL")
+    {
+        let value = node.text().unwrap_or("").trim();
+        if value.is_empty() || is_absolute_url(value) {
+            continue;
+        }
+        let local = if value.starts_with('/') {
+            format!("{prefix}root{}", value)
+        } else {
+            format!("{prefix}{value}")
+        };
+        replacements.push((
+            node.range(),
+            format!("<BaseURL>{}</BaseURL>", xml_escape(&local)),
+        ));
+    }
+    if replacements.is_empty() {
+        let Some(insert_at) = xml
+            .find("<MPD")
+            .and_then(|start| xml[start..].find('>').map(|end| start + end + 1))
+        else {
+            return xml.to_string();
+        };
+        let mut output = String::with_capacity(xml.len() + prefix.len() + 18);
+        output.push_str(&xml[..insert_at]);
+        output.push_str(&format!("<BaseURL>{}</BaseURL>", xml_escape(&prefix)));
+        output.push_str(&xml[insert_at..]);
+        return output;
+    }
+    let mut output = xml.to_string();
+    for (range, replacement) in replacements.into_iter().rev() {
+        output.replace_range(range, &replacement);
+    }
+    output
+}
+
+fn is_absolute_url(value: &str) -> bool {
+    value.starts_with("http://") || value.starts_with("https://") || value.starts_with("//")
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// 代理 `proxy` 模式 MPD 的相对切片。路径来自改写后的 `<BaseURL>`。
+async fn mpd_segment(state: &Arc<AppState>, gid: &str, cid: &str, path: &str) -> Response {
+    let path = path.trim_start_matches('/');
+    if path.is_empty() || path.split('/').any(|part| part == "..") {
+        return (StatusCode::BAD_REQUEST, "Bad path").into_response();
+    }
+    let config = state.snapshot();
+    let Some(group) = config.group(gid) else {
+        return (StatusCode::NOT_FOUND, "Channel not found").into_response();
+    };
+    if group.mode != "proxy" {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+    let Some(channel) = group.channels.iter().find(|channel| channel.id == cid) else {
+        return (StatusCode::NOT_FOUND, "Channel not found").into_response();
+    };
+    let channel_url = match crate::resolver::resolve(state, gid, cid, channel).await {
+        Ok(Some(url)) => url,
+        Ok(None) => channel.url.clone(),
+        Err(error) => {
+            tracing::warn!(gid, cid, error = %error, "解析脚本失败");
+            return (StatusCode::BAD_GATEWAY, "Upstream Error").into_response();
+        }
+    };
+    let Ok(base) = Url::parse(&channel_url) else {
+        return (StatusCode::BAD_GATEWAY, "Upstream Error").into_response();
+    };
+    let target = if let Some(root) = path.strip_prefix("root/") {
+        base.join(&format!("/{root}"))
+    } else {
+        base.join(path)
+    };
+    let Ok(target) = target else {
+        return (StatusCode::BAD_REQUEST, "Bad path").into_response();
+    };
+    let bytes = match fetch_bytes(state, target.as_str(), gid, cid).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            tracing::warn!(url = %target, error = %error, "代理 MPD 切片失败");
+            state.stats.record_upstream_failure();
+            return (StatusCode::BAD_GATEWAY, "Upstream Error").into_response();
+        }
+    };
+    let mime = match target.path().rsplit_once('.').map(|(_, ext)| ext) {
+        Some("m4s" | "mp4" | "m4v") => "video/mp4",
+        Some("m4a") => "audio/mp4",
+        Some("vtt") => "text/vtt",
+        Some("ttml" | "xml") => "application/ttml+xml",
+        _ => "application/octet-stream",
+    };
+    let mut response = Response::new(Body::from(bytes));
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
+    insert_header(&mut response, header::CACHE_CONTROL, SEGMENT_FIRST);
+    response
 }
 
 /// MPD 正文透传（转封装属 P1）。

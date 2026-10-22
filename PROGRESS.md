@@ -38,7 +38,7 @@ flowchart LR
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 171 项（114 单元 + 57 集成） |
+| `cargo test --offline` | ✅ 172 项（114 单元 + 58 集成） |
 | 冒烟脚本 | ✅ 14 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
@@ -66,7 +66,7 @@ flowchart LR
 | 旧数据迁移 `./var/dash` | 不实现 | 仅 088 行为，v0.8.2 无 |
 | DASH URL 池 `pool≥2` | 已实现（目标取用未验） | 多个 `<BaseURL>`；视频用 `pool[0]`，音频/字幕轮询其余；目标正常取用未观测（F-015） |
 | DASH `mpd_keep_seconds` | 已实现 | 媒体清单按末尾时间窗裁剪；目标 proxy+MPD 分支未验 |
-| `proxy` 模式 MPD 完整改写 | 未实现 | 仍原样透传；DASH 模式已完成 MPD→HLS |
+| `proxy` 模式 MPD 代理 | 已实现（相对地址） | 相对 `<BaseURL>` 改写到本服务 `mpd/`，init/切片经本服务代理；绝对 `<BaseURL>` 保持直连；`mpd_keep_seconds` 未裁剪（目标分支未完整观测） |
 | CENC ClearKey 解密 | 不实现 | 目标只检测 KID、不解密；本实现按原字节代理 |
 | 多 CDN 故障切换 | 未复刻 | 目标未观测到切换；DASH 多 BaseURL 仅做顺序回退 |
 | `/epg/api/*` 响应形状 | 自定 | 目标仅登记路由（S-EP-16） |
@@ -74,6 +74,7 @@ flowchart LR
 | `random_id_enabled` 随机 ID | 仅回显 | 目标行为未观测；`link-info` 形状已对齐 |
 | `cache.backend=memory` | 仅回显 | 实际缓存仍落盘；目标 memory 统计恒 0（F-015） |
 | 播放侧 `compat_mode` 与 `srt_ua_keywords` | 不实现 | 目标未测出行为（D19 §3.5） |
+| 定时录制 DASH 频道 | 未实现 | 目标先并轨再 ffmpeg 合成 mp4；当前只录 HLS 切片（F-009 S-REC-02） |
 | `socks5` 代理 | 不支持 | 未知类型直连并告警；目标行为未验 |
 
 ### 0.6 任务计划（P3）
@@ -99,7 +100,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | P4-01 | MPD 完整解析与 DASH→HLS | L | `BaseURL`、`SegmentTimeline`、`SegmentList`、init/切片代理、`/dash/status` | ✅ §3bc |
 | P4-02 | `mpd_keep_seconds` 与 `url_pool_size` | M | 媒体清单时间窗；多 `<BaseURL>` 音视频分流与顺序回退 | ✅ §3bc |
-| P4-03 | 目标 proxy+MPD 分支 | M | MPD 正文改写/裁剪与 ClearKey 行为 | 未实现（登记） |
+| P4-03 | 目标 proxy+MPD 分支 | M | 相对 `<BaseURL>` 改写 + init/切片代理；绝对地址与 `mpd_keep_seconds` 裁剪未做 | 🔶 部分（§0.5） |
 | P4-04 | CENC 解密 | L | ClearKey 解密与出口策略 | 不实现（目标不解密） |
 
 ### 0.7 待环境
@@ -917,12 +918,12 @@ P2 已关闭；后续计划见 §0.6。
 | URL 池 | 多个 `<BaseURL>`；视频固定首选，音频/字幕在其余地址轮询；`url_pool_size` 控制启用 | 同上 |
 | 状态接口 | `GET /panel/api/dash/status` 返回会话、`phase=ready/starting`、`segment_count`、`active_tracks[]`（name/kind/lang/label/width/height/bandwidth/codecs/frame_rate/audio_channels） | `src/http/routes/dash.rs` |
 | 看门狗 | 主清单失败累计；连续 5 次冷却 3600 s；改配置解除 | `src/http/routes/stream.rs` |
-| 限制 | CENC 不解密；`proxy`+MPD 仍原样透传；目标 URL 池正常取用方式未观测 | §0.5 |
+| 限制 | CENC 不解密；`proxy`+MPD 仅代理相对 BaseURL，绝对地址直连；目标 URL 池正常取用方式未观测 | §0.5 |
 
 验证：
 - 单元：MPD 摘要、Timeline/BaseURL、`r=-1` + `timeShiftBufferDepth`、多 BaseURL、SegmentList、主/媒体清单、时间窗、URL 池轮询、媒体序号、动态清单无 `ENDLIST`、BaseURL 查询串继承。
-- 集成：`dash_mode_converts_mpd_to_hls_and_proxies_segments` 覆盖主清单、媒体清单、init、切片、状态与 `keep_seconds=4`；`dash_mode_resolver_url_is_used_for_media_playlist` 覆盖解析脚本地址沿用到媒体清单。
-- `cargo test --offline` 171 项（114 单元 + 57 集成）。
+- 集成：`dash_mode_converts_mpd_to_hls_and_proxies_segments` 覆盖主清单、媒体清单、init、切片、状态与 `keep_seconds=4`；`dash_mode_resolver_url_is_used_for_media_playlist` 覆盖解析脚本地址沿用到媒体清单；`proxy_mode_rewrites_mpd_base_url_and_proxies_segments` 覆盖 proxy+MPD 相对 BaseURL、init/切片代理。
+- `cargo test --offline` 172 项（114 单元 + 58 集成）。
 
 ## 4. 进度日志
 
