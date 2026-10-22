@@ -42,8 +42,8 @@ flowchart LR
 | 冒烟脚本 | ✅ 15 个（assets、panel、resolver、share、remux、schedule、timeshift、record、record-dash、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
-| 发布包 | ✅ amd64 3.6 MB、arm64 3.3 MB；`verify-release.sh amd64` 与 `verify-release.sh arm64` 通过 |
-| CI | ✅ [运行 39772023805](https://github.com/HasonHuang/sontv/actions/runs/39772023805)（`9a505b7`）；fmt/clippy/test、CLI 冒烟与双架构 `verify-release.sh` 全绿；真实翻译联调本地通过 |
+| 发布包 | ✅ amd64 3.6 MB、arm64 3.4 MB；`verify-release.sh amd64` 与 `verify-release.sh arm64` 通过 |
+| CI | ✅ [运行 39776307326](https://github.com/HasonHuang/sontv/actions/runs/39776307326)（`19d6885`）；fmt/clippy/test、CLI 冒烟与双架构 `verify-release.sh` 全绿；真实翻译联调本地通过 |
 
 ### 0.4 里程碑
 
