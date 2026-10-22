@@ -53,6 +53,9 @@ token_failure_url = "http://placeholder.test/Failure.mp4"
 
 [cache]
 disk_path = "$CACHE"
+# 本脚本断言首写/命中缓存头；关闭预取，避免首请求直接命中预取结果。
+[cache.prefetch]
+enabled = false
 [cache.disguise]
 enabled = true
 playlist = true
