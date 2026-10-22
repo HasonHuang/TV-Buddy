@@ -294,6 +294,7 @@ scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
 - 构建用 Docker `rust:1-alpine`：镜像宿主三元组即 `*-linux-musl`，直接产出静态二进制。
 - 容器无外网，依赖来自宿主 `~/.cargo` 缓存（`--offline`）。
 - 安装：解包后 `sudo ./install.sh`，默认装到 `/opt/iptv-proxy`。详见上文「一键安装」。
+- GitHub Actions 只在推送 `v*` 版本 tag 时执行；普通分支推送不触发。示例：`git tag v0.1.0 && git push origin v0.1.0`。
 
 ## 运维
 
