@@ -289,9 +289,31 @@ impl Manager {
     ) -> Result<String, String> {
         let (_, keep, pool) =
             Self::settings(state, gid, cid).unwrap_or_else(|| (upstream.to_string(), 0, 1));
-        let xml = crate::http::routes::stream::fetch(state, upstream, gid, cid)
+        let dash = state.snapshot().cache.dash.clone();
+        let timeout = Duration::from_secs(dash.mpd_timeout_secs.clamp(1, 120));
+        let mut xml = None;
+        let mut last_error = String::new();
+        for attempt in 0..=dash.retry_max.min(32) {
+            match tokio::time::timeout(
+                timeout,
+                crate::http::routes::stream::fetch(state, upstream, gid, cid),
+            )
             .await
-            .map_err(|error| format!("Upstream Error: {error}"))?;
+            {
+                Ok(Ok(body)) => {
+                    xml = Some(body);
+                    break;
+                }
+                Ok(Err(error)) => last_error = error.to_string(),
+                Err(_) => last_error = "MPD timeout".to_string(),
+            }
+            if attempt < dash.retry_max.min(32) {
+                tokio::time::sleep(retry_delay(&dash, attempt)).await;
+            }
+        }
+        let Some(xml) = xml else {
+            return Err(format!("Upstream Error: {last_error}"));
+        };
         let presentation = dash::parse_presentation(&xml, upstream)
             .map_err(|error| format!("MPD 解析失败: {error:#}"))?;
         let body = render_master(&presentation, gid, cid, self_base);
@@ -430,34 +452,34 @@ impl Manager {
             return Some(bytes_response(bytes, &entry, "public, max-age=300"));
         }
         let mut last_error = None;
-        let timeout = Duration::from_secs(
-            state
-                .snapshot()
-                .cache
-                .dash
-                .segment_timeout_secs
-                .clamp(1, 120),
-        );
+        let dash = state.snapshot().cache.dash.clone();
+        let timeout = Duration::from_secs(dash.segment_timeout_secs.clamp(1, 120));
+        let attempts = dash.retry_max.min(32);
         for url in &entry.urls {
-            match tokio::time::timeout(
-                timeout,
-                crate::http::routes::stream::fetch_bytes(state, url, gid, cid),
-            )
-            .await
-            {
-                Ok(Ok(bytes)) => {
-                    if let Some(parent) = path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
+            for attempt in 0..=attempts {
+                match tokio::time::timeout(
+                    timeout,
+                    crate::http::routes::stream::fetch_bytes(state, url, gid, cid),
+                )
+                .await
+                {
+                    Ok(Ok(bytes)) => {
+                        if let Some(parent) = path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        let _ = std::fs::write(&path, &bytes);
+                        self.touch(gid, cid);
+                        return Some(bytes_response(bytes, &entry, "public, max-age=300"));
                     }
-                    let _ = std::fs::write(&path, &bytes);
-                    self.touch(gid, cid);
-                    return Some(bytes_response(bytes, &entry, "public, max-age=300"));
+                    Ok(Err(error)) => {
+                        last_error = Some(error.to_string());
+                    }
+                    Err(_) => {
+                        last_error = Some("segment timeout".to_string());
+                    }
                 }
-                Ok(Err(error)) => {
-                    last_error = Some(error.to_string());
-                }
-                Err(_) => {
-                    last_error = Some("segment timeout".to_string());
+                if attempt < attempts {
+                    tokio::time::sleep(retry_delay(&dash, attempt)).await;
                 }
             }
         }
@@ -816,6 +838,15 @@ fn insert_header(response: &mut Response, name: header::HeaderName, value: &str)
     }
 }
 
+/// 计算 DASH 重试等待时间。
+fn retry_delay(config: &crate::config::model::CacheDashCfg, attempt: u32) -> Duration {
+    let initial = config.retry_initial_ms as f64;
+    let factor = config.retry_backoff.max(1.0);
+    let max = config.retry_max_ms.min(60_000) as f64;
+    let delay = (initial * factor.powi(attempt as i32)).min(max);
+    Duration::from_millis(delay.max(config.min_request_interval_ms as f64) as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -949,6 +980,17 @@ mod tests {
         );
         assert!(rendered.body.contains("#EXT-X-MEDIA-SEQUENCE:1"));
         assert!(rendered.body.contains("/g/c/video_720p/1_"));
+    }
+
+    #[test]
+    fn retry_delay_backs_off_and_caps() {
+        let config = crate::config::model::CacheDashCfg::default();
+        assert_eq!(retry_delay(&config, 0).as_millis(), 200);
+        assert_eq!(retry_delay(&config, 1).as_millis(), 400);
+        assert_eq!(retry_delay(&config, 8).as_millis(), 2_000);
+        let mut config = config;
+        config.min_request_interval_ms = 500;
+        assert_eq!(retry_delay(&config, 0).as_millis(), 500);
     }
 
     #[test]
