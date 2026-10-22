@@ -22,10 +22,18 @@ pub struct Entry {
     pub ext: String,
 }
 
+/// 内存索引容量限制；`0` 表示不限制。
+#[derive(Default, Clone, Copy)]
+struct Limits {
+    global: usize,
+    per_channel: usize,
+}
+
 /// 内存索引。
 #[derive(Default)]
 pub struct SegmentIndex {
     inner: RwLock<HashMap<String, Entry>>,
+    limits: RwLock<Limits>,
 }
 
 impl SegmentIndex {
@@ -37,11 +45,20 @@ impl SegmentIndex {
         format!("{gid}/{cid}/{suffix}")
     }
 
+    /// 更新 `[cache.segments]` 的索引上限。
+    pub fn set_limits(&self, global: u64, per_channel: u64) {
+        *self.limits.write().unwrap_or_else(|e| e.into_inner()) = Limits {
+            global: global as usize,
+            per_channel: per_channel as usize,
+        };
+    }
+
     /// 登记一批切片。
     pub fn register(&self, gid: &str, cid: &str, entries: &[(String, String, String)]) {
         if entries.is_empty() {
             return;
         }
+        let limits = *self.limits.read().unwrap_or_else(|e| e.into_inner());
         let mut map = self.write();
         for (suffix, url, ext) in entries {
             map.insert(
@@ -51,6 +68,27 @@ impl SegmentIndex {
                     ext: ext.clone(),
                 },
             );
+        }
+        if limits.per_channel > 0 {
+            let prefix = format!("{gid}/{cid}/");
+            let keys: Vec<String> = map
+                .keys()
+                .filter(|key| key.starts_with(&prefix))
+                .cloned()
+                .collect();
+            if keys.len() > limits.per_channel {
+                let remove = keys.len() - limits.per_channel;
+                for key in keys.into_iter().take(remove) {
+                    map.remove(&key);
+                }
+            }
+        }
+        if limits.global > 0 && map.len() > limits.global {
+            let overflow = map.len() - limits.global;
+            let keys: Vec<String> = map.keys().take(overflow).cloned().collect();
+            for key in keys {
+                map.remove(&key);
+            }
         }
     }
 
@@ -184,6 +222,23 @@ mod tests {
         assert_eq!(entry.url, "http://up/x.ts");
         assert_eq!(entry.ext, "jpg");
         assert!(index.get(&dir, "g/1", "c 1", "nope").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn limits_trim_registered_entries() {
+        let dir = std::env::temp_dir().join(format!("iptv-seg-limit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let index = SegmentIndex::new();
+        index.set_limits(0, 2);
+        let entries: Vec<(String, String, String)> = (0..4)
+            .map(|n| (n.to_string(), format!("http://up/{n}.ts"), "jpg".into()))
+            .collect();
+        index.register("g", "c", &entries);
+        let live = (0..4)
+            .filter(|n| index.get(&dir, "g", "c", &n.to_string()).is_some())
+            .count();
+        assert_eq!(live, 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

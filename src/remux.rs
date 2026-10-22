@@ -27,10 +27,6 @@ use tracing::{info, warn};
 
 use crate::{http::routes::stream::channel_headers, state::AppState};
 
-/// 目标分片时长（秒）。
-const TARGET_SECS: f64 = 5.0;
-/// 清单窗口长度。
-const WINDOW: usize = 4;
 /// 空闲多久后回收会话。
 const IDLE: Duration = Duration::from_secs(90);
 /// 伪装扩展名轮换。
@@ -58,6 +54,9 @@ pub struct Session {
     inner: Mutex<Inner>,
     last: Mutex<Instant>,
     stop: AtomicBool,
+    target_secs: f64,
+    window: usize,
+    backoff_ms: Vec<u64>,
 }
 
 impl Session {
@@ -82,7 +81,7 @@ impl Session {
         let first = inner.next_seq.saturating_sub(inner.window.len() as u64);
         let mut body = format!(
             "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:{}\n#EXT-X-MEDIA-SEQUENCE:{first}\n",
-            TARGET_SECS as u64
+            self.target_secs as u64
         );
         for seg in &inner.window {
             body.push_str(&format!(
@@ -157,6 +156,11 @@ impl Manager {
         }
         let dir = state.cache_dir.join("remux").join(gid).join(cid);
         let _ = fs::create_dir_all(&dir);
+        let remux = state.snapshot().cache.remux.clone();
+        let target_secs = remux.target_duration_secs.max(1.0);
+        let window = (remux.window_segments as usize)
+            .saturating_sub(remux.publish_delay_segments as usize)
+            .max(1);
         let session = Arc::new(Session {
             gid: gid.to_string(),
             cid: cid.to_string(),
@@ -164,6 +168,13 @@ impl Manager {
             inner: Mutex::new(Inner::default()),
             last: Mutex::new(Instant::now()),
             stop: AtomicBool::new(false),
+            target_secs,
+            window,
+            backoff_ms: if remux.reconnect_backoff_ms.is_empty() {
+                vec![1_000]
+            } else {
+                remux.reconnect_backoff_ms.clone()
+            },
         });
         self.sessions
             .lock()
@@ -255,7 +266,7 @@ fn cut(session: &Session, data: Vec<u8>, duration: f64) {
         name: name.clone(),
         duration: duration.max(0.1),
     });
-    while inner.window.len() > WINDOW {
+    while inner.window.len() > session.window {
         if let Some(old) = inner.window.pop_front() {
             let _ = fs::remove_file(session.dir.join(old.name));
         }
@@ -277,6 +288,7 @@ fn cut(session: &Session, data: Vec<u8>, duration: f64) {
 fn spawn_reader(session: Arc<Session>, state: Arc<AppState>, url: String) {
     tokio::spawn(async move {
         let mut parser = Parser::new();
+        let mut attempt = 0usize;
         loop {
             if session.stop.load(Ordering::SeqCst) || session.idle_for() > IDLE {
                 break;
@@ -289,15 +301,28 @@ fn spawn_reader(session: Arc<Session>, state: Arc<AppState>, url: String) {
                 Ok(response) if response.status().is_success() => response,
                 Ok(response) => {
                     warn!(url = %url, status = %response.status(), "remux 上游状态异常");
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    let delay = session
+                        .backoff_ms
+                        .get(attempt.min(session.backoff_ms.len() - 1))
+                        .copied()
+                        .unwrap_or(1_000);
+                    attempt = attempt.saturating_add(1);
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
                     continue;
                 }
                 Err(error) => {
                     warn!(url = %url, %error, "remux 上游连接失败");
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    let delay = session
+                        .backoff_ms
+                        .get(attempt.min(session.backoff_ms.len() - 1))
+                        .copied()
+                        .unwrap_or(1_000);
+                    attempt = attempt.saturating_add(1);
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
                     continue;
                 }
             };
+            attempt = 0;
             loop {
                 if session.stop.load(Ordering::SeqCst) {
                     return;
@@ -401,7 +426,10 @@ impl Parser {
                         (Some(start), Some(now)) if now >= start => (now - start) as f64 / 90_000.0,
                         _ => 0.0,
                     };
-                    if boundary.is_some() && !self.current.is_empty() && elapsed >= TARGET_SECS {
+                    if boundary.is_some()
+                        && !self.current.is_empty()
+                        && elapsed >= session.target_secs
+                    {
                         let data = std::mem::take(&mut self.current);
                         cut(session, data, elapsed);
                         self.start_pts = boundary;
@@ -531,6 +559,9 @@ mod tests {
             inner: Mutex::new(Inner::default()),
             last: Mutex::new(Instant::now()),
             stop: AtomicBool::new(false),
+            target_secs: 5.0,
+            window: 4,
+            backoff_ms: vec![200, 1_000, 2_000],
         }
     }
 

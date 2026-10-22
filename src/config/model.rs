@@ -151,6 +151,11 @@ pub struct CacheCfg {
     pub disk_max_mb: u64,
     pub memory_max_mb: u64,
     pub segment_cache_max_mb: u64,
+    pub prefetch: CachePrefetchCfg,
+    pub segments: CacheSegmentsCfg,
+    pub ttl: CacheTtlCfg,
+    pub dash: CacheDashCfg,
+    pub remux: CacheRemuxCfg,
     pub disguise: DisguiseCfg,
     #[serde(flatten)]
     pub extra: toml::Table,
@@ -166,7 +171,184 @@ impl Default for CacheCfg {
             disk_max_mb: 0,
             memory_max_mb: 0,
             segment_cache_max_mb: 50,
+            prefetch: CachePrefetchCfg::default(),
+            segments: CacheSegmentsCfg::default(),
+            ttl: CacheTtlCfg::default(),
+            dash: CacheDashCfg::default(),
+            remux: CacheRemuxCfg::default(),
             disguise: DisguiseCfg::default(),
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[cache.prefetch]`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CachePrefetchCfg {
+    pub enabled: bool,
+    pub concurrency: u32,
+    pub timeout: u64,
+    pub prefetch_limit: u64,
+    pub skip_tail: u64,
+    pub mpd_readahead: u64,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for CachePrefetchCfg {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            concurrency: 4,
+            timeout: 10,
+            prefetch_limit: 0,
+            skip_tail: 1,
+            mpd_readahead: 1,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[cache.segments]`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CacheSegmentsCfg {
+    pub global_max: u64,
+    pub per_channel_max: u64,
+    pub retain_count: u64,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for CacheSegmentsCfg {
+    fn default() -> Self {
+        Self {
+            global_max: 0,
+            per_channel_max: 0,
+            retain_count: 20,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[cache.ttl]`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CacheTtlCfg {
+    pub sub_url_secs: u64,
+    pub segment_secs: u64,
+    pub refresh_ratio: f64,
+    pub fallback_mpd_secs: u64,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for CacheTtlCfg {
+    fn default() -> Self {
+        Self {
+            sub_url_secs: 1_800,
+            segment_secs: 300,
+            refresh_ratio: 0.4,
+            fallback_mpd_secs: 8,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[cache.dash]`——目标 DASH 会话调参。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CacheDashCfg {
+    pub mpd_refresh_min_secs: f64,
+    pub mpd_refresh_max_secs: f64,
+    pub mpd_timeout_secs: u64,
+    pub segment_timeout_secs: u64,
+    pub fetch_concurrency: u32,
+    pub ondemand_idle_secs: u64,
+    pub mpd_body_dedup: bool,
+    pub whole_file_serve: String,
+    pub whole_file_budget_mb: u64,
+    pub obfuscate_filenames: bool,
+    pub playlist_min_secs: f64,
+    pub retain_min_secs: f64,
+    pub fetch_extra_segments: u64,
+    pub fast_start_secs: f64,
+    pub start_time_offset_secs: f64,
+    pub publish_delay_secs: f64,
+    pub continuous_tail_min_ratio: f64,
+    pub retry_max: u32,
+    pub retry_initial_ms: u64,
+    pub retry_backoff: f64,
+    pub retry_max_ms: u64,
+    pub min_request_interval_ms: u64,
+    pub playlist_stall_secs: u64,
+    pub watchdog_tick_secs: u64,
+    pub watchdog_stall_secs: u64,
+    pub watchdog_rebuild_max: u32,
+    pub watchdog_cooldown_secs: u64,
+    pub watchdog_rebuild_stagger_ms: u64,
+    pub session_max_lifetime_secs: u64,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for CacheDashCfg {
+    fn default() -> Self {
+        Self {
+            mpd_refresh_min_secs: 4.0,
+            mpd_refresh_max_secs: 12.0,
+            mpd_timeout_secs: 10,
+            segment_timeout_secs: 8,
+            fetch_concurrency: 20,
+            ondemand_idle_secs: 60,
+            mpd_body_dedup: true,
+            whole_file_serve: "auto".into(),
+            whole_file_budget_mb: 0,
+            obfuscate_filenames: true,
+            playlist_min_secs: 30.0,
+            retain_min_secs: 90.0,
+            fetch_extra_segments: 2,
+            fast_start_secs: 12.0,
+            start_time_offset_secs: 15.0,
+            publish_delay_secs: 0.0,
+            continuous_tail_min_ratio: 0.6,
+            retry_max: 8,
+            retry_initial_ms: 200,
+            retry_backoff: 2.0,
+            retry_max_ms: 2_000,
+            min_request_interval_ms: 80,
+            playlist_stall_secs: 0,
+            watchdog_tick_secs: 15,
+            watchdog_stall_secs: 45,
+            watchdog_rebuild_max: 5,
+            watchdog_cooldown_secs: 3_600,
+            watchdog_rebuild_stagger_ms: 300,
+            session_max_lifetime_secs: 0,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[cache.remux]`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CacheRemuxCfg {
+    pub target_duration_secs: f64,
+    pub window_segments: u64,
+    pub publish_delay_segments: u64,
+    pub reconnect_backoff_ms: Vec<u64>,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for CacheRemuxCfg {
+    fn default() -> Self {
+        Self {
+            target_duration_secs: 5.0,
+            window_segments: 6,
+            publish_delay_segments: 2,
+            reconnect_backoff_ms: vec![200, 1_000, 2_000],
             extra: toml::Table::new(),
         }
     }
@@ -623,6 +805,39 @@ mod tests {
             "http://group:8080"
         );
         assert!(config.proxy_for("missing", "c").is_none());
+    }
+
+    #[test]
+    fn cache_subsections_round_trip() {
+        let text = r#"
+[cache]
+disk_path = "cache"
+[cache.prefetch]
+enabled = false
+concurrency = 2
+[cache.segments]
+global_max = 10
+per_channel_max = 3
+[cache.ttl]
+segment_secs = 42
+[cache.dash]
+mpd_timeout_secs = 7
+[cache.remux]
+window_segments = 8
+publish_delay_segments = 2
+reconnect_backoff_ms = [100, 500]
+"#;
+        let config: Config = toml::from_str(text).expect("解析配置");
+        assert!(!config.cache.prefetch.enabled);
+        assert_eq!(config.cache.prefetch.concurrency, 2);
+        assert_eq!(config.cache.segments.global_max, 10);
+        assert_eq!(config.cache.segments.per_channel_max, 3);
+        assert_eq!(config.cache.ttl.segment_secs, 42);
+        assert_eq!(config.cache.dash.mpd_timeout_secs, 7);
+        assert_eq!(config.cache.remux.window_segments, 8);
+        let encoded = toml::to_string(&config).expect("序列化");
+        let decoded: Config = toml::from_str(&encoded).expect("再解析");
+        assert_eq!(decoded.cache.remux.reconnect_backoff_ms, vec![100, 500]);
     }
 
     #[test]

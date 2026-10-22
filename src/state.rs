@@ -79,6 +79,12 @@ impl AppState {
         let cache_dir = PathBuf::from(&config.cache.disk_path);
         let offset_hours = config.server.timezone_offset_hours as i64;
         ensure_cache_dirs(&cache_dir);
+        let segments = SegmentIndex::new();
+        segments.set_limits(
+            config.cache.segments.global_max,
+            config.cache.segments.per_channel_max,
+        );
+        let sources_ttl = Duration::from_secs(config.cache.ttl.sub_url_secs.max(1));
         Self {
             config_path,
             config: ArcSwap::from_pointee(config),
@@ -88,9 +94,9 @@ impl AppState {
                 .timeout(Duration::from_secs(20))
                 .build()
                 .unwrap_or_default(),
-            segments: SegmentIndex::new(),
+            segments,
             playlists: TtlCache::new(Duration::from_secs(5)),
-            sources: TtlCache::new(std::time::Duration::from_secs(3600)),
+            sources: TtlCache::new(sources_ttl),
             resolver: crate::resolver::Cache::default(),
             remux: Arc::new(crate::remux::Manager::default()),
             dash_hls: Arc::new(crate::dash_hls::Manager::new()),
@@ -170,6 +176,12 @@ impl AppState {
     /// 原子替换配置。同时解除全部冷却（S-MODE-17）。
     pub fn replace(&self, config: Config) {
         self.watchdog.clear_all();
+        self.segments.set_limits(
+            config.cache.segments.global_max,
+            config.cache.segments.per_channel_max,
+        );
+        self.sources
+            .set_ttl(Duration::from_secs(config.cache.ttl.sub_url_secs.max(1)));
         self.config.store(Arc::new(config));
     }
 

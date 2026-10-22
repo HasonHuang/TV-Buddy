@@ -13,28 +13,34 @@ pub use segments::{save_index, segment_path, SegmentIndex};
 
 use std::{
     collections::HashMap,
-    sync::Mutex,
+    sync::{Mutex, RwLock},
     time::{Duration, Instant},
 };
 
 /// 带 TTL 的小缓存。用于缓存在线清单。
 pub struct TtlCache {
-    ttl: Duration,
+    ttl: RwLock<Duration>,
     inner: Mutex<HashMap<String, (Instant, String)>>,
 }
 
 impl TtlCache {
     pub fn new(ttl: Duration) -> Self {
         Self {
-            ttl,
+            ttl: RwLock::new(ttl),
             inner: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// 更新 TTL；已有条目按新 TTL 判定。
+    pub fn set_ttl(&self, ttl: Duration) {
+        *self.ttl.write().unwrap_or_else(|e| e.into_inner()) = ttl;
     }
 
     pub fn get(&self, key: &str) -> Option<String> {
         let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let (at, value) = guard.get(key)?;
-        if at.elapsed() < self.ttl {
+        let ttl = *self.ttl.read().unwrap_or_else(|e| e.into_inner());
+        if at.elapsed() < ttl {
             Some(value.clone())
         } else {
             None

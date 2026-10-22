@@ -21,6 +21,11 @@
 | `[server]` | `bind`、`not_found_url`、`error_url`、`home_url`、`m3u_header_lines`、`timezone_offset_hours`、`log_level`、`trust_proxy` | 监听、跳转、订阅头行、日志级别 |
 | `[panel]` | `enabled`、`username`、`password_sha256`、`session_ttl` | 面板登录 |
 | `[cache]` | `backend`、`disk_path`、`m3u8/segment_max_entries`、`disk_max_mb`、`disguise.*` | 缓存与伪装 |
+| `[cache.prefetch]` | `enabled`、`concurrency`、`timeout`、`prefetch_limit`、`skip_tail`、`mpd_readahead` | 预载参数（已建模，尚未接入预载器） |
+| `[cache.segments]` | `global_max`、`per_channel_max`、`retain_count` | 内存切片索引上限 |
+| `[cache.ttl]` | `sub_url_secs`、`segment_secs`、`refresh_ratio`、`fallback_mpd_secs` | 订阅地址与切片缓存时长 |
+| `[cache.dash]` | `mpd_refresh_*`、`*_timeout_secs`、`fetch_concurrency`、`ondemand_idle_secs`、`retry_*`、`watchdog_*` 等 | DASH 调参（已建模） |
+| `[cache.remux]` | `target_duration_secs`、`window_segments`、`publish_delay_segments`、`reconnect_backoff_ms` | Remux 切片时长、窗口与重连退避 |
 | `[auth]` | `token_enabled`、`token_ttl_hours`、`token_failure_url`、`whitelist` | 播放 Token |
 | `[health]`/`[stats]` | `enabled`、`interval_secs`、`online_window_secs` | 健康与指标 |
 | `[assets]` | `map`（原始 URL → 本地 HLS 入口） | 占位/错误视频转换 |
@@ -38,6 +43,8 @@
 | `[auth]` | 立即 | S-CFG-02 |
 | `[[groups]]`/`[[groups.channels]]` | 立即 | 面板改动的实测行为 |
 | `[cache]`（`disk_path`） | 需重启 | 目标同 |
+| `[cache.segments]`/`[cache.ttl]` | 立即（索引上限与 TTL 随快照更新） | 本实现 |
+| `[cache.remux]` | 新会话生效；已有会话保留旧参数 | 本实现 |
 | `[epg]` | **需重启**（`enabled` 与源列表在启动时读取） | F-008 |
 | `[epg.translate]`/`[subtitle.translate]` | 立即（下次翻译生效） | 设计决策 |
 | `[panel]` | 立即（新会话按新口令） | 设计决策 |

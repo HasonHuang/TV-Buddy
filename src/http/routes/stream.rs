@@ -26,10 +26,15 @@ const REWRITE_CACHE: &str = "no-cache, must-revalidate";
 const MASTER_CACHE: &str = "no-cache, no-store";
 /// 清单缺 `#EXT-X-TARGETDURATION` 时的缓存窗口（秒）。
 const DEFAULT_TARGET_DURATION: u64 = 6;
-/// 切片首写缓存头。
-const SEGMENT_FIRST: &str = "public, max-age=300";
-/// 切片命中缓存头。
-const SEGMENT_HIT: &str = "private, max-age=300";
+/// 切片缓存头；`[cache.ttl].segment_secs` 控制时长。
+fn segment_cache_control(state: &AppState, first: bool) -> String {
+    let secs = state.snapshot().cache.ttl.segment_secs.max(1);
+    if first {
+        format!("public, max-age={secs}")
+    } else {
+        format!("private, max-age={secs}")
+    }
+}
 
 /// `GET /{gid}/{cid}.m3u8` 与 `/{gid}/{cid}.mpd`。
 pub async fn entry(
@@ -831,7 +836,11 @@ async fn mpd_segment(
     response
         .headers_mut()
         .insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
-    insert_header(&mut response, header::CACHE_CONTROL, SEGMENT_FIRST);
+    insert_header(
+        &mut response,
+        header::CACHE_CONTROL,
+        &segment_cache_control(state, true),
+    );
     response
 }
 
@@ -886,7 +895,7 @@ async fn segment(state: &Arc<AppState>, gid: &str, cid: &str, name: &str) -> Res
     let path = proxy::segment_path(&state.cache_dir, gid, cid, &suffix, &ext);
     if let Ok(bytes) = std::fs::read(&path) {
         state.stats.record_segment(true);
-        return segment_response(bytes, &ext, SEGMENT_HIT);
+        return segment_response(bytes, &ext, &segment_cache_control(state, false));
     }
     state.stats.record_segment(false);
     match fetch_bytes(state, &entry.url, gid, cid).await {
@@ -897,7 +906,7 @@ async fn segment(state: &Arc<AppState>, gid: &str, cid: &str, name: &str) -> Res
             if let Err(err) = std::fs::write(&path, &bytes) {
                 tracing::warn!(error = %err, "写切片缓存失败");
             }
-            segment_response(bytes, &ext, SEGMENT_FIRST)
+            segment_response(bytes, &ext, &segment_cache_control(state, true))
         }
         Err(err) => {
             tracing::warn!(url = %entry.url, error = %err, "抓取上游切片失败");
