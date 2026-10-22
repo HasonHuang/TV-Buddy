@@ -26,7 +26,7 @@ impl PlaylistError {
 
 /// 渲染总订阅：只含 `access = "public"` 的分组（F-009）。
 pub fn render_total(config: &Config, base: &str, token: Option<&str>) -> String {
-    let mut body = header(config);
+    let mut body = header(config, base);
     for group in &config.groups {
         if group.access != "public" {
             continue;
@@ -48,16 +48,23 @@ pub fn render_group(
     if group.access == "archived" {
         return Err(PlaylistError::GroupArchived);
     }
-    let mut body = header(config);
+    let mut body = header(config, base);
     for channel in &group.channels {
         push_entry(&mut body, group, channel, base, token);
     }
     Ok(body)
 }
 
-/// `#EXTM3U` 与自定义头行（S-URL-07）。
-fn header(config: &Config) -> String {
-    let mut body = String::from("#EXTM3U\n");
+/// `#EXTM3U`、EPG 发现头与自定义头行（S-URL-07、S-EPG-01）。
+fn header(config: &Config, base: &str) -> String {
+    let mut body = if config.epg.enabled {
+        format!(
+            "#EXTM3U x-tvg-url=\"{}/epg.xml.gz\"\n",
+            base.trim_end_matches('/')
+        )
+    } else {
+        String::from("#EXTM3U\n")
+    };
     for line in &config.server.m3u_header_lines {
         body.push_str(line);
         body.push('\n');
@@ -190,6 +197,23 @@ mod tests {
         let body = render_group(&config, &config.groups[0], "http://host", Some("tok")).unwrap();
         assert!(body.contains("http://upstream/x.m3u8"));
         assert!(!body.contains("/g5/c1"));
+    }
+
+    #[test]
+    fn epg_header_is_emitted_when_enabled() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.epg.enabled = true;
+        let body = render_total(&config, "http://host/", None);
+        let first = body.lines().next().unwrap();
+        assert_eq!(first, "#EXTM3U x-tvg-url=\"http://host/epg.xml.gz\"");
+    }
+
+    #[test]
+    fn epg_header_is_absent_when_disabled() {
+        let config = config_with(vec![group("g1", "public", "proxy")]);
+        let body = render_total(&config, "http://host", None);
+        let first = body.lines().next().unwrap();
+        assert_eq!(first, "#EXTM3U");
     }
 
     #[test]

@@ -38,7 +38,7 @@ flowchart LR
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 177 项（117 单元 + 60 集成） |
+| `cargo test --offline` | ✅ 179 项（119 单元 + 60 集成） |
 | 冒烟脚本 | ✅ 15 个（assets、panel、resolver、share、remux、schedule、timeshift、record、record-dash、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
@@ -119,12 +119,13 @@ flowchart LR
 
 | ID | 优先级 | 项 | 现状 | 待做 | 依据 |
 | --- | --- | --- | --- | --- | --- |
-| U-01 | P0 | 订阅注入 `x-tvg-url` | `playlist::header()` 只输出 `#EXTM3U` 与 `m3u_header_lines` | `[epg].enabled = true` 时在首行输出 `x-tvg-url="<host>/epg.xml.gz"`；补单元与集成测试 | F-006、`design/03` §5.2 |
 | U-02 | P0 | 缺失 EPG 端点 | 已实现 `status`、`refresh`、`mappings`、`mapping`、`match-report` 与 3 个公开 JSON；目标路由表仍有 12 项未注册 | 私有面 `/panel/api/epg/`：`POST regenerate`、`GET programmes/:channel`、`GET scripts`、`POST extra`、`POST script`、`POST script-delete`、`POST cron-preview`、`GET suggest/:gid/:cid`、`GET search`、`GET viewer-channels`、`GET source-channels/:id`、`GET tz-preview/:id`；先补路由与最小响应，再按目标证据校正 | F-010、F-013、`design/03` §6.3 |
 | U-03 | P0 | EPG 配置语义未生效 | `public_viewer_enabled`、`allow_scripts`、`record_pad_before_secs`、`record_pad_after_secs` 只建模，未读取 | 公开浏览页按 `public_viewer_enabled` 控制；`allow_scripts = false` 拒绝脚本源；从 EPG 建任务应用前后缓冲；缓冲目标语义需先确认 | `src/config/model.rs`、F-008、F-014 |
 | U-04 | P0 | `proxy` + MPD 分支不完整 | 相对 `<BaseURL>` 已改写并代理；绝对 `<BaseURL>` 直连；`mpd_keep_seconds` 未裁剪 | 代理绝对 `<BaseURL>` 的 init/切片；在 MPD 正文按 `mpd_keep_seconds` 裁剪；补查询串、失败回退与缓存测试 | `design/03` §4.2、F-015 |
 | U-05 | P1 | 目标配置段未建模 | `[cache.prefetch]`、`[cache.ttl]`、`[cache.segments]`、`[dash]`、`[remux]` 落在 `extra`，运行时使用固定参数 | 建模并接入预载、TTL、段上限、DASH/Remux 调参；未知键继续原样回写 | 目标配置 JSON、S-CACHE-04、`design/04` |
 | U-06 | P1 | 目标路由仍有资源/台标端点缺口 | 目标枚举含 `POST /panel/api/assets/convert`、`POST /panel/api/logo/restore`、`POST /panel/api/logo/animate`；当前未注册 | 先补响应形状与使用场景证据；证据不足时登记为不做，不猜字段 | F-010、F-012、`findings/dynamic/11` §1 |
+
+> 本轮已完成（2026-10-22）：**U-01 订阅注入 `x-tvg-url`**。`src/playlist.rs` 在 `[epg].enabled = true` 时输出 `#EXTM3U x-tvg-url="<host>/epg.xml.gz"`；单元与集成测试已覆盖。
 
 #### 0.8.2 待验（目标证据）
 

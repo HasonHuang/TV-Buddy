@@ -310,7 +310,7 @@ scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
 - 缓存无容量上限（与目标一致，见 F-015）；`cache.backend=memory` 只回显，实际仍落盘。
 - 运维接口的响应形状为本实现自定；目标只登记存在性（见 `design/03` §6.4）。
 - 面板有 12 个管理分区，另有独立 `/logo` 与 `/unban` 页面；目标前端代码与文案不复制。
-- EPG：支持 `kind = "xml"` 与 `kind = "script"`、EPG 翻译、手工映射与匹配报告；订阅 `x-tvg-url` 与录制联动未实现（`design/03` §6.5）。
+- EPG：支持 `kind = "xml"` 与 `kind = "script"`、EPG 翻译、手工映射与匹配报告；EPG 开启时订阅注入 `x-tvg-url`。录制前后缓冲与其余 EPG 私有端点未实现（`design/03` §6.5）。
 - 定时录制：HLS 频道按切片合并；DASH 频道要求直播 MPD 且系统有 ffmpeg（支持 `-c copy`），产出 MKV。静态 MPD 报「录制区间内无可用切片」。
 - `l1/l2` 限流、每 IP 会话上限、`random_id_enabled` 的随机 ID 行为、`compat_mode`、`srt_ua_keywords`、`socks5` 未实现或仅保留配置键。
 - 与目标的差异以 `docs/design/reconciliation-report.md` 为准（22 项用例差异 0）。

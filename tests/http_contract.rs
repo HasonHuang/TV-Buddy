@@ -554,7 +554,11 @@ async fn health_and_total_playlist() {
         "attachment; filename=\"playlist.m3u\""
     );
     let body = response.text().await.expect("读正文");
-    assert!(body.starts_with("#EXTM3U"));
+    assert_eq!(
+        body.lines().next(),
+        Some("#EXTM3U"),
+        "EPG 关闭时不注入 x-tvg-url"
+    );
     // 归档组不导出；公开、开放、透传组导出。
     assert!(body.contains("/pg/c1.m3u8?token="));
     // 直通组在订阅里直接给上游地址。
@@ -792,6 +796,13 @@ async fn epg_enabled_serves_xmltv_and_filters() {
     let response = fetch(&fixture, "/epg").await;
     assert_eq!(response.status(), StatusCode::OK);
     assert!(header(&response, "content-type").starts_with("text/html"));
+
+    // EPG 开启时，订阅首行注入公开节目单地址。
+    let response = fetch(&fixture, "/playlist.m3u").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let playlist = response.text().await.expect("读订阅");
+    let expected = format!("#EXTM3U x-tvg-url=\"{}/epg.xml.gz\"", fixture.base);
+    assert_eq!(playlist.lines().next(), Some(expected.as_str()));
 
     // 面板接口需要会话。
     let response = fetch(&fixture, "/panel/api/epg/status").await;
