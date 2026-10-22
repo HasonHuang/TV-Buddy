@@ -2,9 +2,8 @@ name: CI
 
 on:
   push:
-    branches: ["rust", "main"]
-  pull_request:
-  workflow_dispatch:
+    tags:
+      - "v*"
 
 permissions:
   contents: read
