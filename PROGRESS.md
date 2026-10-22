@@ -43,7 +43,7 @@ flowchart LR
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
 | 发布包 | ✅ amd64 3.6 MB、arm64 3.4 MB；`verify-release.sh amd64` 与 `verify-release.sh arm64` 通过 |
-| CI | ✅ [运行 39776307326](https://github.com/HasonHuang/sontv/actions/runs/39776307326)（`19d6885`）；fmt/clippy/test、CLI 冒烟与双架构 `verify-release.sh` 全绿；真实翻译联调本地通过 |
+| CI | ✅ [运行 39783303837](https://github.com/HasonHuang/sontv/actions/runs/39783303837)（`5fc2b1b`）；fmt/clippy/test、CLI 冒烟与双架构 `verify-release.sh` 全绿；新增 `x-tvg-url` 用例 |
 
 ### 0.4 里程碑
 
