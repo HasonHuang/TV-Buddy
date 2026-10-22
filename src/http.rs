@@ -203,6 +203,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/logo/delete", post(routes::logo::delete))
         .route("/panel/api/logo/rename", post(routes::logo::rename))
         .route("/panel/api/logo/restore", post(routes::logo::restore))
+        .route("/panel/api/logo/animate", post(routes::logo::animate))
         .route(
             "/panel/api/logo/match-report",
             get(routes::logo::match_report),

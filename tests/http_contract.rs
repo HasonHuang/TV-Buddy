@@ -1504,6 +1504,25 @@ async fn logo_library_upload_serve_and_delete() {
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
 
+    // 动效请求校验：quality 必须是字符串。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/logo/animate", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(
+            serde_json::json!({
+                "file": "cctv1.png",
+                "effect": "spot",
+                "quality": 80
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("动效请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
     // 原图还原。
     let original = fixture.dir.join("cache/logos/.orig/cctv1.png");
     std::fs::create_dir_all(original.parent().expect("父目录")).expect("建原图目录");
@@ -3981,4 +4000,94 @@ source = "auto"
         serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
     assert_eq!(body["ok"], true);
     assert!(body["translated"].as_u64().unwrap_or(0) > 0);
+}
+
+#[tokio::test]
+async fn logo_animate_generates_apng_when_ffmpeg_is_available() {
+    if std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .is_err()
+        || std::process::Command::new("ffprobe")
+            .arg("-version")
+            .output()
+            .is_err()
+    {
+        return;
+    }
+    let fixture = fixture().await;
+    let token = login(&fixture).await;
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/logo/upload", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(
+            serde_json::json!({
+                "items": [{ "name": "anim.png", "data": format!("data:image/png;base64,{png}") }]
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("上传");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/logo/animate", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(
+            serde_json::json!({
+                "file": "anim.png",
+                "effect": "spot",
+                "quality": "80"
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("动效");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    assert_eq!(body["ok"], true);
+    assert!(body["frames"].as_u64().unwrap_or(0) > 1);
+    assert!(body["bytes_after"].as_u64().unwrap_or(0) > 0);
+
+    let bytes = std::fs::read(fixture.dir.join("cache/logos/anim.png")).expect("读动图");
+    assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert!(bytes.windows(4).any(|window| window == b"acTL"));
+    let check = fixture.dir.join("check.png");
+    std::fs::write(&check, &bytes).expect("写校验图");
+    assert!(
+        std::process::Command::new("ffprobe")
+            .args(["-v", "error"])
+            .arg(&check)
+            .status()
+            .expect("ffprobe")
+            .success(),
+        "APNG 应可被 ffprobe 解码"
+    );
+    assert!(fixture.dir.join("cache/logos/.orig/anim.png").is_file());
+
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/logo/list", fixture.base))
+        .header("authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("列表");
+    let list: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
+    let item = list["logos"]
+        .as_array()
+        .expect("logos")
+        .iter()
+        .find(|item| item["file"] == "anim.png")
+        .expect("应列出动图");
+    assert_eq!(item["animated"], true);
+    assert_eq!(item["has_original"], true);
 }

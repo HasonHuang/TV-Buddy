@@ -120,7 +120,7 @@ flowchart LR
 | ID | 优先级 | 项 | 现状 | 待做 | 依据 |
 | --- | --- | --- | --- | --- | --- |
 | U-05 | P1 | 目标配置段部分接入 | `[cache.prefetch]`、`[cache.segments]`、`[cache.ttl]`、`[cache.dash]`、`[cache.remux]` 已建模；切片索引上限、订阅/切片 TTL、Remux 时长/窗口/退避已接入 | 接入预载器与 `[cache.dash]` 调参；未知键继续原样回写 | 目标配置 JSON、S-CACHE-04、`design/04` |
-| U-06 | P1 | 台标动效端点缺口 | `POST /panel/api/assets/convert`、`GET /assets/*path`、`POST /panel/api/logo/restore` 已实现；`POST /panel/api/logo/animate` 仍未实现 | 目标用纯 Rust 逐帧编码 APNG/动效（6 种效果，`quality` 为字符串），需引入图像编码与帧生成；证据见 F-012 | F-012、`findings/dynamic/12` |
+| U-06 | P1 | 台标动效兼容缺口 | `/panel/api/logo/animate` 已实现 6 种效果与 APNG 编码，`.orig/` 备份、`quality` 字符串校验、`animated` 列表标志已接入 | 当前仅支持 PNG，解码依赖 `ffmpeg`/`ffprobe`；目标还覆盖 WebP/BMP/AVIF，并做脏矩形优化 | F-012、`findings/dynamic/12` |
 
 > 本轮已完成（2026-10-22）：
 > - **U-01 订阅注入 `x-tvg-url`**：`[epg].enabled = true` 时首行输出 `#EXTM3U x-tvg-url="<host>/epg.xml.gz"`；单元与集成测试覆盖。
@@ -128,7 +128,7 @@ flowchart LR
 > - **U-03 EPG 配置语义**：`public_viewer_enabled` 控制 `/epg`；`allow_scripts=false` 拒绝脚本源；`python_bin`、`script_timeout_secs`、源级 `timeout_secs`、`tz_shift_mins`、源级 `cron` 生效；`record_pad_*` 进入 `/panel/api/epg/programmes`；全局 Cron 支持标准 5 字段。
 > - **U-04 `proxy` + MPD**：`mpd_keep_seconds > 0` 时裁剪 `SegmentTemplate/SegmentTimeline` 与 `SegmentList`，并推进 `$Number$` 的 `startNumber`；绝对 `<BaseURL>` 按目标证据保持直连。
 > - **U-05 配置段**：新增 `[cache.{prefetch,segments,ttl,dash,remux}]` 模型；接入切片索引上限、`ttl.sub_url_secs`/`segment_secs`、Remux 目标时长/窗口/重连退避。预载器与 `[cache.dash]` 调参仍待接入。
-> - **U-06 资源/台标部分**：`/panel/api/assets/{convert,list,remove}` 支持 `[assets].map` 与本地 HLS，新增公开 `GET /assets/*path`；`/panel/api/logo/restore` 用 `.orig/` 还原；`logo/list` 增加 `has_original`。台标动效 `logo/animate` 仍未实现。
+> - **U-06 资源/台标部分**：`/panel/api/assets/{convert,list,remove}` 支持 `[assets].map` 与本地 HLS，新增公开 `GET /assets/*path`；`/panel/api/logo/{restore,animate}` 已实现，动效覆盖 6 种效果与 APNG 编码，`logo/list` 增加 `has_original`/`animated`。动效当前仅 PNG。
 
 #### 0.8.2 待验（目标证据）
 

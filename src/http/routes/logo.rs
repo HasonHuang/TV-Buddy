@@ -375,3 +375,67 @@ pub async fn restore(
         Err(error) => Err(ApiError::internal(format!("{error:#}"))),
     }
 }
+
+/// `POST /panel/api/logo/animate`——生成 APNG 动效并覆盖原图。
+pub async fn animate(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let file = body
+        .get("file")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if file.is_empty() {
+        return Err(ApiError::bad_request("file 不能为空"));
+    }
+    let effect = body
+        .get("effect")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if effect.is_empty() {
+        return Err(ApiError::bad_request("effect 不能为空"));
+    }
+    let quality = match body.get("quality") {
+        Some(Value::String(value)) => value.as_str(),
+        Some(_) => return Err(ApiError::bad_request("quality 必须是字符串")),
+        None => "",
+    };
+    let config = state.snapshot();
+    let max_size = extra_u64(&config, "max_size", 512).clamp(16, 2048) as u32;
+    let frame_ms = extra_u64(&config, "anim_frame_ms", 80).clamp(20, 1_000);
+    let default_quality = extra_u64(&config, "quality", 80).clamp(1, 100) as u8;
+    let report = crate::logo_anim::animate(
+        &config.cache.disk_path,
+        file,
+        effect,
+        quality,
+        max_size,
+        frame_ms,
+        default_quality,
+    )
+    .map_err(|error| ApiError::internal(format!("{error:#}")))?;
+    Ok(Json(json!({
+        "ok": true,
+        "frames": report.frames,
+        "width": report.width,
+        "height": report.height,
+        "total_ms": report.total_ms,
+        "bytes_before": report.bytes_before,
+        "bytes_after": report.bytes_after,
+        "dirty_ratio": report.dirty_ratio,
+    })))
+}
+
+fn extra_u64(config: &crate::config::Config, key: &str, default: u64) -> u64 {
+    config
+        .extra
+        .get("logo")
+        .and_then(toml::Value::as_table)
+        .and_then(|logo| logo.get(key))
+        .and_then(toml::Value::as_integer)
+        .map(|value| value.max(0) as u64)
+        .unwrap_or(default)
+}

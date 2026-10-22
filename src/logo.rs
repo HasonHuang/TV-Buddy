@@ -35,6 +35,7 @@ pub struct Entry {
     pub mtime: u64,
     pub url: String,
     pub has_original: bool,
+    pub animated: bool,
 }
 
 /// 文件名只保留安全字符；拒绝空名、`..` 与隐藏文件。
@@ -104,6 +105,7 @@ pub fn list(cache_dir: &str) -> Vec<Entry> {
                     .unwrap_or(&file)
                     .to_string(),
                 has_original: orig_dir(cache_dir).join(&file).is_file(),
+                animated: is_animated(&directory.join(&file)),
                 file: file.clone(),
                 ext,
                 bytes: meta.len(),
@@ -137,12 +139,20 @@ pub fn write(cache_dir: &str, name: &str, ext: &str, data: &[u8]) -> Result<Entr
     Ok(Entry {
         url: format!("/logo/{file}"),
         has_original: false,
+        animated: false,
         file,
         name,
         ext,
         bytes: data.len() as u64,
         mtime,
     })
+}
+
+/// 是否为 APNG（含 `acTL` 块）。
+fn is_animated(path: &Path) -> bool {
+    fs::read(path)
+        .map(|data| data.windows(4).any(|window| window == b"acTL"))
+        .unwrap_or(false)
 }
 
 /// 用 `.orig/` 备份覆盖当前台标；没有备份时返回 `Ok(false)`。
@@ -321,6 +331,7 @@ pub fn rename(cache_dir: &str, file: &str, name: &str) -> Result<Entry> {
         return Ok(Entry {
             name,
             has_original: orig_dir(cache_dir).join(&target_name).is_file(),
+            animated: is_animated(&target),
             file: target_name.clone(),
             ext,
             bytes: fs::metadata(&source).map(|meta| meta.len()).unwrap_or(0),
@@ -341,6 +352,7 @@ pub fn rename(cache_dir: &str, file: &str, name: &str) -> Result<Entry> {
     Ok(Entry {
         url: format!("/logo/{target_name}"),
         has_original: orig_dir(cache_dir).join(&target_name).is_file(),
+        animated: is_animated(&target),
         file: target_name,
         name,
         ext,
