@@ -356,7 +356,11 @@ async fn proxy_entry(
         }
     };
     if proxy::modes::looks_like_mpd(&upstream) {
-        return proxy_mpd(&upstream, gid, cid, self_base);
+        let keep = config
+            .group(gid)
+            .map(|group| group.mpd_keep_seconds)
+            .unwrap_or(0);
+        return proxy_mpd(&upstream, gid, cid, self_base, keep);
     }
     if proxy::media::is_master(&upstream) {
         return master_entry(&upstream, channel_url, gid, cid, self_base, ext);
@@ -493,8 +497,9 @@ async fn upstream_playlist(
 ///
 /// 目标在 proxy+MPD 下的取用方式未完整观测（F-015、S-MODE-04）。这里只做
 /// 最小改写：绝对 `<BaseURL>` 保持不动，相对地址与本服务同源代理。
-fn proxy_mpd(body: &str, gid: &str, cid: &str, self_base: &str) -> Response {
-    let body = rewrite_mpd_base_urls(body, gid, cid, self_base);
+fn proxy_mpd(body: &str, gid: &str, cid: &str, self_base: &str, keep_seconds: u64) -> Response {
+    let body = trim_mpd_window(body, keep_seconds);
+    let body = rewrite_mpd_base_urls(&body, gid, cid, self_base);
     let mut response = Response::new(Body::from(body));
     response.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -502,6 +507,205 @@ fn proxy_mpd(body: &str, gid: &str, cid: &str, self_base: &str) -> Response {
     );
     insert_header(&mut response, header::CACHE_CONTROL, ENTRY_CACHE);
     response
+}
+
+/// 按 `mpd_keep_seconds` 裁掉 MPD 时间线中最旧的切片。
+///
+/// 只处理带 `SegmentTimeline` 的 `SegmentTemplate` 与 `SegmentList`。裁剪后
+/// 若模板使用 `$Number$`，同步增加 `startNumber`，避免播放器请求错位。
+fn trim_mpd_window(xml: &str, keep_seconds: u64) -> String {
+    if keep_seconds == 0 {
+        return xml.to_string();
+    }
+    let Ok(document) = roxmltree::Document::parse(xml) else {
+        return xml.to_string();
+    };
+    let keep = keep_seconds as f64;
+    let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    for parent in document.descendants().filter(|node| node.is_element()) {
+        match parent.tag_name().name() {
+            "SegmentTemplate" => {
+                let Some(timeline) = parent
+                    .children()
+                    .find(|node| node.is_element() && node.tag_name().name() == "SegmentTimeline")
+                else {
+                    continue;
+                };
+                let timescale = parent
+                    .attribute("timescale")
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .unwrap_or(1.0)
+                    .max(1.0);
+                let spans: Vec<(roxmltree::Node<'_, '_>, f64, usize, f64)> = timeline
+                    .children()
+                    .filter(|node| node.is_element() && node.tag_name().name() == "S")
+                    .filter_map(|node| {
+                        let duration = node
+                            .attribute("d")
+                            .and_then(|value| value.parse::<f64>().ok())
+                            .unwrap_or(0.0);
+                        let repeat = node
+                            .attribute("r")
+                            .and_then(|value| value.parse::<usize>().ok())
+                            .unwrap_or(0);
+                        (duration > 0.0).then_some((node, duration / timescale, repeat + 1, 0.0))
+                    })
+                    .collect();
+                if spans.is_empty() {
+                    continue;
+                }
+                let mut starts = Vec::with_capacity(spans.len());
+                let mut cursor = 0.0;
+                for (node, duration, repeats, _) in &spans {
+                    let start = node
+                        .attribute("t")
+                        .and_then(|value| value.parse::<f64>().ok())
+                        .map(|value| value / timescale)
+                        .unwrap_or(cursor);
+                    starts.push(start);
+                    cursor = start + duration * *repeats as f64;
+                }
+                let mut spans: Vec<_> = spans
+                    .into_iter()
+                    .zip(starts)
+                    .map(|((node, duration, repeats, _), start)| (node, duration, repeats, start))
+                    .collect();
+                let total: f64 = spans
+                    .iter()
+                    .map(|(_, duration, repeats, _)| duration * *repeats as f64)
+                    .sum();
+                if total <= keep {
+                    continue;
+                }
+                let mut remaining = total;
+                let mut removed_segments = 0usize;
+                for index in 0..spans.len() {
+                    if remaining <= keep {
+                        break;
+                    }
+                    let (node, duration, repeats, start) = spans[index].clone();
+                    let span_duration = duration * repeats as f64;
+                    if index + 1 < spans.len() && remaining - span_duration >= keep {
+                        edits.push((node.range(), String::new()));
+                        removed_segments += repeats;
+                        remaining -= span_duration;
+                        continue;
+                    }
+                    if repeats <= 1 {
+                        if index + 1 < spans.len() {
+                            edits.push((node.range(), String::new()));
+                            removed_segments += 1;
+                            remaining -= span_duration;
+                            continue;
+                        }
+                        break;
+                    }
+                    let cut =
+                        (((remaining - keep) / duration).ceil() as usize).clamp(1, repeats - 1);
+                    let new_repeats = repeats - cut;
+                    let new_start = start + duration * cut as f64;
+                    edits.push((
+                        node.range(),
+                        rewrite_s_node(&node, new_start * timescale, new_repeats),
+                    ));
+                    removed_segments += cut;
+                    spans[index].2 = new_repeats;
+                    break;
+                }
+                if removed_segments == 0 {
+                    continue;
+                }
+                let media = parent.attribute("media").unwrap_or("");
+                if media.contains("$Number$") {
+                    let start = parent
+                        .attribute("startNumber")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(1)
+                        + removed_segments;
+                    match parent.attribute_node("startNumber") {
+                        Some(attribute) => {
+                            edits.push((attribute.range_value(), start.to_string()));
+                        }
+                        None => {
+                            let start_tag = parent.range().start;
+                            if let Some(offset) = xml[start_tag..].find('>') {
+                                let at = start_tag + offset;
+                                edits.push((at..at, format!(" startNumber=\"{start}\"")));
+                            }
+                        }
+                    }
+                }
+            }
+            "SegmentList" => {
+                let timescale = parent
+                    .attribute("timescale")
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .unwrap_or(1.0)
+                    .max(1.0);
+                let duration = parent
+                    .attribute("duration")
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                if duration <= 0.0 {
+                    continue;
+                }
+                let segments: Vec<_> = parent
+                    .children()
+                    .filter(|node| node.is_element() && node.tag_name().name() == "SegmentURL")
+                    .collect();
+                if segments.len() < 2 {
+                    continue;
+                }
+                let keep_count = ((keep * timescale / duration).ceil() as usize).max(1);
+                if keep_count >= segments.len() {
+                    continue;
+                }
+                for segment in &segments[..segments.len() - keep_count] {
+                    edits.push((segment.range(), String::new()));
+                }
+            }
+            _ => {}
+        }
+    }
+    if edits.is_empty() {
+        return xml.to_string();
+    }
+    edits.sort_by_key(|(range, _)| range.start);
+    let mut output = xml.to_string();
+    for (range, replacement) in edits.into_iter().rev() {
+        if range.end <= output.len() {
+            output.replace_range(range, &replacement);
+        }
+    }
+    output
+}
+
+/// 重建 `S` 节点，保留其它属性并覆盖 `t`/`r`。
+fn rewrite_s_node(node: &roxmltree::Node<'_, '_>, start: f64, repeats: usize) -> String {
+    let mut attrs = Vec::new();
+    for attribute in node.attributes() {
+        if matches!(attribute.name(), "t" | "r") {
+            continue;
+        }
+        attrs.push(format!(
+            "{}=\"{}\"",
+            attribute.name(),
+            xml_escape(attribute.value())
+        ));
+    }
+    attrs.push(format!("t=\"{}\"", format_mpd_number(start)));
+    if repeats > 1 {
+        attrs.push(format!("r=\"{}\"", repeats - 1));
+    }
+    format!("<S {}/>", attrs.join(" "))
+}
+
+fn format_mpd_number(value: f64) -> String {
+    if (value - value.round()).abs() < f64::EPSILON {
+        (value.round() as i64).to_string()
+    } else {
+        format!("{value}")
+    }
 }
 
 fn rewrite_mpd_base_urls(xml: &str, gid: &str, cid: &str, self_base: &str) -> String {
@@ -848,4 +1052,45 @@ pub(crate) async fn fetch_bytes(
     }
     let response = request.send().await?.error_for_status()?;
     Ok(response.bytes().await?.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trim_mpd_window;
+
+    fn template_mpd() -> &'static str {
+        r#"<MPD><Period><AdaptationSet><SegmentTemplate timescale="1000" startNumber="10" media="seg-$Number$.m4s"><SegmentTimeline><S t="0" d="2000"/><S t="2000" d="2000"/><S t="4000" d="2000"/><S t="6000" d="2000"/></SegmentTimeline></SegmentTemplate></AdaptationSet></Period></MPD>"#
+    }
+
+    #[test]
+    fn trim_mpd_keeps_tail_and_advances_number() {
+        let output = trim_mpd_window(template_mpd(), 5);
+        assert!(!output.contains("t=\"0\""));
+        assert!(!output.contains("t=\"2000\""));
+        assert!(output.contains("t=\"4000\""));
+        assert!(output.contains("t=\"6000\""));
+        assert!(output.contains("startNumber=\"12\""), "{output}");
+    }
+
+    #[test]
+    fn trim_mpd_handles_repeat_and_missing_start_number() {
+        let xml = r#"<MPD><Period><AdaptationSet><SegmentTemplate timescale="1" media="s-$Number$.m4s"><SegmentTimeline><S t="0" d="1" r="4"/><S t="5" d="5"/></SegmentTimeline></SegmentTemplate></AdaptationSet></Period></MPD>"#;
+        let output = trim_mpd_window(xml, 7);
+        assert!(!output.contains("d=\"1\" r=\"4\""), "{output}");
+        assert!(output.contains("startNumber=\"4\""), "{output}");
+        assert!(output.contains("t=\"5\""));
+    }
+
+    #[test]
+    fn trim_mpd_handles_segment_list_and_limits() {
+        let xml = r#"<MPD><Period><AdaptationSet><SegmentList timescale="1" duration="2"><SegmentURL media="a.m4s"/><SegmentURL media="b.m4s"/><SegmentURL media="c.m4s"/><SegmentURL media="d.m4s"/></SegmentList></AdaptationSet></Period></MPD>"#;
+        let output = trim_mpd_window(xml, 3);
+        assert!(!output.contains("a.m4s"));
+        assert!(!output.contains("b.m4s"));
+        assert!(output.contains("c.m4s"));
+        assert!(output.contains("d.m4s"));
+        assert_eq!(trim_mpd_window(xml, 0), xml);
+        assert_eq!(trim_mpd_window(xml, 100), xml);
+        assert_eq!(trim_mpd_window("not xml", 5), "not xml");
+    }
 }

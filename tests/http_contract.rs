@@ -2772,6 +2772,7 @@ id = "mpg"
 name = "代理 MPD"
 mode = "proxy"
 access = "open"
+mpd_keep_seconds = 4
 [[groups.channels]]
 id = "c1"
 name = "无 BaseURL"
@@ -2784,6 +2785,14 @@ url = "{upstream}/dash/base.mpd"
     )
     .await;
 
+    assert_eq!(
+        fixture
+            .state
+            .snapshot()
+            .group("mpg")
+            .map(|group| group.mpd_keep_seconds),
+        Some(4)
+    );
     let manifest = fetch(&fixture, "/mpg/c1.mpd").await;
     assert_eq!(manifest.status(), StatusCode::OK);
     assert_eq!(
@@ -2802,6 +2811,11 @@ url = "{upstream}/dash/base.mpd"
         body.contains("chunk-$RepresentationID$-$Number$.m4s"),
         "{body}"
     );
+    // mpd_keep_seconds = 4：保留最后两段，并把编号从 1 推到 3。
+    assert!(body.contains("startNumber=\"3\""), "{body}");
+    assert!(body.contains("t=\"4000\""), "{body}");
+    assert!(body.contains("r=\"1\""), "{body}");
+    assert!(!body.contains("<S d=\"2000\" r=\"3\"/>"), "{body}");
 
     let init = fetch(&fixture, "/mpg/c1/mpd/init-v0.mp4").await;
     assert_eq!(init.status(), StatusCode::OK);

@@ -65,8 +65,8 @@ flowchart LR
 | 缓存容量上限 | 不实现 | 目标配置存在但未生效（F-015） |
 | 旧数据迁移 `./var/dash` | 不实现 | 仅 088 行为，v0.8.2 无 |
 | DASH URL 池 `pool≥2` | 已实现（目标取用未验） | 多个 `<BaseURL>`；视频用 `pool[0]`，音频/字幕轮询其余；目标正常取用未观测（F-015） |
-| DASH `mpd_keep_seconds` | 已实现 | 媒体清单按末尾时间窗裁剪；目标 proxy+MPD 分支未验 |
-| `proxy` 模式 MPD 代理 | 已实现（相对地址） | 相对 `<BaseURL>` 改写到本服务 `mpd/`，init/切片与查询串经本服务代理；绝对 `<BaseURL>` 保持直连；`mpd_keep_seconds` 未裁剪（目标分支未完整观测） |
+| DASH `mpd_keep_seconds` | 已实现 | DASH→HLS 媒体清单与 `proxy` 模式 MPD 都按末尾时间窗裁剪；proxy 分支会同步推进 `$Number$` 起始编号 |
+| `proxy` 模式 MPD 代理 | 已实现（相对地址） | 相对 `<BaseURL>` 改写到本服务 `mpd/`，init/切片与查询串经本服务代理；绝对 `<BaseURL>` 按目标行为保持直连；`mpd_keep_seconds` 已裁剪 |
 | CENC ClearKey 解密 | 不实现 | 目标只检测 KID、不解密；本实现按原字节代理 |
 | 多 CDN 故障切换 | 未复刻 | 目标未观测到切换；DASH 多 BaseURL 仅做顺序回退 |
 | `/epg/api/*` 响应形状 | 自定 | 目标仅登记路由（S-EP-16） |
@@ -100,7 +100,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | P4-01 | MPD 完整解析与 DASH→HLS | L | `BaseURL`、`SegmentTimeline`、`SegmentList`、init/切片代理、`/dash/status` | ✅ §3bc |
 | P4-02 | `mpd_keep_seconds` 与 `url_pool_size` | M | 媒体清单时间窗；多 `<BaseURL>` 音视频分流与顺序回退 | ✅ §3bc |
-| P4-03 | 目标 proxy+MPD 分支 | M | 相对 `<BaseURL>` 改写 + init/切片代理；绝对地址与 `mpd_keep_seconds` 裁剪未做 | 🔶 部分（§0.5） |
+| P4-03 | 目标 proxy+MPD 分支 | M | 相对 `<BaseURL>` 改写 + init/切片代理；`mpd_keep_seconds` 裁剪；绝对地址按目标保持直连 | ✅ §0.8 |
 | P4-04 | CENC 解密 | L | ClearKey 解密与出口策略 | 不实现（目标不解密） |
 
 ### 0.7 待环境
@@ -119,7 +119,6 @@ flowchart LR
 
 | ID | 优先级 | 项 | 现状 | 待做 | 依据 |
 | --- | --- | --- | --- | --- | --- |
-| U-04 | P0 | `proxy` + MPD 分支不完整 | 相对 `<BaseURL>` 已改写并代理；绝对 `<BaseURL>` 直连；`mpd_keep_seconds` 未裁剪 | 代理绝对 `<BaseURL>` 的 init/切片；在 MPD 正文按 `mpd_keep_seconds` 裁剪；补查询串、失败回退与缓存测试 | `design/03` §4.2、F-015 |
 | U-05 | P1 | 目标配置段未建模 | `[cache.prefetch]`、`[cache.ttl]`、`[cache.segments]`、`[dash]`、`[remux]` 落在 `extra`，运行时使用固定参数 | 建模并接入预载、TTL、段上限、DASH/Remux 调参；未知键继续原样回写 | 目标配置 JSON、S-CACHE-04、`design/04` |
 | U-06 | P1 | 台标动效端点缺口 | `POST /panel/api/assets/convert`、`GET /assets/*path`、`POST /panel/api/logo/restore` 已实现；`POST /panel/api/logo/animate` 仍未实现 | 目标用纯 Rust 逐帧编码 APNG/动效（6 种效果，`quality` 为字符串），需引入图像编码与帧生成；证据见 F-012 | F-012、`findings/dynamic/12` |
 
@@ -127,6 +126,7 @@ flowchart LR
 > - **U-01 订阅注入 `x-tvg-url`**：`[epg].enabled = true` 时首行输出 `#EXTM3U x-tvg-url="<host>/epg.xml.gz"`；单元与集成测试覆盖。
 > - **U-02 EPG 端点补齐**：注册 12 个 `/panel/api/epg/*` 端点；`regenerate` 改为读 `epg/raw/`；额外频道持久化并写入输出；脚本上传/删除、Cron 预览、节目表、源频道、建议与时间偏移预览已实现；面板翻译端点补 `/panel/api` 别名。
 > - **U-03 EPG 配置语义**：`public_viewer_enabled` 控制 `/epg`；`allow_scripts=false` 拒绝脚本源；`python_bin`、`script_timeout_secs`、源级 `timeout_secs`、`tz_shift_mins`、源级 `cron` 生效；`record_pad_*` 进入 `/panel/api/epg/programmes`；全局 Cron 支持标准 5 字段。
+> - **U-04 `proxy` + MPD**：`mpd_keep_seconds > 0` 时裁剪 `SegmentTemplate/SegmentTimeline` 与 `SegmentList`，并推进 `$Number$` 的 `startNumber`；绝对 `<BaseURL>` 按目标证据保持直连。
 > - **U-06 资源/台标部分**：`/panel/api/assets/{convert,list,remove}` 支持 `[assets].map` 与本地 HLS，新增公开 `GET /assets/*path`；`/panel/api/logo/restore` 用 `.orig/` 还原；`logo/list` 增加 `has_original`。台标动效 `logo/animate` 仍未实现。
 
 #### 0.8.2 待验（目标证据）

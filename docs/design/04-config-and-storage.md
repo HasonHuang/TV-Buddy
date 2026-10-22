@@ -74,7 +74,7 @@
 | 切片索引（M2 已实现） | `seg_url/<sha256("{gid}/{cid}")[..16]>.json`：`<S>` → `{url, ext}`；内存 + 磁盘两级 | `src/proxy/segments.rs` |
 | 切片正文（M2 已实现） | `seg_bytes/<gid>_<cid>_<S>.<ext>`；命中复用，不设上限 | 同上 |
 | DASH 缓存（P4 已实现） | `dash/<gid>/<cid>/<track>/{index.txt,init.<ext>,<序号>_<hash>.<ext>}`；媒体清单按时重取，init/切片命中复用 | `src/dash_hls.rs` |
-| DASH 时间窗 | `[groups].mpd_keep_seconds > 0` 时媒体清单只保留末尾累计时长；`0` 保留全部 | `src/dash_hls.rs` |
+| DASH 时间窗 | `[groups].mpd_keep_seconds > 0` 时媒体清单只保留末尾累计时长；`0` 保留全部。`proxy` 模式 MPD 同样裁剪时间线并推进编号 | `src/dash_hls.rs`、`src/http/routes/stream.rs` |
 | DASH URL 池 | 多个 `<BaseURL>` 时视频用首选，音频/字幕在其余地址轮询；`url_pool_size<=1` 不轮询 | `src/dash_hls.rs` |
 | 清单复用（M2 已实现） | 进程内 TTL 5 秒（`TtlCache`） | `src/proxy/mod.rs` |
 | flush | 清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash/`** | S-CACHE-06 |
