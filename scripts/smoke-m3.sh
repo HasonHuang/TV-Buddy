@@ -139,6 +139,16 @@ url = "http://127.0.0.1:$UP/main.mpd"
 id = "c7"
 name = "DASH 失败频道"
 url = "http://127.0.0.1:1/dead.mpd"
+
+[[groups]]
+id = "mp"
+name = "代理 MPD 组"
+mode = "proxy"
+access = "public"
+[[groups.channels]]
+id = "m1"
+name = "代理 MPD 频道"
+url = "http://127.0.0.1:$UP/main.mpd"
 EOF
 
 python3 -m http.server "$UP" --directory "$WORK/up" >"$WORK/up.log" 2>&1 &
@@ -217,6 +227,14 @@ check "dash 媒体清单 200" "200" "$(status "$B/dh/c6/video_360p/index.txt")"
 check "dash 媒体清单切片" "1" "$(grep -c '#EXTINF:2.000000,' "$WORK/body")"
 check "dash 未就绪 503" "503" "$(status "$B/dh/c7.m3u8")"
 check "dash 未就绪文案" "timeout waiting for master playlist" "$(cat "$WORK/body")"
+
+# --- Proxy + MPD ---
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/mp/m1.mpd")
+check "proxy MPD 200" "200" "$CODE"
+check "proxy MPD 类型" "application/dash+xml" "$(hfile "$WORK/h" content-type)"
+check "proxy MPD 改写 BaseURL" "1" "$(grep -c "<BaseURL>http://127.0.0.1:$PORT/mp/m1/mpd/</BaseURL>" "$WORK/body")"
+check "proxy MPD 切片 200" "200" "$(status "$B/mp/m1/mpd/dash-1.m4s")"
+check "proxy MPD 切片非空" "yes" "$([ -s "$WORK/body" ] && echo yes || echo no)"
 
 # --- Token ---
 T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \

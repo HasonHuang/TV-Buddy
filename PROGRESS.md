@@ -924,6 +924,7 @@ P2 已关闭；后续计划见 §0.6。
 验证：
 - 单元：MPD 摘要、Timeline/BaseURL、`r=-1` + `timeShiftBufferDepth`、多 BaseURL、SegmentList、主/媒体清单、时间窗、URL 池轮询、媒体序号、动态清单无 `ENDLIST`、BaseURL 查询串继承。
 - 集成：`dash_mode_converts_mpd_to_hls_and_proxies_segments` 覆盖主清单、媒体清单、init、切片、状态与 `keep_seconds=4`；`dash_mode_resolver_url_is_used_for_media_playlist` 覆盖解析脚本地址沿用到媒体清单；`proxy_mode_rewrites_mpd_base_url_and_proxies_segments` 覆盖 proxy+MPD 相对 BaseURL、init/切片与查询串代理。
+- `smoke-m3.sh` 新增 proxy+MPD：入口 200、`application/dash+xml`、相对 BaseURL 改写、切片代理。
 - `cargo test --offline` 172 项（114 单元 + 58 集成）。
 
 ## 4. 进度日志
