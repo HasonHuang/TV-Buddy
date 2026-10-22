@@ -776,7 +776,9 @@ async fn epg_enabled_serves_xmltv_and_filters() {
     );
     let body = response.text().await.expect("读正文");
     assert!(body.contains("generator-info-name=\"iptv-proxy\""));
-    assert!(body.contains("<channel id=\"cctv1\">"));
+    assert!(body.contains("<channel id=\"c1\">"));
+    assert!(body.contains("<programme start="));
+    assert!(body.contains("channel=\"c1\""));
     assert!(body.contains("<title lang=\"zh\">新闻</title>"));
     assert!(!body.contains("老节目"));
     assert!(!body.contains("未匹配节目"));
@@ -834,6 +836,117 @@ async fn single_segment_unknown_path_is_404() {
 }
 
 #[tokio::test]
+async fn epg_manual_mapping_and_match_report() {
+    let fixture = fixture_with(true).await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let post = |path: &str, body: serde_json::Value| {
+        fixture
+            .client
+            .post(format!("{}{path}", fixture.base))
+            .header("authorization", auth.clone())
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+    };
+
+    let response = post(
+        "/panel/api/epg/mapping",
+        serde_json::json!({
+            "gid": "pg", "cid": "c1", "source_id": "s1", "source_channel_id": "unused"
+        }),
+    )
+    .await
+    .expect("设置映射");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mappings: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/epg/mappings", fixture.base))
+            .header("authorization", auth.clone())
+            .send()
+            .await
+            .expect("映射表")
+            .text()
+            .await
+            .expect("正文"),
+    )
+    .expect("JSON");
+    assert_eq!(mappings["mappings"]["pg/c1"]["source_id"], "s1");
+    assert_eq!(mappings["mappings"]["pg/c1"]["source_channel_id"], "unused");
+
+    assert_eq!(
+        post("/panel/api/epg/refresh", serde_json::json!({}))
+            .await
+            .expect("刷新")
+            .status(),
+        StatusCode::OK
+    );
+    let body = fetch(&fixture, "/epg.xml").await.text().await.expect("EPG");
+    assert!(body.contains("<channel id=\"c1\">"));
+    assert!(body.contains("未匹配节目"));
+    assert!(!body.contains("早间新闻"));
+
+    let mappings: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/epg/mappings", fixture.base))
+            .header("authorization", auth.clone())
+            .send()
+            .await
+            .expect("映射表")
+            .text()
+            .await
+            .expect("正文"),
+    )
+    .expect("JSON");
+    assert_eq!(
+        mappings["mappings"]["pg/c1"]["source_display_name"],
+        "未匹配频道"
+    );
+
+    let report = fixture
+        .client
+        .get(format!("{}/panel/api/epg/match-report", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("报告");
+    assert_eq!(report.status(), StatusCode::OK);
+    assert!(
+        header(&report, "content-type").starts_with("text/plain"),
+        "报告应为纯文本"
+    );
+    let report = report.text().await.expect("正文");
+    assert!(report.contains("pg     c1"), "{report}");
+    assert!(report.contains("manual"), "{report}");
+    assert!(report.contains("s1"), "{report}");
+
+    // 清空映射后回到自动匹配。
+    assert_eq!(
+        post(
+            "/panel/api/epg/mapping",
+            serde_json::json!({"gid":"pg","cid":"c1","source_id":"","source_channel_id":""})
+        )
+        .await
+        .expect("清除")
+        .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        post("/panel/api/epg/refresh", serde_json::json!({}))
+            .await
+            .expect("刷新")
+            .status(),
+        StatusCode::OK
+    );
+    let body = fetch(&fixture, "/epg.xml").await.text().await.expect("EPG");
+    assert!(body.contains("早间新闻"));
+    assert!(!body.contains("未匹配节目"));
+}
+
+#[tokio::test]
 async fn epg_api_exposes_channels_programmes_and_search() {
     let fixture = fixture_with(true).await;
     epg::refresh(&fixture.state).await.expect("采集应成功");
@@ -843,9 +956,9 @@ async fn epg_api_exposes_channels_programmes_and_search() {
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     assert_eq!(body["count"], 1);
-    assert_eq!(body["channels"][0]["id"], "cctv1");
+    assert_eq!(body["channels"][0]["id"], "c1");
 
-    let response = fetch(&fixture, "/epg/api/programmes/cctv1").await;
+    let response = fetch(&fixture, "/epg/api/programmes/c1").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
@@ -2778,7 +2891,7 @@ print(f'''<?xml version="1.0" encoding="UTF-8"?>
     .expect("写脚本");
 
     let summary = epg::refresh(&fixture.state).await.expect("采集应成功");
-    assert!(summary.channels >= 2, "两个源都应匹配到频道");
+    assert!(summary.channels >= 1, "两个源都应匹配到本地频道");
     let response = fetch(&fixture, "/epg.xml").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.expect("正文");

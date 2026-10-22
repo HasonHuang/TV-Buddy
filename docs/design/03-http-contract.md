@@ -314,7 +314,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 ### 6.5 EPG（P1 已实现）
 
-证据：F-008（S-EP-05、S-EP-12）。目标共 12 个 `/panel/api/epg/*` 端点；本实现先做公开三件与状态/刷新。
+证据：F-008、F-010（S-EP-05、S-EP-12、S-EPG-07）。本实现覆盖公开三件、状态/刷新、手工映射与匹配报告。
 
 | 方法 | 路径 | 鉴权 | 行为 |
 | --- | --- | --- | --- |
@@ -323,6 +323,9 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | `GET` | `/epg` | 无 | `200 text/html`（内嵌浏览页）；关闭时 `404` |
 | `GET` | `/panel/api/epg/status` | Bearer | `{"enabled","running","sources","channels","programmes","kept","keep_days","future_days","last_success","last_error"}` |
 | `POST` | `/panel/api/epg/refresh` | Bearer | 同步采集一次；`{"ok":true,"msg":"采集完成","channels","programmes"}`；失败 → `500` + 原因 |
+| `GET` | `/panel/api/epg/mappings` | Bearer | `{"mappings":{"gid/cid":{"source_id","source_channel_id","source_name","source_display_name"}},"extra":[]}` |
+| `POST` | `/panel/api/epg/mapping` | Bearer | `{"gid","cid","source_id","source_channel_id"}`；两者留空 → 清除 |
+| `GET` | `/panel/api/epg/match-report` | Bearer | `text/plain`：`matched_count=… empty_count=… extra_count=…` + 表格 |
 | `GET` | `/epg/api/channels` | 无 | `{"count","channels":[{"id","names":[{"lang","name"}]}]}` |
 | `GET` | `/epg/api/programmes/{channel}` | 无 | `{"channel","count","programmes":[{"channel","start","stop","title","desc","categories"}]}` |
 | `GET` | `/epg/api/search?q=` | 无 | `{"q","count","programmes":[…]}`；最多 200 条；空 `q` 返回 0 |
@@ -333,10 +336,13 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | --- | --- |
 | 源类型 | `kind = "xml"`：按 `url` 拉 XMLTV。`kind = "script"`：执行 `<cache>/epg/scripts/<script>`（`python3`，cwd 为脚本目录，stdout 即 XMLTV；为空时读 `output_files`），超时 `timeout_secs`（5–3600 秒） |
 | 时间窗 | 保留 `stop >= 现在 - keep_days` 且 `start <= 现在 + future_days`；`keep_yesterday = true` 时下界不晚于昨天 0 点 |
-| 频道匹配 | `match_by_name = true` 时按频道名匹配；同时接受 `tvg_id`/`tvg-id`/`epg_id` 显式键。未匹配的频道与节目丢弃 |
-| 输出 | `<cache>/epg/epg.xml` 与 `epg.xml.gz`；根节点 `generator-info-name="iptv-proxy"`；保留 `channel/@id` 与 `programme` 的 `start`/`stop`/`channel` |
+| 输出标识 | `out_id = tvg_id \|\| channel.id`；XMLTV 的 `channel/@id` 与节目 `channel` 使用 `out_id` |
+| 频道匹配 | 手工映射优先；否则 `tvg_id`（大小写不敏感）→ 名称（删全部空白含 U+3000、转小写、完全相等，不做子串）；`match_by_name=false` 时只保留 `tvg_id` |
+| 冲突 | 同一源频道被多个本地频道命中 → 配置顺序最后一个获得节目；重复 `out_id` 标为 `duplicate` |
+| 输出 | `<cache>/epg/epg.xml` 与 `epg.xml.gz`；根节点 `generator-info-name="iptv-proxy"`；保留 `programme` 的 `start`/`stop`/`channel` |
 | 语言 | 文本节点缺 `xml:lang` 时补 `lang="zh"`；显式语言保留 |
 | 原样保留 | `icon`、`credits` 等未建模子节点按原片段输出 |
+| 手工映射 | 存 `<cache>/epg/mappings.json`；`GET /panel/api/epg/mappings` 读取；刷新后补源频道显示名 |
 | 调度 | 启动即采集一次；之后按 `[epg].cron`，只识别 `0 */N * * *`（N 小时），其它写法回退 4 小时 |
 
 > 三个 `/epg/api/*` 的响应形状为本实现自定（目标只登记了路由存在性）。

@@ -198,7 +198,7 @@ scripts/smoke-m3.sh   # 直连模式：redirect/rewrite/passthrough、remux/dash
 scripts/smoke-m4.sh   # 热重载、看门狗冷却、缓存状态与清空、指标与日志
 scripts/smoke-cli.sh  # CLI：端口、密码、启停、更新、重装、卸载保留数据
 scripts/smoke-translate-live.sh # 真实 MTranServer 联调（需外网）
-scripts/smoke-epg.sh  # EPG：采集、/epg.xml[.gz]、/epg 页面与 /epg/api/*、状态与刷新
+scripts/smoke-epg.sh  # EPG：采集、/epg.xml[.gz]、/epg 页面、/epg/api/*、手工映射与匹配报告
 scripts/smoke-logo.sh # 台标库：上传、公开取图与列表、删除
 scripts/smoke-backup.sh # 备份与恢复：导出 gzip、改动后回滚、拒绝非法内容
 scripts/smoke-security.sh # 安全面：Token 查看/轮换、IP 统计、封禁与解封
@@ -262,6 +262,8 @@ tests/             # 路由级集成测试（起真实服务 + 伪上游）
 | `POST` | `/panel/api/dash/scan-url` | 解析任意 MPD |
 | `GET` | `/epg.xml[.gz]` | 节目单 |
 | `GET` | `/epg/api/{channels,programmes,search}` | 节目单 JSON |
+| `GET` | `/panel/api/epg/{status,mappings,match-report}` | EPG 状态、手工映射与匹配报告 |
+| `POST` | `/panel/api/epg/{refresh,mapping}` | 立即采集、设置/清除手工映射 |
 | `POST` | `/panel/api/groups/import[/m3u]` | 批量导入分组（JSON / M3U） |
 
 ## 目录
@@ -308,7 +310,7 @@ scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
 - 缓存无容量上限（与目标一致，见 F-015）；`cache.backend=memory` 只回显，实际仍落盘。
 - 运维接口的响应形状为本实现自定；目标只登记存在性（见 `design/03` §6.4）。
 - 面板有 12 个管理分区，另有独立 `/logo` 与 `/unban` 页面；目标前端代码与文案不复制。
-- EPG：支持 `kind = "xml"` 与 `kind = "script"`、EPG 翻译；EPG 手工映射、订阅 `x-tvg-url` 与录制联动未实现（`design/03` §6.5）。
+- EPG：支持 `kind = "xml"` 与 `kind = "script"`、EPG 翻译、手工映射与匹配报告；订阅 `x-tvg-url` 与录制联动未实现（`design/03` §6.5）。
 - 定时录制：HLS 频道按切片合并；DASH 频道要求直播 MPD 且系统有 ffmpeg（支持 `-c copy`），产出 MKV。静态 MPD 报「录制区间内无可用切片」。
 - `l1/l2` 限流、每 IP 会话上限、`random_id_enabled` 的随机 ID 行为、`compat_mode`、`srt_ua_keywords`、`socks5` 未实现或仅保留配置键。
 - 与目标的差异以 `docs/design/reconciliation-report.md` 为准（22 项用例差异 0）。

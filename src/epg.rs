@@ -20,6 +20,7 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use roxmltree::Document;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{config::Config, state::AppState};
@@ -37,6 +38,111 @@ pub struct EpgState {
     pub last_success: Mutex<Option<u64>>,
     /// 最近一次错误。
     pub last_error: Mutex<Option<String>>,
+    /// 手工映射：键 `gid/cid`。
+    pub mappings: Mutex<HashMap<String, Mapping>>,
+    /// 最近一次匹配报告。
+    pub match_rows: Mutex<Vec<MatchRow>>,
+}
+
+/// 手工 EPG 映射。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Mapping {
+    pub source_id: String,
+    pub source_channel_id: String,
+    pub source_name: String,
+    pub source_display_name: String,
+}
+
+/// 一条匹配报告。
+#[derive(Debug, Clone, Default)]
+pub struct MatchRow {
+    pub gid: String,
+    pub cid: String,
+    pub name: String,
+    pub out_id: String,
+    pub via: String,
+    pub source_id: String,
+    pub programmes: usize,
+}
+
+impl EpgState {
+    /// 载入缓存的映射表。
+    pub fn load(cache_dir: &Path) -> Self {
+        let state = Self::default();
+        if let Ok(text) = fs::read_to_string(mapping_file(cache_dir)) {
+            if let Ok(mappings) = serde_json::from_str::<HashMap<String, Mapping>>(&text) {
+                *state.mappings.lock().unwrap_or_else(|e| e.into_inner()) = mappings;
+            }
+        }
+        state
+    }
+}
+
+fn mapping_file(cache_dir: &Path) -> PathBuf {
+    output_dir(cache_dir).join("mappings.json")
+}
+
+/// 读取映射快照。
+pub fn mappings(state: &AppState) -> HashMap<String, Mapping> {
+    state
+        .epg
+        .mappings
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// 设置或清除手工映射；`source_id`/`source_channel_id` 为空表示清除。
+pub fn set_mapping(
+    state: &AppState,
+    gid: &str,
+    cid: &str,
+    source_id: &str,
+    source_channel_id: &str,
+) -> Result<Option<Mapping>> {
+    let config = state.snapshot();
+    let Some(group) = config.group(gid) else {
+        bail!("分组不存在");
+    };
+    if !group.channels.iter().any(|channel| channel.id == cid) {
+        bail!("频道不存在");
+    }
+    let source_id = source_id.trim();
+    let source_channel_id = source_channel_id.trim();
+    let mut map = state.epg.mappings.lock().unwrap_or_else(|e| e.into_inner());
+    let key = format!("{gid}/{cid}");
+    if source_id.is_empty() || source_channel_id.is_empty() {
+        map.remove(&key);
+        save_mappings(state, &map)?;
+        return Ok(None);
+    }
+    let Some(source) = config
+        .epg
+        .sources
+        .iter()
+        .find(|source| source.id == source_id)
+    else {
+        bail!("EPG 源不存在");
+    };
+    let mapping = Mapping {
+        source_id: source_id.to_string(),
+        source_channel_id: source_channel_id.to_string(),
+        source_name: source.name.clone(),
+        source_display_name: String::new(),
+    };
+    map.insert(key, mapping.clone());
+    save_mappings(state, &map)?;
+    Ok(Some(mapping))
+}
+
+fn save_mappings(state: &AppState, mappings: &HashMap<String, Mapping>) -> Result<()> {
+    let path = mapping_file(Path::new(&state.cache_dir));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let text = serde_json::to_string_pretty(mappings)?;
+    fs::write(path, text)?;
+    Ok(())
 }
 
 /// 一次采集的摘要。
@@ -118,7 +224,23 @@ pub async fn refresh(state: &Arc<AppState>) -> Result<Summary> {
 }
 
 async fn collect(state: &Arc<AppState>, config: &Config) -> Result<Summary> {
-    let keys = channel_keys(config);
+    let targets = channel_targets(config);
+    let mappings = mappings(state);
+    let mut rows: Vec<MatchRow> = targets
+        .iter()
+        .map(|target| MatchRow {
+            gid: target.gid.clone(),
+            cid: target.cid.clone(),
+            name: target.name.clone(),
+            out_id: target.out_id.clone(),
+            via: if duplicate_out_ids(&targets, &target.out_id) {
+                "duplicate".into()
+            } else {
+                "none".into()
+            },
+            ..MatchRow::default()
+        })
+        .collect();
     let now = now_secs() as i64;
     let past = past_limit(config, now);
     let future = now + config.epg.future_days.max(0) * 86_400;
@@ -128,6 +250,7 @@ async fn collect(state: &Arc<AppState>, config: &Config) -> Result<Summary> {
     let mut programmes: Vec<Programme> = Vec::new();
     let mut sources = 0usize;
     let mut errors: Vec<String> = Vec::new();
+    let mut mapping_displays: HashMap<(String, String), String> = HashMap::new();
 
     for source in config.epg.sources.iter().filter(|source| source.enabled) {
         let body = match source_body(state, config, source).await {
@@ -138,22 +261,72 @@ async fn collect(state: &Arc<AppState>, config: &Config) -> Result<Summary> {
             }
         };
         sources += 1;
-        match parse(&body) {
-            Ok(document) => {
-                let matched = document.matched(&keys);
-                for channel in matched.channels {
-                    if seen.insert(channel.id.clone()) {
-                        channels.push(channel);
-                    }
-                }
-                programmes.extend(
-                    matched
-                        .programmes
-                        .into_iter()
-                        .filter(|programme| in_window(programme, past, future)),
-                );
+        let document = match parse(&body) {
+            Ok(document) => document,
+            Err(error) => {
+                errors.push(format!("{}：解析失败 {error:#}", source.name));
+                continue;
             }
-            Err(error) => errors.push(format!("{}：解析失败 {error:#}", source.name)),
+        };
+        for mapping in mappings.values() {
+            if mapping.source_id != source.id {
+                continue;
+            }
+            if let Some(channel) = document
+                .channels
+                .iter()
+                .find(|channel| channel.id == mapping.source_channel_id)
+            {
+                if let Some((_, name)) = channel.names.first() {
+                    mapping_displays.insert(
+                        (mapping.source_id.clone(), mapping.source_channel_id.clone()),
+                        name.clone(),
+                    );
+                }
+            }
+        }
+        let (candidates, owners, source_programmes) = match_source(
+            &targets, &document, &mappings, &source.id, config, past, future,
+        );
+        for candidate in &candidates {
+            let row = &mut rows[candidate.target];
+            if row.source_id.is_empty() || candidate.manual {
+                row.via = candidate.via.clone();
+                row.source_id = source.id.clone();
+                row.programmes = if owners.get(&candidate.channel_id) == Some(&candidate.target) {
+                    source_programmes
+                        .get(&candidate.channel_id)
+                        .map(Vec::len)
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+            }
+            let target = &targets[candidate.target];
+            if !seen.contains(&target.out_id) {
+                seen.insert(target.out_id.clone());
+                channels.push(Channel {
+                    id: target.out_id.clone(),
+                    names: vec![(None, target.name.clone())],
+                    raw_children: document
+                        .channels
+                        .iter()
+                        .find(|channel| channel.id == candidate.channel_id)
+                        .map(|channel| channel.raw_children.clone())
+                        .unwrap_or_default(),
+                });
+            }
+            if owners.get(&candidate.channel_id) == Some(&candidate.target) {
+                for programme in source_programmes
+                    .get(&candidate.channel_id)
+                    .into_iter()
+                    .flatten()
+                {
+                    let mut programme = programme.clone();
+                    programme.channel = target.out_id.clone();
+                    programmes.push(programme);
+                }
+            }
         }
     }
 
@@ -189,6 +362,26 @@ async fn collect(state: &Arc<AppState>, config: &Config) -> Result<Summary> {
     fs::write(&file, xml.as_bytes()).with_context(|| format!("写 {}", file.display()))?;
     let gz = directory.join("epg.xml.gz");
     write_gzip(&gz, xml.as_bytes()).with_context(|| format!("写 {}", gz.display()))?;
+    *state
+        .epg
+        .match_rows
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = rows;
+    if !mapping_displays.is_empty() {
+        let mut map = state
+            .epg
+            .mappings
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        for mapping in map.values_mut() {
+            if let Some(name) = mapping_displays
+                .get(&(mapping.source_id.clone(), mapping.source_channel_id.clone()))
+            {
+                mapping.source_display_name = name.clone();
+            }
+        }
+        let _ = save_mappings(state, &map);
+    }
 
     Ok(Summary {
         channels: channels.len(),
@@ -196,6 +389,146 @@ async fn collect(state: &Arc<AppState>, config: &Config) -> Result<Summary> {
         kept: programmes.len(),
         translated,
     })
+}
+
+/// 本地频道及其 EPG 输出标识。
+struct Target {
+    gid: String,
+    cid: String,
+    name: String,
+    out_id: String,
+    tvg_id: Option<String>,
+    normalized: String,
+}
+
+struct Candidate {
+    target: usize,
+    channel_id: String,
+    via: String,
+    manual: bool,
+}
+
+fn channel_targets(config: &Config) -> Vec<Target> {
+    let mut targets = Vec::new();
+    for group in &config.groups {
+        for channel in &group.channels {
+            let tvg_id = ["tvg_id", "tvg-id", "epg_id"]
+                .iter()
+                .find_map(|key| {
+                    channel
+                        .extra
+                        .get(*key)
+                        .and_then(|value| value.as_str())
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                })
+                .map(str::to_string);
+            let out_id = tvg_id.clone().unwrap_or_else(|| channel.id.clone());
+            targets.push(Target {
+                gid: group.id.clone(),
+                cid: channel.id.clone(),
+                name: channel.name.clone(),
+                out_id,
+                tvg_id: tvg_id.map(|value| value.to_lowercase()),
+                normalized: normalize_name(&channel.name),
+            });
+        }
+    }
+    targets
+}
+
+fn normalize_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>()
+        .to_lowercase()
+}
+
+fn duplicate_out_ids(targets: &[Target], out_id: &str) -> bool {
+    targets
+        .iter()
+        .filter(|target| target.out_id == out_id)
+        .count()
+        > 1
+}
+
+type MatchResult = (
+    Vec<Candidate>,
+    HashMap<String, usize>,
+    HashMap<String, Vec<Programme>>,
+);
+
+fn match_source(
+    targets: &[Target],
+    document: &DocumentData,
+    mappings: &HashMap<String, Mapping>,
+    source_id: &str,
+    config: &Config,
+    past: i64,
+    future: i64,
+) -> MatchResult {
+    let by_id: HashMap<String, &Channel> = document
+        .channels
+        .iter()
+        .map(|channel| (channel.id.to_lowercase(), channel))
+        .collect();
+    let mut by_name: HashMap<String, &Channel> = HashMap::new();
+    for channel in &document.channels {
+        for (_, name) in &channel.names {
+            by_name.entry(normalize_name(name)).or_insert(channel);
+        }
+    }
+    let mut candidates = Vec::new();
+    for (index, target) in targets.iter().enumerate() {
+        let key = format!("{}/{}", target.gid, target.cid);
+        let manual = mappings.get(&key).filter(|mapping| {
+            mapping.source_id == source_id && !mapping.source_channel_id.is_empty()
+        });
+        let (channel, via, is_manual) = if let Some(mapping) = manual {
+            let channel = by_id
+                .get(&mapping.source_channel_id.to_lowercase())
+                .copied();
+            match channel {
+                Some(channel) => (Some(channel), "manual", true),
+                None => (None, "none", false),
+            }
+        } else if let Some(tvg_id) = &target.tvg_id {
+            match by_id.get(tvg_id) {
+                Some(channel) => (Some(*channel), "tvg-id", false),
+                None => (None, "none", false),
+            }
+        } else if config.epg.match_by_name {
+            match by_name.get(&target.normalized) {
+                Some(channel) => (Some(*channel), "name", false),
+                None => (None, "none", false),
+            }
+        } else {
+            (None, "none", false)
+        };
+        if let Some(channel) = channel {
+            candidates.push(Candidate {
+                target: index,
+                channel_id: channel.id.clone(),
+                via: via.to_string(),
+                manual: is_manual,
+            });
+        }
+    }
+    let mut owners: HashMap<String, usize> = HashMap::new();
+    for candidate in &candidates {
+        owners.insert(candidate.channel_id.clone(), candidate.target);
+    }
+    let mut source_programmes: HashMap<String, Vec<Programme>> = HashMap::new();
+    for programme in &document.programmes {
+        if in_window(programme, past, future) {
+            source_programmes
+                .entry(programme.channel.clone())
+                .or_default()
+                .push(programme.clone());
+        }
+    }
+    (candidates, owners, source_programmes)
 }
 
 /// 取 EPG 源正文：`xml` 抓 URL；`script` 跑 `<cache>/epg/scripts/` 下的 Python。
@@ -539,27 +872,6 @@ fn past_limit(config: &Config, now: i64) -> i64 {
     }
 }
 
-/// 频道匹配键：频道名 + 显式的 EPG 标识（`tvg_id`/`tvg-id`/`epg_id`）。
-fn channel_keys(config: &Config) -> HashSet<String> {
-    let mut keys = HashSet::new();
-    for group in &config.groups {
-        for channel in &group.channels {
-            if config.epg.match_by_name {
-                keys.insert(channel.name.trim().to_string());
-            }
-            for key in ["tvg_id", "tvg-id", "epg_id"] {
-                if let Some(value) = channel.extra.get(key).and_then(|value| value.as_str()) {
-                    if !value.trim().is_empty() {
-                        keys.insert(value.trim().to_string());
-                    }
-                }
-            }
-        }
-    }
-    keys.remove("");
-    keys
-}
-
 /// 解析结果。
 #[derive(Debug, Default)]
 pub struct DocumentData {
@@ -569,6 +881,7 @@ pub struct DocumentData {
 
 impl DocumentData {
     /// 只保留能匹配到本服务频道的内容。
+    #[cfg(test)]
     fn matched(self, keys: &HashSet<String>) -> Self {
         let channels: Vec<Channel> = self
             .channels
@@ -995,6 +1308,113 @@ mod tests {
         assert!(!in_window(&old, now - 3 * 86_400, now + 86_400));
         assert!(in_window(&fresh, now - 3 * 86_400, now + 86_400));
         assert!(!in_window(&far, now - 3 * 86_400, now + 86_400));
+    }
+
+    #[test]
+    fn channel_targets_use_tvg_id_and_normalized_name() {
+        let mut config = Config::default();
+        let mut group = crate::config::model::Group::default();
+        group.id = "g".into();
+        let mut first = crate::config::model::Channel::default();
+        first.id = "e1".into();
+        first.name = "CCTV-1 综合".into();
+        first
+            .extra
+            .insert("tvg_id".into(), toml::Value::String("cctv1".into()));
+        let mut second = crate::config::model::Channel::default();
+        second.id = "e2".into();
+        second.name = " cctv-3　综艺 ".into();
+        group.channels = vec![first, second];
+        config.groups.push(group);
+
+        let targets = channel_targets(&config);
+        assert_eq!(targets[0].out_id, "cctv1");
+        assert_eq!(targets[1].out_id, "e2");
+        assert_eq!(targets[1].normalized, "cctv-3综艺");
+        assert_eq!(normalize_name("  A　B  "), "ab");
+    }
+
+    #[test]
+    fn match_source_prefers_tvg_then_name_and_last_owner_wins() {
+        let mut config = Config::default();
+        let mut group = crate::config::model::Group::default();
+        group.id = "g".into();
+        let mut e1 = crate::config::model::Channel::default();
+        e1.id = "e1".into();
+        e1.name = "CCTV-1 综合".into();
+        e1.extra
+            .insert("tvg_id".into(), toml::Value::String("cctv1".into()));
+        let mut e2 = crate::config::model::Channel::default();
+        e2.id = "e2".into();
+        e2.name = "cctv-1 综合".into();
+        let mut e3 = crate::config::model::Channel::default();
+        e3.id = "e3".into();
+        e3.name = "CCTV-3 综艺".into();
+        group.channels = vec![e1, e2, e3];
+        config.groups.push(group);
+        let targets = channel_targets(&config);
+        let document = parse(
+            r#"<tv><channel id="cctv1"><display-name>CCTV-1 综合</display-name></channel>
+<channel id="cctv3"><display-name>CCTV-3 综艺</display-name></channel>
+<programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="cctv1"><title>A</title></programme>
+<programme start="20261020090000 +0000" stop="20261020100000 +0000" channel="cctv1"><title>B</title></programme>
+<programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="cctv3"><title>C</title></programme></tv>"#,
+        )
+        .expect("解析");
+        let (candidates, owners, programmes) = match_source(
+            &targets,
+            &document,
+            &HashMap::new(),
+            "s1",
+            &config,
+            0,
+            4_000_000_000,
+        );
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates[0].via, "tvg-id");
+        assert_eq!(candidates[1].via, "name");
+        assert_eq!(owners["cctv1"], 1, "配置顺序最后的同名频道获得节目");
+        assert_eq!(programmes["cctv1"].len(), 2);
+        assert_eq!(programmes["cctv3"].len(), 1);
+    }
+
+    #[test]
+    fn manual_mapping_channel_is_used() {
+        let mut config = Config::default();
+        let mut group = crate::config::model::Group::default();
+        group.id = "g".into();
+        let mut channel = crate::config::model::Channel::default();
+        channel.id = "e6".into();
+        channel.name = "本地频道".into();
+        group.channels = vec![channel];
+        config.groups.push(group);
+        let targets = channel_targets(&config);
+        let document = parse(
+            r#"<tv><channel id="only"><display-name>ONLY</display-name></channel>
+<programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="only"><title>A</title></programme></tv>"#,
+        )
+        .expect("解析");
+        let mut mappings = HashMap::new();
+        mappings.insert(
+            "g/e6".into(),
+            Mapping {
+                source_id: "s1".into(),
+                source_channel_id: "only".into(),
+                ..Mapping::default()
+            },
+        );
+        let (candidates, _, _) = match_source(
+            &targets,
+            &document,
+            &mappings,
+            "s1",
+            &config,
+            0,
+            4_000_000_000,
+        );
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].via, "manual");
+        assert_eq!(candidates[0].channel_id, "only");
     }
 
     #[test]

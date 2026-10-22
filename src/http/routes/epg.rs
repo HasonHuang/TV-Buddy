@@ -1,7 +1,7 @@
 //! EPG 公开文档与面板接口。
 //!
 //! 公开面：`/epg.xml`、`/epg.xml.gz`、`/epg`。EPG 关闭时三者都 `404`（S-EP-05）。
-//! 私有面：`/panel/api/epg/{status,refresh}`（S-EP-12 的 P1 子集）。
+//! 私有面：`/panel/api/epg/{status,refresh,mappings,mapping,match-report}`。
 
 use std::{collections::HashMap, path::Path as FsPath, sync::Arc};
 
@@ -102,6 +102,69 @@ pub async fn refresh(
         }))),
         Err(error) => Err(ApiError::internal(format!("{error:#}"))),
     }
+}
+
+/// `GET /panel/api/epg/mappings`——手工映射表。
+pub async fn mappings(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
+    Json(json!({
+        "mappings": epg::mappings(&state),
+        "extra": [],
+    }))
+}
+
+/// `POST /panel/api/epg/mapping`——设置或清除手工映射。
+pub async fn mapping(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let text = |key: &str| {
+        body.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let gid = text("gid");
+    let cid = text("cid");
+    if gid.is_empty() || cid.is_empty() {
+        return Err(ApiError::bad_request("缺少 gid/cid"));
+    }
+    match epg::set_mapping(
+        &state,
+        &gid,
+        &cid,
+        &text("source_id"),
+        &text("source_channel_id"),
+    ) {
+        Ok(Some(mapping)) => Ok(Json(json!({ "ok": true, "mapping": mapping }))),
+        Ok(None) => Ok(Json(json!({ "ok": true, "cleared": true }))),
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
+}
+
+/// `GET /panel/api/epg/match-report`——目标式文本报告。
+pub async fn match_report(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Response {
+    let rows = state
+        .epg
+        .match_rows
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    let matched = rows
+        .iter()
+        .filter(|row| !row.source_id.is_empty() && row.via != "none" && row.via != "duplicate")
+        .count();
+    let empty = rows.iter().filter(|row| row.via == "none").count();
+    let mut body = format!("matched_count={matched} empty_count={empty} extra_count=0\n");
+    body.push_str("gid    cid  name                   out_id       via       src_id     pc\n");
+    for row in &rows {
+        body.push_str(&format!(
+            "{:<6} {:<4} {:<22} {:<12} {:<9} {:<9} {}\n",
+            row.gid, row.cid, row.name, row.out_id, row.via, row.source_id, row.programmes
+        ));
+    }
+    ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response()
 }
 
 /// 读取并解析生成的节目单；关闭或缺失时返回 `None`。

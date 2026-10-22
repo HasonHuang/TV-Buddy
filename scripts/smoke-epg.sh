@@ -99,7 +99,7 @@ done
 check "EPG XML 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$B/epg.xml")"
 check "EPG XML 类型" "application/xml; charset=utf-8" "$(header "$B/epg.xml" content-type)"
 check "EPG 生成者" "1" "$(grep -c 'generator-info-name="iptv-proxy"' "$WORK/body")"
-check "EPG 含匹配频道" "1" "$(grep -c '<channel id="cctv1">' "$WORK/body")"
+check "EPG 含匹配频道" "1" "$(grep -c '<channel id="c1">' "$WORK/body")"
 check "EPG 含窗口内节目" "1" "$(grep -c '新闻' "$WORK/body")"
 check "EPG 过滤旧节目" "0" "$(grep -c '老节目' "$WORK/body")"
 
@@ -111,8 +111,8 @@ check "EPG 浏览页 200" "200" "$(curl -s -o "$WORK/page.html" -w '%{http_code}
 check "EPG 浏览页含前端资源" "1" "$(grep -c '/assets/epg-' "$WORK/page.html")"
 
 check "EPG 频道接口 200" "200" "$(curl -s -o "$WORK/channels.json" -w '%{http_code}' "$B/epg/api/channels")"
-check "EPG 频道接口计数" "1" "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(1 if d["count"]>=1 and d["channels"][0]["id"]=="cctv1" else 0)' "$WORK/channels.json")"
-check "EPG 节目接口 200" "200" "$(curl -s -o "$WORK/prog.json" -w '%{http_code}' "$B/epg/api/programmes/cctv1")"
+check "EPG 频道接口计数" "1" "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(1 if d["count"]>=1 and d["channels"][0]["id"]=="c1" else 0)' "$WORK/channels.json")"
+check "EPG 节目接口 200" "200" "$(curl -s -o "$WORK/prog.json" -w '%{http_code}' "$B/epg/api/programmes/c1")"
 check "EPG 节目含标题" "1" "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(1 if d["count"]==1 and d["programmes"][0]["title"]=="新闻" else 0)' "$WORK/prog.json")"
 check "EPG 搜索命中" "1" "$(curl -s "$B/epg/api/search?q=%E6%96%B0%E9%97%BB" | python3 -c 'import json,sys;print(1 if json.load(sys.stdin)["count"]==1 else 0)')"
 
@@ -123,6 +123,12 @@ TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("toke
 check "EPG 状态 200" "200" "$(curl -s -o "$WORK/status.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/status")"
 check "EPG 状态已匹配频道" "1" "$(python3 -c 'import json,sys;print(1 if json.load(open(sys.argv[1]))["channels"]>=1 else 0)' "$WORK/status.json")"
 check "EPG 刷新 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/refresh")"
+
+check "EPG 映射设置 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"gid":"g1","cid":"c1","source_id":"s1","source_channel_id":"cctv1"}' "$B/panel/api/epg/mapping")"
+check "EPG 刷新后映射" "1" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/refresh" >/dev/null; curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/mappings" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if d["mappings"]["g1/c1"]["source_id"]=="s1" else 0)')"
+check "EPG 匹配报告 200" "200" "$(curl -s -o "$WORK/report.txt" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/match-report")"
+check "EPG 报告含 manual" "1" "$(grep -c 'manual' "$WORK/report.txt")"
+check "EPG 映射清除 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"gid":"g1","cid":"c1","source_id":"","source_channel_id":""}' "$B/panel/api/epg/mapping")"
 
 if [ "$fail" = "0" ]; then
   echo "EPG 冒烟测试全部通过"

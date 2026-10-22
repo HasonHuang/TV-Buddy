@@ -38,7 +38,7 @@ flowchart LR
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 173 项（114 单元 + 59 集成） |
+| `cargo test --offline` | ✅ 177 项（117 单元 + 60 集成） |
 | 冒烟脚本 | ✅ 15 个（assets、panel、resolver、share、remux、schedule、timeshift、record、record-dash、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
@@ -925,7 +925,7 @@ P2 已关闭；后续计划见 §0.6。
 - 单元：MPD 摘要、Timeline/BaseURL、`r=-1` + `timeShiftBufferDepth`、多 BaseURL、SegmentList、主/媒体清单、时间窗、URL 池轮询、媒体序号、动态清单无 `ENDLIST`、BaseURL 查询串继承。
 - 集成：`dash_mode_converts_mpd_to_hls_and_proxies_segments` 覆盖主清单、媒体清单、init、切片、状态与 `keep_seconds=4`；`dash_mode_resolver_url_is_used_for_media_playlist` 覆盖解析脚本地址沿用到媒体清单；`proxy_mode_rewrites_mpd_base_url_and_proxies_segments` 覆盖 proxy+MPD 相对 BaseURL、init/切片与查询串代理。
 - `smoke-m3.sh` 新增 proxy+MPD：入口 200、`application/dash+xml`、相对 BaseURL 改写、切片代理。
-- `cargo test --offline` 173 项（114 单元 + 59 集成）。
+- `cargo test --offline` 177 项（117 单元 + 60 集成）。
 
 ## 3bd. 定时录制 DASH 频道（已实现）
 
@@ -945,7 +945,26 @@ P2 已关闭；后续计划见 §0.6。
 验证：
 - 集成：`dash_schedule_rejects_static_mpd` 覆盖静态 MPD 失败与目标错误串。
 - 冒烟：`scripts/smoke-record-dash.sh` 生成动态 MPD，验证采集、并轨、下载与产物时长；`scripts/smoke-record.sh` 继续覆盖 HLS 成功路径。
-- `cargo test --offline` 173 项（114 单元 + 59 集成）。
+- `cargo test --offline` 177 项（117 单元 + 60 集成）。
+
+## 3be. EPG 匹配、手工映射与报告（已实现）
+
+证据：F-008、F-010 §9；目标规则见 `docs/findings/dynamic/10`。
+
+| 项 | 结果 | 位置 |
+| --- | --- | --- |
+| 输出标识 | `out_id = tvg_id || channel.id`；XMLTV `channel/@id` 与节目 `channel` 均改写为 `out_id` | `src/epg.rs` |
+| 匹配优先级 | 手工映射 → `tvg_id`（大小写不敏感）→ 名称（删全部空白含 U+3000、转小写、完全相等） | 同上 |
+| 冲突 | 同一源频道被多个本地频道命中 → 配置顺序最后一个获得节目；重复 `out_id` 标为 `duplicate` | 同上 |
+| 手工映射 | `GET /panel/api/epg/mappings`；`POST /panel/api/epg/mapping`；空 `source_id`/`source_channel_id` 清除 | `src/http/routes/epg.rs` |
+| 持久化 | `<cache>/epg/mappings.json`；启动载入；刷新后补 `source_display_name` | `src/epg.rs` |
+| 报告 | `GET /panel/api/epg/match-report` 返回 `text/plain`：计数行 + `gid cid name out_id via src_id pc` | `src/http/routes/epg.rs` |
+| 多源 | 同一 `out_id` 只输出一个频道；各源节目按本地频道归并 | `src/epg.rs` |
+
+验证：
+- 单元：`channel_targets_use_tvg_id_and_normalized_name`、`match_source_prefers_tvg_then_name_and_last_owner_wins`、`manual_mapping_channel_is_used`。
+- 集成：`epg_manual_mapping_and_match_report` 覆盖设置/读取/清除映射、`manual` 报告与刷新回退。\n- 冒烟：`scripts/smoke-epg.sh` 覆盖映射设置、映射表、匹配报告与清除。
+- `cargo test --offline` 177 项（117 单元 + 60 集成）。
 
 ## 4. 进度日志
 
@@ -994,6 +1013,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **P4 DASH→HLS**：MPD 完整解析、HLS 主/媒体清单、init/切片代理、`mpd_keep_seconds`、多 `<BaseURL>` 池、`/dash/status` | ✅ §3bc |
 | 2026-10-21 | **翻译服务**：兼容 MTranServer v5、旧接口与单条回退；支持 Token；真实服务联调通过 | ✅ §3bb |
 | 2026-10-22 | **DASH 定时录制**：动态 MPD 增量抓轨、`ffmpeg -c copy` 并轨 MKV；静态 MPD 失败语义对齐；新增冒烟；双架构重出包 | ✅ §3bd |
+| 2026-10-22 | **EPG 匹配**：`out_id` 改写、tvg-id/名称优先级、最后命中、duplicate；手工映射持久化与 `match-report` | ✅ §3be |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）
 

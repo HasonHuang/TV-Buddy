@@ -208,6 +208,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/logo/suggest", post(routes::logo::suggest))
         .route("/panel/api/epg/status", get(routes::epg::status))
         .route("/panel/api/epg/refresh", post(routes::epg::refresh))
+        .route("/panel/api/epg/mappings", get(routes::epg::mappings))
+        .route("/panel/api/epg/mapping", post(routes::epg::mapping))
+        .route(
+            "/panel/api/epg/match-report",
+            get(routes::epg::match_report),
+        )
         .route("/panel/api/groups", post(routes::groups::create_group))
         .route("/panel/api/groups/export", get(routes::groups::export_all))
         .route(
