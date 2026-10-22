@@ -66,7 +66,7 @@ flowchart LR
 | 旧数据迁移 `./var/dash` | 不实现 | 仅 088 行为，v0.8.2 无 |
 | DASH URL 池 `pool≥2` | 已实现（目标取用未验） | 多个 `<BaseURL>`；视频用 `pool[0]`，音频/字幕轮询其余；目标正常取用未观测（F-015） |
 | DASH `mpd_keep_seconds` | 已实现 | 媒体清单按末尾时间窗裁剪；目标 proxy+MPD 分支未验 |
-| `proxy` 模式 MPD 代理 | 已实现（相对地址） | 相对 `<BaseURL>` 改写到本服务 `mpd/`，init/切片经本服务代理；绝对 `<BaseURL>` 保持直连；`mpd_keep_seconds` 未裁剪（目标分支未完整观测） |
+| `proxy` 模式 MPD 代理 | 已实现（相对地址） | 相对 `<BaseURL>` 改写到本服务 `mpd/`，init/切片与查询串经本服务代理；绝对 `<BaseURL>` 保持直连；`mpd_keep_seconds` 未裁剪（目标分支未完整观测） |
 | CENC ClearKey 解密 | 不实现 | 目标只检测 KID、不解密；本实现按原字节代理 |
 | 多 CDN 故障切换 | 未复刻 | 目标未观测到切换；DASH 多 BaseURL 仅做顺序回退 |
 | `/epg/api/*` 响应形状 | 自定 | 目标仅登记路由（S-EP-16） |

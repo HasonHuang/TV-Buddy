@@ -6,7 +6,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     body::Body,
-    extract::{Path, Query, State},
+    extract::{Path, Query, RawQuery, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -269,6 +269,7 @@ pub async fn wildcard(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path((gid, cid, rest)): Path<(String, String, String)>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     let rest = rest.trim_start_matches('/').to_string();
     if let Some(name) = rest.strip_prefix("timeshift/") {
@@ -295,7 +296,7 @@ pub async fn wildcard(
         }
     }
     if let Some(path) = rest.strip_prefix("mpd/") {
-        return mpd_segment(&state, &gid, &cid, path).await;
+        return mpd_segment(&state, &gid, &cid, path, raw_query.as_deref()).await;
     }
     match rest.as_str() {
         // 变体媒体清单：只有上游是主清单时存在（S-PROXY-07）。
@@ -564,7 +565,13 @@ fn xml_escape(value: &str) -> String {
 }
 
 /// 代理 `proxy` 模式 MPD 的相对切片。路径来自改写后的 `<BaseURL>`。
-async fn mpd_segment(state: &Arc<AppState>, gid: &str, cid: &str, path: &str) -> Response {
+async fn mpd_segment(
+    state: &Arc<AppState>,
+    gid: &str,
+    cid: &str,
+    path: &str,
+    query: Option<&str>,
+) -> Response {
     let path = path.trim_start_matches('/');
     if path.is_empty() || path.split('/').any(|part| part == "..") {
         return (StatusCode::BAD_REQUEST, "Bad path").into_response();
@@ -595,9 +602,12 @@ async fn mpd_segment(state: &Arc<AppState>, gid: &str, cid: &str, path: &str) ->
     } else {
         base.join(path)
     };
-    let Ok(target) = target else {
+    let Ok(mut target) = target else {
         return (StatusCode::BAD_REQUEST, "Bad path").into_response();
     };
+    if let Some(query) = query.filter(|query| !query.is_empty()) {
+        target.set_query(Some(query));
+    }
     let bytes = match fetch_bytes(state, target.as_str(), gid, cid).await {
         Ok(bytes) => bytes,
         Err(error) => {
