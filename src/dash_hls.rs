@@ -32,8 +32,6 @@ use crate::{
     state::AppState,
 };
 
-/// 会话空闲回收时间。
-const IDLE: Duration = Duration::from_secs(120);
 /// 默认伪装扩展名。
 const EXTS: &[&str] = &["jpg", "png", "gif", "bmp", "webp"];
 
@@ -257,16 +255,25 @@ impl Manager {
             .and_then(|session| session.entries.get(path).cloned())
     }
 
-    fn ensure_janitor(self: &Arc<Self>) {
+    fn ensure_janitor(self: &Arc<Self>, state: &Arc<AppState>) {
         if self.janitor.swap(true, Ordering::SeqCst) {
             return;
         }
         let manager = self.clone();
+        let state = state.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(30)).await;
+                let idle = Duration::from_secs(
+                    state
+                        .snapshot()
+                        .cache
+                        .dash
+                        .ondemand_idle_secs
+                        .clamp(5, 86_400),
+                );
                 let mut sessions = manager.sessions.lock().unwrap_or_else(|e| e.into_inner());
-                sessions.retain(|_, session| session.last.elapsed() <= IDLE);
+                sessions.retain(|_, session| session.last.elapsed() <= idle);
             }
         });
     }
@@ -300,7 +307,7 @@ impl Manager {
                 .max()
                 .unwrap_or(0),
         );
-        self.ensure_janitor();
+        self.ensure_janitor(state);
         info!(
             gid,
             cid,
@@ -423,9 +430,22 @@ impl Manager {
             return Some(bytes_response(bytes, &entry, "public, max-age=300"));
         }
         let mut last_error = None;
+        let timeout = Duration::from_secs(
+            state
+                .snapshot()
+                .cache
+                .dash
+                .segment_timeout_secs
+                .clamp(1, 120),
+        );
         for url in &entry.urls {
-            match crate::http::routes::stream::fetch_bytes(state, url, gid, cid).await {
-                Ok(bytes) => {
+            match tokio::time::timeout(
+                timeout,
+                crate::http::routes::stream::fetch_bytes(state, url, gid, cid),
+            )
+            .await
+            {
+                Ok(Ok(bytes)) => {
                     if let Some(parent) = path.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
@@ -433,8 +453,11 @@ impl Manager {
                     self.touch(gid, cid);
                     return Some(bytes_response(bytes, &entry, "public, max-age=300"));
                 }
-                Err(error) => {
+                Ok(Err(error)) => {
                     last_error = Some(error.to_string());
+                }
+                Err(_) => {
+                    last_error = Some("segment timeout".to_string());
                 }
             }
         }

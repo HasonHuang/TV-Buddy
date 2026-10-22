@@ -591,6 +591,29 @@ async fn media_upstream_entry_is_rewritten_media_playlist() {
 }
 
 #[tokio::test]
+async fn prefetch_caches_media_playlist_segments_except_tail() {
+    let fixture = fixture().await;
+    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let dir = fixture.dir.join("cache/seg_bytes");
+    let mut count = 0;
+    for _ in 0..40 {
+        count = std::fs::read_dir(&dir)
+            .map(|read| {
+                read.filter_map(Result::ok)
+                    .filter(|item| item.file_type().map(|kind| kind.is_file()).unwrap_or(false))
+                    .count()
+            })
+            .unwrap_or(0);
+        if count >= 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(count, 1, "默认 skip_tail=1，应只预取第一条切片");
+}
+
+#[tokio::test]
 async fn media_upstream_variant_path_redirects_to_error_url() {
     let fixture = fixture().await;
     let response = fetch(&fixture, "/pg/c1/video/index.txt").await;

@@ -422,8 +422,72 @@ fn media_entry(
     );
     state.segments.register(gid, cid, &rendered.segments);
     proxy::save_index(&state.cache_dir, gid, cid, &rendered.segments);
+    spawn_prefetch(
+        state.clone(),
+        config.cache.prefetch.clone(),
+        gid.to_string(),
+        cid.to_string(),
+        rendered.segments.clone(),
+    );
     state.stats.record_playlist();
     media_response(rendered.body, upstream)
+}
+
+/// 按 `[cache.prefetch]` 预取媒体清单切片；失败只记日志。
+fn spawn_prefetch(
+    state: Arc<AppState>,
+    config: crate::config::model::CachePrefetchCfg,
+    gid: String,
+    cid: String,
+    mut entries: Vec<(String, String, String)>,
+) {
+    if !config.enabled || entries.is_empty() {
+        return;
+    }
+    let skip_tail = config.skip_tail as usize;
+    if skip_tail > 0 && entries.len() > skip_tail {
+        entries.truncate(entries.len() - skip_tail);
+    }
+    if config.prefetch_limit > 0 {
+        entries.truncate(config.prefetch_limit as usize);
+    }
+    if entries.is_empty() {
+        return;
+    }
+    let timeout = std::time::Duration::from_secs(config.timeout.clamp(1, 120));
+    let concurrency = config.concurrency.clamp(1, 32) as usize;
+    tokio::spawn(async move {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
+        let mut tasks = tokio::task::JoinSet::new();
+        for (suffix, url, ext) in entries {
+            let path = proxy::segment_path(&state.cache_dir, &gid, &cid, &suffix, &ext);
+            if path.is_file() {
+                continue;
+            }
+            let Ok(permit) = semaphore.clone().acquire_owned().await else {
+                break;
+            };
+            let state = state.clone();
+            let gid = gid.clone();
+            let cid = cid.clone();
+            tasks.spawn(async move {
+                let _permit = permit;
+                let Ok(result) =
+                    tokio::time::timeout(timeout, fetch_bytes(&state, &url, &gid, &cid)).await
+                else {
+                    return;
+                };
+                let Ok(bytes) = result else {
+                    return;
+                };
+                if let Some(parent) = path.parent() {
+                    let _ = tokio::fs::create_dir_all(parent).await;
+                }
+                let _ = tokio::fs::write(path, bytes).await;
+            });
+        }
+        while tasks.join_next().await.is_some() {}
+    });
 }
 
 /// 媒体清单响应：缓存窗口取上游 `#EXT-X-TARGETDURATION`（S-PROXY-03）。
