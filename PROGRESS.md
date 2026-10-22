@@ -107,6 +107,56 @@ flowchart LR
 
 当前无阻塞项。
 
+### 0.8 未完成任务总表（2026-10-22）
+
+> 本表汇总当前代码、§0.5、README 与 `docs/spec/08` 的未完成项。P0–P4 已交付项不重复。
+> 类型：**待做** = 代码缺口；**待验** = 需要目标容器或真实上游；**不做** = 已登记差异，不计入待办。
+> 优先级：P0 影响播放/订阅兼容；P1 影响配置与运维；P2 影响证据完整度。
+>
+> §0.2 的百分比只表示原计划 P0–P3 的完成度；本节的残余项不计入该百分比。
+
+#### 0.8.1 待做（代码缺口）
+
+| ID | 优先级 | 项 | 现状 | 待做 | 依据 |
+| --- | --- | --- | --- | --- | --- |
+| U-01 | P0 | 订阅注入 `x-tvg-url` | `playlist::header()` 只输出 `#EXTM3U` 与 `m3u_header_lines` | `[epg].enabled = true` 时在首行输出 `x-tvg-url="<host>/epg.xml.gz"`；补单元与集成测试 | F-006、`design/03` §5.2 |
+| U-02 | P0 | 缺失 EPG 端点 | 已实现 `status`、`refresh`、`mappings`、`mapping`、`match-report` 与 3 个公开 JSON；目标路由表仍有 12 项未注册 | 私有面 `/panel/api/epg/`：`POST regenerate`、`GET programmes/:channel`、`GET scripts`、`POST extra`、`POST script`、`POST script-delete`、`POST cron-preview`、`GET suggest/:gid/:cid`、`GET search`、`GET viewer-channels`、`GET source-channels/:id`、`GET tz-preview/:id`；先补路由与最小响应，再按目标证据校正 | F-010、F-013、`design/03` §6.3 |
+| U-03 | P0 | EPG 配置语义未生效 | `public_viewer_enabled`、`allow_scripts`、`record_pad_before_secs`、`record_pad_after_secs` 只建模，未读取 | 公开浏览页按 `public_viewer_enabled` 控制；`allow_scripts = false` 拒绝脚本源；从 EPG 建任务应用前后缓冲；缓冲目标语义需先确认 | `src/config/model.rs`、F-008、F-014 |
+| U-04 | P0 | `proxy` + MPD 分支不完整 | 相对 `<BaseURL>` 已改写并代理；绝对 `<BaseURL>` 直连；`mpd_keep_seconds` 未裁剪 | 代理绝对 `<BaseURL>` 的 init/切片；在 MPD 正文按 `mpd_keep_seconds` 裁剪；补查询串、失败回退与缓存测试 | `design/03` §4.2、F-015 |
+| U-05 | P1 | 目标配置段未建模 | `[cache.prefetch]`、`[cache.ttl]`、`[cache.segments]`、`[dash]`、`[remux]` 落在 `extra`，运行时使用固定参数 | 建模并接入预载、TTL、段上限、DASH/Remux 调参；未知键继续原样回写 | 目标配置 JSON、S-CACHE-04、`design/04` |
+| U-06 | P1 | 目标路由仍有资源/台标端点缺口 | 目标枚举含 `POST /panel/api/assets/convert`、`POST /panel/api/logo/restore`、`POST /panel/api/logo/animate`；当前未注册 | 先补响应形状与使用场景证据；证据不足时登记为不做，不猜字段 | F-010、F-012、`findings/dynamic/11` §1 |
+
+#### 0.8.2 待验（目标证据）
+
+| ID | 项 | 当前结论 | 需要的证据 |
+| --- | --- | --- | --- |
+| V-01 | DASH URL 池正常取用 | 已按视频 `pool[0]`、音频/字幕轮询其余实现；目标在 `pool≥2` 环境只拉 MPD 后零切片 | 目标正常 MPD + 多 `<BaseURL>` 样本；记录实际请求分布与回退顺序 |
+| V-02 | `proxy` + MPD 目标分支 | 仅相对 `<BaseURL>` 分支已对拍；绝对地址与时间窗裁剪未知 | 目标容器构造绝对 `<BaseURL>` 与多切片 MPD |
+| V-03 | `/epg/api/*` 响应形状 | 本实现形状自定；且 `spec/08` §16 与 `design/03` §8 对 v0.8.2/v0.8.8 路由版本记载冲突 | 目标响应逐字段抓取；先解决版本证据冲突，再与 U-02 一起对拍 |
+| V-04 | `/subs/{groups,preview}` 字段 | 行为与主要字段已实现；目标逐字段形状未完全对拍 | 目标请求/响应样本，重点比较 `trace`、`dropped_groups`、`out_groups` |
+| V-05 | 每频道独立代理 | 本实现按频道 > 分组 > 直连，覆盖播放、回看、Remux、录制、DASH 回看 | 目标覆盖顺序、认证头、失败回退与 `socks5` 行为 |
+| V-06 | `/unban` 配额与 `whoami` | 本实现已有每个 IP 30 天 3 次与 `whoami`；目标配额未实测 | 目标连续解封；记录状态码、`remaining` 与窗口重置 |
+| V-07 | 切片 TS 结构 | 本实现只保证字节代理；无 PAT/PMT/SDT 证据 | 真实上游 TS 切片；核对 PID 布局、SDT 与 `lumberjack` 水印（S-DIS-08/09） |
+| V-08 | `<P>` 算法 | 自研 `sha256("<gid>:<cid>")[:16]`；目标算法未解 | 更多 `(gid,cid)` 样本或反编译；低影响，不阻塞发布 |
+| V-09 | `[playlist]` / `[share]` 目标语义 | 本实现已覆盖主要路径；目标多 VPS 与聚合边界未完整对拍 | 目标 `merge_ttl_secs`、`merge_position`、`share` 角色切换与信任 IP 样本 |
+| V-10 | 面板与录制/EPG 交互差分 | API 对拍 22/22 差异 0；12 个面板分区与录制/EPG 完整流程未逐屏对拍 | 目标容器截图与操作录像；只比对行为，不复制目标前端代码、资源与文案 |
+
+#### 0.8.3 已登记为不做或仅回显
+
+以下项不计入上述待办。若要改变结论，先补目标证据。
+
+| 项 | 结论 | 依据 |
+| --- | --- | --- |
+| 缓存容量上限 | 不实现 | 目标配置存在但上限未生效（F-015） |
+| 旧数据迁移 `./var/dash` | 不实现 | 仅 v0.8.8 行为，v0.8.2 无 |
+| CENC/ClearKey 解密 | 不实现 | 目标只检测 KID，不解密；本实现按原字节代理 |
+| 多 CDN 故障切换 | 未复刻 | 目标未观测到切换；DASH 多 `<BaseURL>` 只做顺序回退 |
+| `l1/l2` 限流与每 IP 会话上限 | 不实现 | 触发条件未复现（F-010 §5） |
+| `random_id_enabled` 随机 ID | 仅回显 | 目标行为未观测；`link-info` 形状已对齐 |
+| `cache.backend = memory` | 仅回显 | 实际缓存仍落盘；目标 memory 统计恒 0（F-015） |
+| 播放侧 `compat_mode` 与 `srt_ua_keywords` | 不实现 | 目标未测出行为（D19 §3.5） |
+| `socks5` 代理 | 不支持 | 未知类型直连并告警；目标行为未验 |
+
 ## 1. 已完成（分阶段）
 
 ### Phase 0–1 · 规范、骨架与取得 ✅
