@@ -2358,6 +2358,9 @@ url = "{upstream}/dash/base.mpd"
         segment.bytes().await.expect("读切片").as_ref(),
         b"dash-segment"
     );
+    // BaseURL 的查询串会随切片请求转发。
+    let segment = fetch(&fixture, "/mpg/c1/mpd/chunk-v0-1.m4s?token=abc").await;
+    assert_eq!(segment.status(), StatusCode::OK);
 
     // 已有的相对 BaseURL 改写后仍保留 `sub/`，切片继续经本服务代理。
     let body = fetch(&fixture, "/mpg/c2.mpd")
