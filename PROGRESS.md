@@ -42,8 +42,8 @@ flowchart LR
 | 冒烟脚本 | ✅ 15 个（assets、panel、resolver、share、remux、schedule、timeshift、record、record-dash、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
-| 发布包 | ✅ amd64 3.6 MB、arm64 3.5 MB；`verify-release.sh` 通过 |
-| CI | ✅ [运行 39737997128](https://github.com/HasonHuang/sontv/actions/runs/39737997128)（`76c2043`）；fmt/clippy/test、CLI 冒烟与双架构 `verify-release.sh` 全绿；真实翻译联调本地通过 |
+| 发布包 | ✅ amd64 3.6 MB、arm64 3.3 MB；`verify-release.sh amd64` 与 `verify-release.sh arm64` 通过 |
+| CI | ✅ [运行 39772023805](https://github.com/HasonHuang/sontv/actions/runs/39772023805)（`9a505b7`）；fmt/clippy/test、CLI 冒烟与双架构 `verify-release.sh` 全绿；真实翻译联调本地通过 |
 
 ### 0.4 里程碑
 
@@ -993,7 +993,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **交互菜单**：无参数或 `menu` 打开；覆盖更新、地址、启停、状态、日志、端口、账号密码、重装、卸载与安装修复 | ✅ §3ba |
 | 2026-10-21 | **P4 DASH→HLS**：MPD 完整解析、HLS 主/媒体清单、init/切片代理、`mpd_keep_seconds`、多 `<BaseURL>` 池、`/dash/status` | ✅ §3bc |
 | 2026-10-21 | **翻译服务**：兼容 MTranServer v5、旧接口与单条回退；支持 Token；真实服务联调通过 | ✅ §3bb |
-| 2026-10-22 | **DASH 定时录制**：动态 MPD 增量抓轨、`ffmpeg -c copy` 并轨 MKV；静态 MPD 失败语义对齐；新增冒烟 | ✅ §3bd |
+| 2026-10-22 | **DASH 定时录制**：动态 MPD 增量抓轨、`ffmpeg -c copy` 并轨 MKV；静态 MPD 失败语义对齐；新增冒烟；双架构重出包 | ✅ §3bd |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）
 
