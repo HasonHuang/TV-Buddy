@@ -73,7 +73,7 @@ scripts/compare-p0.sh
 ## 覆盖范围与限制
 
 - 覆盖 P0 数据面：代理链路、六种模式的行为、Token 与 `access`、缓存窗口、切片。
-- 未覆盖：EPG、录制、推流、DASH 转封装、面板 UI 逐项交互、`remux`/`dash` 的实际转封装（需 `ffmpeg`）。
+- 未覆盖：面板 UI 逐项交互、推流；录制由 `scripts/smoke-record.sh` 与 `scripts/smoke-record-dash.sh` 覆盖（需 `ffmpeg`）。
 - 目标为 linux/amd64，本机跑 arm64 二进制；两侧都只经 HTTP 观测，不比较内部状态。
 
 ## P3 复验（2026-10-21）

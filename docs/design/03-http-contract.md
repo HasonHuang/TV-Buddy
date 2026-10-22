@@ -543,10 +543,12 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 项 | 规则 |
 | --- | --- |
 | 调度 | 每 10 秒扫描；开始时间已到 → `recording` |
-| 取材 | 抓媒体清单，增量下载切片并合并；主清单取最高码率 |
-| 产物 | `<cache>/recordings/<name>_<unix>.ts`；`format=mkv` 且有 ffmpeg 时转封装为 MKV |
+| 取材（HLS） | 抓媒体清单，增量下载切片并合并；主清单取最高码率 |
+| 取材（DASH） | 确认 `type=dynamic` 后，增量抓取各轨 init/切片；静态 MPD 直接失败 |
+| 产物（HLS） | `<cache>/recordings/<name>_<unix>.ts`；`format=mkv` 且有 ffmpeg 时转封装为 MKV |
+| 产物（DASH） | `<cache>/recordings/<name>_<unix>.mkv`；`ffmpeg -c copy` 并轨视频与音频 |
 | 状态 | `pending` / `recording` / `finished` / `failed` |
-| 失败 | 无切片（如静态 MPD）→ `failed`，`note` 记录原因 |
+| 失败 | 无切片（如静态 MPD）→ `failed`，`error` 记录原因；DASH 缺 ffmpeg → `failed` |
 | 时移 | 未实现（P2） |
 
 ### 6.15 直播回看（P1 已实现，代理频道）

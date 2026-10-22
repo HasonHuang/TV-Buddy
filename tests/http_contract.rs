@@ -2810,6 +2810,71 @@ script = "missing.py"
 }
 
 #[tokio::test]
+async fn dash_schedule_rejects_static_mpd() {
+    let fixture = fixture_with_extra(
+        r#"
+[[groups]]
+id = "rgd"
+name = "DASH 录制组"
+mode = "dash"
+access = "open"
+format = "mpd"
+[[groups.channels]]
+id = "c1"
+name = "静态 DASH"
+url = "{upstream}/dash/base.mpd"
+"#,
+    )
+    .await;
+    let session = login(&fixture).await;
+    let now = iptv_proxy::schedule::now_epoch();
+    let task = serde_json::json!({
+        "name": "静态 DASH",
+        "group_id": "rgd",
+        "channel_id": "c1",
+        "start_time": iptv_proxy::schedule::format_local(now - 2, 8),
+        "end_time": iptv_proxy::schedule::format_local(now + 8, 8),
+        "format": "mkv"
+    });
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/schedule", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .header("content-type", "application/json")
+        .body(task.to_string())
+        .send()
+        .await
+        .expect("新增");
+    assert_eq!(response.status(), StatusCode::OK);
+    iptv_proxy::schedule::spawn(fixture.state.clone());
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let list: serde_json::Value = serde_json::from_str(
+            &fixture
+                .client
+                .get(format!("{}/panel/api/schedule", fixture.base))
+                .header("authorization", format!("Bearer {session}"))
+                .send()
+                .await
+                .expect("列表")
+                .text()
+                .await
+                .expect("正文"),
+        )
+        .expect("JSON");
+        let task = &list[0];
+        if task["status"] == "failed" {
+            assert_eq!(task["error"], "录制区间内无可用切片");
+            return;
+        }
+        assert_ne!(task["status"], "finished", "静态 MPD 不应录制成功");
+        assert!(Instant::now() < deadline, "等待录制失败超时: {task}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+#[tokio::test]
 async fn schedule_from_epg_batch_creates_tasks_and_reports_failures() {
     let fixture = fixture().await;
     let session = login(&fixture).await;

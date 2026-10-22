@@ -2,11 +2,13 @@
 //!
 //! 证据：F-009 §2（S-REC-02）。
 //! 任务存在 `<cache>/schedule.json`；产物在 `<cache>/recordings/`。
-//! 录制按上游媒体清单增量下载切片并合并；`format=mkv` 且有 ffmpeg 时再转封装。
+//! HLS 录制按上游媒体清单增量下载切片并合并；`format=mkv` 且有 ffmpeg 时再转封装。
+//! DASH 录制增量抓取各轨 init/切片，结束后交给 ffmpeg 并轨为 MKV。
 
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::Write,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -275,6 +277,9 @@ async fn record(state: Arc<AppState>, task: Task, end: i64, stop: Arc<AtomicBool
     let Some(channel) = group.channels.iter().find(|c| c.id == task.channel_id) else {
         return fail(&state, &task, "Channel not found");
     };
+    if group.mode == "dash" {
+        return record_dash(&state, &task, end, &stop, channel).await;
+    }
     let mut url = channel.url.clone();
     let headers =
         crate::http::routes::stream::channel_headers(&state, &task.group_id, &task.channel_id);
@@ -397,6 +402,244 @@ async fn record(state: Arc<AppState>, task: Task, end: i64, stop: Arc<AtomicBool
             note.clone()
         };
     });
+}
+
+/// DASH 录制：按轨道增量抓取 init/切片，结束后用 ffmpeg 并轨为 MKV。
+///
+/// 目标在 DASH 录制时先并 `_merged_video_*` / `_merged_audio-*`，再
+/// `ffmpeg -c copy` 出 MKV（F-009 §2.3）。静态 MPD 与目标一样报
+/// `录制区间内无可用切片`。
+async fn record_dash(
+    state: &Arc<AppState>,
+    task: &Task,
+    end: i64,
+    stop: &AtomicBool,
+    channel: &crate::config::model::Channel,
+) {
+    let started = Instant::now();
+    if stop.load(Ordering::SeqCst) {
+        return fail(state, task, "录制已停止");
+    }
+    let url = match crate::resolver::resolve(state, &task.group_id, &task.channel_id, channel).await
+    {
+        Ok(Some(url)) => url,
+        Ok(None) => channel.url.clone(),
+        Err(error) => return fail(state, task, &format!("解析脚本失败: {error:#}")),
+    };
+    let mut presentation = match fetch_presentation(state, task, &url).await {
+        Ok(presentation) => presentation,
+        Err(error) => {
+            let reason = if error.contains("没有可转封装的轨道") {
+                "录制区间内无可用切片".to_string()
+            } else {
+                error
+            };
+            return fail(state, task, &reason);
+        }
+    };
+    if !presentation.is_live {
+        return fail(state, task, "录制区间内无可用切片");
+    }
+    let probe = tokio::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .await;
+    if !matches!(probe, Ok(output) if output.status.success()) {
+        return fail(state, task, "ffmpeg 不可用");
+    }
+    let dir = Path::new(&state.cache_dir).join("recordings");
+    if let Err(error) = fs::create_dir_all(&dir) {
+        return fail(state, task, &format!("建录制目录失败: {error}"));
+    }
+    let temp = dir.join(format!("tmp-{}", task.id));
+    let _ = fs::remove_dir_all(&temp);
+    if let Err(error) = fs::create_dir_all(&temp) {
+        return fail(state, task, &format!("建临时目录失败: {error}"));
+    }
+
+    struct Part {
+        kind: String,
+        path: PathBuf,
+        initialized: bool,
+        seen: HashSet<(u64, u64)>,
+    }
+    let mut parts: HashMap<String, Part> = HashMap::new();
+    let mut note = String::new();
+    loop {
+        for stream in presentation
+            .streams
+            .iter()
+            .filter(|stream| stream.kind == "video" || stream.kind == "audio")
+        {
+            let name = if stream.name.is_empty() {
+                stream.id.clone()
+            } else {
+                stream.name.clone()
+            };
+            let part = parts.entry(name.clone()).or_insert_with(|| Part {
+                kind: stream.kind.clone(),
+                path: temp.join(format!("{name}.mp4")),
+                initialized: false,
+                seen: HashSet::new(),
+            });
+            if !part.initialized {
+                if let Some(init) = stream.init.first() {
+                    match crate::http::routes::stream::fetch_bytes(
+                        state,
+                        init,
+                        &task.group_id,
+                        &task.channel_id,
+                    )
+                    .await
+                    {
+                        Ok(bytes) => {
+                            if let Err(error) = append(&part.path, &bytes) {
+                                note = format!("写 init 失败: {error}");
+                            } else {
+                                part.initialized = true;
+                            }
+                        }
+                        Err(error) => note = format!("抓 init 失败: {error}"),
+                    }
+                } else {
+                    part.initialized = true;
+                }
+            }
+            for segment in &stream.segments {
+                let key = (segment.number, segment.time);
+                if part.seen.contains(&key) {
+                    continue;
+                }
+                for segment_url in &segment.urls {
+                    match crate::http::routes::stream::fetch_bytes(
+                        state,
+                        segment_url,
+                        &task.group_id,
+                        &task.channel_id,
+                    )
+                    .await
+                    {
+                        Ok(bytes) => {
+                            if let Err(error) = append(&part.path, &bytes) {
+                                note = format!("写切片失败: {error}");
+                                break;
+                            }
+                            part.seen.insert(key);
+                            break;
+                        }
+                        Err(error) => note = format!("抓切片失败: {error}"),
+                    }
+                }
+            }
+        }
+        if stop.load(Ordering::SeqCst) || now_epoch() >= end {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        match fetch_presentation(state, task, &url).await {
+            Ok(next) if next.is_live => presentation = next,
+            Ok(_) => note = "上游 MPD 已转为静态".into(),
+            Err(error) => note = error,
+        }
+    }
+
+    let mut video = None;
+    let mut audio = None;
+    for part in parts.values() {
+        if !part.path.is_file() || fs::metadata(&part.path).map(|m| m.len()).unwrap_or(0) == 0 {
+            continue;
+        }
+        match part.kind.as_str() {
+            "video" if video.is_none() => video = Some(part.path.clone()),
+            "audio" if audio.is_none() => audio = Some(part.path.clone()),
+            _ => {}
+        }
+    }
+    let Some(video) = video else {
+        let _ = fs::remove_dir_all(&temp);
+        let reason = if note.is_empty() {
+            "录制区间内无可用切片".to_string()
+        } else {
+            note
+        };
+        return fail(state, task, &reason);
+    };
+
+    let stamp = now_epoch();
+    let stem = format!(
+        "{}_{}",
+        crate::logo::sanitize(&task.name).unwrap_or_else(|| "record".into()),
+        stamp
+    );
+    let output = dir.join(format!("{stem}.mkv"));
+    let mut command = tokio::process::Command::new("ffmpeg");
+    command.kill_on_drop(true);
+    command.args(["-y", "-loglevel", "error", "-i"]).arg(&video);
+    if let Some(audio) = &audio {
+        command.arg("-i").arg(audio);
+    }
+    if audio.is_some() {
+        command.args(["-map", "0:v:0", "-map", "1:a:0"]);
+    } else {
+        command.args(["-map", "0"]);
+    }
+    command.args(["-c", "copy"]).arg(&output);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&temp);
+            return fail(state, task, &format!("ffmpeg 不可用: {error}"));
+        }
+    };
+    let merged = tokio::time::timeout(Duration::from_secs(120), child.wait()).await;
+    let ok = match merged {
+        Ok(Ok(status)) => status.success(),
+        _ => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            false
+        }
+    };
+    if !ok || !output.is_file() {
+        let _ = fs::remove_file(&output);
+        let _ = fs::remove_dir_all(&temp);
+        return fail(state, task, "ffmpeg 并轨失败");
+    }
+    let record_secs = started.elapsed().as_secs();
+    let size = fs::metadata(&output).map(|meta| meta.len()).unwrap_or(0);
+    let name = output
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let _ = fs::remove_dir_all(&temp);
+    state.schedule.set(&task.id, |task| {
+        task.status = "finished".into();
+        task.output_file = name;
+        task.file_size = size;
+        task.record_secs = record_secs;
+        task.note = "mkv 录制完成".into();
+    });
+}
+
+/// 抓取并解析当前 MPD。
+async fn fetch_presentation(
+    state: &AppState,
+    task: &Task,
+    url: &str,
+) -> Result<crate::dash::Presentation, String> {
+    let text = crate::http::routes::stream::fetch(state, url, &task.group_id, &task.channel_id)
+        .await
+        .map_err(|error| format!("读取 MPD 失败: {error}"))?;
+    crate::dash::parse_presentation(&text, url).map_err(|error| format!("解析 MPD 失败: {error:#}"))
+}
+
+/// 追加写入切片文件。
+fn append(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    file.write_all(bytes)
 }
 
 fn fail(state: &AppState, task: &Task, reason: &str) {

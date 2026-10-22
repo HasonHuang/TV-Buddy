@@ -34,12 +34,12 @@ flowchart LR
 | P2 | 订阅聚合、面板分区、DASH 回看、EPG/字幕翻译 | ██████████ 100% |
 | P3 | 目标剩余端点与兼容细节（见 §0.6） | ██████████ 100% |
 
-### 0.3 质量门（2026-10-21）
+### 0.3 质量门（2026-10-22）
 
 | 项 | 结果 |
 | --- | --- |
-| `cargo test --offline` | ✅ 172 项（114 单元 + 58 集成） |
-| 冒烟脚本 | ✅ 14 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
+| `cargo test --offline` | ✅ 173 项（114 单元 + 59 集成） |
+| 冒烟脚本 | ✅ 15 个（assets、panel、resolver、share、remux、schedule、timeshift、record、record-dash、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
 | 发布包 | ✅ amd64 3.6 MB、arm64 3.5 MB；`verify-release.sh` 通过 |
@@ -74,7 +74,7 @@ flowchart LR
 | `random_id_enabled` 随机 ID | 仅回显 | 目标行为未观测；`link-info` 形状已对齐 |
 | `cache.backend=memory` | 仅回显 | 实际缓存仍落盘；目标 memory 统计恒 0（F-015） |
 | 播放侧 `compat_mode` 与 `srt_ua_keywords` | 不实现 | 目标未测出行为（D19 §3.5） |
-| 定时录制 DASH 频道 | 未实现 | 目标先并轨再 ffmpeg 合成 mp4；当前只录 HLS 切片（F-009 S-REC-02） |
+| 定时录制 DASH 频道 | 已实现（轨道并轨） | 增量抓取各轨 init/切片，再 `ffmpeg -c copy` 并轨为 MKV；静态 MPD 与目标同报「录制区间内无可用切片」（F-009 S-REC-02） |
 | `socks5` 代理 | 不支持 | 未知类型直连并告警；目标行为未验 |
 
 ### 0.6 任务计划（P3）
@@ -925,7 +925,27 @@ P2 已关闭；后续计划见 §0.6。
 - 单元：MPD 摘要、Timeline/BaseURL、`r=-1` + `timeShiftBufferDepth`、多 BaseURL、SegmentList、主/媒体清单、时间窗、URL 池轮询、媒体序号、动态清单无 `ENDLIST`、BaseURL 查询串继承。
 - 集成：`dash_mode_converts_mpd_to_hls_and_proxies_segments` 覆盖主清单、媒体清单、init、切片、状态与 `keep_seconds=4`；`dash_mode_resolver_url_is_used_for_media_playlist` 覆盖解析脚本地址沿用到媒体清单；`proxy_mode_rewrites_mpd_base_url_and_proxies_segments` 覆盖 proxy+MPD 相对 BaseURL、init/切片与查询串代理。
 - `smoke-m3.sh` 新增 proxy+MPD：入口 200、`application/dash+xml`、相对 BaseURL 改写、切片代理。
-- `cargo test --offline` 172 项（114 单元 + 58 集成）。
+- `cargo test --offline` 173 项（114 单元 + 59 集成）。
+
+## 3bd. 定时录制 DASH 频道（已实现）
+
+证据：F-009 §2.1–§2.3、S-REC-01/S-REC-02。
+
+| 项 | 结果 | 位置 |
+| --- | --- | --- |
+| 触发 | 分组 `mode = "dash"` 的任务进入录制后走 DASH 分支 | `src/schedule.rs` |
+| 直播判定 | 先抓 MPD 并解析；`type=static` → `failed`，`error=录制区间内无可用切片` | 同上 |
+| 取材 | 每 2 秒重读 MPD，增量抓取视频/音频轨的 init 与切片，按段号+时间去重 | 同上 |
+| 合流 | `ffmpeg -i <video.mp4> [-i <audio.mp4>] -map … -c copy <recordings>/<name>_<unix>.mkv` | 同上 |
+| 上游参数 | 复用频道 HTTP 客户端、代理与自定义头 | 同上 |
+| 停止与超时 | 采集时每 2 秒检查停止标志；并轨超时 120 秒；失败清理半成品 | 同上 |
+| 产物 | 任务字段 `output_file`、`file_size`、`record_secs`；`note=mkv 录制完成` | 同上 |
+| 差异 | 中间文件命名与目标不同；产物仍为 MKV | §0.5 |
+
+验证：
+- 集成：`dash_schedule_rejects_static_mpd` 覆盖静态 MPD 失败与目标错误串。
+- 冒烟：`scripts/smoke-record-dash.sh` 生成动态 MPD，验证采集、并轨、下载与产物时长；`scripts/smoke-record.sh` 继续覆盖 HLS 成功路径。
+- `cargo test --offline` 173 项（114 单元 + 59 集成）。
 
 ## 4. 进度日志
 
@@ -973,6 +993,7 @@ P2 已关闭；后续计划见 §0.6。
 | 2026-10-21 | **交互菜单**：无参数或 `menu` 打开；覆盖更新、地址、启停、状态、日志、端口、账号密码、重装、卸载与安装修复 | ✅ §3ba |
 | 2026-10-21 | **P4 DASH→HLS**：MPD 完整解析、HLS 主/媒体清单、init/切片代理、`mpd_keep_seconds`、多 `<BaseURL>` 池、`/dash/status` | ✅ §3bc |
 | 2026-10-21 | **翻译服务**：兼容 MTranServer v5、旧接口与单条回退；支持 Token；真实服务联调通过 | ✅ §3bb |
+| 2026-10-22 | **DASH 定时录制**：动态 MPD 增量抓轨、`ffmpeg -c copy` 并轨 MKV；静态 MPD 失败语义对齐；新增冒烟 | ✅ §3bd |
 
 ## 附录 A · 目标能力全集（历史盘点，2026-10-17）
 

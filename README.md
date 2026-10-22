@@ -203,7 +203,16 @@ scripts/smoke-logo.sh # 台标库：上传、公开取图与列表、删除
 scripts/smoke-backup.sh # 备份与恢复：导出 gzip、改动后回滚、拒绝非法内容
 scripts/smoke-security.sh # 安全面：Token 查看/轮换、IP 统计、封禁与解封
 scripts/smoke-aggregate.sh # 订阅聚合：远端源合并、过滤与位置
-scripts/smoke-assets.sh # 素材：ffmpeg 状态、视频/字幕上传与删除、解析脚本\nscripts/smoke-share.sh  # 多 VPS：门禁、Token 同步、封禁汇总\nscripts/smoke-panel.sh  # 面板：健康摘要、DASH 探测、回看状态\nscripts/smoke-resolver.sh # 解析脚本：URL 覆盖、TTL 缓存、失败转 error_url\nscripts/smoke-remux.sh    # Remux：预热、清单、伪装切片（需 ffmpeg 生成测试流）\nscripts/smoke-schedule.sh # 录制任务 CRUD、直播开关\nscripts/smoke-timeshift.sh # 回看：VOD 清单、伪装切片（需 ffmpeg）\nscripts/smoke-record.sh   # 录制：调度到期、合并切片、下载产物（需 ffmpeg）\nscripts/smoke-dash-timeshift.sh # DASH 回看：ffmpeg 转 HLS 后缓冲（缺 DASH 解复用器时跳过）
+scripts/smoke-assets.sh # 素材：ffmpeg 状态、视频/字幕上传与删除、解析脚本
+scripts/smoke-share.sh  # 多 VPS：门禁、Token 同步、封禁汇总
+scripts/smoke-panel.sh  # 面板：健康摘要、DASH 探测、回看状态
+scripts/smoke-resolver.sh # 解析脚本：URL 覆盖、TTL 缓存、失败转 error_url
+scripts/smoke-remux.sh    # Remux：预热、清单、伪装切片（需 ffmpeg 生成测试流）
+scripts/smoke-schedule.sh # 录制任务 CRUD、直播开关
+scripts/smoke-timeshift.sh # 回看：VOD 清单、伪装切片（需 ffmpeg）
+scripts/smoke-record.sh   # 录制：调度到期、合并切片、下载产物（需 ffmpeg）
+scripts/smoke-record-dash.sh # DASH 录制：动态 MPD、轨道并轨、下载产物（需 ffmpeg）
+scripts/smoke-dash-timeshift.sh # DASH 回看：ffmpeg 转 HLS 后缓冲（缺 DASH 解复用器时跳过）
 scripts/compare-p0.sh # 对拍：同一夹具下对比目标 v0.8.2（需容器 iptv82）
 tests/             # 路由级集成测试（起真实服务 + 伪上游）
 ```
@@ -300,6 +309,6 @@ scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
 - 运维接口的响应形状为本实现自定；目标只登记存在性（见 `design/03` §6.4）。
 - 面板有 12 个管理分区，另有独立 `/logo` 与 `/unban` 页面；目标前端代码与文案不复制。
 - EPG：支持 `kind = "xml"` 与 `kind = "script"`、EPG 翻译；EPG 手工映射、订阅 `x-tvg-url` 与录制联动未实现（`design/03` §6.5）。
-- 定时录制面向 HLS 切片；DASH 频道的并轨与 mp4 合成未实现。
+- 定时录制：HLS 频道按切片合并；DASH 频道要求直播 MPD 且系统有 ffmpeg（支持 `-c copy`），产出 MKV。静态 MPD 报「录制区间内无可用切片」。
 - `l1/l2` 限流、每 IP 会话上限、`random_id_enabled` 的随机 ID 行为、`compat_mode`、`srt_ua_keywords`、`socks5` 未实现或仅保留配置键。
 - 与目标的差异以 `docs/design/reconciliation-report.md` 为准（22 项用例差异 0）。
