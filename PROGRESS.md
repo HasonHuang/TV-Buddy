@@ -42,7 +42,7 @@ flowchart LR
 | 冒烟脚本 | ✅ 14 个（assets、panel、resolver、share、remux、schedule、timeshift、record、epg、aggregate、backup、logo、security、cli）；另有真实翻译联调 1 个（需外网） |
 | DASH 回看 | ✅ 容器内 4 项断言 × 3 次 |
 | 格式与静态检查 | ✅ `cargo fmt --check`；`cargo clippy` 0 error |
-| 发布包 | ✅ amd64 3.5 MB、arm64 3.3 MB；`verify-release.sh` 通过 |
+| 发布包 | ✅ amd64 3.6 MB、arm64 3.5 MB；`verify-release.sh` 通过 |
 | CI | ✅ [运行 39711069535](https://github.com/HasonHuang/sontv/actions/runs/39711069535)（`060422f`）；fmt/clippy/test、CLI 冒烟与双架构 `verify-release.sh` 全绿；真实翻译联调本地通过 |
 
 ### 0.4 里程碑
@@ -903,7 +903,7 @@ P2 已关闭；后续计划见 §0.6。
 
 注意：`translate.ipacel.cc` 是社区试用服务，可用性与额度不保证。生产建议自建 MTranServer。
 
-## 3bc. P4 · DASH→HLS 与 URL 池（已完成）
+## 3bc. P4 · DASH→HLS、proxy MPD 与 URL 池（已完成）
 
 证据：F-016、S-MODE-06、S-DASH-01。
 
@@ -917,12 +917,13 @@ P2 已关闭；后续计划见 §0.6。
 | 时间窗 | `[groups].mpd_keep_seconds` 按末尾累计时长裁剪媒体清单 | 同上 |
 | URL 池 | 多个 `<BaseURL>`；视频固定首选，音频/字幕在其余地址轮询；`url_pool_size` 控制启用 | 同上 |
 | 状态接口 | `GET /panel/api/dash/status` 返回会话、`phase=ready/starting`、`segment_count`、`active_tracks[]`（name/kind/lang/label/width/height/bandwidth/codecs/frame_rate/audio_channels） | `src/http/routes/dash.rs` |
+| proxy+MPD | 相对 `<BaseURL>` 改写到 `/{gid}/{cid}/mpd/`；init/切片/查询串经本服务代理；绝对地址直连 | `src/http/routes/stream.rs` |
 | 看门狗 | 主清单失败累计；连续 5 次冷却 3600 s；改配置解除 | `src/http/routes/stream.rs` |
 | 限制 | CENC 不解密；`proxy`+MPD 仅代理相对 BaseURL，绝对地址直连；目标 URL 池正常取用方式未观测 | §0.5 |
 
 验证：
 - 单元：MPD 摘要、Timeline/BaseURL、`r=-1` + `timeShiftBufferDepth`、多 BaseURL、SegmentList、主/媒体清单、时间窗、URL 池轮询、媒体序号、动态清单无 `ENDLIST`、BaseURL 查询串继承。
-- 集成：`dash_mode_converts_mpd_to_hls_and_proxies_segments` 覆盖主清单、媒体清单、init、切片、状态与 `keep_seconds=4`；`dash_mode_resolver_url_is_used_for_media_playlist` 覆盖解析脚本地址沿用到媒体清单；`proxy_mode_rewrites_mpd_base_url_and_proxies_segments` 覆盖 proxy+MPD 相对 BaseURL、init/切片代理。
+- 集成：`dash_mode_converts_mpd_to_hls_and_proxies_segments` 覆盖主清单、媒体清单、init、切片、状态与 `keep_seconds=4`；`dash_mode_resolver_url_is_used_for_media_playlist` 覆盖解析脚本地址沿用到媒体清单；`proxy_mode_rewrites_mpd_base_url_and_proxies_segments` 覆盖 proxy+MPD 相对 BaseURL、init/切片与查询串代理。
 - `cargo test --offline` 172 项（114 单元 + 58 集成）。
 
 ## 4. 进度日志
