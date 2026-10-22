@@ -119,13 +119,14 @@ flowchart LR
 
 | ID | 优先级 | 项 | 现状 | 待做 | 依据 |
 | --- | --- | --- | --- | --- | --- |
-| U-02 | P0 | 缺失 EPG 端点 | 已实现 `status`、`refresh`、`mappings`、`mapping`、`match-report` 与 3 个公开 JSON；目标路由表仍有 12 项未注册 | 私有面 `/panel/api/epg/`：`POST regenerate`、`GET programmes/:channel`、`GET scripts`、`POST extra`、`POST script`、`POST script-delete`、`POST cron-preview`、`GET suggest/:gid/:cid`、`GET search`、`GET viewer-channels`、`GET source-channels/:id`、`GET tz-preview/:id`；先补路由与最小响应，再按目标证据校正 | F-010、F-013、`design/03` §6.3 |
-| U-03 | P0 | EPG 配置语义未生效 | `public_viewer_enabled`、`allow_scripts`、`record_pad_before_secs`、`record_pad_after_secs` 只建模，未读取 | 公开浏览页按 `public_viewer_enabled` 控制；`allow_scripts = false` 拒绝脚本源；从 EPG 建任务应用前后缓冲；缓冲目标语义需先确认 | `src/config/model.rs`、F-008、F-014 |
 | U-04 | P0 | `proxy` + MPD 分支不完整 | 相对 `<BaseURL>` 已改写并代理；绝对 `<BaseURL>` 直连；`mpd_keep_seconds` 未裁剪 | 代理绝对 `<BaseURL>` 的 init/切片；在 MPD 正文按 `mpd_keep_seconds` 裁剪；补查询串、失败回退与缓存测试 | `design/03` §4.2、F-015 |
 | U-05 | P1 | 目标配置段未建模 | `[cache.prefetch]`、`[cache.ttl]`、`[cache.segments]`、`[dash]`、`[remux]` 落在 `extra`，运行时使用固定参数 | 建模并接入预载、TTL、段上限、DASH/Remux 调参；未知键继续原样回写 | 目标配置 JSON、S-CACHE-04、`design/04` |
 | U-06 | P1 | 目标路由仍有资源/台标端点缺口 | 目标枚举含 `POST /panel/api/assets/convert`、`POST /panel/api/logo/restore`、`POST /panel/api/logo/animate`；当前未注册 | 先补响应形状与使用场景证据；证据不足时登记为不做，不猜字段 | F-010、F-012、`findings/dynamic/11` §1 |
 
-> 本轮已完成（2026-10-22）：**U-01 订阅注入 `x-tvg-url`**。`src/playlist.rs` 在 `[epg].enabled = true` 时输出 `#EXTM3U x-tvg-url="<host>/epg.xml.gz"`；单元与集成测试已覆盖。
+> 本轮已完成（2026-10-22）：
+> - **U-01 订阅注入 `x-tvg-url`**：`[epg].enabled = true` 时首行输出 `#EXTM3U x-tvg-url="<host>/epg.xml.gz"`；单元与集成测试覆盖。
+> - **U-02 EPG 端点补齐**：注册 12 个 `/panel/api/epg/*` 端点；`regenerate` 改为读 `epg/raw/`；额外频道持久化并写入输出；脚本上传/删除、Cron 预览、节目表、源频道、建议与时间偏移预览已实现；面板翻译端点补 `/panel/api` 别名。
+> - **U-03 EPG 配置语义**：`public_viewer_enabled` 控制 `/epg`；`allow_scripts=false` 拒绝脚本源；`python_bin`、`script_timeout_secs`、源级 `timeout_secs`、`tz_shift_mins`、源级 `cron` 生效；`record_pad_*` 进入 `/panel/api/epg/programmes`；全局 Cron 支持标准 5 字段。
 
 #### 0.8.2 待验（目标证据）
 
@@ -133,7 +134,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | V-01 | DASH URL 池正常取用 | 已按视频 `pool[0]`、音频/字幕轮询其余实现；目标在 `pool≥2` 环境只拉 MPD 后零切片 | 目标正常 MPD + 多 `<BaseURL>` 样本；记录实际请求分布与回退顺序 |
 | V-02 | `proxy` + MPD 目标分支 | 仅相对 `<BaseURL>` 分支已对拍；绝对地址与时间窗裁剪未知 | 目标容器构造绝对 `<BaseURL>` 与多切片 MPD |
-| V-03 | `/epg/api/*` 响应形状 | 本实现形状自定；且 `spec/08` §16 与 `design/03` §8 对 v0.8.2/v0.8.8 路由版本记载冲突 | 目标响应逐字段抓取；先解决版本证据冲突，再与 U-02 一起对拍 |
+| V-03 | `/epg/api/*` 响应形状 | 面板私有 EPG 端点已按目标面板调用形状实现；公开 `/epg/api/*` 仍为本实现自定；`spec/08` §16 与 `design/03` §8 对 v0.8.2/v0.8.8 路由版本记载冲突 | 目标公开端点逐字段抓取；先解决版本证据冲突 |
 | V-04 | `/subs/{groups,preview}` 字段 | 行为与主要字段已实现；目标逐字段形状未完全对拍 | 目标请求/响应样本，重点比较 `trace`、`dropped_groups`、`out_groups` |
 | V-05 | 每频道独立代理 | 本实现按频道 > 分组 > 直连，覆盖播放、回看、Remux、录制、DASH 回看 | 目标覆盖顺序、认证头、失败回退与 `socks5` 行为 |
 | V-06 | `/unban` 配额与 `whoami` | 本实现已有每个 IP 30 天 3 次与 `whoami`；目标配额未实测 | 目标连续解封；记录状态码、`remaining` 与窗口重置 |

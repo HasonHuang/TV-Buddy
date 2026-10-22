@@ -53,7 +53,8 @@ pub async fn xml_gz(State(state): State<Arc<AppState>>) -> Response {
 
 /// `GET /epg`——公开浏览页。EPG 关闭时 `404`。
 pub async fn viewer(State(state): State<Arc<AppState>>) -> Response {
-    if !state.snapshot().epg.enabled {
+    let config = state.snapshot();
+    if !config.epg.enabled || !config.epg.public_viewer_enabled {
         return not_found();
     }
     static_assets::epg_page().await
@@ -108,7 +109,7 @@ pub async fn refresh(
 pub async fn mappings(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({
         "mappings": epg::mappings(&state),
-        "extra": [],
+        "extra": epg::extras(&state),
     }))
 }
 
@@ -156,7 +157,9 @@ pub async fn match_report(PanelAuth(_): PanelAuth, State(state): State<Arc<AppSt
         .filter(|row| !row.source_id.is_empty() && row.via != "none" && row.via != "duplicate")
         .count();
     let empty = rows.iter().filter(|row| row.via == "none").count();
-    let mut body = format!("matched_count={matched} empty_count={empty} extra_count=0\n");
+    let extra_count = epg::extras(&state).len();
+    let mut body =
+        format!("matched_count={matched} empty_count={empty} extra_count={extra_count}\n");
     body.push_str("gid    cid  name                   out_id       via       src_id     pc\n");
     for row in &rows {
         body.push_str(&format!(
@@ -165,6 +168,265 @@ pub async fn match_report(PanelAuth(_): PanelAuth, State(state): State<Arc<AppSt
         ));
     }
     ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response()
+}
+
+/// `GET /panel/api/epg/scripts`——脚本列表与 Python 版本。
+pub async fn scripts_list(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    let config = state.snapshot();
+    Json(json!({
+        "python": epg::python_version().await,
+        "scripts": epg::list_scripts(&config),
+    }))
+}
+
+/// `POST /panel/api/epg/script`——上传或覆盖脚本。
+pub async fn script_save(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let content = body.get("content").and_then(Value::as_str).unwrap_or("");
+    if name.is_empty() {
+        return Err(ApiError::bad_request("缺少 name"));
+    }
+    match epg::save_script(&state.snapshot(), name, content) {
+        Ok(info) => Ok(Json(json!({ "ok": true, "script": info }))),
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
+}
+
+/// `POST /panel/api/epg/script-delete`——删除脚本。
+pub async fn script_delete(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if name.is_empty() {
+        return Err(ApiError::bad_request("缺少 name"));
+    }
+    match epg::delete_script(&state.snapshot(), name) {
+        Ok(removed) => Ok(Json(json!({ "ok": true, "removed": removed }))),
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
+}
+
+/// `POST /panel/api/epg/extra`——额外频道的增删。
+pub async fn extra(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let action = body
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("add")
+        .trim();
+    match action {
+        "add" => {
+            let text = |key: &str| {
+                body.get(key)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            };
+            match epg::add_extra(
+                &state,
+                &text("source_id"),
+                &text("source_channel_id"),
+                &text("out_id"),
+                &text("out_name"),
+            ) {
+                Ok(extra) => {
+                    spawn_regenerate(&state);
+                    Ok(Json(json!({ "ok": true, "extra": extra })))
+                }
+                Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+            }
+        }
+        "remove" => {
+            let keys: Vec<(String, String)> = match body.get("items").and_then(Value::as_array) {
+                Some(items) => items
+                    .iter()
+                    .filter_map(|item| {
+                        let source_id = item.get("source_id")?.as_str()?.trim().to_string();
+                        let source_channel_id =
+                            item.get("source_channel_id")?.as_str()?.trim().to_string();
+                        Some((source_id, source_channel_id))
+                    })
+                    .collect(),
+                None => {
+                    let source_id = body
+                        .get("source_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    let source_channel_id = body
+                        .get("source_channel_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if source_id.is_empty() || source_channel_id.is_empty() {
+                        return Err(ApiError::bad_request("缺少 source_id/source_channel_id"));
+                    }
+                    vec![(source_id, source_channel_id)]
+                }
+            };
+            match epg::remove_extras(&state, &keys) {
+                Ok(removed) => {
+                    spawn_regenerate(&state);
+                    Ok(Json(json!({ "ok": true, "removed": removed })))
+                }
+                Err(error) => Err(ApiError::internal(format!("{error:#}"))),
+            }
+        }
+        _ => Err(ApiError::bad_request("未知 action")),
+    }
+}
+
+/// 后台按 raw 缓存重新生成，不阻塞面板请求。
+fn spawn_regenerate(state: &Arc<AppState>) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        if let Err(error) = epg::regenerate(&state).await {
+            tracing::warn!(%error, "EPG 重新生成失败");
+        }
+    });
+}
+
+/// `POST /panel/api/epg/regenerate`——按 raw 缓存重新匹配并生成。
+pub async fn regenerate(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, ApiError> {
+    match epg::regenerate(&state).await {
+        Ok(summary) => Ok(Json(json!({
+            "ok": true,
+            "channels": summary.channels,
+            "programmes": summary.kept,
+        }))),
+        Err(error) => Err(ApiError::internal(format!("{error:#}"))),
+    }
+}
+
+/// `POST /panel/api/epg/cron-preview`——校验表达式并返回下次触发时间。
+pub async fn cron_preview(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let expr = body
+        .get("expr")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let config = state.snapshot();
+    let offset = config.server.timezone_offset_hours as i64;
+    match epg::cron_preview(expr, epg::now_secs() as i64, offset, 3) {
+        Ok(next) => Json(json!({ "ok": true, "next": next })),
+        Err(error) => Json(json!({ "ok": false, "error": format!("{error:#}") })),
+    }
+}
+
+/// `GET /panel/api/epg/programmes/{channel}`——频道节目表与录制缓冲。
+pub async fn programmes(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path(channel): Path<String>,
+) -> Response {
+    let config = state.snapshot();
+    match epg::programmes_for(&config, &channel) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => Json(json!({
+            "now": epg::now_secs(),
+            "channel": channel,
+            "programmes": [],
+            "note": format!("{error:#}"),
+        }))
+        .into_response(),
+    }
+}
+
+/// `GET /panel/api/epg/suggest/{gid}/{cid}`——按名称推荐源频道。
+pub async fn suggest(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path((gid, cid)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let config = state.snapshot();
+    match epg::suggest(&config, &gid, &cid, 10) {
+        Ok(value) => Ok(Json(value)),
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
+}
+
+/// `GET /panel/api/epg/source-channels/{id}`——源频道搜索与分页。
+pub async fn source_channels(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path(source_id): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<Value> {
+    let query = params.get("q").map(String::as_str).unwrap_or("");
+    let offset = params
+        .get("offset")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let limit = params
+        .get("limit")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(60);
+    let config = state.snapshot();
+    Json(epg::source_channels(
+        &config, &source_id, query, offset, limit,
+    ))
+}
+
+/// `GET /panel/api/epg/tz-preview/{id}?shift=`——时间偏移预览。
+pub async fn tz_preview(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path(source_id): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<Value> {
+    let shift_mins = params
+        .get("shift")
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or(0);
+    let config = state.snapshot();
+    Json(epg::tz_preview(&config, &source_id, shift_mins * 60))
+}
+
+/// `GET /panel/api/epg/search?q=`——面板侧标题搜索。
+pub async fn search(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    api_search(State(state), Query(params)).await
+}
+
+/// `GET /panel/api/epg/viewer-channels`——公开浏览页可见频道。
+pub async fn viewer_channels(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    api_channels(State(state)).await
 }
 
 /// 读取并解析生成的节目单；关闭或缺失时返回 `None`。

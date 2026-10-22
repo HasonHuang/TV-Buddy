@@ -287,14 +287,14 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 录制 | `/panel/api/schedule`、`/schedule/from-epg`、`/schedule/{idx}`、`/schedule/{idx}/stop`、`/schedule/download/{filename}` | P1 |
 | 推流 | `/panel/api/livestream`、`/livestream/{gid}/{cid}/{start,stop}` | P1 |
 | DASH | `/panel/api/dash/{status,scan-url,tracks/:gid/:cid}`、`/dash-timeshift/status` | P2 |
-| EPG | `/panel/api/epg/{status,refresh,regenerate,mappings,programmes,scripts,match-report,mapping,extra,script,script-delete,cron-preview}`、`/epg/{suggest,search,viewer-channels,source-channels,tz-preview}` | P1 |
+| EPG | `/panel/api/epg/{status,refresh,regenerate,mappings,mapping,extra,match-report,scripts,script,script-delete,cron-preview,programmes/:channel,suggest/:gid/:cid,search,viewer-channels,source-channels/:id,tz-preview/:id}` | ✅ P1 |
 | 安全 | `/panel/api/security/{token,token/rotate,ip/stats,ip/ban,ip/unban,ip/unban-batch}` | ✅ P1（见 §6.7） |
 | 指标 | `/panel/api/{stats,logs,health}` | ✅ M4（`health` 在 M0） |
 | 备份 | `GET /panel/api/backup?include=all\|epg-scripts\|resolver`、`POST /panel/api/restore` | ✅ P1（见 §6.6） |
 | 导入 | `POST /panel/api/groups/import/m3u` | ✅ P1（见 §6.2） |
 | 导入 | `/groups/{import,import/force}`（JSON 分组数组） | ✅ P1（`/groups/import/m3u` 相邻） |
 | 订阅聚合 | `POST /panel/api/subs/{groups,preview}` | P2 |
-| 翻译 | `/panel/api/epg/translate/{run,status,clear,probe,models,mtran/test}`、`/subtitle/translate/clear` | P2 |
+| 翻译 | `/panel/api/epg/translate/{run,status,clear,clear-engine,probe,models,mtran/test}`（兼容无前缀别名）、`/panel/api/subtitle/{translate/clear,mtran/test}` | ✅ P2 |
 | 分享 | `GET /api/share/pull?key=`（仅 GET/HEAD） | P2 |
 | 解析脚本 | `/panel/api/resolver/{scripts,script-delete}` | P2 |
 
@@ -320,12 +320,24 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | --- | --- | --- | --- |
 | `GET` | `/epg.xml` | 无 | `200 application/xml; charset=utf-8`；`[epg].enabled = false` 或尚未生成 → `404` |
 | `GET` | `/epg.xml.gz` | 无 | `200 application/gzip`（gzip 魔数 `1f 8b`）；同上 `404` |
-| `GET` | `/epg` | 无 | `200 text/html`（内嵌浏览页）；关闭时 `404` |
+| `GET` | `/epg` | 无 | `200 text/html`（内嵌浏览页）；`epg.enabled = false` 或 `public_viewer_enabled = false` → `404` |
 | `GET` | `/panel/api/epg/status` | Bearer | `{"enabled","running","sources","channels","programmes","kept","keep_days","future_days","last_success","last_error"}` |
 | `POST` | `/panel/api/epg/refresh` | Bearer | 同步采集一次；`{"ok":true,"msg":"采集完成","channels","programmes"}`；失败 → `500` + 原因 |
-| `GET` | `/panel/api/epg/mappings` | Bearer | `{"mappings":{"gid/cid":{"source_id","source_channel_id","source_name","source_display_name"}},"extra":[]}` |
+| `POST` | `/panel/api/epg/regenerate` | Bearer | 只读 `<cache>/epg/raw/` 重新匹配并生成，不重新下载；`{"ok":true,"channels","programmes"}` |
+| `GET` | `/panel/api/epg/mappings` | Bearer | `{"mappings":{"gid/cid":{"source_id","source_channel_id","source_name","source_display_name"}},"extra":[{"source_id","source_channel_id","out_id","out_name"}]}` |
 | `POST` | `/panel/api/epg/mapping` | Bearer | `{"gid","cid","source_id","source_channel_id"}`；两者留空 → 清除 |
+| `POST` | `/panel/api/epg/extra` | Bearer | `{"action":"add","source_id","source_channel_id","out_id","out_name"}`；`{"action":"remove","source_id","source_channel_id"}`；批量 `items[]` |
 | `GET` | `/panel/api/epg/match-report` | Bearer | `text/plain`：`matched_count=… empty_count=… extra_count=…` + 表格 |
+| `GET` | `/panel/api/epg/scripts` | Bearer | `{"python":<版本或 null>,"scripts":[{"name","size"}]}` |
+| `POST` | `/panel/api/epg/script` | Bearer | `{"name","content"}`；只接受 `.py`；`{"ok":true,"script":{…}}` |
+| `POST` | `/panel/api/epg/script-delete` | Bearer | `{"name"}`；`{"ok":true,"removed":<bool>}` |
+| `POST` | `/panel/api/epg/cron-preview` | Bearer | `{"expr"}`；`{"ok":true,"next":[epoch…]}` 或 `{"ok":false,"error"}` |
+| `GET` | `/panel/api/epg/programmes/{channel}` | Bearer | `{"now","pad_before","pad_after","programmes":[{"disp_start","disp_end","stop_epoch","rec_start","rec_end","live","title","desc"}]}` |
+| `GET` | `/panel/api/epg/suggest/{gid}/{cid}` | Bearer | `{"suggestions":[{"source_id","source_channel_id","source_name","display_name","score"}]}` |
+| `GET` | `/panel/api/epg/search?q=` | Bearer | 同公开搜索 |
+| `GET` | `/panel/api/epg/viewer-channels` | Bearer | 同公开频道表 |
+| `GET` | `/panel/api/epg/source-channels/{id}?q=&offset=&limit=` | Bearer | `{"items":[{"id","display_names","source_id","source_name"}],"total"}`；`id=__all__` 跨源 |
+| `GET` | `/panel/api/epg/tz-preview/{id}?shift=` | Bearer | `{"ok":true,"items":[{"raw","current","shifted"}]}`；`shift` 单位为分钟 |
 | `GET` | `/epg/api/channels` | 无 | `{"count","channels":[{"id","names":[{"lang","name"}]}]}` |
 | `GET` | `/epg/api/programmes/{channel}` | 无 | `{"channel","count","programmes":[{"channel","start","stop","title","desc","categories"}]}` |
 | `GET` | `/epg/api/search?q=` | 无 | `{"q","count","programmes":[…]}`；最多 200 条；空 `q` 返回 0 |
@@ -334,22 +346,27 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 项 | 规则 |
 | --- | --- |
-| 源类型 | `kind = "xml"`：按 `url` 拉 XMLTV。`kind = "script"`：执行 `<cache>/epg/scripts/<script>`（`python3`，cwd 为脚本目录，stdout 即 XMLTV；为空时读 `output_files`），超时 `timeout_secs`（5–3600 秒） |
+| 源类型 | `kind = "xml"`：按 `url` 拉 XMLTV。`kind = "script"`：执行 `<cache>/epg/scripts/<script>`（`python_bin`，默认 `python3`；cwd 为脚本目录，stdout 即 XMLTV；为空时读 `output_files`）。`allow_scripts = false` 时拒绝脚本源 |
+| 源缓存 | 每次抓取/执行后写 `<cache>/epg/raw/<source_id>.xml`；`regenerate` 与单源定时任务只读该缓存 |
+| 定时 | `[epg].cron` 与源级 `cron` 均按标准 5 字段解析；源级空表示仅随全局采集。非法全局表达式回退 4 小时 |
+| 超时 | 源级 `timeout_secs > 0` 优先，否则用 `[epg].script_timeout_secs`；均限制在 5–3600 秒 |
+| 时间偏移 | `source.tz_shift_mins` 在解析后平移 `start`/`stop`，单位分钟，正数向后 |
 | 时间窗 | 保留 `stop >= 现在 - keep_days` 且 `start <= 现在 + future_days`；`keep_yesterday = true` 时下界不晚于昨天 0 点 |
 | 输出标识 | `out_id = tvg_id \|\| channel.id`；XMLTV 的 `channel/@id` 与节目 `channel` 使用 `out_id` |
+| 额外频道 | `extra.json` 持久化；`out_id` 为空时用源频道 ID；与输出 ID 冲突时跳过 |
 | 频道匹配 | 手工映射优先；否则 `tvg_id`（大小写不敏感）→ 名称（删全部空白含 U+3000、转小写、完全相等，不做子串）；`match_by_name=false` 时只保留 `tvg_id` |
 | 冲突 | 同一源频道被多个本地频道命中 → 配置顺序最后一个获得节目；重复 `out_id` 标为 `duplicate` |
 | 输出 | `<cache>/epg/epg.xml` 与 `epg.xml.gz`；根节点 `generator-info-name="iptv-proxy"`；保留 `programme` 的 `start`/`stop`/`channel` |
 | 语言 | 文本节点缺 `xml:lang` 时补 `lang="zh"`；显式语言保留 |
 | 原样保留 | `icon`、`credits` 等未建模子节点按原片段输出 |
 | 手工映射 | 存 `<cache>/epg/mappings.json`；`GET /panel/api/epg/mappings` 读取；刷新后补源频道显示名 |
-| 调度 | 启动即采集一次；之后按 `[epg].cron`，只识别 `0 */N * * *`（N 小时），其它写法回退 4 小时 |
+| 调度 | 启动即采集一次；之后每分钟检查 `[epg].cron` 与源级 `cron`。全局到期刷新全部源，单源到期只刷新该源再用 raw 缓存重生成 |
 
-> 三个 `/epg/api/*` 的响应形状为本实现自定（目标只登记了路由存在性）。
+> `/epg/api/*` 的响应形状为本实现自定（目标只登记了路由存在性）；面板私有 EPG 端点按目标面板调用形状实现。
 > 实现：按请求读取 `epg.xml` 并解析；节目单较大时再改为内存快照。
 >
 | 翻译 | 读 `[epg.translate]`：`enabled`、`url`（或 `engine="mtran"` 时的 `mtran_url`）、`token`/`mtran_token`、`source`/`mtran_source`、`target`/`targets`、`translation_first`、`mtran_batch`。采集后把节目文本批量发到 MTranServer v5 `/translate/batch`（`{from,to,texts}` → `{results}`），兼容旧 `{texts,source_lang,target_lang}`；`/translate/batch` 不可用时回退单条 `/translate`。译文按目标语言追加为 `lang="<target>"` 的文本节点；`translation_first = true` 时排在原文前。结果缓存在 `<cache>/epg/.translate/cache.json`，命中不发请求 |
-| 翻译接口 | `GET /epg/translate/{status,models}` 报告引擎与目标语言；`POST /epg/translate/{run,probe,mtran/test,clear,clear-engine}`。`run/probe` 需面板会话；未启用或未配地址 → `400`。`clear*` 清空缓存 |
+| 翻译接口 | `GET /epg/translate/{status,models}` 报告引擎与目标语言；`POST /epg/translate/{run,probe,mtran/test,clear,clear-engine}`。面板别名在相同路径前加 `/panel/api`。`run/probe` 需面板会话；未启用或未配地址 → `400`。`clear*` 清空缓存 |
 
 ### 6.6 备份与恢复（P1 已实现）
 

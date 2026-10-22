@@ -206,10 +206,80 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/panel/api/logo/apply", post(routes::logo::apply))
         .route("/panel/api/logo/suggest", post(routes::logo::suggest))
+        // 面板把 `api()` 的路径拼在 `/panel/api` 后，EPG 翻译端点也要有面板别名。
+        .route(
+            "/panel/api/epg/translate/status",
+            get(routes::epg::translate_status),
+        )
+        .route(
+            "/panel/api/epg/translate/models",
+            get(routes::epg::translate_models),
+        )
+        .route(
+            "/panel/api/epg/translate/run",
+            post(routes::epg::translate_run),
+        )
+        .route(
+            "/panel/api/epg/translate/probe",
+            post(routes::epg::translate_probe),
+        )
+        .route(
+            "/panel/api/epg/translate/mtran/test",
+            post(routes::epg::translate_mtran),
+        )
+        .route(
+            "/panel/api/epg/translate/clear",
+            post(routes::epg::translate_clear_results),
+        )
+        .route(
+            "/panel/api/epg/translate/clear-engine",
+            post(routes::epg::translate_clear),
+        )
+        .route(
+            "/panel/api/subtitle/translate/clear",
+            post(routes::media::translate_clear),
+        )
+        .route(
+            "/panel/api/subtitle/mtran/test",
+            post(routes::media::mtran_test),
+        )
         .route("/panel/api/epg/status", get(routes::epg::status))
         .route("/panel/api/epg/refresh", post(routes::epg::refresh))
+        .route("/panel/api/epg/regenerate", post(routes::epg::regenerate))
         .route("/panel/api/epg/mappings", get(routes::epg::mappings))
         .route("/panel/api/epg/mapping", post(routes::epg::mapping))
+        .route("/panel/api/epg/extra", post(routes::epg::extra))
+        .route("/panel/api/epg/scripts", get(routes::epg::scripts_list))
+        .route("/panel/api/epg/script", post(routes::epg::script_save))
+        .route(
+            "/panel/api/epg/script-delete",
+            post(routes::epg::script_delete),
+        )
+        .route(
+            "/panel/api/epg/cron-preview",
+            post(routes::epg::cron_preview),
+        )
+        .route(
+            "/panel/api/epg/programmes/:channel",
+            get(routes::epg::programmes),
+        )
+        .route(
+            "/panel/api/epg/suggest/:gid/:cid",
+            get(routes::epg::suggest),
+        )
+        .route("/panel/api/epg/search", get(routes::epg::search))
+        .route(
+            "/panel/api/epg/viewer-channels",
+            get(routes::epg::viewer_channels),
+        )
+        .route(
+            "/panel/api/epg/source-channels/:id",
+            get(routes::epg::source_channels),
+        )
+        .route(
+            "/panel/api/epg/tz-preview/:id",
+            get(routes::epg::tz_preview),
+        )
         .route(
             "/panel/api/epg/match-report",
             get(routes::epg::match_report),

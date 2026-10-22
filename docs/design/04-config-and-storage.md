@@ -23,6 +23,8 @@
 | `[cache]` | `backend`、`disk_path`、`m3u8/segment_max_entries`、`disk_max_mb`、`disguise.*` | 缓存与伪装 |
 | `[auth]` | `token_enabled`、`token_ttl_hours`、`token_failure_url`、`whitelist` | 播放 Token |
 | `[health]`/`[stats]` | `enabled`、`interval_secs`、`online_window_secs` | 健康与指标 |
+| `[epg]` | `enabled`、`cron`、`public_viewer_enabled`、`keep_days`、`future_days`、`keep_yesterday`、`match_by_name`、`allow_scripts`、`python_bin`、`script_timeout_secs`、`record_pad_before_secs`、`record_pad_after_secs` | 节目单采集与浏览 |
+| `[[epg.sources]]` | `id`、`name`、`kind`、`enabled`、`url`、`script`、`cron`、`timeout_secs`、`tz_shift_mins` | 节目单源 |
 | `[epg.translate]` | `enabled`、`url`/`mtran_url`、`token`/`mtran_token`、`source`、`target(s)`、`mtran_batch` | EPG 机翻 |
 | `[subtitle.translate]` | `enabled`、`url`、`token`、`source`、`target(s)`、`batch` | 字幕机翻 |
 | `[[groups]]`/`[[groups.channels]]` | 见 `02-architecture.md` §4.1 | 数据面 |
@@ -56,6 +58,8 @@
 ├─ recordings/    录制产物 + schedule.json
 ├─ logos/         台标文件（含 .orig/ 原图备份）
 ├─ resolvers/     解析脚本缓存
+├─ epg/scripts/   EPG Python 脚本
+├─ epg/raw/       每个源的原始 XMLTV（regenerate 用）
 ├─ epg/.translate/ EPG 翻译缓存
 └─ subtitles/.translate/ 字幕翻译缓存
 ```

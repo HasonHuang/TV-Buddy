@@ -810,6 +810,225 @@ async fn epg_enabled_serves_xmltv_and_filters() {
 }
 
 #[tokio::test]
+async fn epg_panel_helpers_scripts_programmes_and_sources() {
+    let fixture = fixture_with(true).await;
+    epg::refresh(&fixture.state).await.expect("采集应成功");
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    // 脚本列表、上传、删除。
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/epg/scripts", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("脚本列表");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert!(body.get("python").is_some());
+    assert!(body["scripts"].as_array().is_some());
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/epg/script", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(r#"{"name":"demo.py","content":"print('demo')"}"#)
+        .send()
+        .await
+        .expect("上传脚本");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/epg/scripts", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("脚本列表");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert!(body["scripts"]
+        .as_array()
+        .expect("scripts")
+        .iter()
+        .any(|item| item["name"] == "demo.py"));
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/epg/script-delete", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(r#"{"name":"demo.py"}"#)
+        .send()
+        .await
+        .expect("删除脚本");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Cron 预览：合法与非法。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/epg/cron-preview", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(r#"{"expr":"*/30 * * * *"}"#)
+        .send()
+        .await
+        .expect("Cron 预览");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["next"].as_array().expect("next").len(), 3);
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/epg/cron-preview", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(r#"{"expr":"bad"}"#)
+        .send()
+        .await
+        .expect("Cron 预览");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["ok"], false);
+
+    // 频道节目表包含录制缓冲。
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/epg/programmes/c1", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("节目表");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["pad_before"], 60);
+    assert_eq!(body["pad_after"], 180);
+    let programmes = body["programmes"].as_array().expect("programmes");
+    assert!(programmes.iter().any(|item| item["title"] == "新闻"));
+    assert!(programmes
+        .iter()
+        .all(|item| item.get("rec_start").is_some() && item.get("stop_epoch").is_some()));
+
+    // 源频道搜索、建议与时区预览。
+    let response = fixture
+        .client
+        .get(format!(
+            "{}/panel/api/epg/source-channels/s1?q=未匹配&offset=0&limit=60",
+            fixture.base
+        ))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("源频道");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["id"], "unused");
+
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/epg/suggest/pg/c1", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("建议");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert!(body["suggestions"]
+        .as_array()
+        .expect("suggestions")
+        .iter()
+        .any(|item| item["source_channel_id"] == "cctv1"));
+
+    let response = fixture
+        .client
+        .get(format!(
+            "{}/panel/api/epg/tz-preview/s1?shift=60",
+            fixture.base
+        ))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("时区预览");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["ok"], true);
+    assert!(body["items"][0]["current"] != body["items"][0]["shifted"]);
+
+    // raw 缓存可重新生成，不重新下载。
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/epg/regenerate", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("重新生成");
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn epg_extra_channels_and_public_viewer_toggle() {
+    let fixture = fixture_with(true).await;
+    epg::refresh(&fixture.state).await.expect("采集应成功");
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/epg/extra", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(r#"{"action":"add","source_id":"s1","source_channel_id":"unused","out_id":"extra1","out_name":"额外频道"}"#)
+        .send()
+        .await
+        .expect("添加额外频道");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 等后台重新生成。
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/epg/mappings", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("映射表");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["extra"].as_array().expect("extra").len(), 1);
+
+    let xml = fetch(&fixture, "/epg.xml").await;
+    assert_eq!(xml.status(), StatusCode::OK);
+    let xml = xml.text().await.expect("读 XML");
+    assert!(xml.contains("<channel id=\"extra1\">"));
+    assert!(xml.contains("未匹配节目"));
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/epg/extra", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(r#"{"action":"remove","source_id":"s1","source_channel_id":"unused"}"#)
+        .send()
+        .await
+        .expect("移除额外频道");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 公开浏览页开关。
+    let mut config = (*fixture.state.snapshot()).clone();
+    config.epg.public_viewer_enabled = false;
+    fixture.state.config.store(Arc::new(config));
+    let response = fetch(&fixture, "/epg").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn playseek_is_forwarded_to_upstream() {
     let fixture = fixture().await;
     let seek = "20261020080000-20261020090000";
@@ -3529,6 +3748,16 @@ async fn epg_translate_endpoints_report_unconfigured_engine() {
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
     assert_eq!(body["models"].as_array().map(Vec::len), Some(0));
+
+    // 面板 `api()` 使用 `/panel/api` 前缀，别名必须同样可用。
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/epg/translate/models", fixture.base))
+        .header("authorization", format!("Bearer {auth}"))
+        .send()
+        .await
+        .expect("面板模型别名");
+    assert_eq!(response.status(), StatusCode::OK);
 
     for path in ["/epg/translate/run", "/epg/translate/probe"] {
         let response = fixture
