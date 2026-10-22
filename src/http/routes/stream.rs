@@ -54,14 +54,14 @@ pub async fn entry(
         return unknown_endpoint(&state, &config, &query);
     };
     if !token_ok(&state, &config, group, &query) {
-        return redirect(&config.auth.token_failure_url);
+        return redirect_asset(&config, &config.auth.token_failure_url);
     }
     // 上游解析脚本：每次播放前算地址（S-RES-01）。
     let resolved = match crate::resolver::resolve(&state, &gid, &cid, channel).await {
         Ok(value) => value,
         Err(error) => {
             tracing::warn!(gid = %gid, cid = %cid, "解析脚本失败: {error:#}");
-            return redirect(&config.server.error_url);
+            return redirect_asset(&config, &config.server.error_url);
         }
     };
     let base = resolved.unwrap_or_else(|| channel.url.clone());
@@ -134,7 +134,7 @@ async fn redirect_entry(
     let ttl = proxy::modes::effective_redirect_ttl(group.redirect_ttl);
     let key = format!("redirect:{}:{cid}:{}", group.id, url_tag(channel_url));
     if let Some(url) = state.modes.get(&key, ttl) {
-        return redirect(&url);
+        return redirect_asset(config, &url);
     }
     let resolved = if proxy::modes::wants_best_quality(&group.redirect_mode) {
         match fetch(state, channel_url, &group.id, cid).await {
@@ -143,14 +143,14 @@ async fn redirect_entry(
             // 失败不缓存（S-MODE-08）。
             Err(err) => {
                 tracing::warn!(url = %channel_url, error = %err, "解析上游主清单失败");
-                return redirect(&config.server.error_url);
+                return redirect_asset(&config, &config.server.error_url);
             }
         }
     } else {
         channel_url.to_string()
     };
     state.modes.put(&key, resolved.clone());
-    redirect(&resolved)
+    redirect_asset(config, &resolved)
 }
 
 /// Rewrite 模式：取一次清单，把相对地址改绝对，切片客户端直连（S-MODE-09）。
@@ -457,7 +457,7 @@ async fn variant_playlist(
     };
     // 上游是媒体清单时没有变体清单这条路（S-PROXY-07）。
     let Some((_attrs, variant_url)) = proxy::media::best_variant(&upstream, &channel_url) else {
-        return redirect(&config.server.error_url);
+        return redirect_asset(&config, &config.server.error_url);
     };
     let text = match fetch(state, &variant_url, gid, cid).await {
         Ok(text) => text,
@@ -749,13 +749,17 @@ fn unknown_endpoint(
     if verified {
         placeholder(config)
     } else {
-        redirect(&config.auth.token_failure_url)
+        redirect_asset(config, &config.auth.token_failure_url)
     }
 }
 
 /// 302 占位视频（未知频道、归档组、错前缀）。
 fn placeholder(config: &Config) -> Response {
-    redirect(&config.server.not_found_url)
+    redirect_asset(config, &config.server.not_found_url)
+}
+
+fn redirect_asset(config: &Config, url: &str) -> Response {
+    redirect(config.asset_local(url).unwrap_or(url))
 }
 
 /// 手写 302（axum 的 `Redirect::temporary` 是 307）。

@@ -58,6 +58,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(static_assets::unban_page).post(routes::public::unban),
         )
         .route("/__assets/*path", get(static_assets::asset))
+        .route("/assets/*path", get(routes::media::served))
         // 面板接口（需要会话）
         .route("/panel/api/login", post(routes::panel::login))
         .route("/panel/api/logout", post(routes::panel::logout))
@@ -144,6 +145,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(routes::media::ffmpeg_status),
         )
         .route("/panel/api/assets/list", get(routes::media::list))
+        .route("/panel/api/assets/convert", post(routes::media::convert))
         .route("/panel/api/assets/upload", post(routes::media::upload))
         .route("/panel/api/assets/remove", post(routes::media::remove))
         .route("/panel/api/assets/raw/:file", get(routes::media::raw))
@@ -200,6 +202,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/logo/upload", post(routes::logo::upload))
         .route("/panel/api/logo/delete", post(routes::logo::delete))
         .route("/panel/api/logo/rename", post(routes::logo::rename))
+        .route("/panel/api/logo/restore", post(routes::logo::restore))
         .route(
             "/panel/api/logo/match-report",
             get(routes::logo::match_report),

@@ -121,12 +121,13 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | U-04 | P0 | `proxy` + MPD 分支不完整 | 相对 `<BaseURL>` 已改写并代理；绝对 `<BaseURL>` 直连；`mpd_keep_seconds` 未裁剪 | 代理绝对 `<BaseURL>` 的 init/切片；在 MPD 正文按 `mpd_keep_seconds` 裁剪；补查询串、失败回退与缓存测试 | `design/03` §4.2、F-015 |
 | U-05 | P1 | 目标配置段未建模 | `[cache.prefetch]`、`[cache.ttl]`、`[cache.segments]`、`[dash]`、`[remux]` 落在 `extra`，运行时使用固定参数 | 建模并接入预载、TTL、段上限、DASH/Remux 调参；未知键继续原样回写 | 目标配置 JSON、S-CACHE-04、`design/04` |
-| U-06 | P1 | 目标路由仍有资源/台标端点缺口 | 目标枚举含 `POST /panel/api/assets/convert`、`POST /panel/api/logo/restore`、`POST /panel/api/logo/animate`；当前未注册 | 先补响应形状与使用场景证据；证据不足时登记为不做，不猜字段 | F-010、F-012、`findings/dynamic/11` §1 |
+| U-06 | P1 | 台标动效端点缺口 | `POST /panel/api/assets/convert`、`GET /assets/*path`、`POST /panel/api/logo/restore` 已实现；`POST /panel/api/logo/animate` 仍未实现 | 目标用纯 Rust 逐帧编码 APNG/动效（6 种效果，`quality` 为字符串），需引入图像编码与帧生成；证据见 F-012 | F-012、`findings/dynamic/12` |
 
 > 本轮已完成（2026-10-22）：
 > - **U-01 订阅注入 `x-tvg-url`**：`[epg].enabled = true` 时首行输出 `#EXTM3U x-tvg-url="<host>/epg.xml.gz"`；单元与集成测试覆盖。
 > - **U-02 EPG 端点补齐**：注册 12 个 `/panel/api/epg/*` 端点；`regenerate` 改为读 `epg/raw/`；额外频道持久化并写入输出；脚本上传/删除、Cron 预览、节目表、源频道、建议与时间偏移预览已实现；面板翻译端点补 `/panel/api` 别名。
 > - **U-03 EPG 配置语义**：`public_viewer_enabled` 控制 `/epg`；`allow_scripts=false` 拒绝脚本源；`python_bin`、`script_timeout_secs`、源级 `timeout_secs`、`tz_shift_mins`、源级 `cron` 生效；`record_pad_*` 进入 `/panel/api/epg/programmes`；全局 Cron 支持标准 5 字段。
+> - **U-06 资源/台标部分**：`/panel/api/assets/{convert,list,remove}` 支持 `[assets].map` 与本地 HLS，新增公开 `GET /assets/*path`；`/panel/api/logo/restore` 用 `.orig/` 还原；`logo/list` 增加 `has_original`。台标动效 `logo/animate` 仍未实现。
 
 #### 0.8.2 待验（目标证据）
 

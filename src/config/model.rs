@@ -36,6 +36,37 @@ impl Config {
         self.groups.iter_mut().find(|group| group.id == gid)
     }
 
+    /// `[assets].map`：原始 URL → 本地 HLS 入口。
+    pub fn asset_map(&self) -> std::collections::BTreeMap<String, String> {
+        let mut out = std::collections::BTreeMap::new();
+        let Some(table) = self
+            .extra
+            .get("assets")
+            .and_then(toml::Value::as_table)
+            .and_then(|assets| assets.get("map"))
+            .and_then(toml::Value::as_table)
+        else {
+            return out;
+        };
+        for (url, local) in table {
+            if let Some(local) = local.as_str() {
+                out.insert(url.clone(), local.to_string());
+            }
+        }
+        out
+    }
+
+    /// 查本地 HLS 入口。
+    pub fn asset_local(&self, url: &str) -> Option<&str> {
+        self.extra
+            .get("assets")
+            .and_then(toml::Value::as_table)
+            .and_then(|assets| assets.get("map"))
+            .and_then(toml::Value::as_table)
+            .and_then(|map| map.get(url))
+            .and_then(toml::Value::as_str)
+    }
+
     /// 频道的有效上游代理：频道级优先，其次分组级。
     pub fn proxy_for(&self, gid: &str, cid: &str) -> Option<&ProxyCfg> {
         let group = self.group(gid)?;

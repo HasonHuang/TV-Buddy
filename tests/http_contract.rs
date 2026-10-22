@@ -1504,6 +1504,35 @@ async fn logo_library_upload_serve_and_delete() {
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
 
+    // 原图还原。
+    let original = fixture.dir.join("cache/logos/.orig/cctv1.png");
+    std::fs::create_dir_all(original.parent().expect("父目录")).expect("建原图目录");
+    std::fs::write(&original, b"static-original").expect("写原图");
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/logo/restore", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(serde_json::json!({ "file": "cctv1.png" }).to_string())
+        .send()
+        .await
+        .expect("还原请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        std::fs::read(fixture.dir.join("cache/logos/cctv1.png")).expect("读还原文件"),
+        b"static-original"
+    );
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/logo/restore", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(serde_json::json!({ "file": "missing.png" }).to_string())
+        .send()
+        .await
+        .expect("还原请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
     // 删除。
     let response = fixture
         .client
@@ -1517,6 +1546,88 @@ async fn logo_library_upload_serve_and_delete() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         fetch(&fixture, "/logo/cctv1.png").await.status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn assets_map_lists_serves_and_removes_local_hls() {
+    let fixture = fixture().await;
+    let token = login(&fixture).await;
+    let dir = fixture.dir.join("cache/assets/convert/demo");
+    std::fs::create_dir_all(&dir).expect("建 HLS 目录");
+    std::fs::write(dir.join("index.m3u8"), "#EXTM3U\n#EXT-X-ENDLIST\n").expect("写清单");
+    fixture
+        .state
+        .mutate(|config| {
+            let assets = config
+                .extra
+                .entry("assets".to_string())
+                .or_insert_with(|| toml::Value::Table(Default::default()));
+            let table = assets.as_table_mut().expect("assets 表");
+            let map = table
+                .entry("map".to_string())
+                .or_insert_with(|| toml::Value::Table(Default::default()));
+            map.as_table_mut().expect("map 表").insert(
+                "http://placeholder.test/404.mp4".to_string(),
+                toml::Value::String("/assets/convert/demo/index.m3u8".to_string()),
+            );
+            Ok(())
+        })
+        .expect("写配置");
+
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/assets/list", fixture.base))
+        .header("authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("素材列表");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("JSON");
+    assert!(body["ffmpeg_installed"].is_boolean());
+    let item = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["url"] == "http://placeholder.test/404.mp4")
+        .expect("应检测到占位 URL");
+    assert_eq!(item["converted"], true);
+    assert_eq!(item["local_path"], "/assets/convert/demo/index.m3u8");
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/assets/convert", fixture.base))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "url": "ftp://example/x.mp4" }).to_string())
+        .send()
+        .await
+        .expect("转换请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = fetch(&fixture, "/assets/convert/demo/index.m3u8").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        header(&response, "content-type"),
+        "application/vnd.apple.mpegurl"
+    );
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/assets/remove", fixture.base))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "url": "http://placeholder.test/404.mp4" }).to_string())
+        .send()
+        .await
+        .expect("移除资源");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        fetch(&fixture, "/assets/convert/demo/index.m3u8")
+            .await
+            .status(),
         StatusCode::NOT_FOUND
     );
 }

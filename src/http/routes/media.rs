@@ -44,12 +44,77 @@ pub async fn list(
     OriginalUri(uri): OriginalUri,
 ) -> Result<Json<Value>, ApiError> {
     let kind = kind_of(&uri)?;
-    let entries = assets::list(&state.snapshot().cache.disk_path, kind);
+    let config = state.snapshot();
+    let entries = assets::list(&config.cache.disk_path, kind);
+    if kind == Kind::Subtitle {
+        return Ok(Json(json!({
+            "kind": kind.dir_name(),
+            "count": entries.len(),
+            "files": entries,
+        })));
+    }
+    let map = config.asset_map();
+    let mut seen = std::collections::HashSet::new();
+    let mut items = Vec::new();
+    for url in asset_urls(&config) {
+        if !seen.insert(url.clone()) {
+            continue;
+        }
+        let local = map.get(&url);
+        items.push(json!({
+            "url": url,
+            "converted": local.is_some(),
+            "local_path": local,
+        }));
+    }
+    let ffmpeg = ffmpeg_probe().await;
     Ok(Json(json!({
         "kind": kind.dir_name(),
         "count": entries.len(),
         "files": entries,
+        "items": items,
+        "ffmpeg_installed": ffmpeg.is_some(),
+        "ffmpeg_path": ffmpeg,
+        "orphans": [],
     })))
+}
+
+/// 从配置收集可能需要转换的视频 URL。
+fn asset_urls(config: &crate::config::Config) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut push = |url: &str| {
+        let url = url.trim();
+        if url.starts_with("http://") || url.starts_with("https://") {
+            let path = url.split('?').next().unwrap_or(url).to_ascii_lowercase();
+            if [".mp4", ".mkv", ".mov", ".webm", ".m4v", ".flv"]
+                .iter()
+                .any(|ext| path.ends_with(ext))
+            {
+                urls.push(url.to_string());
+            }
+        }
+    };
+    push(&config.server.not_found_url);
+    push(&config.server.error_url);
+    push(&config.server.home_url);
+    push(&config.auth.token_failure_url);
+    push(&config.auth.limit_url);
+    push(&config.auth.ban_url);
+    for group in &config.groups {
+        for channel in &group.channels {
+            push(&channel.url);
+        }
+    }
+    urls
+}
+
+async fn ffmpeg_probe() -> Option<String> {
+    let output = tokio::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .await
+        .ok()?;
+    output.status.success().then(|| "ffmpeg".to_string())
 }
 
 /// `POST /panel/api/{assets,subtitles}/upload`——`{"items":[{"name","ext","data"}]}`。
@@ -108,6 +173,15 @@ pub async fn remove(
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
     let kind = kind_of(&uri)?;
+    if kind == Kind::Video {
+        if let Some(url) = body
+            .get("url")
+            .and_then(Value::as_str)
+            .filter(|url| !url.trim().is_empty())
+        {
+            return remove_asset_url(&state, url.trim()).await;
+        }
+    }
     let file = body
         .get("file")
         .and_then(Value::as_str)
@@ -601,4 +675,190 @@ fn remove_files(dir: &FsPath) -> usize {
         }
     }
     count
+}
+
+/// 把一个上游 URL 转成本地 HLS，并写入 `[assets].map`。
+pub async fn convert(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let url = body
+        .get("url")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(ApiError::bad_request("url 必须是 http(s) 地址"));
+    }
+    if ffmpeg_probe().await.is_none() {
+        return Err(ApiError::internal("未检测到 ffmpeg"));
+    }
+    let config = state.snapshot();
+    let digest = hex::encode(Sha256::digest(url.as_bytes()));
+    let digest = &digest[..12];
+    let root = FsPath::new(&config.cache.disk_path)
+        .join("assets")
+        .join("convert")
+        .join(digest);
+    let _ = tokio::fs::remove_dir_all(&root).await;
+    tokio::fs::create_dir_all(&root)
+        .await
+        .map_err(|error| ApiError::internal(format!("建目录失败: {error}")))?;
+    let input = root.join("input.mp4");
+    let response = state
+        .http
+        .get(&url)
+        .send()
+        .await
+        .map_err(|error| ApiError::internal(format!("下载失败: {error}")))?
+        .error_for_status()
+        .map_err(|error| ApiError::internal(format!("上游状态异常: {error}")))?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| ApiError::internal(format!("读取正文失败: {error}")))?;
+    if bytes.is_empty() {
+        return Err(ApiError::internal("上游正文为空"));
+    }
+    tokio::fs::write(&input, &bytes)
+        .await
+        .map_err(|error| ApiError::internal(format!("写临时文件失败: {error}")))?;
+
+    let playlist = root.join("index.m3u8");
+    let segments = root.join("seg_%05d.ts");
+    let mut output = run_ffmpeg(&input, &playlist, &segments, true).await;
+    if output
+        .as_ref()
+        .map(|out| !out.status.success())
+        .unwrap_or(true)
+    {
+        output = run_ffmpeg(&input, &playlist, &segments, false).await;
+    }
+    let _ = tokio::fs::remove_file(&input).await;
+    let output =
+        output.map_err(|error| ApiError::internal(format!("执行 ffmpeg 失败: {error}")))?;
+    if !output.status.success() || !playlist.is_file() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(ApiError::internal(format!(
+            "ffmpeg 转换失败: {}",
+            stderr.trim().chars().take(500).collect::<String>()
+        )));
+    }
+    let local = format!("/assets/convert/{digest}/index.m3u8");
+    set_asset_map(&state, &url, Some(&local))
+        .map_err(|error| ApiError::internal(format!("写配置失败: {error:#}")))?;
+    Ok(Json(json!({
+        "ok": true,
+        "url": url,
+        "local_path": local,
+        "bytes": bytes.len(),
+    })))
+}
+
+async fn run_ffmpeg(
+    input: &FsPath,
+    playlist: &FsPath,
+    segments: &FsPath,
+    copy: bool,
+) -> std::io::Result<std::process::Output> {
+    let mut command = tokio::process::Command::new("ffmpeg");
+    command.arg("-y").arg("-i").arg(input);
+    if copy {
+        command.args(["-c", "copy"]);
+    } else {
+        command.args(["-c:v", "libx264", "-c:a", "aac"]);
+    }
+    command
+        .args(["-f", "hls", "-hls_time", "6", "-hls_playlist_type", "vod"])
+        .arg("-hls_segment_filename")
+        .arg(segments)
+        .arg(playlist);
+    match tokio::time::timeout(std::time::Duration::from_secs(1_800), command.output()).await {
+        Ok(output) => output,
+        Err(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "ffmpeg 超时",
+        )),
+    }
+}
+
+fn set_asset_map(state: &Arc<AppState>, url: &str, local: Option<&str>) -> anyhow::Result<()> {
+    state.mutate(|config| {
+        let assets = config
+            .extra
+            .entry("assets".to_string())
+            .or_insert_with(|| toml::Value::Table(Default::default()));
+        if !assets.is_table() {
+            *assets = toml::Value::Table(Default::default());
+        }
+        let table = assets.as_table_mut().expect("assets 表");
+        let map = table
+            .entry("map".to_string())
+            .or_insert_with(|| toml::Value::Table(Default::default()));
+        if !map.is_table() {
+            *map = toml::Value::Table(Default::default());
+        }
+        let map = map.as_table_mut().expect("map 表");
+        match local {
+            Some(local) => {
+                map.insert(url.to_string(), toml::Value::String(local.to_string()));
+            }
+            None => {
+                map.remove(url);
+            }
+        }
+        Ok(())
+    })
+}
+
+async fn remove_asset_url(state: &Arc<AppState>, url: &str) -> Result<Json<Value>, ApiError> {
+    let config = state.snapshot();
+    let local = config.asset_local(url).map(str::to_string);
+    set_asset_map(state, url, None)
+        .map_err(|error| ApiError::internal(format!("写配置失败: {error:#}")))?;
+    if let Some(local) = local {
+        if let Some(relative) = local.strip_prefix("/assets/") {
+            let path = FsPath::new(&config.cache.disk_path)
+                .join("assets")
+                .join(relative);
+            if let Some(parent) = path.parent() {
+                let _ = tokio::fs::remove_dir_all(parent).await;
+            }
+        }
+    }
+    Ok(Json(json!({ "ok": true, "removed": 1 })))
+}
+
+/// `GET /assets/*path`——公开读取本地 HLS 入口与切片。
+pub async fn served(State(state): State<Arc<AppState>>, Path(path): Path<String>) -> Response {
+    let cache = state.snapshot().cache.disk_path.clone();
+    let mut full = FsPath::new(&cache).join("assets");
+    for part in path.split('/') {
+        let Some(part) = crate::logo::sanitize(part) else {
+            return (StatusCode::NOT_FOUND, "not found").into_response();
+        };
+        if part == "." || part == ".." {
+            return (StatusCode::NOT_FOUND, "not found").into_response();
+        }
+        full.push(part);
+    }
+    let Ok(bytes) = tokio::fs::read(&full).await else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let mime = match full.extension().and_then(|ext| ext.to_str()) {
+        Some("m3u8") => "application/vnd.apple.mpegurl",
+        Some("ts") => "video/mp2t",
+        Some("m4s") => "video/iso.segment",
+        Some("mp4") => "video/mp4",
+        Some("vtt") => "text/vtt",
+        _ => "application/octet-stream",
+    };
+    let mut response = ([(header::CONTENT_TYPE, mime)], bytes).into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=3600"),
+    );
+    response
 }

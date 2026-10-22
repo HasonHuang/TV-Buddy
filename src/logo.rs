@@ -20,6 +20,11 @@ pub fn dir(cache_dir: &str) -> PathBuf {
     Path::new(cache_dir).join("logos")
 }
 
+/// 原图备份目录。
+pub fn orig_dir(cache_dir: &str) -> PathBuf {
+    dir(cache_dir).join(".orig")
+}
+
 /// 列表项。
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Entry {
@@ -29,6 +34,7 @@ pub struct Entry {
     pub bytes: u64,
     pub mtime: u64,
     pub url: String,
+    pub has_original: bool,
 }
 
 /// 文件名只保留安全字符；拒绝空名、`..` 与隐藏文件。
@@ -97,6 +103,7 @@ pub fn list(cache_dir: &str) -> Vec<Entry> {
                     .map(|(name, _)| name)
                     .unwrap_or(&file)
                     .to_string(),
+                has_original: orig_dir(cache_dir).join(&file).is_file(),
                 file: file.clone(),
                 ext,
                 bytes: meta.len(),
@@ -129,12 +136,25 @@ pub fn write(cache_dir: &str, name: &str, ext: &str, data: &[u8]) -> Result<Entr
         .unwrap_or(0);
     Ok(Entry {
         url: format!("/logo/{file}"),
+        has_original: false,
         file,
         name,
         ext,
         bytes: data.len() as u64,
         mtime,
     })
+}
+
+/// 用 `.orig/` 备份覆盖当前台标；没有备份时返回 `Ok(false)`。
+pub fn restore(cache_dir: &str, file: &str) -> Result<bool> {
+    let file = sanitize(file).context("文件名不合法")?;
+    let original = orig_dir(cache_dir).join(&file);
+    if !original.is_file() {
+        return Ok(false);
+    }
+    let target = dir(cache_dir).join(&file);
+    fs::copy(&original, &target).with_context(|| format!("还原 {}", target.display()))?;
+    Ok(true)
 }
 
 /// 删除一个台标；文件不存在时返回 `Ok(false)`。
@@ -263,6 +283,23 @@ mod tests {
         assert!(!remove(&cache, &entry.file).expect("再删应返回 false"));
         let _ = fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn restore_uses_original_backup() {
+        let root = std::env::temp_dir().join(format!("logo-orig-{}", uuid::Uuid::new_v4()));
+        let cache = root.to_string_lossy().to_string();
+        let entry = write(&cache, "c1", "png", b"animated").expect("写入");
+        fs::create_dir_all(orig_dir(&cache)).expect("建原图目录");
+        fs::write(orig_dir(&cache).join(&entry.file), b"static").expect("写原图");
+        assert!(list(&cache)[0].has_original);
+        assert!(restore(&cache, &entry.file).expect("还原"));
+        assert_eq!(
+            fs::read(dir(&cache).join(&entry.file)).expect("读"),
+            b"static"
+        );
+        assert!(!restore(&cache, "missing.png").expect("无备份"));
+        let _ = fs::remove_dir_all(&root);
+    }
 }
 
 /// 重命名台标：保留原扩展名；目标已存在时报错。
@@ -283,6 +320,7 @@ pub fn rename(cache_dir: &str, file: &str, name: &str) -> Result<Entry> {
     if target == source {
         return Ok(Entry {
             name,
+            has_original: orig_dir(cache_dir).join(&target_name).is_file(),
             file: target_name.clone(),
             ext,
             bytes: fs::metadata(&source).map(|meta| meta.len()).unwrap_or(0),
@@ -294,9 +332,15 @@ pub fn rename(cache_dir: &str, file: &str, name: &str) -> Result<Entry> {
         bail!("目标已存在");
     }
     fs::rename(&source, &target).with_context(|| format!("重命名 {}", source.display()))?;
+    let original = orig_dir(cache_dir).join(&file);
+    if original.is_file() {
+        let target_original = orig_dir(cache_dir).join(&target_name);
+        let _ = fs::rename(original, target_original);
+    }
     let meta = fs::metadata(&target).ok();
     Ok(Entry {
         url: format!("/logo/{target_name}"),
+        has_original: orig_dir(cache_dir).join(&target_name).is_file(),
         file: target_name,
         name,
         ext,

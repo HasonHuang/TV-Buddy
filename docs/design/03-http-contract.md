@@ -254,6 +254,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | POST | `/panel/api/logo/upload` | — | 体 `{"items":[{"name","ext","data"}]}`（`data` 可带 `data:image/…;base64,` 前缀）；返回 `{"ok":true,"added":[…],"failed":[…]}` | F-012 |
 | POST | `/panel/api/logo/delete` | — | 体 `{"file"}`；成功 `{"ok":true,"removed":1}`；缺文件 → `404` | F-012 |
 | POST | `/panel/api/logo/rename` | — | 体 `{"file","name"}`；保留扩展名；`{"ok":true,"logo":{…}}`；缺文件 → `404`，目标已存在 → `400` | F-012（形状自定） |
+| POST | `/panel/api/logo/restore` | — | 体 `{"file"}`；用 `<cache>/logos/.orig/` 备份覆盖当前文件；`{"ok":true}`；无备份 → `400` | F-012 |
 | GET | `/panel/api/logo/match-report` | — | `{"channels","missing","broken","unused","missing_channels":[…],"broken_logos":[…],"unused_logos":[…]}` | F-012（形状自定） |
 | POST | `/panel/api/logo/apply` | — | 体 `{"gid","cid","file"}`；把 `/logo/<file>` 写入频道 `logo`；`404` 用于缺文件或未知分组/频道 | F-012（形状自定） |
 | POST | `/panel/api/logo/suggest` | — | 体 `{"threshold","limit"}`；按名称相似度推荐，`{"threshold","count","channels":[{"gid","cid","name","suggest":[{"file","score"}]}]}` | F-012（形状自定） |
@@ -283,7 +284,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 组 | 路径 | 阶段 |
 | --- | --- | --- |
 | 缓存 | `POST /panel/api/cache/flush`、`GET /panel/api/cache/stats` | ✅ M4 |
-| 素材 | `/panel/api/assets/{list,convert,remove,ffmpeg-status}` | P2 |
+| 素材 | `/panel/api/assets/{list,convert,remove,ffmpeg-status}`、`GET /assets/*path`（本地 HLS） | ✅ P2 |
 | 录制 | `/panel/api/schedule`、`/schedule/from-epg`、`/schedule/{idx}`、`/schedule/{idx}/stop`、`/schedule/download/{filename}` | P1 |
 | 推流 | `/panel/api/livestream`、`/livestream/{gid}/{cid}/{start,stop}` | P1 |
 | DASH | `/panel/api/dash/{status,scan-url,tracks/:gid/:cid}`、`/dash-timeshift/status` | P2 |
@@ -429,10 +430,12 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/panel/api/assets/list` | `{"kind":"assets","count","files":[{"file","name","ext","bytes","mtime"}]}` |
+| `GET` | `/panel/api/assets/list` | `{"kind","count","files":[…],"items":[{"url","converted","local_path"}],"ffmpeg_installed","ffmpeg_path"}`；`items` 来自配置中的非 HLS URL |
+| `POST` | `/panel/api/assets/convert` | `{"url"}`；下载后调用 `ffmpeg` 转 HLS，写 `[assets].map`，返回 `{"ok":true,"url","local_path","bytes"}` |
 | `POST` | `/panel/api/assets/upload` | `{"items":[{"name","ext","data"}]}`；`data` 可带 `data:` 前缀 |
-| `POST` | `/panel/api/assets/remove` | `{"file"}`；缺文件 → `404` |
+| `POST` | `/panel/api/assets/remove` | `{"file"}` 或 `{"url"}`；按 URL 删除时同时清 `[assets].map` 与本地目录 |
 | `GET` | `/panel/api/assets/raw/<file>` | 面板内下载（`private, max-age=0`） |
+| `GET` | `/assets/*path` | 公开读取 `<cache>/assets/` 下的 HLS 清单与切片 |
 | `GET` | `/panel/api/assets/ffmpeg-status` | `{"installed","version","remux_ready","note"}`；每次实时执行 `ffmpeg -version` |
 | `GET` | `/panel/api/subtitle/list`、`…/upload`、`…/remove`、`…/raw/<file>` | 与视频同形；扩展名 `srt/ass/ssa/vtt` |
 | `GET` | `/panel/api/subtitle/translate/status` | `{enabled,engine,url,source,targets,translation_first,formats,converts_ass,cached}` |

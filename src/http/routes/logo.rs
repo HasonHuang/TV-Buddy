@@ -353,3 +353,25 @@ pub async fn suggest(
         "channels": channels,
     }))
 }
+
+/// `POST /panel/api/logo/restore`——用 `.orig/` 备份还原静态原图。
+pub async fn restore(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let file = body
+        .get("file")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if file.is_empty() {
+        return Err(ApiError::bad_request("file 不能为空"));
+    }
+    let cache = state.snapshot().cache.disk_path.clone();
+    match logo::restore(&cache, file) {
+        Ok(true) => Ok(Json(json!({ "ok": true }))),
+        Ok(false) => Err(ApiError::bad_request("没有找到原图备份")),
+        Err(error) => Err(ApiError::internal(format!("{error:#}"))),
+    }
+}
