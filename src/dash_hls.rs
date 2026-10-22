@@ -290,6 +290,7 @@ impl Manager {
         let (_, keep, pool) =
             Self::settings(state, gid, cid).unwrap_or_else(|| (upstream.to_string(), 0, 1));
         let dash = state.snapshot().cache.dash.clone();
+        let keep = effective_keep(keep, dash.retain_min_secs);
         let timeout = Duration::from_secs(dash.mpd_timeout_secs.clamp(1, 120));
         let mut xml = None;
         let mut last_error = String::new();
@@ -847,6 +848,15 @@ fn retry_delay(config: &crate::config::model::CacheDashCfg, attempt: u32) -> Dur
     Duration::from_millis(delay.max(config.min_request_interval_ms as f64) as u64)
 }
 
+/// 分组未指定窗口时，用 `[cache.dash].retain_min_secs` 作为最短保留窗口。
+fn effective_keep(group_keep: u64, retain_min_secs: f64) -> u64 {
+    if group_keep > 0 {
+        group_keep
+    } else {
+        retain_min_secs.ceil().max(1.0) as u64
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -980,6 +990,13 @@ mod tests {
         );
         assert!(rendered.body.contains("#EXT-X-MEDIA-SEQUENCE:1"));
         assert!(rendered.body.contains("/g/c/video_720p/1_"));
+    }
+
+    #[test]
+    fn group_keep_overrides_retain_min() {
+        assert_eq!(effective_keep(4, 90.0), 4);
+        assert_eq!(effective_keep(0, 90.0), 90);
+        assert_eq!(effective_keep(0, 0.0), 1);
     }
 
     #[test]
