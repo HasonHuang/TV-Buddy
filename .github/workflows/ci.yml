@@ -11,9 +11,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   # 发布产物命名用的产品名。注意：step 的 with: 不支持 env 上下文，
-  # 所以 upload-artifact / download-artifact / Release 标题里用字面量，改名前须一起改。
+  # 所以 upload-artifact / download-artifact 里用字面量，改名前须一起改。
   PRODUCT_SLUG: tv-buddy
-  PRODUCT_NAME: TV Buddy
 
 jobs:
   frontend:
@@ -202,7 +201,10 @@ jobs:
         run: ls -lh dist
       - uses: softprops/action-gh-release@v2
         with:
-          name: TV Buddy ${{ github.ref_name }}
+          # 标题就用 tag 本身（列表里显示 v2026.x.y）。显式写死是必要的：
+          # 该 action 更新已存在的 release 时是 `input_name || existing.name || tag`，
+          # 省略 name 会保留旧标题，改不回来。
+          name: ${{ github.ref_name }}
           files: dist/*
           generate_release_notes: true
           fail_on_unmatched_files: true
