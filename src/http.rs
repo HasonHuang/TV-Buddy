@@ -115,6 +115,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/reload", post(routes::panel::reload))
         .route("/panel/api/cache/stats", get(routes::admin::cache_stats))
         .route("/panel/api/cache/flush", post(routes::admin::cache_flush))
+        .route("/panel/api/cdn/estimate", post(routes::cdn::estimate))
         .route("/panel/api/stats", get(routes::admin::stats))
         .route("/panel/api/logs", get(routes::admin::logs))
         .route("/panel/api/security/token", get(routes::security::token))

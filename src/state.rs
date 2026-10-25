@@ -72,6 +72,8 @@ pub struct AppState {
     pub login_guard: crate::auth::LoginGuard,
     /// 自助解封配额。
     pub unban_quota: crate::auth::UnbanQuota,
+    /// 被动实测统计（推荐 TTL 与磁盘上限）。
+    pub estimate: crate::cache_estimate::Estimator,
     /// 按代理配置缓存的 HTTP 客户端。
     proxy_clients: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
     /// 最近日志行。
@@ -94,6 +96,8 @@ impl AppState {
             config.cache.segments.per_channel_max,
         );
         let sources_ttl = Duration::from_secs(config.cache.ttl.sub_url_secs.max(1));
+        let estimate = crate::cache_estimate::Estimator::load_or_default(&cache_dir);
+        estimate.set_auto_tune(config.cdn.auto_tune);
         Self {
             config_path,
             config: ArcSwap::from_pointee(config),
@@ -120,6 +124,7 @@ impl AppState {
             ip_guard: crate::auth::IpGuard::new(),
             login_guard: crate::auth::LoginGuard::new(),
             unban_quota: crate::auth::UnbanQuota::new(),
+            estimate,
             proxy_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
             logs,
             started: Instant::now(),
@@ -192,6 +197,7 @@ impl AppState {
         );
         self.sources
             .set_ttl(Duration::from_secs(config.cache.ttl.sub_url_secs.max(1)));
+        self.estimate.set_auto_tune(config.cdn.auto_tune);
         self.config.store(Arc::new(config));
     }
 

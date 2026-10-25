@@ -37,13 +37,34 @@ const MASTER_CACHE: &str = "no-cache, no-store";
 /// 清单缺 `#EXT-X-TARGETDURATION` 时的缓存窗口（秒）。
 const DEFAULT_TARGET_DURATION: u64 = 6;
 /// 切片缓存头；`[cache.ttl].segment_secs` 控制时长。
+///
+/// `[cdn].enabled` 时切到 CDN 模式：TTL 取显式值或实测推荐值，命中路径可按
+/// `shared_cache_hits` 一并转 `public`（`docs/design/06-low-spec-optimization.md` §6）。
+/// 关闭时输出与旧行为逐字节一致。
 fn segment_cache_control(state: &AppState, first: bool) -> String {
-    let secs = state.snapshot().cache.ttl.segment_secs.max(1);
-    if first {
-        format!("public, max-age={secs}")
-    } else {
-        format!("private, max-age={secs}")
+    let config = state.snapshot();
+    if !config.cdn.enabled {
+        let secs = config.cache.ttl.segment_secs.max(1);
+        return if first {
+            format!("public, max-age={secs}")
+        } else {
+            format!("private, max-age={secs}")
+        };
     }
+    let secs = if config.cdn.segment_max_age_secs != 0 {
+        config.cdn.segment_max_age_secs
+    } else {
+        state
+            .estimate
+            .ttl_secs()
+            .unwrap_or(crate::cache_estimate::FALLBACK_TTL_SECS)
+    };
+    let scope = if first || config.cdn.shared_cache_hits {
+        "public"
+    } else {
+        "private"
+    };
+    format!("{scope}, max-age={secs}")
 }
 
 /// `GET /{gid}/{cid}.m3u8` 与 `/{gid}/{cid}.mpd`。
@@ -54,7 +75,7 @@ pub async fn entry(
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     let config = state.snapshot();
-    let self_base = self_base(&headers);
+    let self_base = self_base(&config, &headers);
     let Some((cid, ext)) = split_entry(&file) else {
         return placeholder(&config);
     };
@@ -298,6 +319,8 @@ pub async fn wildcard(
     RawQuery(raw_query): RawQuery,
 ) -> Response {
     let rest = rest.trim_start_matches('/').to_string();
+    // 对外基址与分组解析共用一份快照。
+    let config = state.snapshot();
     if let Some(name) = rest.strip_prefix("timeshift/") {
         return state
             .timeshift
@@ -307,17 +330,14 @@ pub async fn wildcard(
     if let Some(response) = state.remux.serve(&gid, &cid, &rest) {
         return response;
     }
-    {
-        let config = state.snapshot();
-        if let Some((group, _)) = resolve(&config, &gid, &cid) {
-            if group.mode == "dash" {
-                if let Some(response) = state
-                    .dash_hls
-                    .serve(&state, &gid, &cid, &rest, &self_base(&headers))
-                    .await
-                {
-                    return response;
-                }
+    if let Some((group, _)) = resolve(&config, &gid, &cid) {
+        if group.mode == "dash" {
+            if let Some(response) = state
+                .dash_hls
+                .serve(&state, &gid, &cid, &rest, &self_base(&config, &headers))
+                .await
+            {
+                return response;
             }
         }
     }
@@ -326,10 +346,11 @@ pub async fn wildcard(
     }
     match rest.as_str() {
         // 变体媒体清单：只有上游是主清单时存在（S-PROXY-07）。
-        "video/index.txt" => variant_playlist(&state, &gid, &cid, &self_base(&headers)).await,
+        "video/index.txt" => {
+            variant_playlist(&state, &gid, &cid, &self_base(&config, &headers)).await
+        }
         // 兼容别名：与入口同义。
         "index.m3u8" => {
-            let config = state.snapshot();
             let Some((group, url)) = resolve(&config, &gid, &cid) else {
                 return placeholder(&config);
             };
@@ -340,7 +361,15 @@ pub async fn wildcard(
                     None => warming_up(),
                 }
             } else if group.mode == "dash" {
-                dash_entry(&state, &group, &gid, &cid, &url, &self_base(&headers)).await
+                dash_entry(
+                    &state,
+                    &group,
+                    &gid,
+                    &cid,
+                    &url,
+                    &self_base(&config, &headers),
+                )
+                .await
             } else if group.mode == "proxy" {
                 proxy_entry(
                     &state,
@@ -348,7 +377,7 @@ pub async fn wildcard(
                     &gid,
                     &cid,
                     &url,
-                    &self_base(&headers),
+                    &self_base(&config, &headers),
                     "m3u8",
                 )
                 .await
@@ -442,10 +471,17 @@ fn media_entry(
         self_base,
     );
     state.segments.register(gid, cid, &rendered.segments);
-    proxy::save_index(&state.cache_dir, gid, cid, &rendered.segments);
+    // 磁盘索引也要有界：不加限制时单频道 JSON 会随清单刷新无限增长。
+    let index_max = match config.cache.segments.per_channel_max {
+        0 => proxy::DEFAULT_INDEX_MAX,
+        value => value as usize,
+    };
+    proxy::save_index(&state.cache_dir, gid, cid, &rendered.segments, index_max);
+    // 被动实测：从清单取窗口参数（T/N/W），供推荐 TTL 使用。
+    state.estimate.observe_playlist(gid, upstream);
     spawn_prefetch(
         state.clone(),
-        config.cache.prefetch.clone(),
+        config.prefetch_for(gid, cid),
         gid.to_string(),
         cid.to_string(),
         rendered.segments.clone(),
@@ -1117,8 +1153,19 @@ fn dash_body(body: String) -> Response {
     response
 }
 
-/// 本服务对外基址：从 `Host` 头拼出绝对地址前缀。
-fn self_base(headers: &HeaderMap) -> String {
+/// 本服务对外基址。
+///
+/// `[cdn].enabled` 且配了 `public_base` 时优先用它（CDN 不下发
+/// `X-Forwarded-Proto` 时清单会一直是 `http://`）；否则按请求头推导。
+fn self_base(config: &Config, headers: &HeaderMap) -> String {
+    if config.cdn.enabled {
+        if let Some(base) = config.cdn.public_base.as_deref() {
+            let base = base.trim().trim_end_matches('/');
+            if !base.is_empty() {
+                return base.to_string();
+            }
+        }
+    }
     let scheme = headers
         .get("x-forwarded-proto")
         .and_then(|value| value.to_str().ok())
@@ -1157,6 +1204,7 @@ async fn segment(state: &Arc<AppState>, gid: &str, cid: &str, name: &str) -> Res
     let path = proxy::segment_path(&state.cache_dir, gid, cid, &suffix, &ext);
     if let Ok(bytes) = std::fs::read(&path) {
         state.stats.record_segment(true);
+        state.estimate.observe_segment(gid, bytes.len() as u64);
         return segment_response(bytes, &ext, &segment_cache_control(state, false));
     }
     state.stats.record_segment(false);
@@ -1190,21 +1238,29 @@ async fn stream_segment(
         request = request.header(name, value);
     }
     let cache_control = segment_cache_control(&state, first);
+    let config = state.snapshot();
     let response = match request.send().await {
         Ok(response) if response.status().is_success() => response,
         Ok(response) => {
             // v0.8.2 实测：上游切片 404 也先回 200，正文为空；日志记片段拉取失败。
             tracing::warn!(url = %url, status = %response.status(), "片段拉取失败");
             state.stats.record_upstream_failure();
-            return segment_response(Vec::new(), &ext, &cache_control);
+            return empty_segment_response(&config, &ext, &cache_control);
         }
         Err(error) => {
             tracing::warn!(url = %url, error = %error, "片段拉取失败");
             state.stats.record_upstream_failure();
-            return segment_response(Vec::new(), &ext, &cache_control);
+            return empty_segment_response(&config, &ext, &cache_control);
         }
     };
     let mime = mime_guess::from_ext(&ext).first_or_octet_stream();
+    // 被动实测：上游声明长度时立刻采样（早于流结束）；缺失时在流结束时按实收字节补报。
+    let declared = response.content_length();
+    if let Some(len) = declared {
+        state.estimate.observe_segment(&gid, len);
+    }
+    let estimate_state = state.clone();
+    let estimate_gid = gid.clone();
     let (tx, mut rx) = mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(8);
     let log_url = url;
     tokio::spawn(async move {
@@ -1229,6 +1285,11 @@ async fn stream_segment(
             }
         }
         if complete {
+            if declared.is_none() && !cached.is_empty() {
+                estimate_state
+                    .estimate
+                    .observe_segment(&estimate_gid, cached.len() as u64);
+            }
             if let Some(parent) = path.parent() {
                 let _ = tokio::fs::create_dir_all(parent).await;
             }
@@ -1322,13 +1383,47 @@ fn redirect(url: &str) -> Response {
 
 /// 切片响应：按伪装扩展名给类型；忽略 `Range`，总是返回全量（S-DIS-07）。
 fn segment_response(bytes: Vec<u8>, ext: &str, cache_control: &str) -> Response {
+    segment_response_with_status(StatusCode::OK, bytes, ext, cache_control)
+}
+
+/// 带状态码的切片响应。
+fn segment_response_with_status(
+    status: StatusCode,
+    bytes: Vec<u8>,
+    ext: &str,
+    cache_control: &str,
+) -> Response {
     let mime = mime_guess::from_ext(ext).first_or_octet_stream();
     let mut response = Response::new(Body::from(bytes));
+    *response.status_mut() = status;
     if let Ok(value) = HeaderValue::from_str(mime.as_ref()) {
         response.headers_mut().insert(header::CONTENT_TYPE, value);
     }
     insert_header(&mut response, header::CACHE_CONTROL, cache_control);
     response
+}
+
+/// 上游没给出正文时的响应。
+///
+/// 默认维持目标实测的 `200` + 空体（播放器自行判断）。`[cdn].enabled` 时可以：
+/// `empty_status` 为 4xx/5xx → 直接返回该状态码 + `no-store`（强制 TTL 的 CDN 会
+/// 忽略 `no-store`，只有状态码能阻止它缓存一个周期的坏片）；否则 `dont_cache_empty`
+/// 为真时加 `no-store`（CDN 跟随源站头时有效）。
+fn empty_segment_response(config: &Config, ext: &str, cache_control: &str) -> Response {
+    let cdn = &config.cdn;
+    if cdn.enabled {
+        if let Ok(status) = StatusCode::from_u16(cdn.empty_status) {
+            if status.is_client_error() || status.is_server_error() {
+                return segment_response_with_status(status, Vec::new(), ext, "no-store");
+            }
+        }
+    }
+    let cache_control = if cdn.enabled && cdn.dont_cache_empty {
+        "no-store"
+    } else {
+        cache_control
+    };
+    segment_response(Vec::new(), ext, cache_control)
 }
 
 fn insert_header(response: &mut Response, name: header::HeaderName, value: &str) {
@@ -1432,7 +1527,7 @@ const PLAYLIST_RETRY_MAX: usize = 4;
 /// 抓上游清单；传输错误、正文解码错误与 5xx 按指数退避重试。
 ///
 /// v0.8.2 实测：404 等 4xx 不重试，直接转 `error_url`；超时/正文中断最多 4 次。
-async fn fetch_playlist(
+pub(crate) async fn fetch_playlist(
     state: &AppState,
     url: &str,
     gid: &str,

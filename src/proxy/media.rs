@@ -73,6 +73,28 @@ pub fn target_duration(body: &str) -> Option<u64> {
     })
 }
 
+/// 窗口统计：`(切片数, 时长总和秒)`。一条 `#EXTINF` 都没有时返回 `None`。
+///
+/// 供被动实测推算推荐 TTL 与磁盘工作集
+/// （`docs/design/06-low-spec-optimization.md` §3.3）。
+pub fn window_stats(body: &str) -> Option<(u64, f64)> {
+    let mut count = 0u64;
+    let mut sum = 0.0f64;
+    for line in body.lines() {
+        let Some(rest) = line.trim().strip_prefix("#EXTINF:") else {
+            continue;
+        };
+        // 形如 `#EXTINF:8.00000000,标题`；标题可缺省。
+        let duration = rest.split(',').next().unwrap_or(rest).trim();
+        let Ok(secs) = duration.parse::<f64>() else {
+            continue;
+        };
+        count += 1;
+        sum += secs;
+    }
+    (count > 0).then_some((count, sum))
+}
+
 /// 主清单 `#EXT-X-STREAM-INF` 的属性白名单。
 ///
 /// v0.8.2 实测只保留这 4 项；`PROGRAM-ID`、`NAME`、`AUDIO`、`SUBTITLES` 等均丢弃。
@@ -358,6 +380,30 @@ mod tests {
             Some(12)
         );
         assert_eq!(target_duration("#EXTM3U\n"), None);
+    }
+
+    #[test]
+    fn window_stats_counts_extinf() {
+        let body = "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-TARGETDURATION:8\n\
+                    #EXTINF:8.00000000,\n1.jpg\n#EXTINF:8.00000000,\n2.jpg\n\
+                    #EXTINF:8.00000000,\n3.jpg\n#EXTINF:8.00000000,\n4.jpg\n\
+                    #EXTINF:8.00000000,\n5.jpg\n#EXTINF:8.00000000,\n6.jpg\n\
+                    #EXTINF:8.00000000,\n7.jpg\n#EXT-X-ENDLIST\n";
+        let (count, sum) = window_stats(body).expect("有 EXTINF");
+        assert_eq!(count, 7);
+        assert!((sum - 56.0).abs() < 1e-9, "{sum}");
+        assert_eq!(target_duration(body), Some(8));
+    }
+
+    #[test]
+    fn window_stats_ignores_master_and_bad_lines() {
+        assert!(window_stats("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv/index.m3u8\n").is_none());
+        assert!(window_stats("#EXTM3U\n").is_none());
+        // 时长非数字的行被跳过，不计入条数。
+        assert_eq!(
+            window_stats("#EXTINF:,\na.ts\n#EXTINF:4.5,\nb.ts\n"),
+            Some((1, 4.5))
+        );
     }
 
     #[test]

@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api } from './api';
+import { RecommendCard, type Recommend } from './lowcfg';
 
 type CacheStats = {
   backend: string;
@@ -14,6 +15,7 @@ type CacheStats = {
   entries: Record<string, number>;
   bytes: number;
   playlist_cache_entries: number;
+  recommend: Recommend;
 };
 
 type Stats = {
@@ -95,44 +97,47 @@ export function CachePage() {
   const entries = Object.entries(stats?.entries ?? {});
 
   return (
-    <div className="card">
-      <div className="row between">
-        <div>
-          <h1>缓存状态</h1>
-          <h2>{stats ? `${stats.backend} · ${formatBytes(stats.bytes)}` : '读取中…'}</h2>
+    <>
+      {stats && <RecommendCard recommend={stats.recommend} />}
+      <div className="card">
+        <div className="row between">
+          <div>
+            <h1>缓存状态</h1>
+            <h2>{stats ? `${stats.backend} · ${formatBytes(stats.bytes)}` : '读取中…'}</h2>
+          </div>
+          <div className="row">
+            <button className="ghost" onClick={() => void load()}>
+              刷新
+            </button>
+            <button onClick={() => void flush()}>清空缓存</button>
+          </div>
         </div>
-        <div className="row">
-          <button className="ghost" onClick={() => void load()}>
-            刷新
-          </button>
-          <button onClick={() => void flush()}>清空缓存</button>
-        </div>
-      </div>
-      <dl>
-        <dt>目录</dt>
-        <dd className="mono ellipsis">{stats?.disk_path ?? '—'}</dd>
-        <dt>内存清单缓存</dt>
-        <dd>{stats?.playlist_cache_entries ?? 0} 项</dd>
-      </dl>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>子目录</th>
-            <th className="right">文件数</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map(([name, files]) => (
-            <tr key={name}>
-              <td className="mono">{name}</td>
-              <td className="right">{files}</td>
+        <dl>
+          <dt>目录</dt>
+          <dd className="mono ellipsis">{stats?.disk_path ?? '—'}</dd>
+          <dt>内存清单缓存</dt>
+          <dd>{stats?.playlist_cache_entries ?? 0} 项</dd>
+        </dl>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>子目录</th>
+              <th className="right">文件数</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      {message && <div className="msg ok">{message}</div>}
-      {error && <div className="msg err">{error}</div>}
-    </div>
+          </thead>
+          <tbody>
+            {entries.map(([name, files]) => (
+              <tr key={name}>
+                <td className="mono">{name}</td>
+                <td className="right">{files}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {message && <div className="msg ok">{message}</div>}
+        {error && <div className="msg err">{error}</div>}
+      </div>
+    </>
   );
 }
 

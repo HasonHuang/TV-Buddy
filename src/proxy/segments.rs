@@ -20,7 +20,17 @@ pub struct Entry {
     pub url: String,
     /// 伪装扩展名。
     pub ext: String,
+    /// 登记时间（Unix 秒）。用于磁盘索引按新旧截断；旧文件缺省为 0。
+    #[serde(default)]
+    pub at: u64,
 }
+
+/// 磁盘索引的默认条目上限。
+///
+/// `[cache.segments].per_channel_max` 为 `0`（不限）时用它兜底：客户端只会请求清单
+/// 窗口内的切片（约 7–20 片），4096 条足够覆盖窗口与重试重叠；不设上限时单个频道的
+/// JSON 每天可长到几十 MB，1 GB 盘上无法接受。
+pub const DEFAULT_INDEX_MAX: usize = 4096;
 
 /// 内存索引容量限制；`0` 表示不限制。
 #[derive(Default, Clone, Copy)]
@@ -66,6 +76,7 @@ impl SegmentIndex {
                 Entry {
                     url: url.clone(),
                     ext: ext.clone(),
+                    at: now_epoch(),
                 },
             );
         }
@@ -138,11 +149,20 @@ pub fn load_index(dir: &Path, gid: &str, cid: &str) -> HashMap<String, Entry> {
         .unwrap_or_default()
 }
 
-/// 写索引文件。与已有内容合并。写失败只记日志（缓存可丢）。
-pub fn save_index(dir: &Path, gid: &str, cid: &str, entries: &[(String, String, String)]) {
+/// 写索引文件。与已有内容合并；超过 `max_entries` 时按登记时间丢弃最旧的。
+///
+/// `max_entries = 0` 表示不限。写失败只记日志（缓存可丢）。
+pub fn save_index(
+    dir: &Path,
+    gid: &str,
+    cid: &str,
+    entries: &[(String, String, String)],
+    max_entries: usize,
+) {
     if entries.is_empty() {
         return;
     }
+    let now = now_epoch();
     let mut merged = load_index(dir, gid, cid);
     for (suffix, url, ext) in entries {
         merged.insert(
@@ -150,8 +170,24 @@ pub fn save_index(dir: &Path, gid: &str, cid: &str, entries: &[(String, String, 
             Entry {
                 url: url.clone(),
                 ext: ext.clone(),
+                at: now,
             },
         );
+    }
+    if max_entries > 0 && merged.len() > max_entries {
+        // 最旧优先丢弃；`at` 相同（旧格式）时按 suffix 兜底，保证结果确定。
+        let mut ordered: Vec<(&String, u64)> =
+            merged.iter().map(|(key, entry)| (key, entry.at)).collect();
+        ordered.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(b.0)));
+        let drop_count = merged.len() - max_entries;
+        let doomed: Vec<String> = ordered
+            .into_iter()
+            .take(drop_count)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in doomed {
+            merged.remove(&key);
+        }
     }
     let path = index_path(dir, gid, cid);
     let Some(parent) = path.parent() else { return };
@@ -166,6 +202,14 @@ pub fn save_index(dir: &Path, gid: &str, cid: &str, entries: &[(String, String, 
         }
         Err(err) => tracing::warn!(error = %err, "序列化切片索引失败"),
     }
+}
+
+/// 当前 Unix 秒。
+fn now_epoch() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0)
 }
 
 /// 切片正文缓存路径。
@@ -216,12 +260,53 @@ mod tests {
                 "http://up/x.ts".to_string(),
                 "jpg".to_string(),
             )],
+            0,
         );
         let index = SegmentIndex::new();
         let entry = index.get(&dir, "g/1", "c 1", &suffix).expect("命中索引");
         assert_eq!(entry.url, "http://up/x.ts");
         assert_eq!(entry.ext, "jpg");
+        assert!(entry.at > 0, "登记时间应被写入");
         assert!(index.get(&dir, "g/1", "c 1", "nope").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_index_truncates_at_max_entries() {
+        let dir = std::env::temp_dir().join(format!("iptv-seg-trunc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // 分两批写入，第二批更新：截断后应保留较新的 20 条。
+        let first: Vec<(String, String, String)> = (0..80)
+            .map(|n| {
+                (
+                    format!("a{n:03}"),
+                    format!("http://up/a{n}.ts"),
+                    "jpg".into(),
+                )
+            })
+            .collect();
+        save_index(&dir, "g", "c", &first, 0);
+        let second: Vec<(String, String, String)> = (0..20)
+            .map(|n| {
+                (
+                    format!("b{n:03}"),
+                    format!("http://up/b{n}.ts"),
+                    "jpg".into(),
+                )
+            })
+            .collect();
+        save_index(&dir, "g", "c", &second, 20);
+
+        let stored = load_index(&dir, "g", "c");
+        assert_eq!(stored.len(), 20, "落盘条数受 max_entries 限制");
+        assert!(
+            stored.contains_key("b019"),
+            "最新的条目必须保留（丢最旧，不能丢刚登记的）"
+        );
+        assert!(!stored.contains_key("a000"));
+        // 不带上限时保持原行为（合并全量）。
+        save_index(&dir, "g", "c", &first, 0);
+        assert_eq!(load_index(&dir, "g", "c").len(), 100);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

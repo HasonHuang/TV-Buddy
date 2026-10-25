@@ -9,7 +9,7 @@ pub mod segments;
 
 pub use media::{parse_segment, prefix, prefix_matches, rewrite_media};
 pub use modes::AddressCache;
-pub use segments::{save_index, segment_path, SegmentIndex};
+pub use segments::{save_index, segment_path, SegmentIndex, DEFAULT_INDEX_MAX};
 
 use std::{
     collections::HashMap,

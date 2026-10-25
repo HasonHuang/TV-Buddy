@@ -4524,3 +4524,461 @@ async fn logo_animate_generates_animated_webp() {
         Some("image/webp")
     );
 }
+
+// ---------------------------------------------------------------------------
+// 低配置优化（`docs/design/06-low-spec-optimization.md`）
+// ---------------------------------------------------------------------------
+
+/// T2：分组级关闭预取、频道级重新打开。
+const PREFETCH_SECTION: &str = r#"
+[[groups]]
+id = "npf"
+name = "关闭预取组"
+mode = "proxy"
+access = "open"
+[groups.prefetch]
+enabled = false
+[[groups.channels]]
+id = "c1"
+name = "关闭预取频道"
+url = "{upstream}/live.m3u8"
+
+[[groups]]
+id = "npfc"
+name = "频道重开组"
+mode = "proxy"
+access = "open"
+[groups.prefetch]
+enabled = false
+[[groups.channels]]
+id = "c1"
+name = "频道重开频道"
+url = "{upstream}/live.m3u8"
+[groups.channels.prefetch]
+enabled = true
+"#;
+
+/// T4：`[cdn]` 打开（其余取默认值）。
+const CDN_AUTO: &str = "[cdn]\nenabled = true\n";
+
+/// 数 `<cache>/seg_bytes` 下属于该分组的切片文件；最多等 1 秒。
+///
+/// 预取是后台任务，命中即早退；关闭预取的分组返回 0。
+async fn cached_segment_files(fixture: &Fixture, gid: &str) -> usize {
+    let dir = fixture.dir.join("cache/seg_bytes");
+    let prefix = format!("{gid}_");
+    for _ in 0..40 {
+        let count = std::fs::read_dir(&dir)
+            .map(|read| {
+                read.filter_map(Result::ok)
+                    .filter(|item| item.file_type().map(|kind| kind.is_file()).unwrap_or(false))
+                    .filter(|item| item.file_name().to_string_lossy().starts_with(&prefix))
+                    .count()
+            })
+            .unwrap_or(0);
+        if count > 0 {
+            return count;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    0
+}
+
+/// 取媒体清单里第 `index` 个切片的本地路径。
+///
+/// 用尾片（`index = 1`）避开预取：默认 `skip_tail = 1` 不预取最后一片，
+/// 所以第一次请求一定走上游路径（`first = true`），第二次才走磁盘命中。
+fn segment_path(body: &str, base: &str, index: usize) -> String {
+    media_lines(body)[index]
+        .strip_prefix(base)
+        .unwrap_or(media_lines(body)[index])
+        .to_string()
+}
+
+#[tokio::test]
+async fn prefetch_disabled_group_skips_segments() {
+    let fixture = fixture_with_extra(PREFETCH_SECTION).await;
+    let response = fetch(&fixture, &format!("/npf/c1.m3u8?token={}", fixture.token)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = response.text().await.expect("读正文");
+    assert_eq!(
+        cached_segment_files(&fixture, "npf").await,
+        0,
+        "分组关闭预取后不应落盘"
+    );
+}
+
+#[tokio::test]
+async fn prefetch_channel_reenables_disabled_group() {
+    let fixture = fixture_with_extra(PREFETCH_SECTION).await;
+    let response = fetch(&fixture, &format!("/npfc/c1.m3u8?token={}", fixture.token)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = response.text().await.expect("读正文");
+    assert!(
+        cached_segment_files(&fixture, "npfc").await >= 1,
+        "频道级开启后应覆盖分组的关闭"
+    );
+}
+
+#[tokio::test]
+async fn cdn_explicit_ttl_wins() {
+    let fixture = fixture_with_extra("[cdn]\nenabled = true\nsegment_max_age_secs = 777\n").await;
+    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let body = response.text().await.expect("读正文");
+    let path = segment_path(&body, &fixture.base, 1);
+    let response = fetch(&fixture, &path).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header(&response, "cache-control"), "public, max-age=777");
+}
+
+#[tokio::test]
+async fn cdn_auto_ttl_uses_measurement() {
+    let fixture = fixture_with_extra(CDN_AUTO).await;
+    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let body = response.text().await.expect("读正文");
+    // 清单解析即完成一次被动实测：T=4、N=2、W=8 → ceil60(16) = 60 → 下限 300。
+    assert_eq!(fixture.state.estimate.ttl_secs(), Some(300));
+    let path = segment_path(&body, &fixture.base, 1);
+    let response = fetch(&fixture, &path).await;
+    assert_eq!(header(&response, "cache-control"), "public, max-age=300");
+}
+
+#[tokio::test]
+async fn cdn_shared_cache_hits_makes_hit_public() {
+    let fixture = fixture_with_extra("[cdn]\nenabled = true\nshared_cache_hits = true\n").await;
+    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let body = response.text().await.expect("读正文");
+    let path = segment_path(&body, &fixture.base, 1);
+    let response = fetch(&fixture, &path).await;
+    assert_eq!(header(&response, "cache-control"), "public, max-age=300");
+    // 第二次是磁盘命中路径：默认 `private`，开了共享缓存后应为 `public`。
+    let response = fetch(&fixture, &path).await;
+    assert_eq!(header(&response, "cache-control"), "public, max-age=300");
+}
+
+#[tokio::test]
+async fn cdn_public_base_overrides_host() {
+    let fixture =
+        fixture_with_extra("[cdn]\nenabled = true\npublic_base = \"https://cdn.example\"\n").await;
+    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let body = response.text().await.expect("读正文");
+    for url in media_lines(&body) {
+        assert!(url.starts_with("https://cdn.example/pg/c1/"), "{url}");
+    }
+    let response = fetch(&fixture, &format!("/pm/c1.m3u8?token={}", fixture.token)).await;
+    let body = response.text().await.expect("读正文");
+    assert!(
+        body.contains("https://cdn.example/pm/c1/video/index.txt"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn cdn_empty_body_becomes_502() {
+    let fixture = fixture_with_extra(CDN_AUTO).await;
+    let response = fetch(&fixture, "/badseg/c1.m3u8").await;
+    let body = response.text().await.expect("读正文");
+    let path = segment_path(&body, &fixture.base, 0);
+    let response = fetch(&fixture, &path).await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(header(&response, "cache-control"), "no-store");
+    assert!(response.bytes().await.expect("读字节").is_empty());
+}
+
+#[tokio::test]
+async fn cdn_dont_cache_empty_keeps_200() {
+    // `empty_status = 0` 不是错误码 → 退回「200 空体 + no-store」。
+    let fixture =
+        fixture_with_extra("[cdn]\nenabled = true\nempty_status = 0\ndont_cache_empty = true\n")
+            .await;
+    let response = fetch(&fixture, "/badseg/c1.m3u8").await;
+    let body = response.text().await.expect("读正文");
+    let path = segment_path(&body, &fixture.base, 0);
+    let response = fetch(&fixture, &path).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header(&response, "cache-control"), "no-store");
+    assert!(response.bytes().await.expect("读字节").is_empty());
+}
+
+#[tokio::test]
+async fn cdn_disabled_matches_legacy() {
+    let fixture = fixture().await;
+    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let body = response.text().await.expect("读正文");
+    let path = segment_path(&body, &fixture.base, 1);
+    let response = fetch(&fixture, &path).await;
+    assert_eq!(header(&response, "cache-control"), "public, max-age=300");
+    let response = fetch(&fixture, &path).await;
+    assert_eq!(
+        header(&response, "cache-control"),
+        "private, max-age=300",
+        "`[cdn]` 默认关闭时命中路径仍为 private"
+    );
+    // 空体仍是 200（旧行为）。
+    let response = fetch(&fixture, "/badseg/c1.m3u8").await;
+    let body = response.text().await.expect("读正文");
+    let path = segment_path(&body, &fixture.base, 0);
+    let response = fetch(&fixture, &path).await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// 按给定 TOML 起夹具（`{dir}` 会被替换成临时目录）。
+async fn fixture_from_toml(toml: &str) -> Fixture {
+    let dir = std::env::temp_dir().join(format!("iptv-proxy-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).expect("建临时目录");
+    let body = toml.replace("{dir}", &dir.display().to_string());
+    let config_path = dir.join("config.toml");
+    std::fs::write(&config_path, body).expect("写配置");
+    let cfg = config::load(&config_path).expect("加载配置");
+    let state = Arc::new(AppState::new(
+        config_path,
+        cfg,
+        Arc::new(RingBuffer::default()),
+    ));
+    let base = serve(http::router(state.clone())).await;
+    let client = Client::builder()
+        .redirect(Policy::none())
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("建客户端");
+    wait_ready(&client, &base).await;
+    Fixture {
+        dir,
+        base,
+        upstream: String::new(),
+        token: String::new(),
+        client,
+        state,
+    }
+}
+
+/// 伪上游：只有 `live.m3u8` 与 `seg1.ts` 存在，其余 404。
+async fn serve_live() -> String {
+    serve(
+        Router::new()
+            .route(
+                "/live.m3u8",
+                get(|| async {
+                    (
+                        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+                        LIVE,
+                    )
+                }),
+            )
+            .route(
+                "/seg1.ts",
+                get(|| async { ([(header::CONTENT_TYPE, "video/mp2t")], SEGMENT) }),
+            ),
+    )
+    .await
+}
+
+async fn estimate(session: &str, base: &str) -> HttpResponse {
+    Client::builder()
+        .redirect(Policy::none())
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("建客户端")
+        .post(format!("{base}/panel/api/cdn/estimate"))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("估算请求")
+}
+
+/// 「立即估算」在服务端全进程串行（并发的第二个请求拿 409），
+/// 所以这几个测试之间也要排队，否则会互相撞锁。
+static ESTIMATE_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[tokio::test]
+async fn estimate_returns_recommendation() {
+    let _serial = ESTIMATE_TESTS.lock().await;
+    let upstream = serve_live().await;
+    let fixture = fixture_from_toml(&format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+log_level = "error"
+
+[cache]
+disk_path = "{{dir}}/cache"
+
+[cdn]
+enabled = true
+
+[[groups]]
+id = "e1"
+name = "估算一"
+mode = "proxy"
+access = "public"
+[[groups.channels]]
+id = "c1"
+name = "估算频道一"
+url = "{upstream}/live.m3u8"
+
+[[groups]]
+id = "e2"
+name = "估算二"
+mode = "proxy"
+access = "public"
+[[groups.channels]]
+id = "c1"
+name = "估算频道二"
+url = "{upstream}/live.m3u8"
+"#
+    ))
+    .await;
+    let session = login(&fixture).await;
+    let response = estimate(&session, &fixture.base).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["groups"], 2, "{body}");
+    assert_eq!(body["failed"].as_array().map(Vec::len), Some(0), "{body}");
+    assert_eq!(body["recommend"]["ttl_secs"], 300, "{body}");
+    assert_eq!(body["recommend"]["source"], "measured", "{body}");
+    assert!(body["recommend"]["disk_cap_mb"].is_u64(), "{body}");
+}
+
+#[tokio::test]
+async fn estimate_all_failed_is_not_500() {
+    let _serial = ESTIMATE_TESTS.lock().await;
+    // 上游只有 `live.m3u8`；频道指向不存在的路径 → 全部失败，但仍返回 200。
+    let upstream = serve_live().await;
+    let fixture = fixture_from_toml(&format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+log_level = "error"
+
+[cache]
+disk_path = "{{dir}}/cache"
+
+[cdn]
+enabled = true
+
+[[groups]]
+id = "e1"
+name = "估算一"
+mode = "proxy"
+access = "public"
+[[groups.channels]]
+id = "c1"
+name = "估算频道一"
+url = "{upstream}/missing.m3u8"
+
+[[groups]]
+id = "e2"
+name = "估算二"
+mode = "proxy"
+access = "public"
+[[groups.channels]]
+id = "c1"
+name = "估算频道二"
+url = "{upstream}/missing.m3u8"
+"#
+    ))
+    .await;
+    let session = login(&fixture).await;
+    let response = estimate(&session, &fixture.base).await;
+    assert_eq!(response.status(), StatusCode::OK, "全失败不应报 5xx");
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["groups"], 0, "{body}");
+    assert_eq!(body["failed"].as_array().map(Vec::len), Some(2), "{body}");
+    assert_eq!(body["recommend"]["ttl_secs"], 600, "回退 TTL");
+    assert_eq!(body["recommend"]["source"], "fallback", "{body}");
+}
+
+#[tokio::test]
+async fn estimate_skips_archived_groups() {
+    let _serial = ESTIMATE_TESTS.lock().await;
+    // 归档组放最前且指向 404：若被探测，`failed` 里就会出现它。
+    let upstream = serve_live().await;
+    let fixture = fixture_from_toml(&format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+log_level = "error"
+
+[cache]
+disk_path = "{{dir}}/cache"
+
+[cdn]
+enabled = true
+
+[[groups]]
+id = "arch"
+name = "归档组"
+mode = "proxy"
+access = "archived"
+[[groups.channels]]
+id = "c1"
+name = "归档频道"
+url = "{upstream}/missing.m3u8"
+
+[[groups]]
+id = "e1"
+name = "估算一"
+mode = "proxy"
+access = "public"
+[[groups.channels]]
+id = "c1"
+name = "估算频道一"
+url = "{upstream}/live.m3u8"
+
+[[groups]]
+id = "e2"
+name = "估算二"
+mode = "proxy"
+access = "public"
+[[groups.channels]]
+id = "c1"
+name = "估算频道二"
+url = "{upstream}/live.m3u8"
+
+[[groups]]
+id = "e3"
+name = "估算三"
+mode = "proxy"
+access = "public"
+[[groups.channels]]
+id = "c1"
+name = "估算频道三"
+url = "{upstream}/live.m3u8"
+"#
+    ))
+    .await;
+    let session = login(&fixture).await;
+    let response = estimate(&session, &fixture.base).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["groups"], 3, "归档组不占名额：{body}");
+    assert_eq!(body["failed"].as_array().map(Vec::len), Some(0), "{body}");
+}
+
+#[tokio::test]
+async fn cache_stats_includes_recommendation() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/cache/stats", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("缓存统计");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    // 已有键不变。
+    assert_eq!(body["backend"], "disk");
+    assert!(body["entries"].is_object(), "{body}");
+    assert!(body["bytes"].is_u64(), "{body}");
+    assert!(body["playlist_cache_entries"].is_u64(), "{body}");
+    // 新增推荐块：尚未播放 → 回退值。
+    assert_eq!(body["recommend"]["ttl_secs"], 600, "{body}");
+    assert_eq!(body["recommend"]["source"], "fallback", "{body}");
+    assert!(body["recommend"]["disk_cap_mb"].is_u64(), "{body}");
+}

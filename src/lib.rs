@@ -6,6 +6,8 @@
 pub mod assets;
 pub mod auth;
 pub mod backup;
+pub mod cache_estimate;
+pub mod cache_gc;
 pub mod config;
 pub mod dash;
 pub mod dash_hls;

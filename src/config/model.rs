@@ -14,6 +14,8 @@ pub struct Config {
     pub server: ServerCfg,
     pub panel: PanelCfg,
     pub cache: CacheCfg,
+    /// `[cdn]`——外部 CDN 兜底与被动实测开关（见 `docs/design/06-low-spec-optimization.md` §6）。
+    pub cdn: CdnCfg,
     pub auth: AuthCfg,
     pub epg: EpgCfg,
     pub playlist: PlaylistCfg,
@@ -79,6 +81,26 @@ impl Config {
             .and_then(|channel| channel.proxy.as_ref())
             .or(group.proxy.as_ref())
     }
+
+    /// 频道的有效预取配置：频道级 > 分组级 > 全局。
+    ///
+    /// 与 [`Config::proxy_for`] 同序，但**返回合并后的值**——全局是基线，
+    /// 分组/频道只覆盖显式设置过的字段（`docs/design/06-low-spec-optimization.md` §7）。
+    pub fn prefetch_for(&self, gid: &str, cid: &str) -> CachePrefetchCfg {
+        let mut cfg = self.cache.prefetch.clone();
+        let Some(group) = self.group(gid) else {
+            return cfg;
+        };
+        if let Some(over) = group.prefetch.as_ref() {
+            cfg.apply(over);
+        }
+        if let Some(channel) = group.channels.iter().find(|channel| channel.id == cid) {
+            if let Some(over) = channel.prefetch.as_ref() {
+                cfg.apply(over);
+            }
+        }
+        cfg
+    }
 }
 
 /// `[server]`。
@@ -142,6 +164,47 @@ impl Default for PanelCfg {
     }
 }
 
+/// `[cdn]`——外部 CDN 侧兜底。
+///
+/// 默认全关：`enabled=false` 时所有响应头与状态码逐字节等于旧行为，
+/// 便于先配 CDN 面板再逐项打开（`docs/design/06-low-spec-optimization.md` §6）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CdnCfg {
+    /// 总开关。
+    pub enabled: bool,
+    /// 被动实测：累计分组窗口统计与切片体积，供推荐 TTL / 磁盘上限使用。
+    pub auto_tune: bool,
+    /// 切片 `Cache-Control` 的 `max-age`（秒）；`0` = 用实测推荐值。
+    pub segment_max_age_secs: u64,
+    /// 命中路径（二次请求）也标 `public`，供只能「遵循源站头」的 CDN 共享缓存。
+    pub shared_cache_hits: bool,
+    /// 空体加 `no-store`；强制 TTL 时会被 CDN 忽略，此时用 [`CdnCfg::empty_status`]。
+    pub dont_cache_empty: bool,
+    /// 上游失败时改用的状态码（默认 `502`），避免「200 + 空体」被缓存一个周期。
+    pub empty_status: u16,
+    /// 固定对外基址；`None` 时仍按 `X-Forwarded-Proto` + `Host` 推导。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_base: Option<String>,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for CdnCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            auto_tune: true,
+            segment_max_age_secs: 0,
+            shared_cache_hits: false,
+            dont_cache_empty: false,
+            empty_status: 502,
+            public_base: None,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
 /// `[cache]`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -155,6 +218,8 @@ pub struct CacheCfg {
     pub segment_cache_max_mb: u64,
     pub prefetch: CachePrefetchCfg,
     pub segments: CacheSegmentsCfg,
+    /// `[cache.gc]`——磁盘回收；补「切片只写不删」的洞。
+    pub gc: CacheGcCfg,
     pub ttl: CacheTtlCfg,
     pub dash: CacheDashCfg,
     pub remux: CacheRemuxCfg,
@@ -175,6 +240,7 @@ impl Default for CacheCfg {
             segment_cache_max_mb: 50,
             prefetch: CachePrefetchCfg::default(),
             segments: CacheSegmentsCfg::default(),
+            gc: CacheGcCfg::default(),
             ttl: CacheTtlCfg::default(),
             dash: CacheDashCfg::default(),
             remux: CacheRemuxCfg::default(),
@@ -212,6 +278,39 @@ impl Default for CachePrefetchCfg {
     }
 }
 
+impl CachePrefetchCfg {
+    /// 叠加分组/频道级覆盖；`None` 字段保持基线值。
+    pub fn apply(&mut self, over: &PrefetchOverrideCfg) {
+        if let Some(enabled) = over.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(limit) = over.prefetch_limit {
+            self.prefetch_limit = limit;
+        }
+        if let Some(concurrency) = over.concurrency {
+            self.concurrency = concurrency;
+        }
+    }
+}
+
+/// `[[groups.prefetch]]` / `[[groups.channels.prefetch]]`——预取的三态覆盖。
+///
+/// 三态：未设置（`None`，继承上层）/ 显式开 / 显式关。全字段 `Option`，
+/// 未设置时不序列化，因此「跟随全局」的分组写回配置不产生噪音。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PrefetchOverrideCfg {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// 目标只保留最近的 N 片；`0` 表示不限。
+    #[serde(alias = "limit", skip_serializing_if = "Option::is_none")]
+    pub prefetch_limit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<u32>,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
 /// `[cache.segments]`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -229,6 +328,49 @@ impl Default for CacheSegmentsCfg {
             global_max: 0,
             per_channel_max: 0,
             retain_count: 20,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[cache.gc]`——磁盘回收。
+///
+/// 切片正文只写不删；1 GB 盘必须靠这里回收
+/// （`docs/design/06-low-spec-optimization.md` §6）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CacheGcCfg {
+    pub enabled: bool,
+    /// 回收上限（MB）；`0` = 按可用空间与工作集自动推算。
+    pub max_disk_mb: u64,
+    /// 超过该时长的文件直接删（秒）。
+    pub max_age_secs: u64,
+    /// 扫描周期（秒）。
+    pub interval_secs: u64,
+    /// 单次扫描最多处理的文件数，避免 1 vCPU 抖动。
+    pub scan_limit: u64,
+    /// 自动上限最多占可用空间的比例。
+    pub disk_budget_ratio: f64,
+    /// 给系统、日志与其它缓存目录预留的空间（MB）。
+    pub reserve_mb: u64,
+    /// 自动上限的下限（MB）。
+    pub min_mb: u64,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for CacheGcCfg {
+    fn default() -> Self {
+        Self {
+            // 默认开：不开则 1 GB 磁盘会被切片吃满。
+            enabled: true,
+            max_disk_mb: 0,
+            max_age_secs: 1_800,
+            interval_secs: 300,
+            scan_limit: 500,
+            disk_budget_ratio: 0.8,
+            reserve_mb: 100,
+            min_mb: 50,
             extra: toml::Table::new(),
         }
     }
@@ -568,6 +710,9 @@ pub struct Group {
     /// 分组级上游代理；频道级优先。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<ProxyCfg>,
+    /// 分组级预取覆盖；缺省继承全局。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefetch: Option<PrefetchOverrideCfg>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub channels: Vec<Channel>,
     #[serde(flatten)]
@@ -588,6 +733,7 @@ impl Default for Group {
             redirect_mode: "direct".into(),
             headers: Vec::new(),
             proxy: None,
+            prefetch: None,
             channels: Vec::new(),
             extra: toml::Table::new(),
         }
@@ -605,6 +751,9 @@ pub struct Channel {
     /// 频道级上游代理；覆盖分组级。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<ProxyCfg>,
+    /// 频道级预取覆盖；覆盖分组级与全局。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefetch: Option<PrefetchOverrideCfg>,
     pub selected_tracks: Vec<String>,
     pub dash_mode: String,
     pub livestream: bool,
@@ -630,6 +779,7 @@ impl Default for Channel {
             url: String::new(),
             headers: Vec::new(),
             proxy: None,
+            prefetch: None,
             selected_tracks: Vec::new(),
             dash_mode: "continuous".into(),
             livestream: false,
@@ -989,5 +1139,173 @@ url = "http://up/live.m3u8"
             ..ProxyCfg::default()
         };
         assert!(proxy.url().is_none());
+    }
+
+    /// 造一个带分组级/频道级预取覆盖的配置。
+    fn config_with_prefetch(
+        group_over: Option<PrefetchOverrideCfg>,
+        channel_over: Option<PrefetchOverrideCfg>,
+    ) -> Config {
+        let mut config = Config::default();
+        let mut group = Group {
+            id: "g".into(),
+            ..Group::default()
+        };
+        group.prefetch = group_over;
+        group.channels.push(Channel {
+            id: "c".into(),
+            prefetch: channel_over,
+            ..Channel::default()
+        });
+        config.groups.push(group);
+        config
+    }
+
+    #[test]
+    fn prefetch_channel_overrides_group_and_global() {
+        let mut config = config_with_prefetch(
+            Some(PrefetchOverrideCfg {
+                enabled: Some(false),
+                prefetch_limit: Some(6),
+                ..PrefetchOverrideCfg::default()
+            }),
+            Some(PrefetchOverrideCfg {
+                enabled: Some(true),
+                concurrency: Some(2),
+                ..PrefetchOverrideCfg::default()
+            }),
+        );
+        config.cache.prefetch.concurrency = 8;
+
+        let merged = config.prefetch_for("g", "c");
+        assert!(merged.enabled, "频道覆盖分组的 false");
+        assert_eq!(merged.prefetch_limit, 6, "频道未设，取分组值");
+        assert_eq!(merged.concurrency, 2, "频道覆盖分组与全局");
+
+        let group_only = config.prefetch_for("g", "other");
+        assert!(!group_only.enabled);
+        assert_eq!(group_only.prefetch_limit, 6);
+        assert_eq!(group_only.concurrency, 8, "频道未命中时回落全局");
+    }
+
+    #[test]
+    fn prefetch_partial_override_keeps_other_fields() {
+        let config = config_with_prefetch(
+            Some(PrefetchOverrideCfg {
+                prefetch_limit: Some(3),
+                ..PrefetchOverrideCfg::default()
+            }),
+            None,
+        );
+        let merged = config.prefetch_for("g", "c");
+        assert_eq!(merged.prefetch_limit, 3);
+        assert_eq!(merged.concurrency, 4, "全局默认");
+        assert!(merged.enabled, "全局默认");
+        assert_eq!(merged.skip_tail, 1, "全局默认");
+    }
+
+    #[test]
+    fn prefetch_unset_equals_global_defaults() {
+        let config = Config::default();
+        let merged = config.prefetch_for("missing", "c");
+        let base = CachePrefetchCfg::default();
+        assert_eq!(merged.enabled, base.enabled);
+        assert_eq!(merged.concurrency, base.concurrency);
+        assert_eq!(merged.prefetch_limit, base.prefetch_limit);
+        assert_eq!(merged.skip_tail, base.skip_tail);
+        assert_eq!(merged.timeout, base.timeout);
+    }
+
+    #[test]
+    fn prefetch_unknown_group_is_global() {
+        let mut config = Config::default();
+        config.cache.prefetch.enabled = false;
+        config.groups.push(Group {
+            id: "g".into(),
+            ..Group::default()
+        });
+        assert!(!config.prefetch_for("nope", "c").enabled);
+    }
+
+    #[test]
+    fn prefetch_override_reads_toml_and_limit_alias() {
+        let text = r#"
+[[groups]]
+id = "hot"
+name = "热"
+[groups.prefetch]
+enabled = true
+limit = 6
+concurrency = 2
+[[groups.channels]]
+id = "c"
+name = "频道"
+url = "http://up/live.m3u8"
+[groups.channels.prefetch]
+enabled = false
+"#;
+        let config: Config = toml::from_str(text).expect("解析配置");
+        let group = config.group("hot").expect("分组");
+        assert_eq!(
+            group.prefetch.as_ref().and_then(|over| over.prefetch_limit),
+            Some(6),
+            "`limit` 是 `prefetch_limit` 的别名"
+        );
+        let merged = config.prefetch_for("hot", "c");
+        assert!(!merged.enabled);
+        assert_eq!(merged.prefetch_limit, 6);
+        assert_eq!(merged.concurrency, 2);
+
+        let channel = &group.channels[0];
+        let over = channel.prefetch.as_ref().expect("频道覆盖");
+        assert_eq!(over.enabled, Some(false));
+        assert_eq!(over.prefetch_limit, None, "未设置的字段保持 None");
+    }
+
+    #[test]
+    fn cdn_and_gc_defaults_are_inert() {
+        let config = Config::default();
+        assert!(!config.cdn.enabled);
+        assert!(config.cdn.auto_tune);
+        assert_eq!(config.cdn.segment_max_age_secs, 0);
+        assert_eq!(config.cdn.empty_status, 502);
+        assert!(config.cdn.public_base.is_none());
+        assert!(config.cache.gc.enabled);
+        assert_eq!(config.cache.gc.max_disk_mb, 0);
+        assert_eq!(config.cache.gc.max_age_secs, 1_800);
+    }
+
+    #[test]
+    fn cdn_and_gc_round_trip_through_toml() {
+        let mut config = Config::default();
+        config.cdn.enabled = true;
+        config.cdn.public_base = Some("https://cdn.example".into());
+        config.cache.gc.max_disk_mb = 200;
+        let encoded = toml::to_string(&config).expect("序列化");
+        assert!(encoded.contains("[cdn]"), "{encoded}");
+        assert!(encoded.contains("[cache.gc]"), "{encoded}");
+        assert!(encoded.contains("public_base = "), "{encoded}");
+        let decoded: Config = toml::from_str(&encoded).expect("再解析");
+        assert!(decoded.cdn.enabled);
+        assert_eq!(
+            decoded.cdn.public_base.as_deref(),
+            Some("https://cdn.example")
+        );
+        assert_eq!(decoded.cache.gc.max_disk_mb, 200);
+    }
+
+    #[test]
+    fn group_without_prefetch_serializes_unchanged() {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g".into(),
+            name: "组".into(),
+            ..Group::default()
+        });
+        let encoded = toml::to_string(&config).expect("序列化");
+        assert!(!encoded.contains("prefetch ="), "{encoded}");
+        assert!(!encoded.contains("[groups.prefetch]"), "{encoded}");
+        let decoded: Config = toml::from_str(&encoded).expect("再解析");
+        assert!(decoded.group("g").expect("分组").prefetch.is_none());
     }
 }

@@ -3,12 +3,13 @@
 //! 契约见 [`docs/design/03-http-contract.md`](../../../docs/design/03-http-contract.md) §6.4。
 //! 响应形状为本实现自定（目标未逐字段采证）。
 
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 use axum::{extract::State, Json};
 use serde_json::{json, Value};
 
 use crate::{
+    cache_gc::dir_usage,
     http::{error::ApiError, ext::PanelAuth},
     state::AppState,
 };
@@ -34,6 +35,8 @@ pub async fn cache_stats(
         "entries": Value::Object(entries),
         "bytes": bytes,
         "playlist_cache_entries": state.playlist_cache_entries(),
+        // 推荐 TTL / 磁盘上限（被动实测，见 `docs/design/06-low-spec-optimization.md` §3）。
+        "recommend": crate::cache_gc::recommendation(&state),
     }))
 }
 
@@ -134,25 +137,4 @@ fn group_of(path: &str) -> Option<String> {
         return None;
     }
     Some(first.to_string())
-}
-
-/// 统计目录内的文件数与总字节数。
-fn dir_usage(dir: &Path) -> (u64, u64) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return (0, 0);
-    };
-    let mut files = 0u64;
-    let mut bytes = 0u64;
-    for entry in entries.flatten() {
-        let Ok(meta) = entry.metadata() else { continue };
-        if meta.is_file() {
-            files += 1;
-            bytes += meta.len();
-        } else if meta.is_dir() {
-            let (sub_files, sub_bytes) = dir_usage(&entry.path());
-            files += sub_files;
-            bytes += sub_bytes;
-        }
-    }
-    (files, bytes)
 }

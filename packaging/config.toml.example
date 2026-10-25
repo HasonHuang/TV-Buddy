@@ -11,6 +11,27 @@ token_enabled = false
 [cache]
 disk_path = "./cache"
 
+# 低配置（1 vCPU / 128 MB 内存 / 1 GB 磁盘 + 前置 CDN）建议显式配上下面几段；
+# 完整可复制的样例见 docs/design/config-low-spec.toml。
+#
+# [cache.segments]
+# per_channel_max = 200      # 内存与磁盘切片索引同步受限（0 = 仅内置默认 4096）
+#
+# [cache.prefetch]
+# enabled = true
+# concurrency = 2            # 1 vCPU：降低开播瞬间的 CPU 抢占
+#
+# [cache.gc]
+# enabled = true             # 默认已开；关掉后切片正文永不删除，1 GB 盘会被吃满
+# max_disk_mb = 0            # 0 = 按可用空间与实测工作集自动
+#
+# [cdn]
+# enabled = true             # CDN 侧兜底；默认 false 时响应头与旧版逐字节一致
+# auto_tune = true           # 从真实播放流量推算推荐 TTL / 磁盘上限
+# segment_max_age_secs = 0   # 0 = 用实测推荐值（面板「缓存状态」页可复制）
+# empty_status = 502         # 让「200 + 空体」不被 CDN 缓存
+# # public_base = "https://cdn.example"
+
 # 字幕机翻（可选）。url 可写根地址、/translate 或 /translate/batch。
 # [subtitle.translate]
 # enabled = true

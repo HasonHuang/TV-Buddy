@@ -6,6 +6,7 @@ import { GroupsPage } from './groups';
 import { BackupPage, EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
 import { AssetsPage } from './assets';
+import { LowSpecForms } from './lowcfg';
 import { LogosPage } from './logo';
 import { PlaylistPage } from './playlist';
 import { LivestreamPage, SchedulePage } from './schedule';
@@ -172,6 +173,7 @@ function SettingsPage() {
 
   return (
     <>
+      <LowSpecForms />
       <div className="card">
         <div className="row between">
           <h1>系统设置</h1>
@@ -180,6 +182,9 @@ function SettingsPage() {
           </button>
         </div>
         <h2>配置（config.toml 全量）</h2>
+        <p className="muted">
+          上面的表单覆盖 CDN、磁盘回收与预取；这里编辑其余全部字段，保存同样整份生效。
+        </p>
         <textarea value={config} onChange={(e) => setConfig(e.target.value)} spellCheck={false} />
         <div style={{ marginTop: 12 }}>
           <button onClick={() => void save()}>保存</button>

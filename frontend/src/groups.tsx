@@ -40,8 +40,88 @@ function entryUrl(group: Group, channel: Channel): string {
   return `${location.origin}/${group.id}/${channel.id}.${entryExt(group)}`;
 }
 
-type GroupForm = { id: string; name: string; mode: string; access: string };
-type ChannelForm = { id: string; name: string; url: string };
+type GroupForm = {
+  id: string;
+  name: string;
+  mode: string;
+  access: string;
+  prefetch: PrefetchForm;
+};
+type ChannelForm = { id: string; name: string; url: string; prefetch: PrefetchForm };
+
+/**
+ * 预取覆盖的三态（`PrefetchOverrideCfg` 全是 `Option`）。
+ *
+ * - `''` 跟随全局：整个覆盖清空；
+ * - `'inherit'` 只覆盖数量/并发，开关仍取全局值；
+ * - `'on'` / `'off'` 显式开或关。
+ */
+type PrefetchForm = {
+  state: '' | 'inherit' | 'on' | 'off';
+  limit: string;
+  concurrency: string;
+};
+
+const PREFETCH_OPTIONS: { value: PrefetchForm['state']; label: string }[] = [
+  { value: '', label: '跟随全局' },
+  { value: 'inherit', label: '只覆盖数量与并发' },
+  { value: 'on', label: '开启预取' },
+  { value: 'off', label: '关闭预取' },
+];
+
+function emptyPrefetch(): PrefetchForm {
+  return { state: '', limit: '', concurrency: '' };
+}
+
+/** 表单 → 后端 `prefetch` 字段；`null` 表示清空覆盖。 */
+function prefetchPayload(form: PrefetchForm): Record<string, unknown> | null {
+  if (form.state === '') {
+    return null;
+  }
+  const payload: Record<string, unknown> = {};
+  if (form.state !== 'inherit') {
+    payload.enabled = form.state === 'on';
+  }
+  const limit = form.limit.trim();
+  if (limit !== '') {
+    payload.prefetch_limit = Number(limit);
+  }
+  const concurrency = form.concurrency.trim();
+  if (concurrency !== '') {
+    payload.concurrency = Number(concurrency);
+  }
+  return payload;
+}
+
+/** 后端 `prefetch` 字段 → 表单。 */
+function prefetchForm(raw: unknown): PrefetchForm {
+  if (!raw || typeof raw !== 'object') {
+    return emptyPrefetch();
+  }
+  const value = raw as { enabled?: boolean; prefetch_limit?: number; concurrency?: number };
+  const state: PrefetchForm['state'] =
+    value.enabled === true ? 'on' : value.enabled === false ? 'off' : 'inherit';
+  return {
+    state,
+    limit: value.prefetch_limit === undefined ? '' : String(value.prefetch_limit),
+    concurrency: value.concurrency === undefined ? '' : String(value.concurrency),
+  };
+}
+
+/** 列表里的预取标记；没有覆盖时不显示。 */
+function PrefetchBadge({ raw }: { raw: unknown }) {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const form = prefetchForm(raw);
+  const label =
+    form.state === 'off'
+      ? '预取关闭'
+      : form.state === 'on'
+        ? '预取开启'
+        : `预取 ${form.limit || '—'} 片 / ${form.concurrency || '—'} 并发`;
+  return <Badge tone={form.state === 'off' ? 'warn' : 'muted'}>{label}</Badge>;
+}
 
 export function GroupsPage() {
   const { node, ok, err } = useToast();
@@ -72,14 +152,16 @@ export function GroupsPage() {
   const saveGroup = async () => {
     if (!groupForm) return;
     const { form, isNew } = groupForm;
+    const prefetch = prefetchPayload(form.prefetch);
     try {
       if (isNew) {
-        await api('POST', '/groups', form);
+        await api('POST', '/groups', { ...form, prefetch });
       } else {
         await api('PUT', `/groups/${form.id}`, {
           name: form.name,
           mode: form.mode,
           access: form.access,
+          prefetch,
         });
       }
       setGroupForm(null);
@@ -93,13 +175,15 @@ export function GroupsPage() {
   const saveChannel = async () => {
     if (!channelForm) return;
     const { gid, form, isNew } = channelForm;
+    const prefetch = prefetchPayload(form.prefetch);
     try {
       if (isNew) {
-        await api('POST', `/groups/${gid}/channels`, form);
+        await api('POST', `/groups/${gid}/channels`, { ...form, prefetch });
       } else {
         await api('PUT', `/groups/${gid}/channels/${form.id}`, {
           name: form.name,
           url: form.url,
+          prefetch,
         });
       }
       setChannelForm(null);
@@ -169,7 +253,13 @@ export function GroupsPage() {
             <button
               onClick={() =>
                 setGroupForm({
-                  form: { id: '', name: '', mode: 'proxy', access: 'public' },
+                  form: {
+                    id: '',
+                    name: '',
+                    mode: 'proxy',
+                    access: 'public',
+                    prefetch: emptyPrefetch(),
+                  },
                   isNew: true,
                 })
               }
@@ -193,6 +283,7 @@ export function GroupsPage() {
                 <span className="muted mono">{group.id}</span>
                 <Badge tone="info">{group.mode}</Badge>
                 <Badge tone={ACCESS_TONE[group.access] ?? 'muted'}>{group.access}</Badge>
+                <PrefetchBadge raw={group.prefetch} />
                 <span className="muted">{channels.length} 个频道</span>
               </div>
               <div className="row">
@@ -211,6 +302,7 @@ export function GroupsPage() {
                         name: group.name,
                         mode: group.mode,
                         access: group.access,
+                        prefetch: prefetchForm(group.prefetch),
                       },
                       isNew: false,
                     })
@@ -244,6 +336,7 @@ export function GroupsPage() {
                     <td>
                       {channel.name || channel.id}
                       <div className="muted mono">{channel.id}</div>
+                      <PrefetchBadge raw={channel.prefetch} />
                     </td>
                     <td className="mono ellipsis">{channel.url}</td>
                     <td className="mono ellipsis">
@@ -274,7 +367,12 @@ export function GroupsPage() {
                         onClick={() =>
                           setChannelForm({
                             gid: group.id,
-                            form: { id: channel.id, name: channel.name, url: channel.url },
+                            form: {
+                              id: channel.id,
+                              name: channel.name,
+                              url: channel.url,
+                              prefetch: prefetchForm(channel.prefetch),
+                            },
                             isNew: false,
                           })
                         }
@@ -313,7 +411,7 @@ export function GroupsPage() {
                 onClick={() =>
                   setChannelForm({
                     gid: group.id,
-                    form: { id: '', name: '', url: '' },
+                    form: { id: '', name: '', url: '', prefetch: emptyPrefetch() },
                     isNew: true,
                   })
                 }
@@ -373,6 +471,12 @@ export function GroupsPage() {
               }
             />
           </Field>
+          <PrefetchFields
+            form={groupForm.form.prefetch}
+            onChange={(prefetch) =>
+              setGroupForm({ ...groupForm, form: { ...groupForm.form, prefetch } })
+            }
+          />
         </Modal>
       )}
 
@@ -423,6 +527,12 @@ export function GroupsPage() {
               }
             />
           </Field>
+          <PrefetchFields
+            form={channelForm.form.prefetch}
+            onChange={(prefetch) =>
+              setChannelForm({ ...channelForm, form: { ...channelForm.form, prefetch } })
+            }
+          />
         </Modal>
       )}
 
@@ -446,6 +556,55 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <label>{label}</label>
       {children}
     </div>
+  );
+}
+
+/** 预取覆盖：三态选择 + 数量/并发（留空表示不覆盖）。 */
+function PrefetchFields({
+  form,
+  onChange,
+}: {
+  form: PrefetchForm;
+  onChange: (next: PrefetchForm) => void;
+}) {
+  const numeric = form.state === 'inherit' || form.state === 'on' || form.state === 'off';
+  return (
+    <>
+      <Field label="预取覆盖">
+        <select
+          value={form.state}
+          onChange={(event) => onChange({ ...form, state: event.target.value as PrefetchForm['state'] })}
+        >
+          {PREFETCH_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {numeric && (
+        <div className="fields">
+          <Field label="单次上限（留空不覆盖）">
+            <input
+              type="number"
+              min={0}
+              value={form.limit}
+              placeholder="0 = 不限"
+              onChange={(event) => onChange({ ...form, limit: event.target.value })}
+            />
+          </Field>
+          <Field label="并发数（留空不覆盖）">
+            <input
+              type="number"
+              min={1}
+              value={form.concurrency}
+              placeholder="1-32"
+              onChange={(event) => onChange({ ...form, concurrency: event.target.value })}
+            />
+          </Field>
+        </div>
+      )}
+    </>
   );
 }
 

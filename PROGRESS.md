@@ -26,6 +26,7 @@
 | P2 | 订阅聚合、面板分区、DASH 回看、EPG/字幕翻译 | ✅ 完成 |
 | P3 | 目标剩余端点与兼容细节 | ✅ 完成 |
 | P4 | DASH 完整链路与 DASH→HLS | ✅ 完成 |
+| P5 | 低配置优化（磁盘回收、CDN 兜底、预取覆盖、被动实测推荐） | ✅ 完成（CDN 面板侧待人工配置） |
 
 当前实现已覆盖：
 
@@ -40,6 +41,37 @@
 - `install.sh` 保留已有 `config.toml`，支持自定义安装目录与服务注册。
 
 ### 1.3 最近完成
+
+2026-10-25：
+
+- **P5 低配置优化实施完成**（设计 `docs/design/06-low-spec-optimization.md`，含实施记录与设计修正）：
+  - **配置层**：新增 `[cdn]`、`[cache.gc]`、分组/频道 `prefetch` 三态覆盖；
+    `Config::prefetch_for(gid,cid)` 按 **频道 > 分组 > 全局** 合并。
+  - **预取接线**：`media_entry` 改用 `prefetch_for`；关掉某分组后该分组不再落盘。
+  - **被动实测**：新模块 `src/cache_estimate.rs`。清单解析得 T/N/W，
+    切片体积按分组做 EMA（α=0.3）；推荐 `TTL = clamp(ceil60(W+2T), 300, 900)`，
+    工作集 `round10(3×N×seg_mb×1.5)`。统计落盘 `<cache>/cache_estimate.json`（带 `v=1`）。
+  - **一次性估算**：新增 `POST /panel/api/cdn/estimate`（前 3 个非归档分组，抓清单与
+    首个切片长度）；全失败仍 `200`（`source` 回落 `fallback`），并发第二个请求 `409`。
+  - **CDN 兜底**：`[cdn].enabled` 时切片 `max-age` 取实测/显式值、命中路径可转 `public`、
+    空体可改 502 + `no-store`、`public_base` 覆盖 Host 推导。关闭时逐字节等于旧行为。
+  - **磁盘回收**：新模块 `src/cache_gc.rs`（`rustix::fs::statvfs` 取 `f_bavail`）。
+    上限 `clamp(min(工作集, 可用×ratio − reserve), min_mb, total×0.7)`；
+    淘汰三段：超龄 → 超量 mtime LRU → `free < reserve` 紧急模式；目录遍历走
+    `spawn_blocking` 防 1 vCPU 抖动。
+  - **面板**：缓存状态页加 CDN 推荐卡（含「复制 TTL」）；系统设置页加
+    `[cdn]`/`[cache.gc]`/`[cache.prefetch]` 三张表单 + 「立即估算」；分组与频道编辑弹窗
+    加预取四态选择（跟随全局 / 只覆盖数量与并发 / 开启 / 关闭）。
+  - **文档**：`docs/design/04-config-and-storage.md` 新增 §11；
+    新增 `docs/design/config-low-spec.toml`（可直接启动，已试跑）。
+- **修掉两个真实缺陷**（低配设计稿 §0 提到、实测确认）：
+  - 切片正文 `<cache>/seg_bytes/` 只写不删 → 新增磁盘 GC 兜底。
+  - 磁盘索引 `seg_url/*.json` 随清单刷新无限增长 → `save_index` 加上限；
+    `[cache.segments].per_channel_max = 0`（默认）时用内置 `DEFAULT_INDEX_MAX = 4096`。
+    截断按**登记时间**而非 suffix：suffix 是 `sha256(上游 URL)` 前缀，不是递增序号。
+- **质量门**：`cargo fmt --check`；283 项测试通过（201 单元 + 82 契约）；
+  clippy 0 error（27 条历史 warning，新增文件 0 条）；`pnpm build`；
+  冒烟 `smoke-m2`/`smoke-panel`/`smoke-cli`/`smoke-backup`/`smoke-assets`/`smoke-share` 通过。
 
 2026-10-24：
 
@@ -112,23 +144,102 @@
 - 台标扩展名白名单与目标一致。
 - 订阅聚合字段对拍完成。
 
-### 1.4 质量门（2026-10-24）
+### 1.4 质量门（2026-10-25）
 
 | 项 | 结果 |
 | --- | --- |
 | `cargo fmt --check` | ✅ 通过 |
-| `cargo test --offline --all-targets` | ✅ 237 项通过（168 单元 + 69 集成） |
-| `cargo clippy --offline --all-targets` | ✅ 无 error；仍有历史 warning |
-| 冒烟脚本 | ✅ 15 个：assets、panel、resolver、share、remux、schedule、timeshift、record、record-dash、epg、aggregate、backup、logo、security、cli |
-| 发布校验 | ✅ 双架构静态产物通过 `verify-release.sh` |
+| `cargo test --offline --all-targets` | ✅ 283 项通过（201 单元 + 82 契约） |
+| `cargo clippy --offline --all-targets` | ✅ 无 error；27 条历史 warning（本轮新增文件 0 条） |
+| 冒烟脚本 | ✅ 本轮重跑 6 个：`m2`、`panel`、`cli`、`backup`、`assets`、`share`；其余 9 个上次通过 |
+| `pnpm build` | ✅ 通过（含 `tsc --noEmit`） |
+| 发布校验 | ⏳ 本轮未重跑（上次 2026-10-24 双架构产物通过 `verify-release.sh`） |
 | CI | ✅ 仅 `v*` tag 触发；fmt/clippy/test、CLI 冒烟与双架构校验已配置 |
 
 ### 1.5 当前工作区
 
-- 基线提交：`086157d`，已推送 `rust` 分支。
+- 代码基线：低配置优化已提交并推送 `rust` 分支，见 §1.7。
 - `PROGRESS_bak.md` 保存 2026-10-23 之前的完整 1169 行记录。
 - `dist/` 与 `samples/` 不入库。
 - 目标测试容器、源站与本实现的临时实例应按需清理。
+
+### 1.6 续接快照（2026-10-24 本轮结束）
+
+本轮已完成并推送：
+
+- `96d5f7c feat(panel)`：面板改为目标的 13 个一级分区；系统设置合并配置/状态/备份；台标与回看独立；订阅源规则/预检；EPG 手工映射/额外频道。
+- `56066c9 feat(subs)`：订阅源正文落盘 `<cache>/sub_url/*.json`，状态落盘 `<cache>/subs/status.json`；重启后按源级 TTL 命中；`cache/flush` 清正文。
+- `50ec323 fix(dash)`：proxy MPD 错令牌 → `302 error_url`；已有 `minimumUpdatePeriod` → `PT1S`；已有 `publishTime` → 当前 UTC；响应头改为 `application/dash+xml; charset=utf-8` 与 `max-age=1, s-maxage=1`。
+- V-08 收口：目标 `<P>` 新增 5 个样本（`x1/c1`、`x1/c2`、`x2/c1`、`x_3/c-4`、`ts1/c1`）；约 2005 种输入模板与主流哈希族均不匹配；判定为低影响，停止黑盒穷举。
+- 质量门：`cargo fmt --check`；237 项测试（168 单元 + 69 集成）；`pnpm build`；`smoke-panel.sh`、`smoke-logo.sh` 通过。
+- 目标清理：已删除测试分组 `x1`、`x2`、`x_3`、`gprobe`；宿主 `:19994` 源站已停止；目标容器 `rea82v09` 保留。
+
+遇到的问题与阻塞：
+
+1. V-08 的 `<P>` 精确算法仍未解。目标为 stripped Rust；Hopper 不可用；环境无 `rizin`/`ghidra`；cargo-auditable 依赖表为空。功能影响低，保持自洽实现。
+2. V-10 只完成 API 与分区级对齐。未做逐屏视觉/交互对拍；缺目标操作录像；系统设置仍是原始配置编辑，不是字段级表单。
+3. 视频素材的 URL 转换/弃用资源列表、多 VPS 分享子页缺后端端点，面板未实现。
+4. U-06 只有 `breathe` 效果逐字节一致；其余效果与缩放仍为近似。
+5. `match-report` 目标 raw 抓包为 `text/plain` 表格，面板 JS 期望 JSON；冲突未解。
+6. 扩展名轮换未覆盖 `.ts` 与无扩展名；Remux 后缀选择与目标不同（目标观测 `.gif/.png`，本实现轮换 5 种）。
+7. `out_groups`/`dropped_groups` 顺序为目标哈希序，本实现为稳定排序；低影响。
+8. V-01 URL 池回退顺序未验；目标 `url_pool_size>1` 多 BaseURL 曾失败并产生零切片，无法继续对拍。
+9. MPD 本地令牌算法功能兼容，但不保证与目标逐字节相同。
+
+本轮新增结论：
+
+- 目标面板一级分区顺序：`dashboard, cache, groups, settings, security, stats, schedule, epg, logos, subs, livestream, assets, logs`。
+- 目标入口扩展名由分组 `format` 决定：`hls` → `.m3u8`，`mpd` → `.mpd`，与 `mode` 无关。探测 DASH proxy 时必须先把分组 `format` 设为 `mpd`。
+- 目标新建频道用 `POST /panel/api/groups/{gid}/channels`；`PUT .../channels/{cid}` 只更新已有频道。
+- 目标 proxy MPD 的 `publishTime` 每次请求更新为当前 UTC；上游缺该属性时不插入。
+- 目标 proxy MPD 错令牌跳 `server.error_url`，不是 `not_found_url`。
+
+下一步任务（按优先级）：
+
+1. V-10 收尾：补系统设置字段级表单、素材 URL 转换/弃用资源、分享子页；能拿到目标录像后做逐屏对拍。
+2. 扩展名轮换：补 `.ts` 与无扩展名的目标证据；决定 Remux 后缀是否改为目标观测集合。
+3. `match-report`：先确认面板调用方与目标 raw 形状，再决定保留 `text/plain` 还是兼容 JSON。
+4. V-01：若目标 URL 池可修复，补 `url_pool_size>1` 的首选与回退顺序；否则保持登记。
+5. U-06 可选：逐像素对齐其余 5 种台标效果与缩放采样。
+6. 每次改完运行完整质量门，提交并立即推送 `rust` 分支。
+
+当前工作区：除未跟踪的 `.opencode/` 外无未提交改动；`frontend/dist` 与 `samples/` 已重建但不入库。
+
+### 1.7 续接快照（2026-10-25 本轮结束）
+
+本轮做的事：把低配置优化全部落地，并修掉设计稿登记的两个真实缺陷。
+设计见 `docs/design/06-low-spec-optimization.md`，验收状态见其 §10。
+`06` 已按 STE100 精简：实测段的真实域名与路径改为占位符，任务清单内容并入 `06`。
+本轮低配置改动已合并为**单个提交**。带真实域名的旧提交不再可达。
+
+该提交含三部分：
+
+- 后端：`src/config/model.rs`、`src/http/routes/{stream,admin,cdn}.rs`、`src/http.rs`、
+  `src/proxy/{media,segments}.rs`、`src/state.rs`、`src/lib.rs`、`src/main.rs`、`Cargo.{toml,lock}`；
+  新文件 `src/cache_estimate.rs`、`src/cache_gc.rs`、`src/http/routes/cdn.rs`
+- 面板：前端新 `frontend/src/lowcfg.tsx`，改 `panel.tsx`、`cache.tsx`、`groups.tsx`、`style.css`
+- 文档：`04-config-and-storage.md` §11、`06`（精简与脱敏）、`docs/design/config-low-spec.toml`、
+  `packaging/config.toml.example` 注释、本文件
+
+未做 / 待办：
+
+1. **T0：CDN 面板侧配置**——`06` §2 的五处改动与规则 A/B 需要在四家 CDN 的控制台手工完成
+   （强制 TTL、关闭遵循源站头、关 Set-Cookie 注入、关图片改写、下发 `X-Forwarded-Proto: https`，
+   然后 Purge All）。验收命令见 `06` §2.4。这是唯一还没做的一环。
+2. **真机验收**：`06` §10 的 S4（造 200 MB → 一个周期回落到上限；占满磁盘走紧急清理）
+   与 S6（64 MB 实例 24h 无 OOM、`seg_bytes` 不涨、tick 不抖动）需要目标 VPS，
+   本地只覆盖了公式与淘汰逻辑的单测。
+3. **未生效的配置键**：`[cache.segments]` 的 `global_max`/`per_channel_max` 仍默认 `0`（不限），
+   内存索引的上限同样没开；低配样例里已显式设 `per_channel_max = 200`，
+   但 `[cache]` 的 `disk_max_mb` / `memory_max_mb` / `segment_cache_max_mb` **依然无人消费**（U-10）。
+4. 上一轮遗留的 V-08/V-10 与其余登记差异（见 §2.2、§2.3）状态未变。
+
+下一轮建议顺序：
+
+1. 在 CDN 面板完成 T0，然后核对 `06` §2.4 的四条命令。
+2. 在目标 VPS 上跑 S4/S6 真机验收。
+3. 回填 `[cache]` 的 MB 上限（U-10）：要么接进 GC 与索引，要么从模型里删掉。
+4. 再考虑上一轮的 V-10 面板收尾与零散登记差异。
 
 ## 2. 待处理任务
 
@@ -138,6 +249,9 @@
 | --- | --- | --- | --- | --- |
 | U-06 | P1 | 台标动效与解码 | ✅ 完成：动画 WebP、10 帧、脏矩形、PNG/WebP 纯 Rust 解码；其他格式回退 `ffmpeg` | 可选：逐像素对齐其余 5 种效果与缩放采样 |
 | U-07 | P2 | 订阅源缓存跨重启 | ✅ 完成：正文落盘 `<cache>/sub_url/`，状态 `<cache>/subs/status.json`；重启后按源级 TTL 命中 | 可补目标缓存文件名格式对拍（不影响行为） |
+| U-08 | P1 | 磁盘回收与索引上限 | ✅ 完成：新增 `[cache.gc]` 与 `src/cache_gc.rs`；`save_index` 加上限 | 真机跑 S4/S6（见 §1.7） |
+| U-09 | P1 | CDN 兜底与被动实测推荐 | ✅ 完成：`[cdn]`、`src/cache_estimate.rs`、`POST /panel/api/cdn/estimate` | T0 的 CDN 面板侧配置待人工完成 |
+| U-10 | P2 | `[cache]` 的 MB 上限是死配置 | ⏳ 未做：`disk_max_mb`、`memory_max_mb`、`segment_cache_max_mb` 全仓库无消费点 | 接进 GC/索引，或从配置模型删掉，避免「配了没反应」 |
 
 ### 2.2 待补目标证据
 
@@ -151,13 +265,14 @@
 - V-06 `/unban` 配额与 `/unban/whoami` ✅
 - V-03 公开 `/epg/api/*` 形状 ✅
 - U-05 `[cache.dash]` 发布延迟与看门狗参数 ✅
-- V-01 DASH 多 `<BaseURL>` 请求分布 ✅
+- V-01 DASH 多 `<BaseURL>` 请求分布 ✅（回退顺序未验）
 - V-02 `proxy`+MPD 绝对 `<BaseURL>` 本地反代 ✅
 - V-04 `/subs/{groups,preview}` 字段 ✅
 - V-09 `[playlist]` / `[share]` 目标语义 ✅
 - V-11 真实 HLS/M3U 验证 ✅
 - U-07 订阅源缓存跨重启 ✅
 - DASH 本地反代错误令牌 → 302 `error_url`；`minimumUpdatePeriod` → `PT1S`；`publishTime` → 当前 UTC；MPD 头对齐 ✅
+- 低配置优化：`[cdn]`、`[cache.gc]`、分组/频道预取覆盖、被动实测推荐、`POST /panel/api/cdn/estimate`、面板推荐卡与三张表单 ✅
 
 ### 2.3 已登记差异与不实现项
 
@@ -172,17 +287,22 @@
 | `random_id_enabled` | 仅回显；行为未观测 | F-018 |
 | `cache.backend=memory` | 仅回显；实际仍落盘 | F-015 |
 | 播放侧 `compat_mode` 与 `srt_ua_keywords` | 不实现；目标未测出行为 | D19 |
-| `socks5` 代理 | 不支持；未知类型直连并告警 | F-018 |
 | `match-report` 形状 | 保留目标 raw 抓包的 `text/plain` 表格；面板 JS 期望 JSON，冲突未解 | F-013 |
 | 扩展名轮换算法 | 未完全破解；只保证取自 `[cache.disguise].formats` | F-018、F-019 |
 | `out_groups`/`dropped_groups` 顺序 | 目标为哈希序；本实现稳定排序 | F-020 |
+| `[cdn]` / `[cache.gc]` / 分组 `prefetch` | 目标 v0.8.2 无此配置面；本实现新增，默认全部不改变既有行为 | `06` §6、§7 |
+| 磁盘索引内置上限 4096 | 目标未观测；本实现为防 `seg_url/*.json` 随清单刷新无限增长而设，`per_channel_max > 0` 时按配置 | `06` §6.2 |
+| 磁盘回收按 mtime LRU | 不按频道整组淘汰；`segment_path` 的文件名经 `slug()` 后无法反解回 `gid/cid` | `06` §6.2 |
 
 ## 3. 建议推进顺序
 
-1. **V-08 / V-10**：继续补证据；低影响项保持登记。
-2. 可选：逐像素对齐 U-06 其余效果与缩放采样。
-3. 每项完成后更新本文件、对应 `docs/` 文档与测试。
-4. 提交使用 Conventional Commits，并立即 push `rust` 分支。
+1. **T0 + 真机验收**：在 CDN 面板按 `06` §2 配五处，跑 §2.4 四条命令；在目标 VPS 上跑 S4/S6。
+2. **回填死配置**：`[cache]` 的 `disk_max_mb`/`memory_max_mb`/`segment_cache_max_mb` 目前无人消费（U-10）。
+3. **V-10 收尾**：字段级设置表单（低配置三段已做成表单，其余仍为原始 JSON 编辑）、素材/分享子页、逐屏对拍。
+4. 扩展名轮换与 `match-report` 形状：先补证据，再决定是否改实现。
+5. V-01 URL 池回退：目标可复现时再补；否则保持登记。
+6. 可选：逐像素对齐 U-06 其余效果与缩放采样。
+7. 每项完成后运行完整质量门，更新本文件与对应 `docs/`，提交并立即 push `rust` 分支。
 
 ## 4. 关键设计结论
 
@@ -204,6 +324,15 @@
 - `map` 模式空映射值保留原名；`merge` 模式仅在 `merge_group` 非空时统一分组。
 - 聚合按 URL 去重，范围覆盖同源与跨源。
 - 源 `ttl_secs=0` 按 3600 秒；源级 TTL 优先于 `merge_ttl_secs`。
+- `[cdn].enabled=false`（默认）时，切片响应头、空体状态码与 `self_base` 推导逐字节等于旧行为。
+- 推荐 TTL = `clamp(ceil60(W + 2T), 300, 900)`，取各分组最大值；无实测用回退 600s。
+- 磁盘上限 = `clamp(min(工作集, 可用空间×0.8 − 100MB), 50MB, 总容量×0.7)`；工作集 = `round10(3 × N × seg_mb × 1.5)`。
+- `statvfs` 取 `f_bavail`（非特权用户可写块数）与 `f_frsize`；失败回退 150MB。
+- 工作集按**十进制 MB**（10⁶）计算，与设计稿 §3.3 的算例一致。
+- 预取合并顺序与 `proxy_for` 同：**频道 > 分组 > 全局**；覆盖字段是三态 `Option`，未设置不输出。
+- 磁盘切片索引按**登记时间**截断（suffix 是哈希，不能当序号）；`per_channel_max=0` 时用内置 4096。
+- GC 淘汰顺序：超龄（`max_age_secs`）→ 超量 mtime LRU → `free < reserve_mb` 时紧急（忽略龄，删到 cap/2）。
+- 估算统计落盘 `<cache>/cache_estimate.json`，带 `v` 版本号，不匹配即丢弃；落盘由 GC tick 节流（≥300s）。
 
 ## 5. 主要文档入口
 
@@ -213,6 +342,8 @@
 | 验证矩阵 | [`docs/spec/07-baseline-and-verification.md`](docs/spec/07-baseline-and-verification.md) |
 | HTTP 契约 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) |
 | 配置与存储 | [`docs/design/04-config-and-storage.md`](docs/design/04-config-and-storage.md) |
+| 低配置优化（设计） | [`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md) |
+| 低配置示例配置 | [`docs/design/config-low-spec.toml`](docs/design/config-low-spec.toml) |
 | 架构 | [`docs/design/02-architecture.md`](docs/design/02-architecture.md) |
 | 发现索引 | [`docs/findings/README.md`](docs/findings/README.md) |
 | 订阅聚合证据 | [`docs/findings/dynamic/17-subscription-merge.md`](docs/findings/dynamic/17-subscription-merge.md) |
