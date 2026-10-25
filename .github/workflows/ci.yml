@@ -53,7 +53,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets
-      - run: cargo test --all-targets
+      - name: 测试
+        run: |
+          set -o pipefail
+          cargo test --all-targets 2>&1 | tee "$RUNNER_TEMP/test.log"
+      - name: 汇总失败用例
+        if: failure()
+        run: |
+          # 失败用例名写进 annotation：不开日志也能定位（本仓库日志 API 受限）。
+          log="$RUNNER_TEMP/test.log"
+          [ -f "$log" ] || exit 0
+          grep -E '^test .+ FAILED$' "$log" | sed -E 's/^test (.+) \.\.\. FAILED$/\1/' | head -20 |
+            while IFS= read -r name; do echo "::error::失败用例：$name"; done
+          # 失败摘要（通常含断言信息）打到日志与 annotation。
+          grep -A40 '^failures:$' "$log" | head -60 || true
       - name: CLI 冒烟
         run: |
           cargo build
