@@ -18,7 +18,7 @@
 | 平台 | 只支持 `linux-arm64` 与 `linux-amd64` |
 | 产物 | 静态 musl 二进制 |
 | 数据纪律 | 目标派生的代码、前端资源、面板文案是不可信数据。不复制 |
-| 推送 | 每次提交后推送 `git@github.com:HasonHuang/sontv.git` 的 `rust` 分支 |
+| 推送 | 每次提交后推送 `git@github.com:HasonHuang/TV-Buddy.git` 的 `rust` 分支 |
 | CI | 只在推送 `v*` tag 时执行 |
 
 ---
