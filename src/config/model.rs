@@ -20,6 +20,8 @@ pub struct Config {
     pub epg: EpgCfg,
     pub playlist: PlaylistCfg,
     pub share: ShareCfg,
+    /// `[subtitle]`——字幕样式与机翻（面板「字幕设置」卡片）。
+    pub subtitle: SubtitleCfg,
     pub health: HealthCfg,
     pub stats: StatsCfg,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -535,6 +537,113 @@ impl Default for DisguiseCfg {
             subtitle: false,
             playlist: true,
             master: false,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[subtitle]`——字幕样式与机翻。
+///
+/// 形状对齐目标 v0.8.2 的 `GET /panel/api/config`（默认值取自该抓包）。面板「系统设置 →
+/// 字幕设置」按这段做字段级表单，所以必须建模：不建模时它落在 `extra` 里，新配置读不到默认值。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubtitleCfg {
+    /// 播放侧兼容模式。目标有该键，行为未测出（D19）。
+    pub compat_mode: String,
+    /// 播放侧字幕 UA 关键字。同上，未测出行为。
+    pub srt_ua_keywords: Vec<String>,
+    pub style: SubtitleStyleCfg,
+    pub translate: SubtitleTranslateCfg,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for SubtitleCfg {
+    fn default() -> Self {
+        Self {
+            compat_mode: "auto".into(),
+            srt_ua_keywords: vec![
+                "ijkplayer".into(),
+                "ijkmediaplayer".into(),
+                "tv.danmaku.ijk".into(),
+            ],
+            style: SubtitleStyleCfg::default(),
+            translate: SubtitleTranslateCfg::default(),
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[subtitle.style]`。字段与目标一致；**样式注入尚未实现**（见 `PROGRESS.md` §2.3）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubtitleStyleCfg {
+    pub enabled: bool,
+    /// 空串 = 跟随播放器默认。
+    pub color: String,
+    /// 百分比字符串，例如 `"80%"`。
+    pub font_size: String,
+    pub bold: bool,
+    /// 0–100，越大越靠下。
+    pub position: u32,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for SubtitleStyleCfg {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            color: String::new(),
+            font_size: "80%".into(),
+            bold: false,
+            position: 90,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[subtitle.translate]`。机翻由 `src/http/routes/media.rs` 消费。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubtitleTranslateCfg {
+    pub enabled: bool,
+    /// MTranServer 基址；留空则用内置免费机翻。
+    pub url: String,
+    /// 目标抓包里出现过 `mtran_token` 别名。
+    #[serde(alias = "mtran_token")]
+    pub token: String,
+    pub source: String,
+    /// 主目标语言。
+    pub target: String,
+    /// 多目标语言；空时回落到 `target`。
+    pub targets: Vec<String>,
+    /// `true` 时译文在上。
+    pub translation_first: bool,
+    pub bilingual: bool,
+    pub set_default: bool,
+    pub timeout_ms: u64,
+    #[serde(alias = "mtran_batch")]
+    pub batch: u64,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for SubtitleTranslateCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: String::new(),
+            token: String::new(),
+            source: "auto".into(),
+            target: "zh-cn".into(),
+            targets: Vec::new(),
+            translation_first: true,
+            bilingual: true,
+            set_default: true,
+            timeout_ms: 1500,
+            batch: 40,
             extra: toml::Table::new(),
         }
     }

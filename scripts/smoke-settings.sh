@@ -109,6 +109,17 @@ cache.gc.max_disk_mb number
 cache.gc.disk_budget_ratio number
 cdn.segment_max_age_secs number
 cache.segments.per_channel_max number
+subtitle.style.enabled bool
+subtitle.style.font_size string
+subtitle.style.color string
+subtitle.style.position number
+subtitle.translate.enabled bool
+subtitle.translate.targets array
+subtitle.translate.target string
+subtitle.translate.translation_first bool
+subtitle.translate.set_default bool
+subtitle.translate.timeout_ms number
+subtitle.translate.token string
 PATHS
 
 # 3) U-10：设了 [cache].disk_max_mb 之后，推荐值必须变成手动源并等于该值。

@@ -783,24 +783,11 @@ fn translate_credentials(config: &crate::config::Config) -> (String, String) {
     if !epg.url.is_empty() {
         return (epg.url, epg.token);
     }
-    let table = config
-        .extra
-        .get("subtitle")
-        .and_then(|table| table.get("translate"));
-    let get = |key: &str| table.and_then(|table| table.get(key));
-    let url = get("url")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .trim()
-        .trim_end_matches('/')
-        .to_string();
-    let token = get("token")
-        .or_else(|| get("mtran_token"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    (url, token)
+    let subtitle = &config.subtitle.translate;
+    (
+        subtitle.url.trim().trim_end_matches('/').to_string(),
+        subtitle.token.trim().to_string(),
+    )
 }
 
 /// `POST /epg/translate/clear`——清空翻译结果缓存。

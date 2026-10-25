@@ -361,60 +361,28 @@ impl SubtitleTranslate {
 }
 
 fn subtitle_translate(config: &crate::config::Config) -> SubtitleTranslate {
-    let table = config
-        .extra
-        .get("subtitle")
-        .and_then(|table| table.get("translate"));
-    let get = |key: &str| table.and_then(|table| table.get(key));
-    let enabled = get("enabled")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    let url = get("url")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .trim()
-        .trim_end_matches('/')
-        .to_string();
-    let token = get("token")
-        .or_else(|| get("mtran_token"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let source = get("source")
-        .and_then(|value| value.as_str())
-        .unwrap_or("auto")
-        .to_string();
-    let translation_first = get("translation_first")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    let mut targets: Vec<String> = get("targets")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(|text| text.trim().to_string()))
-                .filter(|text| !text.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
+    let cfg = &config.subtitle.translate;
+    let enabled = cfg.enabled;
+    let url = cfg.url.trim().trim_end_matches('/').to_string();
+    let token = cfg.token.trim().to_string();
+    let source = cfg.source.clone();
+    let translation_first = cfg.translation_first;
+    let mut targets: Vec<String> = cfg
+        .targets
+        .iter()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .collect();
     if targets.is_empty() {
-        if let Some(target) = get("target").and_then(|value| value.as_str()) {
-            let target = target.trim();
-            if !target.is_empty() {
-                targets.push(target.to_string());
-            }
+        let target = cfg.target.trim();
+        if !target.is_empty() {
+            targets.push(target.to_string());
         }
     }
     if targets.is_empty() {
         targets.push("zh-cn".to_string());
     }
-    let batch = get("batch")
-        .or_else(|| get("mtran_batch"))
-        .and_then(|value| value.as_integer())
-        .filter(|value| *value > 0)
-        .unwrap_or(40)
-        .min(500) as usize;
+    let batch = cfg.batch.clamp(1, 500) as usize;
     SubtitleTranslate {
         enabled,
         url,

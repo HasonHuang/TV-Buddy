@@ -3991,6 +3991,7 @@ async fn subtitle_translation_engine_translates_and_caches() {
 enabled = true
 url = "{upstream}"
 target = "zh-cn"
+# 不设 translation_first：走目标默认 true（译文在上）
 "#;
     let fixture = fixture_with_all(false, extra).await;
     let auth = format!("Bearer {}", login(&fixture).await);
@@ -4048,12 +4049,12 @@ target = "zh-cn"
         .expect("正文");
     assert!(
         text.contains(
-            "00:00:01,000 --> 00:00:03,000\nHello\n[zh-cn]译:Hello\nWorld\n[zh-cn]译:World\n"
+            "00:00:01,000 --> 00:00:03,000\n[zh-cn]译:Hello\nHello\n[zh-cn]译:World\nWorld\n"
         ),
         "{text}"
     );
     assert!(
-        text.contains("2\n00:00:04,000 --> 00:00:05,000\nHello\n[zh-cn]译:Hello\n"),
+        text.contains("2\n00:00:04,000 --> 00:00:05,000\n[zh-cn]译:Hello\nHello\n"),
         "{text}"
     );
 
@@ -4200,7 +4201,7 @@ target = "zh-cn"
     assert!(text.starts_with("WEBVTT\n\n"), "{text}");
     assert!(
         text.contains(
-            "00:00:01.000 --> 00:00:03.500\nHello\n[zh-cn]译:Hello\nWorld\n[zh-cn]译:World\n"
+            "00:00:01.000 --> 00:00:03.500\n[zh-cn]译:Hello\nHello\n[zh-cn]译:World\nWorld\n"
         ),
         "{text}"
     );

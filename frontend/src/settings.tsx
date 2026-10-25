@@ -164,7 +164,19 @@ function Pick({
 }
 
 /** 布尔下拉：值仍是布尔，只是外观与目标一致。 */
-function BoolPick({ label, path, hint }: { label: string; path: string; hint?: string }) {
+function BoolPick({
+  label,
+  path,
+  hint,
+  onLabel = '开启',
+  offLabel = '关闭',
+}: {
+  label: string;
+  path: string;
+  hint?: string;
+  onLabel?: string;
+  offLabel?: string;
+}) {
   const { draft, update } = useDraft();
   return (
     <div className="field">
@@ -173,8 +185,8 @@ function BoolPick({ label, path, hint }: { label: string; path: string; hint?: s
         value={asBool(draft, path) ? 'on' : 'off'}
         onChange={(event) => update(path, event.target.value === 'on')}
       >
-        <option value="on">开启</option>
-        <option value="off">关闭</option>
+        <option value="on">{onLabel}</option>
+        <option value="off">{offLabel}</option>
       </select>
       {hint ? <div className="hint">{hint}</div> : null}
     </div>
@@ -292,6 +304,88 @@ function Lines({
   );
 }
 
+/** 标签多选（字幕目标语言）。选中集写回数组；`primaryPath` 同步首个选中项。 */
+function Chips({
+  label,
+  path,
+  primaryPath,
+  hint,
+  options,
+}: {
+  label: string;
+  path: string;
+  primaryPath?: string;
+  hint?: string;
+  options: { value: string; label: string }[];
+}) {
+  const { draft, update } = useDraft();
+  const chosen = asList(draft, path);
+  const toggle = (value: string) => {
+    const next = chosen.includes(value)
+      ? chosen.filter((item) => item !== value)
+      : [...chosen, value];
+    update(path, next);
+    if (primaryPath) update(primaryPath, next[0] ?? '');
+  };
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={chosen.includes(option.value) ? '' : 'ghost'}
+            onClick={() => toggle(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {hint ? <div className="hint">{hint}</div> : null}
+    </div>
+  );
+}
+
+/** 滑杆（字幕位置）。 */
+function Range({
+  label,
+  path,
+  min,
+  max,
+  unit,
+  hint,
+}: {
+  label: string;
+  path: string;
+  min: number;
+  max: number;
+  unit?: string;
+  hint?: string;
+}) {
+  const { draft, update } = useDraft();
+  const value = asNumber(draft, path);
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <div className="row">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          value={value}
+          onChange={(event) => update(path, Number(event.target.value))}
+        />
+        <span className="muted">
+          {value}
+          {unit ?? ''}
+        </span>
+      </div>
+      {hint ? <div className="hint">{hint}</div> : null}
+    </div>
+  );
+}
+
 function Card({
   title,
   note,
@@ -324,6 +418,37 @@ const CATCHUP_TEMPLATES = [
   { value: 'dollar', label: '国外（${start}-${end}）' },
   { value: 'unix', label: 'Kodi（{utc}-{utcend}）' },
   { value: 'both', label: '两者都带' },
+];
+
+/** 字幕字号预设；`[subtitle].style.font_size` 存字符串百分比。 */
+const FONT_SIZES = ['60%', '70%', '80%', '90%', '100%', '110%', '120%', '150%'].map((size) => ({
+  value: size,
+  label: size === '80%' ? '80%（默认）' : size,
+}));
+
+/** 字幕颜色；空串 = 跟随播放器默认。取值为十六进制，目标的具体预设未观测。 */
+const SUBTITLE_COLORS = [
+  { value: '', label: '默认颜色' },
+  { value: '#ffffff', label: '白色' },
+  { value: '#000000', label: '黑色' },
+  { value: '#ffff00', label: '黄色' },
+  { value: '#00ffff', label: '青色' },
+  { value: '#ff0000', label: '红色' },
+];
+
+/** 字幕机翻的目标语言（按 p12 参考截图的顺序）。 */
+const SUBTITLE_LANGS = [
+  { value: 'zh-cn', label: '简体中文' },
+  { value: 'zh-tw', label: '繁體中文' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Español' },
+  { value: 'fr', label: 'Français' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'ru', label: 'Русский' },
+  { value: 'he', label: 'עברית' },
+  { value: 'vi', label: 'Tiếng Việt' },
 ];
 
 /** 系统设置页。 */
@@ -415,6 +540,38 @@ export function SettingsPage() {
     try {
       await api('POST', '/cache/flush');
       ok('本地缓存已清空');
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const clearTranslated = async () => {
+    setBusy('subclear');
+    try {
+      await api('POST', '/subtitle/translate/clear');
+      ok('译文缓存已清空');
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const testMtran = async () => {
+    setBusy('mtran');
+    try {
+      const result = await api<{ ok: boolean; base?: string; targets?: { error?: string }[] }>(
+        'POST',
+        '/subtitle/mtran/test',
+        { text: 'hello' },
+      );
+      if (result.ok) {
+        ok(`机翻连通正常${result.base ? `（${result.base}）` : ''}`);
+      } else {
+        err(result.targets?.[0]?.error || '机翻测试失败');
+      }
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     } finally {
@@ -670,6 +827,73 @@ export function SettingsPage() {
                   hint="0 = 仅用内置默认 4096"
                 />
                 <Num label="保留条数" path="cache.segments.retain_count" />
+              </div>
+            </Card>
+
+            <Card
+              title="字幕设置"
+              note="仅 DASH 模式频道生效"
+              actions={
+                <button
+                  className="ghost"
+                  disabled={busy === 'subclear'}
+                  onClick={() => void clearTranslated()}
+                >
+                  {busy === 'subclear' ? '清理中…' : '清理译文缓存'}
+                </button>
+              }
+            >
+              <Toggle
+                label="开启（下方参数生效，注入到 VTT）"
+                path="subtitle.style.enabled"
+                hint="关闭时原样返回字幕"
+              />
+              <div className="fields">
+                <Pick label="字号" path="subtitle.style.font_size" options={FONT_SIZES} />
+                <Pick label="颜色" path="subtitle.style.color" options={SUBTITLE_COLORS} />
+                <Toggle label="字体加粗" path="subtitle.style.bold" />
+                <Range
+                  label="位置"
+                  path="subtitle.style.position"
+                  min={0}
+                  max={100}
+                  unit="%"
+                  hint="越大越靠下"
+                />
+              </div>
+              <Toggle label="字幕机翻" path="subtitle.translate.enabled" />
+              <Chips
+                label="目标语言"
+                path="subtitle.translate.targets"
+                primaryPath="subtitle.translate.target"
+                options={SUBTITLE_LANGS}
+                hint="可多选；第一个选中的作为主目标语言"
+              />
+              <div className="fields">
+                <Toggle label="显示双语" path="subtitle.translate.bilingual" />
+                <BoolPick
+                  label="显示方式"
+                  path="subtitle.translate.translation_first"
+                  onLabel="译文在上"
+                  offLabel="译文在下"
+                />
+                <Toggle label="默认选中译轴" path="subtitle.translate.set_default" />
+                <Num label="翻译超时" path="subtitle.translate.timeout_ms" unit="ms" />
+              </div>
+              <div className="fields">
+                <Text
+                  label="MTranServer"
+                  path="subtitle.translate.url"
+                  placeholder="http://127.0.0.1:8989"
+                  hint="留空则用内置免费机翻"
+                />
+                <Text label="API Key" path="subtitle.translate.token" hint="没填就留空" />
+              </div>
+              <div className="row">
+                <button className="ghost" disabled={busy === 'mtran'} onClick={() => void testMtran()}>
+                  {busy === 'mtran' ? '测试中…' : '测试'}
+                </button>
+                <span className="muted">测试用的是已保存的配置：改了地址先保存再测。</span>
               </div>
             </Card>
 

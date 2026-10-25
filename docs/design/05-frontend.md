@@ -73,7 +73,7 @@
 | 磁盘回收 | `[cache.gc]` | §11.2 的八个键；立即估算 | ✅ |
 | CDN 兜底 | `[cdn]` | §11.1 的键 | ✅ |
 | 切片缓存 | `[cache.segments]` | `global_max`、`per_channel_max`、`retain_count`（本实现扩展） | ✅ |
-| 字幕设置 | `[subtitle]` | 样式、机翻、目标语言、MTranServer | ⏳ |
+| 字幕设置 | `[subtitle]` | `style.*`（开关 / 字号 / 颜色 / 字重 / 位置滑杆）、`translate.*`（机翻、目标语言多选、双语与译文上下、译轴、超时、MTranServer、API Key）+ 测试与清理译文缓存 | ✅（样式注入未实现，兼容保留） |
 | DASH 调优 | `[cache.dash]` | 播放体验 / 网络性能 / 特殊场景三组 | ⏳ |
 | 备份与迁移 | — | 复用 `BackupPage` 卡片 | ✅ |
 | 语言 | — | 界面语言（目标为「跟随浏览器」） | ⏳ 待决策 |

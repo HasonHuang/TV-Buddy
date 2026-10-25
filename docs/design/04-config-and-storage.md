@@ -28,6 +28,7 @@
 | `[cache.dash]` | `mpd_refresh_*`、`*_timeout_secs`、`fetch_concurrency`、`ondemand_idle_secs`、`retry_*`、`watchdog_*` 等 | MPD/切片超时、重试退避、会话空闲回收、`playlist_min_secs` 媒体窗口、`start_time_offset_secs`、`publish_delay_secs`、看门狗 tick/stall/stagger/上限/冷却已接入；`fast_start_secs` 目标无可观测语义，仅保留配置 |
 | `[cache.remux]` | `target_duration_secs`、`window_segments`、`publish_delay_segments`、`reconnect_backoff_ms` | Remux 切片时长、窗口与重连退避 |
 | `[auth]` | `token_enabled`、`token_ttl_hours`、`token_failure_url`、`whitelist` | 播放 Token |
+| `[subtitle]` | `compat_mode`、`srt_ua_keywords`、`style.{enabled,color,font_size,bold,position}`、`translate.{enabled,url,token,target,targets,translation_first,bilingual,set_default,timeout_ms,batch}` | 字幕样式与机翻。`translate.*` 已实现；`style.*` **样式注入未实现**（兼容保留，见 `PROGRESS.md` §2.3）。缺省 `translation_first = true`（对齐目标） |
 | `[cdn]` | `enabled`、`auto_tune`、`segment_max_age_secs`、`shared_cache_hits`、`dont_cache_empty`、`empty_status`、`public_base` | 外部 CDN 侧兜底与被动实测开关；`enabled=false`（默认）时响应头与状态码逐字节不变。见 §11 |
 | `[health]`/`[stats]` | `enabled`、`interval_secs`、`online_window_secs` | 健康与指标 |
 | `[assets]` | `map`（原始 URL → 本地 HLS 入口） | 占位/错误视频转换 |

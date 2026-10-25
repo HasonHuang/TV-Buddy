@@ -87,6 +87,17 @@
   - 新冒烟 `scripts/smoke-settings.sh` 六组断言：配置 `GET→PUT→GET` 逐字节等价、字段路径存在性、
     U-10 被服务端消费（改 `disk_max_mb` 后推荐值转 `manual`）、口令哈希契约、前端资源已内嵌。
   - 基线：`docs/design/reference/img/p12-settings.png`；字段清单见 `05` §4.1。
+- **字幕设置卡片 + `[subtitle]` 建模**：
+  - `[subtitle]` 原先没建模，整段落在 `extra` 里：新配置读不到默认值，面板保存还会把默认值写坏。
+    现在按目标形状建成类型化段（`SubtitleCfg` / `SubtitleStyleCfg` / `SubtitleTranslateCfg`），
+    默认值取自目标抓包（含 `style.position = 90`、`font_size = "80%"`、`timeout_ms = 1500`）。
+  - 两处消费点（`media.rs::subtitle_translate`、`epg.rs::translate_credentials`）改为读类型化字段，
+    删掉 `extra.get("subtitle")` 的取值路径。
+  - 面板新增「字幕设置」卡片：样式开关 / 字号 / 颜色 / 字重 / 位置滑杆、机翻开关、目标语言多选
+    （首个选中项即主目标语言）、双语与译文上下、译轴默认与超时、MTranServer 与 API Key，
+    外带「测试」（`POST /panel/api/subtitle/mtran/test`）与「清理译文缓存」。
+  - 行为变化：`translation_first` 缺省由我们旧的非目标默认 `false` 改为目标默认 `true`（译文在上），
+    两个契约测试的期望随之更新。
 - **质量门**：`cargo fmt --check`；285 项测试通过（203 单元 + 82 契约）；
   clippy 0 error（27 条历史 warning，新增文件 0 条）；`pnpm build`；
   冒烟 `smoke-m2`/`smoke-panel`/`smoke-cli`/`smoke-backup`/`smoke-assets`/`smoke-share` 通过。
@@ -335,6 +346,9 @@
 | `[cache].disk_max_mb`、`memory_max_mb` | **生效**：目标不消费这两个键（F-015），本实现分别接进 GC 与内存索引；默认 `0` = 不限，行为与序列化都不变 | U-10、`04` §11.5 |
 | `segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries` | **不消费**：目标同样未观测到生效；默认值非 0（`50`/`500`/`2000`），与显式填写的同值无法区分，生效会静默压容 | F-015、S-CACHE-03、`04` §11.5 |
 | 内存索引条目按 256 B/条估算 | 估算值，只作上限、偏保守；目标给的是字节预算，本实现按条目计数 | U-10、`04` §11.5 |
+| `[subtitle]` 段由 `extra` 改为类型化 | 原先未建模，新配置读不到默认值；现按目标形状建模，键面与默认值一致 | 目标 `v0.8.2-config.json` |
+| `[subtitle.translate].translation_first` 缺省 | 由 `false` 改为 `true`，与目标默认一致；两个契约测试期望已更新 | 同上 |
+| `[subtitle].style.*` 样式注入 | 保留键面、**不实现**：目标把样式注入 VTT 的行为未观测；面板可编辑，运行时不生效 | `05` §4.1 |
 
 ## 3. 建议推进顺序
 
