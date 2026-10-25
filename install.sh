@@ -299,7 +299,7 @@ elif [ "$USE_DIST" = 1 ]; then
     extract_archive "$LATEST"
 else
     # 默认：从 GitHub Release 下载同架构安装包。
-    URL=$(release_url "$ARCH") || fail "在 $GITHUB_REPO 的 Release $VERSION 中找不到 $ARCH 安装包；可用 --archive 指定下载地址"
+    URL=$(release_url "$ARCH") || fail "在 $GITHUB_REPO 的 Release $VERSION 中找不到 $ARCH 安装包。若最新版本是预发布（tag 带 -beta/-rc），/releases/latest 不含它，请用 --version <tag> 指定；也可用 --archive 直接给安装包地址"
     fetch_release_archive "$URL"
     verify_digest "$DOWNLOADED"
     extract_archive "$DOWNLOADED"

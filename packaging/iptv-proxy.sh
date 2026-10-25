@@ -527,7 +527,7 @@ update_source() {
     done
 
     # 本地没有产物时，退到 GitHub Release（默认更新源）。
-    release=$(release_url "$arch") || fail "在 $GITHUB_REPO 的 Release $IPTV_PROXY_VERSION 中找不到 $arch 安装包"
+    release=$(release_url "$arch") || fail "在 $GITHUB_REPO 的 Release $IPTV_PROXY_VERSION 中找不到 $arch 安装包。若是预发布版本，请用 IPTV_PROXY_VERSION=<tag> 指定"
     TMP_DIR=$(mktemp -d)
     echo "下载：$release" >&2
     download "$release" "$TMP_DIR/pkg.tar.gz" || fail "下载失败：$release"
