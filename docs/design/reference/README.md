@@ -122,6 +122,17 @@ T=$(curl -s -X POST $B/panel/api/login -H 'Content-Type: application/json' \
 #    页面：[data-page="<pid>"] 逐个点击；弹窗：调用 openGroupModal()/openChannelModal()/openModal('<id>') 等
 ```
 
+> 本机现状（2026-10-25）：全局已装 `puppeteer`（`npm i -g puppeteer`），但 `npx puppeteer browsers
+> install chrome` 的下载被沙箱网络拦下。复用缓存里的 Chrome 133 即可：
+>
+> ```bash
+> export NODE_PATH=$(npm root -g)  # 全局包不在默认解析路径里
+> export PUPPETEER_EXECUTABLE_PATH="$HOME/.cache/puppeteer/chrome/mac_arm-133.0.6943.126/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+> node shot.mjs
+> ```
+>
+> 采集前请确认 `frontend/dist` 是新的（`pnpm build`）且二进制已重编（资源是编进二进制的）。
+
 采集要点：
 
 - 登录后 token 存 `localStorage.iptv_token`。
