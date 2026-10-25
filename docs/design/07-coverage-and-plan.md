@@ -43,9 +43,9 @@
 | A3 | `security` 缺白名单、限流 `l1`/`l2`、会话 TTL/并发、防爆破 | `05` §4.2；键都在 `[auth]`，`src/http.rs` 无对应展示接口 | 安全页加四组只读+可编辑卡片（写配置走 `PUT /panel/api/config`） |
 | A4 | `logs` 缺级别过滤 | `05` §4.2；日志接口已按级别返回 | 日志页加级别下拉，前端过滤 |
 | A5 | `epg` 缺翻译设置（`m08` 翻译模型）与采集节奏 | `05` §4.2；`/panel/api/epg/translate/*` 与 `[epg].cron` 已在 | EPG 页加翻译卡片（引擎/Key/目标语言）与节奏选择 |
-| A6 | `settings` 缺 DASH 调优卡片 | `05` §4.1；`[cache.dash]` 已建模 | 按 `[cache.dash]` 键自拟三组（播放体验 / 网络性能 / 特殊场景），组名沿用 `p12` 文案 |
+| A6 ✅ | `settings` 的 DASH 调优卡片 | `05` §4.1；`[cache.dash]` 已建模 | 按 `[cache.dash]` 键自拟三组（播放体验 / 网络性能 / 特殊场景），组名沿用 `p12` 文案 |
 | A7 | `subs` 的「读取分组」待核 | `05` §4.2；`/panel/api/subs/groups` 已在 | 先核 UI 是否有入口，没有就加一个「读取分组」按钮 |
-| A8 | `dashboard` 缺快速操作 | `05` §4.2；`/cache/flush`、`/reload`、M3U 导出端点都在 | 概览页加四个按钮 |
+| A8 ✅ | `dashboard` 的快速操作 | `05` §4.2；`/cache/flush`、`/reload`、M3U 导出端点都在 | 概览页加四个按钮 |
 | A9 | `groups` 缺**分组与频道排序** | `p02-groups.png`：目标有 `▲`/`▼` 与拖拽柄；`groups.tsx` 无排序代码。`08` S-BUG-02 的相反结论已更正（`07` `D-006`） | 前端数组重排 + `PUT /panel/api/config` 全量回写（**无需新端点**），与目标机制一致 |
 | A10 | `groups` 工具栏缺 `JSON 导入`/`JSON 覆盖`/`导出全部` | 同上截图；端点 `/panel/api/groups/{import,import/force,export}` 已在 `src/http.rs` | 工具栏补三个入口；`多选`（批量操作语义未观测）先不做，登记待核 |
 | A11 | 频道行缺状态点与 `异常`/`常驻`/`全轨道` 徽章 | 同上截图（绿点、`异常`、`常驻`、`全轨道`） | 需先确认健康数据出口：`/panel/api/health` 的载荷是否含逐频道字段；没有则属 §3.B 类 |
@@ -77,7 +77,7 @@ CENC/ClearKey 解密、DASH 多 CDN 故障切换、`l1/l2` 限流复刻、`cache
 
 | 阶段 | 内容 | 验收方式 | 相对成本 |
 | --- | --- | --- | --- |
-| **P1** | A1–A8（面板接线，零后端） | `scripts/smoke-settings.sh` 扩断言；`05` §4.2 逐行复核；`pnpm build` + 相关冒烟 | 中（8 项 UI） |
+| **P1** | A1–A11（面板接线，零后端） | `scripts/smoke-settings.sh` 扩断言；`05` §4.2 逐行复核；`pnpm build` + 相关冒烟 | 中（11 项 UI）。进度：A6/A8 已完成 |
 | **P2** | ✅ C1/C2（已定案并更正 `08` `S-BUG-02`、登记 `D-006`）、C4（已定：不做） | 文档改动已 diff 复核；证据是 `p02-groups.png` | 低（已完成） |
 | **P3** | B1/B2（指标采集 + 概览页） | 新增 smoke 断言 status 字段；与目标字段清单（`docs/findings/dynamic/11-security-and-metrics.md` §6）逐字段对照 | 高（新采集） |
 | **P4** | C3 之外的深化（如需要） | 需先能复现目标环境 | 视情况 |

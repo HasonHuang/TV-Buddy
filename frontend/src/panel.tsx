@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getToken, setToken, UNAUTHORIZED_EVENT } from './api';
+import { useToast } from './ui';
 import { GroupsPage } from './groups';
 import { EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
@@ -97,6 +98,8 @@ function Login({ onDone }: { onDone: () => void }) {
 function Overview() {
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const { node, ok, err } = useToast();
 
   const load = useCallback(async () => {
     try {
@@ -111,6 +114,20 @@ function Overview() {
     void load();
   }, [load]);
 
+  /** 快速操作：端点都是现成的，成功后刷新状态。 */
+  const action = async (name: string, path: string, done: string) => {
+    setBusy(name);
+    try {
+      await api('POST', path);
+      ok(done);
+      await load();
+    } catch (cause) {
+      err(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy('');
+    }
+  };
+
   const entries = Object.entries(status ?? {}).filter(([, value]) => typeof value !== 'object');
 
   return (
@@ -121,9 +138,26 @@ function Overview() {
           <h2>概览</h2>
         </div>
         <div className="row">
-          <button className="ghost" onClick={() => void load()}>
-            刷新
+          <button className="ghost" disabled={busy !== ''} onClick={() => void load()}>
+            刷新状态
           </button>
+          <button
+            className="ghost"
+            disabled={busy !== ''}
+            onClick={() => void action('flush', '/cache/flush', '本地缓存已清空')}
+          >
+            {busy === 'flush' ? '清理中…' : '清空缓存'}
+          </button>
+          <button
+            className="ghost"
+            disabled={busy !== ''}
+            onClick={() => void action('reload', '/reload', '配置已热重载')}
+          >
+            {busy === 'reload' ? '重载中…' : '热重载配置'}
+          </button>
+          <a className="ghost" href="/playlist.m3u" target="_blank" rel="noreferrer">
+            导出全部 M3U
+          </a>
         </div>
       </div>
       <dl>
@@ -135,6 +169,7 @@ function Overview() {
         ))}
       </dl>
       {error && <div className="msg err">{error}</div>}
+      {node}
     </div>
   );
 }

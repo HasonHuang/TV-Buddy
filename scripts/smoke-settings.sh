@@ -128,6 +128,35 @@ share.master_url string
 share.follower_urls array
 share.share_token bool
 share.poll_secs number
+cache.dash.playlist_min_secs number
+cache.dash.start_time_offset_secs number
+cache.dash.publish_delay_secs number
+cache.dash.retain_min_secs number
+cache.dash.fetch_extra_segments number
+cache.dash.fast_start_secs number
+cache.dash.mpd_refresh_min_secs number
+cache.dash.mpd_refresh_max_secs number
+cache.dash.mpd_timeout_secs number
+cache.dash.segment_timeout_secs number
+cache.dash.fetch_concurrency number
+cache.dash.min_request_interval_ms number
+cache.dash.retry_max number
+cache.dash.retry_initial_ms number
+cache.dash.retry_backoff number
+cache.dash.retry_max_ms number
+cache.dash.watchdog_tick_secs number
+cache.dash.watchdog_stall_secs number
+cache.dash.watchdog_rebuild_max number
+cache.dash.watchdog_cooldown_secs number
+cache.dash.watchdog_rebuild_stagger_ms number
+cache.dash.playlist_stall_secs number
+cache.dash.ondemand_idle_secs number
+cache.dash.session_max_lifetime_secs number
+cache.dash.continuous_tail_min_ratio number
+cache.dash.whole_file_budget_mb number
+cache.dash.obfuscate_filenames bool
+cache.dash.mpd_body_dedup bool
+cache.dash.whole_file_serve string
 PATHS
 
 # 3) U-10：设了 [cache].disk_max_mb 之后，推荐值必须变成手动源并等于该值。
@@ -171,6 +200,7 @@ for needle in \
   'cdn.segment_max_age_secs' \
   'share.follower_urls' \
   '/assets/' \
+  'cache.dash.watchdog_rebuild_stagger_ms' \
   'DraftCtx'
 do
   case "$BUNDLE" in

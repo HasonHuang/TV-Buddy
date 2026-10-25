@@ -943,6 +943,133 @@ export function SettingsPage() {
               />
             </Card>
 
+            <Card
+              title="DASH 调优"
+              note="304 增量刷新、多 CDN 故障切换、断流续传、片段级容错都是自动的，无需配置"
+            >
+              <p className="muted">
+                三组参数默认值已适配绝大多数源，不确定用途就不要改——改错会直接影响起播与卡顿。
+              </p>
+              <details>
+                <summary>播放体验（影响延迟、起播速度、卡顿稳定性）</summary>
+                <div className="fields">
+                  <Num
+                    label="媒体窗口"
+                    path="cache.dash.playlist_min_secs"
+                    unit="秒"
+                    step={0.5}
+                    hint="媒体清单保留的时间窗"
+                  />
+                  <Num
+                    label="时移偏移"
+                    path="cache.dash.start_time_offset_secs"
+                    unit="秒"
+                    step={0.5}
+                  />
+                  <Num
+                    label="发布延迟"
+                    path="cache.dash.publish_delay_secs"
+                    unit="秒"
+                    step={0.5}
+                    hint=">0 时压后 ceil(延迟/切片时长) 段"
+                  />
+                  <Num
+                    label="保留下限"
+                    path="cache.dash.retain_min_secs"
+                    unit="秒"
+                    step={0.5}
+                  />
+                  <Num
+                    label="额外抓取"
+                    path="cache.dash.fetch_extra_segments"
+                    unit="段"
+                    hint="发布延迟为 0 时压后这么多段"
+                  />
+                  <Num
+                    label="快速起播"
+                    path="cache.dash.fast_start_secs"
+                    unit="秒"
+                    step={0.5}
+                    hint="目标侧无可观测差异，保留配置"
+                  />
+                </div>
+              </details>
+              <details>
+                <summary>网络性能（高级，默认值适用大多数场景）</summary>
+                <div className="fields">
+                  <Num
+                    label="清单刷新下限"
+                    path="cache.dash.mpd_refresh_min_secs"
+                    unit="秒"
+                    step={0.5}
+                  />
+                  <Num
+                    label="清单刷新上限"
+                    path="cache.dash.mpd_refresh_max_secs"
+                    unit="秒"
+                    step={0.5}
+                  />
+                  <Num label="清单超时" path="cache.dash.mpd_timeout_secs" unit="秒" />
+                  <Num label="切片超时" path="cache.dash.segment_timeout_secs" unit="秒" />
+                  <Num label="拉取并发" path="cache.dash.fetch_concurrency" unit="个" />
+                  <Num label="请求间隔下限" path="cache.dash.min_request_interval_ms" unit="毫秒" />
+                  <Num label="重试次数" path="cache.dash.retry_max" unit="次" />
+                  <Num label="首次退避" path="cache.dash.retry_initial_ms" unit="毫秒" />
+                  <Num
+                    label="退避倍数"
+                    path="cache.dash.retry_backoff"
+                    step={0.5}
+                  />
+                  <Num label="退避上限" path="cache.dash.retry_max_ms" unit="毫秒" />
+                </div>
+              </details>
+              <details>
+                <summary>特殊场景（高级，一般无需调整）</summary>
+                <div className="fields">
+                  <Num label="看门狗周期" path="cache.dash.watchdog_tick_secs" unit="秒" />
+                  <Num label="停滞判定" path="cache.dash.watchdog_stall_secs" unit="秒" />
+                  <Num label="重建上限" path="cache.dash.watchdog_rebuild_max" unit="次" />
+                  <Num
+                    label="重建冷却"
+                    path="cache.dash.watchdog_cooldown_secs"
+                    unit="秒"
+                    hint="连续失败达上限后冷却"
+                  />
+                  <Num
+                    label="重建错开"
+                    path="cache.dash.watchdog_rebuild_stagger_ms"
+                    unit="毫秒"
+                  />
+                  <Num label="清单停滞" path="cache.dash.playlist_stall_secs" unit="秒" />
+                  <Num label="按需空闲回收" path="cache.dash.ondemand_idle_secs" unit="秒" />
+                  <Num
+                    label="会话最长存活"
+                    path="cache.dash.session_max_lifetime_secs"
+                    unit="秒"
+                    hint="0 = 不限"
+                  />
+                  <Num
+                    label="尾部连续比"
+                    path="cache.dash.continuous_tail_min_ratio"
+                    step={0.05}
+                  />
+                  <Num label="整文件预算" path="cache.dash.whole_file_budget_mb" unit="MB" />
+                  <Toggle label="文件名混淆" path="cache.dash.obfuscate_filenames" />
+                  <Toggle label="清单正文去重" path="cache.dash.mpd_body_dedup" />
+                </div>
+                <Pick
+                  label="整文件下发"
+                  path="cache.dash.whole_file_serve"
+                  options={[
+                    { value: 'auto', label: '自动（auto）' },
+                    { value: 'on', label: '总是' },
+                    { value: 'off', label: '从不' },
+                  ]}
+                  hint="取值以配置为准；目标侧该键存在回读异常（S-CACHE-07）"
+                />
+              </details>
+            </Card>
+
             <RawCard
               draft={draft}
               onSaved={(next) => {
