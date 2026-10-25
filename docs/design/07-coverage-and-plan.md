@@ -59,6 +59,25 @@
 | B3 | 频道行绿点与 `异常` 徽章缺数据源 | `health` 只给汇总计数；`watchdog` 有逐频道失败/冷却状态但无读取出口 | 给 `health` 或新端点补逐频道健康（`watchdog` 的 failures/冷却 + DASH 会话在跑），前端据此画点与 `异常` |
 | B4 | **DASH 回看清单 `/{gid}/{cid}/dash-timeshift/{track}/{playlist.txt|playlist.m3u8|playlist|filename}` 完全没实现** | 全仓只有 `/panel/api/dash-timeshift/status`（`src/http.rs:108`），播放路由无该分支；`?playseek=` 未解析，`400 missing playseek` / `404 no segments in range` 两个错误串全仓不存在。文档此前把它标成 P2 已实现，属**文档与实现不一致**（2026-10-25 核对更正） | 需新增状态：目标要求「`PROGRAM-DATE-TIME` = 切片**到达本机**时间」「窗 = 已录制区间」「按 track 的录制序号」，而现有 `dash::Segment{number,time,...}` 的 `time` 是 MPD timeline、`dash_hls::Session` 无到达时间戳。最接近可复用：`dash_hls::{serve,render_media,Entry,cache_path}`。工作量与新采集同档 |
 
+**B4 的实施落点**（2026-10-25 核对，供动手时省一轮搜索）：
+
+- 当前请求的实际走向：`stream.rs:340` 先匹配 `timeshift/` 前缀（`dash-timeshift/...` 不命中）
+  → `stream.rs:346` remux `owns()` 不命中 → `stream.rs:349-358` 仅 `group.mode == "dash"`
+  时进 `dash_hls::serve`，而 `dash_hls.rs:443-446` 把 `dash-timeshift/track/playlist.txt` 拆成
+  `track = "dash-timeshift"`、`file = "track/playlist.txt"`（既不是 `index.txt` 也不是
+  `index.m3u8`）→ `dash_hls.rs:554-556` 落成 `404 Segment not found`；非 dash 模式由
+  `stream.rs:384-390` 给 `302 not_found_url`，proxy 模式由 `stream.rs:391` 进 `segment()` →
+  `proxy::parse_segment()`（`media.rs:92-109`）失败 → `302 error_url`。
+- `dash_hls` 会话生命周期：键 `format!("{gid}/{cid}")`（`dash_hls.rs:155-157`）；创建/更新
+  `upsert`（`:170-195`）；`set_ready` 同时管 `latest`/`progress`/清冷却（`:227-240`）；
+  维护循环 `ensure_maintenance`（`:290-383`，空闲按 `cache.dash.ondemand_idle_secs` 淘汰、
+  停更判定用 `watchdog_stall_secs`、重建时 `entries.clear()` 在 `:353`）；`status()` 的
+  `segment_count`/`uptime_secs` 在 `:251-273`。
+- **不能直接复用这个会话存回看索引**：`entries` 是 `HashMap<String, Entry>` 且只有
+  `urls`/`ext`（`dash_hls.rs:126`），没有到达时间；而 `entries.clear()`（`:353`）会在
+  watchdog 重建时把「按 track 的录制序号」一起清掉。B4 需要独立持久化的索引，
+  或至少与 watchdog 重建解耦。
+
 ### C. 冲突与文档债（需定案，不写码）
 
 | # | 事项 | 现状 | 处置建议 |
