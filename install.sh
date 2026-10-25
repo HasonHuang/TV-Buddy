@@ -2,8 +2,10 @@
 # IPTV Proxy 一键安装脚本。
 #
 # 用法：
-#   发布包目录：sudo ./install.sh
-#   仓库根目录：sudo ./install.sh              # 自动使用 dist/ 中最新的同架构包
+#   直接安装：sudo sh install.sh                  # 默认从 GitHub Release 下载同架构包
+#   指定版本：sudo sh install.sh --version v2026.3.0
+#   发布包目录：sudo ./install.sh                 # 用旁边的已解包文件，不再下载
+#   仓库根目录：sudo ./install.sh --local         # 改用 dist/ 中最新的同架构包
 #   指定安装包：sudo ./install.sh --archive /path/to/iptv-proxy-<version>-<arch>.tar.gz
 #   远程安装包：sudo ./install.sh --archive https://example.com/iptv-proxy.tar.gz
 #
@@ -14,19 +16,29 @@ set -eu
 PREFIX=${PREFIX:-/opt/iptv-proxy}
 ARCHIVE=${ARCHIVE:-}
 CLI_LINK=${CLI_LINK:-/usr/local/bin/iptv-proxy}
+# 默认发布源，可用 --repo 或 IPTV_PROXY_REPO 覆盖。
+GITHUB_REPO=${IPTV_PROXY_REPO:-HasonHuang/TV-Buddy}
+VERSION=${IPTV_PROXY_VERSION:-latest}
 DO_SERVICE=1
 DO_LINK=1
 DO_START=0
+USE_DIST=0
 TMP_DIR=
+DOWNLOADED=
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 usage() {
     cat <<'EOF'
 用法：install.sh [选项]
 
+不带 --archive 且当前目录不是发布包时，从 GitHub Release 下载同架构安装包。
+
 选项：
   --prefix <目录>    安装目录（默认 /opt/iptv-proxy）
   --archive <路径>   指定 tar.gz 安装包；也接受 http(s) URL
+  --version <tag>    从 Release 安装指定版本，如 v2026.3.0（默认取最新）
+  --repo <owner/name> Release 所在仓库（默认内置）
+  --local            不从 Release 下载，改用本地 dist/ 中的安装包
   --no-service       不注册 systemd/OpenRC 服务
   --no-link          不创建 iptv-proxy 命令软链
   --start            安装后立即启动服务
@@ -35,6 +47,8 @@ usage() {
 环境变量：
   PREFIX             同 --prefix
   ARCHIVE            同 --archive
+  IPTV_PROXY_VERSION 同 --version
+  IPTV_PROXY_REPO    同 --repo
   CLI_LINK           命令软链位置（默认 /usr/local/bin/iptv-proxy）
 EOF
 }
@@ -51,6 +65,12 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
+ensure_tmp() {
+    if [ -z "$TMP_DIR" ]; then
+        TMP_DIR=$(mktemp -d)
+    fi
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --prefix)
@@ -62,6 +82,20 @@ while [ "$#" -gt 0 ]; do
             [ "$#" -ge 2 ] || fail "--archive 缺少参数"
             ARCHIVE=$2
             shift 2
+            ;;
+        --version)
+            [ "$#" -ge 2 ] || fail "--version 缺少参数"
+            VERSION=$2
+            shift 2
+            ;;
+        --repo)
+            [ "$#" -ge 2 ] || fail "--repo 缺少参数"
+            GITHUB_REPO=$2
+            shift 2
+            ;;
+        --local)
+            USE_DIST=1
+            shift
             ;;
         --no-service)
             DO_SERVICE=0
@@ -144,42 +178,131 @@ download() {
     fi
 }
 
+# 取 GitHub API 的 JSON 到标准输出。失败时返回非 0，由调用方决定是否回退。
+fetch_json() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 2 --connect-timeout 10 \
+            -H 'Accept: application/vnd.github+json' "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- --header='Accept: application/vnd.github+json' "$1"
+    else
+        return 1
+    fi
+}
+
+# 解析 `releases/latest` 的重定向地址，得到 tag（不经 API，省掉限流）。
+latest_tag() {
+    command -v curl >/dev/null 2>&1 || return 1
+    redirect=$(curl -fsS -o /dev/null -w '%{redirect_url}' --max-time 10 \
+        "https://github.com/$GITHUB_REPO/releases/latest" 2>/dev/null) || return 1
+    tag=${redirect##*/tag/}
+    [ -n "$tag" ] && [ "$tag" != "$redirect" ] || return 1
+    printf '%s' "$tag"
+}
+
+# 查 Release 里与当前架构匹配的 tar.gz。优先枚举真实资产名；
+# API 不可用（限流/无 curl）时按 tag 拼下载地址。
+release_url() {
+    arch=$1
+    tag=
+    if [ "$VERSION" != "latest" ]; then
+        tag=$VERSION
+    else
+        tag=$(latest_tag) || tag=
+    fi
+
+    probe=
+    if [ -n "$tag" ]; then
+        probe="https://api.github.com/repos/$GITHUB_REPO/releases/tags/$tag"
+    else
+        probe="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+    fi
+    json=$(fetch_json "$probe" 2>/dev/null) || json=
+    if [ -n "$json" ]; then
+        url=$(printf '%s\n' "$json" \
+            | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
+            | sed 's/.*"\(https[^"]*\)"/\1/' \
+            | grep -e "-$arch\.tar\.gz\$" \
+            | head -n 1)
+        if [ -n "$url" ]; then
+            printf '%s' "$url"
+            return 0
+        fi
+        # API 通了但没有该架构的包，说明版本/架构不对，不必再猜地址。
+        return 1
+    fi
+
+    [ -n "$tag" ] || return 1
+    # 产物名前缀：tv-buddy-*；旧版本用过 iptv-proxy-*，一并试。
+    for prefix in tv-buddy iptv-proxy; do
+        for candidate in "$tag" "v${tag#v}"; do
+            url="https://github.com/$GITHUB_REPO/releases/download/$candidate/${prefix}-${candidate#v}-$arch.tar.gz"
+            if command -v curl >/dev/null 2>&1; then
+                code=$(curl -fsSL -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)
+                [ "$code" = "200" ] || continue
+            fi
+            printf '%s' "$url"
+            return 0
+        done
+    done
+    return 1
+}
+
 extract_archive() {
     archive=$1
-    TMP_DIR=$(mktemp -d)
-    tar -xzf "$archive" -C "$TMP_DIR" || fail "解包失败：$archive"
-    BIN_SRC=$(find "$TMP_DIR" -type f -name iptv-proxy -perm -u+x | head -n 1)
+    ensure_tmp
+    # 解包到独立子目录，避免覆盖 TMP_DIR 里已下载的 pkg.tar.gz。
+    EXTRACT_DIR="$TMP_DIR/extract"
+    rm -rf "$EXTRACT_DIR"
+    mkdir -p "$EXTRACT_DIR"
+    tar -xzf "$archive" -C "$EXTRACT_DIR" || fail "解包失败：$archive"
+    BIN_SRC=$(find "$EXTRACT_DIR" -type f -name iptv-proxy -perm -u+x | head -n 1)
     [ -n "$BIN_SRC" ] || fail "安装包内没有 iptv-proxy：$archive"
     SRC_DIR=$(dirname "$BIN_SRC")
+}
+
+# 下载 tar.gz 及其同名 .sha256 到 TMP_DIR，结果写入全局 DOWNLOADED。
+# 用全局变量而非 stdout：命令替换会进子 shell，TMP_DIR 的赋值带不回来，
+# 临时目录就没人清理了。
+fetch_release_archive() {
+    url=$1
+    ensure_tmp
+    echo "下载：$url" >&2
+    download "$url" "$TMP_DIR/pkg.tar.gz" || fail "下载失败：$url"
+    if ( download "$url.sha256" "$TMP_DIR/pkg.tar.gz.sha256" ) >/dev/null 2>&1; then
+        :
+    else
+        rm -f "$TMP_DIR/pkg.tar.gz.sha256"
+    fi
+    DOWNLOADED="$TMP_DIR/pkg.tar.gz"
 }
 
 if [ -n "$ARCHIVE" ]; then
     case "$ARCHIVE" in
         http://*|https://*)
-            TMP_DIR=$(mktemp -d)
-            echo "下载：$ARCHIVE"
-            download "$ARCHIVE" "$TMP_DIR/pkg.tar.gz"
-            if ( download "$ARCHIVE.sha256" "$TMP_DIR/pkg.tar.gz.sha256" ) >/dev/null 2>&1; then
-                :
-            else
-                rm -f "$TMP_DIR/pkg.tar.gz.sha256"
-            fi
-            ARCHIVE="$TMP_DIR/pkg.tar.gz"
+            fetch_release_archive "$ARCHIVE"
+            ARCHIVE=$DOWNLOADED
             ;;
     esac
     [ -f "$ARCHIVE" ] || fail "安装包不存在：$ARCHIVE"
     verify_digest "$ARCHIVE"
     extract_archive "$ARCHIVE"
 elif [ -x "$SCRIPT_DIR/iptv-proxy" ] && [ -f "$SCRIPT_DIR/config.toml.example" ]; then
-    # 已解包的发布目录。
+    # 已解包的发布目录：包内容就在旁边，直接用，不必再下载。
     SRC_DIR=$SCRIPT_DIR
     BIN_SRC=$SCRIPT_DIR/iptv-proxy
-else
-    # 仓库根目录：使用 dist/ 中最新的同架构包。
+elif [ "$USE_DIST" = 1 ]; then
+    # 显式要求用本地构建产物（仓库根目录的开发流程）。
     LATEST=$(ls -t "$SCRIPT_DIR"/dist/iptv-proxy-*-"$ARCH".tar.gz 2>/dev/null | head -n 1 || true)
-    [ -n "$LATEST" ] || fail "未找到安装包。先运行 scripts/build-release.sh ${ARCH}，或用 --archive 指定 tar.gz"
+    [ -n "$LATEST" ] || fail "未找到本地安装包。先运行 scripts/build-release.sh ${ARCH}，或去掉 --local 直接从 Release 安装"
     verify_digest "$LATEST"
     extract_archive "$LATEST"
+else
+    # 默认：从 GitHub Release 下载同架构安装包。
+    URL=$(release_url "$ARCH") || fail "在 $GITHUB_REPO 的 Release $VERSION 中找不到 $ARCH 安装包；可用 --archive 指定下载地址"
+    fetch_release_archive "$URL"
+    verify_digest "$DOWNLOADED"
+    extract_archive "$DOWNLOADED"
 fi
 
 # 发布包把资源放在顶层；仓库里在 packaging/。

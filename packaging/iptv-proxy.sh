@@ -34,6 +34,9 @@ DEFAULT_PORT=19899
 DEFAULT_USER=admin
 DEFAULT_PASS=admin
 VERSION=${IPTV_PROXY_CLI_VERSION:-0.1.0}
+# 默认发布源，与 install.sh 一致；可用 IPTV_PROXY_REPO / IPTV_PROXY_VERSION 覆盖。
+GITHUB_REPO=${IPTV_PROXY_REPO:-HasonHuang/TV-Buddy}
+IPTV_PROXY_VERSION=${IPTV_PROXY_VERSION:-latest}
 TMP_DIR=
 
 if [ -t 1 ]; then
@@ -84,13 +87,21 @@ update 来源（按优先级）：
   IPTV_PROXY_BIN        本地二进制
   IPTV_PROXY_ARCHIVE    本地 tar.gz
   IPTV_PROXY_URL        远程 tar.gz 或二进制，支持 {arch} 占位符
+  本地 dist/ 中的安装包
+  GitHub Release       默认；用 IPTV_PROXY_VERSION 指定 tag
 
 非交互：
   IPTV_PROXY_YES=1      跳过 reinstall / uninstall 的删除确认
 
+环境变量：
+  IPTV_PROXY_REPO       发布仓库，默认内置
+  IPTV_PROXY_VERSION    要更新的 tag，如 v2026.3.0；默认 latest
+
 示例：
   iptv-proxy port 8080
   iptv-proxy pass 'new-password' admin
+  iptv-proxy update                                  # 拉最新 Release
+  IPTV_PROXY_VERSION=v2026.3.0 iptv-proxy update     # 固定版本
   IPTV_PROXY_URL=https://example.com/iptv-proxy-{arch}.tar.gz iptv-proxy update
 EOF
 }
@@ -416,6 +427,71 @@ extract_binary() {
     printf '%s' "$src"
 }
 
+# 取 GitHub API 的 JSON。失败返回非 0，由调用方回退。
+fetch_json() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 2 --connect-timeout 10 \
+            -H 'Accept: application/vnd.github+json' "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- --header='Accept: application/vnd.github+json' "$1"
+    else
+        return 1
+    fi
+}
+
+# 解析 releases/latest 的重定向得到 tag（不经 API，省限流）。
+latest_tag() {
+    command -v curl >/dev/null 2>&1 || return 1
+    redirect=$(curl -fsS -o /dev/null -w '%{redirect_url}' --max-time 10 \
+        "https://github.com/$GITHUB_REPO/releases/latest" 2>/dev/null) || return 1
+    tag=${redirect##*/tag/}
+    [ -n "$tag" ] && [ "$tag" != "$redirect" ] || return 1
+    printf '%s' "$tag"
+}
+
+# 查 Release 中当前架构的 tar.gz 地址。优先枚举真实资产名；
+# API 不可用时按 tag 拼地址。
+release_url() {
+    arch=$1
+    if [ "$IPTV_PROXY_VERSION" != "latest" ]; then
+        tag=$IPTV_PROXY_VERSION
+    else
+        tag=$(latest_tag) || tag=
+    fi
+
+    if [ -n "$tag" ]; then
+        probe="https://api.github.com/repos/$GITHUB_REPO/releases/tags/$tag"
+    else
+        probe="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+    fi
+    json=$(fetch_json "$probe" 2>/dev/null) || json=
+    if [ -n "$json" ]; then
+        url=$(printf '%s\n' "$json" \
+            | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
+            | sed 's/.*"\(https[^"]*\)"/\1/' \
+            | grep -e "-$arch\.tar\.gz\$" \
+            | head -n 1)
+        [ -n "$url" ] || return 1
+        printf '%s' "$url"
+        return 0
+    fi
+
+    [ -n "$tag" ] || return 1
+    # 产物名前缀：tv-buddy-*；旧版本用过 iptv-proxy-*，一并试。
+    for prefix in tv-buddy iptv-proxy; do
+        for candidate in "$tag" "v${tag#v}"; do
+            url="https://github.com/$GITHUB_REPO/releases/download/$candidate/${prefix}-${candidate#v}-$arch.tar.gz"
+            if command -v curl >/dev/null 2>&1; then
+                code=$(curl -fsSL -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)
+                [ "$code" = "200" ] || continue
+            fi
+            printf '%s' "$url"
+            return 0
+        done
+    done
+    return 1
+}
+
 update_source() {
     if [ -n "${IPTV_PROXY_BIN:-}" ]; then
         [ -f "$IPTV_PROXY_BIN" ] || fail "二进制不存在：$IPTV_PROXY_BIN"
@@ -449,7 +525,34 @@ update_source() {
             return
         fi
     done
-    fail "未配置更新源：设置 IPTV_PROXY_BIN、IPTV_PROXY_ARCHIVE 或 IPTV_PROXY_URL"
+
+    # 本地没有产物时，退到 GitHub Release（默认更新源）。
+    release=$(release_url "$arch") || fail "在 $GITHUB_REPO 的 Release $IPTV_PROXY_VERSION 中找不到 $arch 安装包"
+    TMP_DIR=$(mktemp -d)
+    echo "下载：$release" >&2
+    download "$release" "$TMP_DIR/pkg.tar.gz" || fail "下载失败：$release"
+    if ( download "$release.sha256" "$TMP_DIR/pkg.sha256" ) >/dev/null 2>&1; then
+        verify_digest "$TMP_DIR/pkg.tar.gz" "$TMP_DIR/pkg.sha256" || fail "校验失败：$release"
+    fi
+    extract_binary "$TMP_DIR/pkg.tar.gz"
+}
+
+# 期望摘要与实测摘要比对。没有 sha256 工具时跳过（不阻断更新）。
+verify_digest() {
+    file=$1
+    sum_file=$2
+    [ -s "$sum_file" ] || return 0
+    expected=$(awk 'NR==1 {print $1}' "$sum_file")
+    [ -n "$expected" ] || return 0
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual=$(sha256sum "$file" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        actual=$(shasum -a 256 "$file" | awk '{print $1}')
+    else
+        warn "未找到 sha256 工具，跳过校验"
+        return 0
+    fi
+    [ "$expected" = "$actual" ]
 }
 
 install_binary() {

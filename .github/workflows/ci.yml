@@ -1,4 +1,4 @@
-name: CI
+name: TV Buddy
 
 on:
   push:
@@ -10,6 +10,10 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # 发布产物命名用的产品名。注意：step 的 with: 不支持 env 上下文，
+  # 所以 upload-artifact / download-artifact / Release 标题里用字面量，改名前须一起改。
+  PRODUCT_SLUG: tv-buddy
+  PRODUCT_NAME: TV Buddy
 
 jobs:
   frontend:
@@ -57,7 +61,8 @@ jobs:
 
   release:
     name: 发布包 ${{ matrix.name }}
-    needs: frontend
+    # 测试全绿后再出包，避免把坏版本发到 Release。
+    needs: [frontend, rust]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -88,13 +93,105 @@ jobs:
           sudo apt-get install -y --no-install-recommends musl-tools
       - name: 构建
         run: cargo build --release --target ${{ matrix.target }}
+      - name: 校验静态链接
+        run: |
+          BIN="target/${{ matrix.target }}/release/iptv-proxy"
+          file "$BIN"
+          # 不用 ldd：静态 musl 二进制在 glibc 宿主上的输出文案随版本变化
+          # （"not a dynamic executable" / "statically linked"），跨 runner 不稳。
+          # 直接查 ELF 程序头里有没有 PT_INTERP（值 3），与 scripts/verify-release.sh 同一判据。
+          python3 - "$BIN" <<'PY'
+          import struct
+          import sys
+
+          path = sys.argv[1]
+          with open(path, "rb") as handle:
+              head = handle.read(64)
+              if head[:4] != b"\x7fELF" or head[4] != 2 or head[5] != 1:
+                  sys.exit("不是 ELF64 小端文件")
+              phoff = struct.unpack_from("<Q", head, 0x20)[0]
+              phentsize = struct.unpack_from("<H", head, 0x36)[0]
+              phnum = struct.unpack_from("<H", head, 0x38)[0]
+              handle.seek(phoff)
+              for _ in range(phnum):
+                  entry = handle.read(phentsize)
+                  if struct.unpack_from("<I", entry, 0)[0] == 3:
+                      sys.exit("存在 PT_INTERP：动态链接")
+          print("静态链接 OK")
+          PY
       - name: 打包
         run: |
-          mkdir -p out
-          cp "target/${{ matrix.target }}/release/iptv-proxy" "out/iptv-proxy-${{ matrix.name }}"
-          cp packaging/config.toml.example out/
+          # 版本取 tag（去掉前缀 v）：$PRODUCT_SLUG-<version>-<arch>.tar.gz[.sha256]
+          VERSION="${GITHUB_REF_NAME#v}"
+          NAME="${PRODUCT_SLUG}-${VERSION}-${{ matrix.name }}"
+          STAGE="out/${NAME}"
+          mkdir -p "$STAGE"
+          # 包内可执行文件名沿用二进制产物名，安装脚本按它查找。
+          install -m 0755 "target/${{ matrix.target }}/release/iptv-proxy" "$STAGE/iptv-proxy"
+          install -m 0644 packaging/config.toml.example "$STAGE/config.toml.example"
+          install -m 0644 packaging/iptv-proxy.service "$STAGE/iptv-proxy.service"
+          install -m 0644 packaging/iptv-proxy.openrc "$STAGE/iptv-proxy.openrc"
+          # 把默认发布源换成实际仓库，fork 后不必改脚本（仍可用 --repo 覆盖）。
+          for f in install.sh packaging/iptv-proxy.sh; do
+            out="$STAGE/$(basename "$f")"
+            sed "s|IPTV_PROXY_REPO:-HasonHuang/TV-Buddy|IPTV_PROXY_REPO:-${GITHUB_REPOSITORY}|" "$f" > "$out"
+            chmod 0755 "$out"
+          done
+          grep -q "IPTV_PROXY_REPO:-${GITHUB_REPOSITORY}" "$STAGE/install.sh"
+          tar -C out -czf "out/${NAME}.tar.gz" "$NAME"
+          ( cd out && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" )
+          ls -lh out
+      - name: 冒烟解包
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NAME="${PRODUCT_SLUG}-${VERSION}-${{ matrix.name }}"
+          mkdir -p check
+          tar -C check -xzf "out/${NAME}.tar.gz"
+          for f in iptv-proxy config.toml.example iptv-proxy.sh iptv-proxy.service iptv-proxy.openrc install.sh; do
+            [ -f "check/${NAME}/${f}" ] || { echo "包内缺少 ${f}" >&2; exit 1; }
+          done
+          # 包内二进制必须可执行，且与本次目标架构一致。
+          BIN="check/${NAME}/iptv-proxy"
+          [ -x "$BIN" ] || { echo "包内二进制不可执行" >&2; exit 1; }
+          file "$BIN"
+          case "${{ matrix.name }}" in
+            amd64) file "$BIN" | grep -q "x86-64" ;;
+            arm64) file "$BIN" | grep -q "ARM aarch64" ;;
+          esac || { echo "包内二进制架构不符：${{ matrix.name }}" >&2; exit 1; }
+          # 没有配置参数时应报读取配置失败并退出，而不是静默启动。
+          if "$BIN" /nonexistent/config.toml >/dev/null 2>&1; then
+            echo "缺少配置时不应退出码为 0" >&2
+            exit 1
+          fi
+          echo "包内容 OK"
       - uses: actions/upload-artifact@v4
         with:
-          name: iptv-proxy-${{ matrix.name }}
-          path: out
+          name: tv-buddy-${{ matrix.name }}
+          path: |
+            out/*.tar.gz
+            out/*.tar.gz.sha256
+          if-no-files-found: error
           retention-days: 7
+
+  publish:
+    name: 发布 Release
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tv-buddy-*
+          path: dist
+          merge-multiple: true
+      - name: 列出产物
+        run: ls -lh dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: TV Buddy ${{ github.ref_name }}
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          # 带后缀的 tag（如 -beta.1）发布为预发布，不会被 /releases/latest 选中。
+          prerelease: ${{ contains(github.ref_name, '-') }}

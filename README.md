@@ -33,14 +33,29 @@ target/release/iptv-proxy config.toml
 
 ## 一键安装（Linux）
 
-`install.sh` 只支持 Linux **amd64/arm64**。它支持三种来源：已解包的发布目录、仓库 `dist/`、指定归档（本地路径或 URL）。
+`install.sh` 只支持 Linux **amd64/arm64**。默认从 GitHub Release 下载同架构安装包；也可以指定已解包的发布目录、仓库 `dist/` 或任意归档（本地路径或 URL）。
 
-### 从发布包安装（推荐）
+### 直接安装（推荐）
 
 ```bash
-tar -xzf iptv-proxy-0.1.0-arm64.tar.gz
-cd iptv-proxy-0.1.0-arm64
-sudo ./install.sh
+curl -fsSL https://raw.githubusercontent.com/HasonHuang/TV-Buddy/main/install.sh | sudo sh
+```
+
+脚本会按 `uname -m` 选 `amd64`/`arm64`，从最新 Release 下载 `tv-buddy-<version>-<arch>.tar.gz`，校验同名 `.sha256` 后安装，默认装到 `/opt/iptv-proxy`。
+
+指定版本或仓库：
+
+```bash
+sudo sh install.sh --version v2026.3.0
+sudo sh install.sh --version v2026.3.0 --repo HasonHuang/TV-Buddy
+```
+
+### 从发布包安装
+
+```bash
+tar -xzf iptv-proxy-2026.3.0-arm64.tar.gz
+cd iptv-proxy-2026.3.0-arm64
+sudo ./install.sh                     # 包就在旁边，直接用，不再下载
 ```
 
 ### 从仓库安装
@@ -50,14 +65,14 @@ sudo ./install.sh
 ```bash
 scripts/build-frontend.sh
 scripts/build-release.sh              # 或只构建当前架构：scripts/build-release.sh arm64
-sudo ./install.sh                     # 自动使用 dist/ 中最新的同架构包
+sudo ./install.sh --local             # 用 dist/ 中最新的同架构包
 ```
 
 ### 指定归档或 URL
 
 ```bash
-sudo ./install.sh --archive dist/iptv-proxy-0.1.0-arm64.tar.gz
-sudo ./install.sh --archive https://example.com/iptv-proxy-0.1.0-arm64.tar.gz
+sudo ./install.sh --archive dist/iptv-proxy-2026.3.0-arm64.tar.gz
+sudo ./install.sh --archive https://example.com/iptv-proxy-2026.3.0-arm64.tar.gz
 ```
 
 归档旁有同名 `.sha256` 文件时，脚本自动校验。
@@ -68,6 +83,9 @@ sudo ./install.sh --archive https://example.com/iptv-proxy-0.1.0-arm64.tar.gz
 | --- | --- |
 | `--prefix <目录>` | 安装目录；默认 `/opt/iptv-proxy` |
 | `--archive <路径或 URL>` | 指定 tar.gz 安装包 |
+| `--version <tag>` | 从 Release 装指定版本，如 `v2026.3.0`；默认最新 |
+| `--repo <owner/name>` | Release 所在仓库；默认内置 |
+| `--local` | 不从 Release 下载，改用本地 `dist/` 中的安装包 |
 | `--no-service` | 不注册 systemd/OpenRC 服务 |
 | `--no-link` | 不创建 `iptv-proxy` 命令软链 |
 | `--start` | 安装后立即启动服务 |
@@ -129,7 +147,14 @@ IPTV_PROXY_ARCHIVE=/path/to/iptv-proxy.tar.gz iptv-proxy update
 IPTV_PROXY_URL=https://example.com/iptv-proxy-{arch}.tar.gz iptv-proxy update
 ```
 
-未设置更新源时，脚本检查 `<prefix>/dist` 与 `<prefix>/../dist` 下的最新同架构包。
+没有设置上面三项时，先查 `<prefix>/dist` 与 `<prefix>/../dist` 下的最新同架构包；都没有则回退到 GitHub Release，默认取最新 tag，可用 `IPTV_PROXY_VERSION` 固定版本、`IPTV_PROXY_REPO` 换仓库：
+
+```bash
+sudo iptv-proxy update                                # 最新 Release
+sudo IPTV_PROXY_VERSION=v2026.3.0 iptv-proxy update   # 固定版本
+```
+
+下载的 Release 包会校验同名 `.sha256`，不通过则不替换二进制。
 
 `uninstall` 选择 `N` 只停服务并保留 `<prefix>`。配置与缓存不会删除。
 无人值守时设 `IPTV_PROXY_YES=1`，直接重装或删除数据。
@@ -294,7 +319,24 @@ scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
 - 构建用 Docker `rust:1-alpine`：镜像宿主三元组即 `*-linux-musl`，直接产出静态二进制。
 - 容器无外网，依赖来自宿主 `~/.cargo` 缓存（`--offline`）。
 - 安装：解包后 `sudo ./install.sh`，默认装到 `/opt/iptv-proxy`。详见上文「一键安装」。
-- GitHub Actions 只在推送 `v*` 版本 tag 时执行；普通分支推送不触发。示例：`git tag v0.1.0 && git push origin v0.1.0`。
+
+### CI 自动发布
+
+GitHub Actions 只在推送 `v*` 版本 tag 时执行；普通分支推送不触发。
+
+```bash
+git tag v2026.4.0
+git push origin v2026.4.0
+```
+
+流水线三阶段：前端构建 → 格式/静态检查/测试（含 CLI 冒烟）→ 交叉编译 amd64/arm64。测试通过后打包并按 tag 名自动创建 GitHub Release，上传：
+
+```text
+tv-buddy-<version>-amd64.tar.gz[.sha256]       # version = tag 去掉 v 前缀
+tv-buddy-<version>-arm64.tar.gz[.sha256]
+```
+
+资产名与 `install.sh` 的查找规则一致，所以 `install.sh` 和 `iptv-proxy update` 都能直接对着 Release 用。CI 会把仓库名注入 `install.sh`，fork 后无需改脚本。
 
 ## 运维
 
