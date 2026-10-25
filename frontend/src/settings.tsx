@@ -897,6 +897,52 @@ export function SettingsPage() {
               </div>
             </Card>
 
+            <Card title="分享（多 VPS）" note="主从互拉分组与订阅；对端用 ?key= 鉴权">
+              <div className="fields">
+                <Toggle label="启用分享" path="share.enabled" />
+                <Pick
+                  label="角色"
+                  path="share.role"
+                  options={[
+                    { value: 'master', label: 'master（主机，拉取下线）' },
+                    { value: 'follower', label: 'follower（从机，从主机拉取）' },
+                  ]}
+                  hint="角色会影响「安全管控」的策略"
+                />
+                <Text label="分享密钥" path="share.key" hint="对端用 ?key= 传入；主从必须一致" />
+                <Num
+                  label="轮询周期"
+                  path="share.poll_secs"
+                  unit="秒"
+                  hint="实际下限 5 秒"
+                />
+                <Toggle
+                  label="订阅地址带分享 token"
+                  path="share.share_token"
+                  hint="目标键：本实现仅回显，不改变订阅地址"
+                />
+              </div>
+              <div className="fields">
+                <Text
+                  label="主机地址（follower 用）"
+                  path="share.master_url"
+                  placeholder="https://master.example"
+                />
+                <Lines
+                  label="下线地址（master 用）"
+                  path="share.follower_urls"
+                  rows={2}
+                  hint="一行一个；master 逐个拉取"
+                />
+              </div>
+              <Lines
+                label="允许拉取的来源"
+                path="share.trust_ips"
+                rows={2}
+                hint="精确 IP 或 a.b.c.0/24；留空表示不限制"
+              />
+            </Card>
+
             <RawCard
               draft={draft}
               onSaved={(next) => {

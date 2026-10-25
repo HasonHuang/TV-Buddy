@@ -8,7 +8,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { api } from './api';
+import { api, copyText } from './api';
+import { Badge } from './ui';
 
 type Entry = {
   file: string;
@@ -69,6 +70,27 @@ type TranslationInfo = {
   cached: number;
 };
 
+/** 配置里指向 `/assets/<文件名>` 的地址集合（递归扫所有字符串）。 */
+function referencedNames(config: unknown): Set<string> {
+  const names = new Set<string>();
+  const visit = (node: unknown): void => {
+    if (typeof node === 'string') {
+      const match = /\/assets\/([^/?#"]+)/.exec(node);
+      if (match) names.add(decodeURIComponent(match[1]));
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (node && typeof node === 'object') {
+      Object.values(node as Record<string, unknown>).forEach(visit);
+    }
+  };
+  visit(config);
+  return names;
+}
+
 function Library({
   kind,
   accept,
@@ -84,6 +106,8 @@ function Library({
   const [translation, setTranslation] = useState<TranslationInfo | null>(null);
   const [target, setTarget] = useState('');
   const [busy, setBusy] = useState('');
+  const [referenced, setReferenced] = useState<Set<string>>(new Set());
+  const [onlyUnused, setOnlyUnused] = useState(false);
 
   useEffect(() => {
     if (kind !== 'subtitle') {
@@ -102,6 +126,10 @@ function Library({
       const data = await api<{ files: Entry[] }>('GET', `/${kind}/list`);
       setFiles(data.files);
       setError('');
+      if (kind === 'assets') {
+        const config = await api<unknown>('GET', '/config');
+        setReferenced(referencedNames(config));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -149,6 +177,11 @@ function Library({
     }
   }
 
+  async function copyLink(name: string) {
+    const url = `${location.origin}/assets/${encodeURIComponent(name)}`;
+    setMessage((await copyText(url)) ? `已复制 ${url}` : '复制失败，请手动复制');
+  }
+
   async function translateFile(file: Entry) {
     if (!target) {
       return;
@@ -171,6 +204,9 @@ function Library({
     }
   }
 
+  const unused = files.filter((file) => !referenced.has(file.file));
+  const shown = onlyUnused ? unused : files;
+
   return (
     <div className="card">
       <div className="row between">
@@ -184,6 +220,16 @@ function Library({
                 </option>
               ))}
             </select>
+          )}
+          {kind === 'assets' && (
+            <label className="tag" style={{ cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={onlyUnused}
+                onChange={(event) => setOnlyUnused(event.target.checked)}
+              />
+              只看未被引用
+            </label>
           )}
           <label className="tag" style={{ cursor: 'pointer' }}>
             上传
@@ -206,6 +252,12 @@ function Library({
       {kind === 'subtitle' && translation?.enabled && translation.engine === 'none' && (
         <p className="muted">未配置 MTranServer 地址：翻译请求会返回 400。</p>
       )}
+      {kind === 'assets' && (
+        <p className="muted">
+          未被引用的素材 {unused.length} 个（共 {files.length} 个）。判定标准：配置里没有任何地址指向
+          `/assets/&lt;文件名&gt;`（本实现自定，目标未观测）。
+        </p>
+      )}
       <table className="table">
         <thead>
           <tr>
@@ -215,9 +267,14 @@ function Library({
           </tr>
         </thead>
         <tbody>
-          {files.map((file) => (
+          {shown.map((file) => (
             <tr key={file.file}>
-              <td className="mono ellipsis">{file.file}</td>
+              <td className="mono ellipsis">
+                {file.file}
+                {kind === 'assets' && !referenced.has(file.file) && (
+                  <Badge tone="muted">未被引用</Badge>
+                )}
+              </td>
               <td className="right">{formatBytes(file.bytes)}</td>
               <td className="right">
                 <a
@@ -228,6 +285,11 @@ function Library({
                 >
                   打开
                 </a>
+                {kind === 'assets' && (
+                  <button className="icon-btn" onClick={() => void copyLink(file.file)}>
+                    复制外链
+                  </button>
+                )}
                 <button className="icon-btn" onClick={() => void remove(file.file)}>
                   删除
                 </button>
@@ -245,7 +307,7 @@ function Library({
               </td>
             </tr>
           ))}
-          {files.length === 0 && (
+          {shown.length === 0 && (
             <tr>
               <td colSpan={3} className="muted">
                 暂无文件。

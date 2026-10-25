@@ -1086,6 +1086,8 @@ pub struct ShareCfg {
     pub follower_urls: Vec<String>,
     /// 同步周期（秒）。
     pub poll_secs: u64,
+    /// 目标键：订阅地址是否带分享 token。**本实现未消费**，仅回显（同 `[auth].random_id_enabled`）。
+    pub share_token: bool,
     #[serde(flatten)]
     pub extra: toml::Table,
 }
@@ -1100,6 +1102,7 @@ impl Default for ShareCfg {
             master_url: String::new(),
             follower_urls: Vec::new(),
             poll_secs: 300,
+            share_token: false,
             extra: toml::Table::new(),
         }
     }

@@ -184,6 +184,7 @@ iptv-proxy-<version>-<arch>/
 | `master_url` | 空 | follower 拉取的基地址 |
 | `follower_urls` | `[]` | master 汇总的基地址 |
 | `poll_secs` | `300` | 同步周期（秒），最小 5 |
+| `share_token` | `false` | 目标键：订阅地址是否带分享 token。**本实现未消费**，仅回显（同 `[auth].random_id_enabled`） |
 
 ## 10. 频道级解析脚本
 

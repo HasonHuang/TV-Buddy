@@ -120,6 +120,14 @@ subtitle.translate.translation_first bool
 subtitle.translate.set_default bool
 subtitle.translate.timeout_ms number
 subtitle.translate.token string
+share.enabled bool
+share.role string
+share.key string
+share.trust_ips array
+share.master_url string
+share.follower_urls array
+share.share_token bool
+share.poll_secs number
 PATHS
 
 # 3) U-10：设了 [cache].disk_max_mb 之后，推荐值必须变成手动源并等于该值。
@@ -161,6 +169,8 @@ for needle in \
   'cache.gc.disk_budget_ratio' \
   'cache.segments.per_channel_max' \
   'cdn.segment_max_age_secs' \
+  'share.follower_urls' \
+  '/assets/' \
   'DraftCtx'
 do
   case "$BUNDLE" in

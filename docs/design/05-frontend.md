@@ -77,9 +77,14 @@
 | DASH 调优 | `[cache.dash]` | 播放体验 / 网络性能 / 特殊场景三组 | ⏳ |
 | 备份与迁移 | — | 复用 `BackupPage` 卡片 | ✅ |
 | 语言 | — | 界面语言（目标为「跟随浏览器」） | ⏳ 待决策 |
+| 分享（多 VPS） | `[share]` | `enabled`、`role`、`key`、`trust_ips`、`master_url`、`follower_urls`、`share_token`（仅回显）、`poll_secs` | ✅ |
 | 其余字段（JSON） | — | 未做成表单的段 | 兜底 |
 
-- 保存写回**整份配置**，所以「其余字段（JSON）」里的改动也会一起生效。
+- 保存写回**整份配置**，所以「其余字段（JSON）」里的改动也会一起生效。该卡片剩下 DASH 调优、
+  在流等段（见上表的 ⏳ 行）。
+- 视频素材页（`p13`）另加两项行内操作：**复制外链**（`location.origin + /assets/<文件名>`，即公网
+  `GET /assets/*`）与**未被引用**标记。判定标准为本实现自定：配置里没有任何字符串指向
+  `/assets/<文件名>`；目标未观测，故只标不删。
 - 契约由 `scripts/smoke-settings.sh` 守住：`GET → PUT → GET` 必须逐字节等价（不丢未知键、
   不改类型），字段路径必须存在，改口令后新口令可登录。
 - 新密码在浏览器里算 SHA-256（`frontend/src/sha256.ts`）。不用 `crypto.subtle`：
