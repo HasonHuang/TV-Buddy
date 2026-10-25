@@ -28,6 +28,28 @@ type TimeshiftStatus = {
   channels: { group_id: string; channel_id: string; hours: number; segments: number }[];
 };
 
+/** `GET /panel/api/epg/programmes/{channel}` 的单条节目。 */
+type Programme = {
+  channel: string;
+  disp_start: string | null;
+  disp_end: string | null;
+  /** 已含 `[epg].record_pad_before_secs` 的录制起点，可直接填进 `datetime-local`。 */
+  rec_start: string | null;
+  rec_end: string | null;
+  live: boolean;
+  title: string;
+  desc: string;
+};
+
+/**
+ * EPG 里的频道键：生成端用的是 `tvg_id`（缺省回退频道 id）的小写形式
+ * （`epg::channel_targets` 的 `out_id`）。前端要按同一规则算，否则查不到节目。
+ */
+function epgKey(channel: Channel): string {
+  const raw = channel.tvg_id ?? channel.id;
+  return typeof raw === 'string' ? raw.toLowerCase() : channel.id.toLowerCase();
+}
+
 const STATUS_TONE: Record<string, string> = {
   pending: 'info',
   recording: 'warn',
@@ -75,6 +97,9 @@ export function SchedulePage({
     format: 'mkv',
   });
   const { node, ok, err } = useToast();
+  const [programmes, setProgrammes] = useState<Programme[] | null>(null);
+  const [epgNote, setEpgNote] = useState('');
+  const [epgBusy, setEpgBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -96,6 +121,96 @@ export function SchedulePage({
   }, [load]);
 
   const channels = groups.find((group) => group.id === form.group_id)?.channels ?? [];
+  const channel = channels.find((item) => item.id === form.channel_id);
+
+  /**
+   * 「从 EPG 加载」：按选中频道拉节目单。
+   *
+   * 取 `rec_start`/`rec_end` 而不是 `disp_start`/`disp_end`——后者是节目本身的起止，
+   * 前者已经加了 `[epg].record_pad_before_secs` / `record_pad_after_secs` 的前后余量，
+   * 正是录制该用的边界（与目标一致）。返回的串形如 `2026-10-25T19:00:00`，
+   * 正好是 `datetime-local` 的格式。
+   */
+  const loadEpg = async () => {
+    if (!channel) {
+      err('请先选择分组与频道');
+      return;
+    }
+    setEpgBusy(true);
+    setProgrammes(null);
+    setEpgNote('');
+    try {
+      const data = await api<{ programmes?: Programme[]; note?: string }>(
+        'GET',
+        `/epg/programmes/${encodeURIComponent(epgKey(channel))}`,
+      );
+      setProgrammes(data.programmes ?? []);
+      setEpgNote(data.note ?? '');
+      if ((data.programmes ?? []).length === 0) {
+        err(data.note ?? '该频道暂无节目单，请先在「节目指南」采集或补映射');
+      } else {
+        ok(`读到 ${data.programmes?.length ?? 0} 条节目`);
+      }
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setEpgBusy(false);
+    }
+  };
+
+  /** 选中一条节目 → 填起止时间与任务名（名称留空时由后端合成）。 */
+  const applyProgramme = (item: Programme) => {
+    if (!item.rec_start || !item.rec_end) {
+      err('该节目缺少起止时间');
+      return;
+    }
+    setForm({
+      ...form,
+      // `datetime-local` 只认到分钟，秒数直接截掉。
+      start_time: item.rec_start.slice(0, 16),
+      end_time: item.rec_end.slice(0, 16),
+      name: item.title,
+    });
+    ok(`已填入「${item.title}」的录制时段`);
+  };
+
+  /** 用一个节目直接建任务（批量端点，目前只提交这一条）。 */
+  const createFromProgramme = async (item: Programme) => {
+    if (!form.group_id || !form.channel_id) {
+      err('请选择分组与频道');
+      return;
+    }
+    if (!item.rec_start || !item.rec_end) {
+      err('该节目缺少起止时间');
+      return;
+    }
+    try {
+      const result = await api<{ created: number; failed: { index: number; error: string }[] }>(
+        'POST',
+        '/schedule/from-epg',
+        {
+          items: [
+            {
+              name: item.title,
+              group_id: form.group_id,
+              channel_id: form.channel_id,
+              start_time: item.rec_start.slice(0, 19),
+              end_time: item.rec_end.slice(0, 19),
+              format: form.format,
+            },
+          ],
+        },
+      );
+      if (result.created > 0) {
+        ok(`已按节目创建任务「${item.title}」`);
+        await load();
+      } else {
+        err(result.failed[0]?.error ?? '创建失败');
+      }
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const create = async () => {
     if (!form.group_id || !form.channel_id) {
@@ -204,7 +319,55 @@ export function SchedulePage({
                 <option value="ts">TS</option>
               </select>
               <button onClick={() => void create()}>创建任务</button>
+              <button
+                className="ghost"
+                disabled={!form.channel_id || epgBusy}
+                onClick={() => void loadEpg()}
+              >
+                {epgBusy ? '读取中…' : '从 EPG 加载节目'}
+              </button>
             </div>
+            {programmes !== null && (
+              <div className="field">
+                <label>节目单（点一条填入时段，或直接排期）</label>
+                {programmes.length === 0 ? (
+                  <p className="muted">{epgNote || '该频道暂无节目单。'}</p>
+                ) : (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>时段</th>
+                        <th>节目</th>
+                        <th className="right">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {programmes.map((item) => (
+                        <tr key={`${item.disp_start}-${item.title}`}>
+                          <td className="mono nowrap">
+                            {item.live && <Badge tone="ok">正在播</Badge>}{' '}
+                            {(item.rec_start ?? '—').replace('T', ' ')} →{' '}
+                            {(item.rec_end ?? '—').slice(11)}
+                          </td>
+                          <td>
+                            {item.title}
+                            {item.desc && <div className="muted ellipsis">{item.desc}</div>}
+                          </td>
+                          <td className="right nowrap">
+                            <button className="ghost" onClick={() => applyProgramme(item)}>
+                              填入
+                            </button>
+                            <button className="ghost" onClick={() => void createFromProgramme(item)}>
+                              排期
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="card">

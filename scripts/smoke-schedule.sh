@@ -53,4 +53,30 @@ check "点亮 200" "200" "$(code -X POST "$B/panel/api/livestream/g/c1/start" -H
 check "直播列表 1" "1" "$(curl -s -H "$A" "$B/panel/api/livestream" | count count)"
 check "熄灭 200" "200" "$(code -X POST "$B/panel/api/livestream/g/c1/stop" -H "$A")"
 
+# --- 「从 EPG 加载节目」（A1）：面板要先能读到节目单，再把 rec_* 填进任务 ---
+# 没有采集数据时接口也要有形状（`programmes` 为空数组 + `note`），面板据此给提示。
+check "节目单 200" "200" "$(code -H "$A" "$B/panel/api/epg/programmes/c1")"
+check "节目单为空数组" "0" \
+  "$(curl -s -H "$A" "$B/panel/api/epg/programmes/c1" | \
+    python3 -c 'import json,sys;print(len(json.load(sys.stdin).get("programmes") or []))')"
+check "节目单带提示" "1" \
+  "$(curl -s -H "$A" "$B/panel/api/epg/programmes/c1" | \
+    python3 -c 'import json,sys;print(1 if json.load(sys.stdin).get("note") else 0)')"
+
+# `from-epg` 是批量端点：有效条目建任务，无效条目逐条报错（不是整体 400）。
+FE='{"items":[
+  {"name":"EPG 节目","group_id":"g","channel_id":"c1","start_time":"2099-01-02T19:00:00","end_time":"2099-01-02T20:00:00","format":"mkv"},
+  {"name":"坏频道","group_id":"g","channel_id":"nope","start_time":"2099-01-02T19:00:00","end_time":"2099-01-02T20:00:00","format":"mkv"}
+]}'
+check "从 EPG 建任务 200" "200" \
+  "$(code -X POST "$B/panel/api/schedule/from-epg" -H "$A" -H 'content-type: application/json' -d "$FE")"
+curl -s -X POST "$B/panel/api/schedule/from-epg" -H "$A" -H 'content-type: application/json' \
+  -d "$FE" > "$WORK/fe.json"
+check "只建成 1 条" "1" \
+  "$(python3 -c 'import json;print(json.load(open("'"$WORK"'/fe.json"))["created"])')"
+check "坏频道报 Channel not found" "Channel not found" \
+  "$(python3 -c 'import json;d=json.load(open("'"$WORK"'/fe.json"));print(d["failed"][0]["error"] if d["failed"] else "")')"
+check "缺 items 400" "400" \
+  "$(code -X POST "$B/panel/api/schedule/from-epg" -H "$A" -H 'content-type: application/json' -d '{}')"
+
 if [ "$fail" = "0" ]; then echo "录制冒烟测试全部通过"; else echo "录制冒烟测试有失败项"; exit 1; fi

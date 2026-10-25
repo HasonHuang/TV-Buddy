@@ -103,7 +103,7 @@
 | `logs` | 级别过滤 | ✅ 已加级别下拉（全部/TRACE/DEBUG/INFO/WARN/ERROR），前端按行过滤；顺带剥掉环形缓冲里的 ANSI 颜色码（原先直接塞 `<pre>` 会显示成控制符） |
 | `epg` | 翻译设置（`m08` 翻译模型）；采集节奏 | `EpgPanelPage`（`ops.tsx`）有手工映射、额外频道、历史天数 → **缺翻译与节奏** |
 | `logos` | 动效（`m09`）、转码参数（最大边 / 质量 / 转 WebP） | `logo.tsx` 有列表、上传、改名、匹配报告（`/logo/match-report`）→ **缺动效与转码参数**（后端动效已实现，面板未接） |
-| `schedule` | 「从 EPG 加载节目」 | `schedule.tsx` 无相关调用，而端点 `/panel/api/schedule/from-epg` 已存在 → **面板未接** |
+| `schedule` | 「从 EPG 加载节目」 | ✅ 已接：选好分组与频道后「从 EPG 加载节目」→ `GET /panel/api/epg/programmes/{epgKey}`（`epgKey` = `tvg_id` 或频道 id 的小写，与 `epg::channel_targets` 的 `out_id` 同规则）。节目表每条可「填入」（取已含 `record_pad_*` 的 `rec_start`/`rec_end`）或「排期」（`POST /panel/api/schedule/from-epg` 单条提交） |
 | `subs` | 源行的「读取分组」 | ✅ 已加：源行「读取分组」按钮 → `POST /panel/api/subs/groups`，结果表列出分组名与频道数，可「加入映射」填 `group_map` |
 
 已对齐的部分：`cache` 按目录渲染 `/cache/stats` 的 `entries`（含 `seg_url` / `sub_url`）；
