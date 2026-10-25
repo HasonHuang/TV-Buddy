@@ -11,6 +11,11 @@ token_enabled = false
 [cache]
 disk_path = "./cache"
 
+# 容量键（U-10）：`disk_max_mb` 与 `[cache.gc].max_disk_mb` 同义（同时非 0 取更小者），
+# `memory_max_mb` 限制内存切片索引（按每条约 256 B 估算成条目数）；两者 `0` = 不限。
+# `segment_cache_max_mb`/`m3u8_max_entries`/`segment_max_entries` 是目标兼容键，
+# 目标 v0.8.2 与本实现都不消费，见 docs/design/04-config-and-storage.md §11.5。
+
 # 低配置（1 vCPU / 128 MB 内存 / 1 GB 磁盘 + 前置 CDN）建议显式配上下面几段；
 # 完整可复制的样例见 docs/design/config-low-spec.toml。
 #

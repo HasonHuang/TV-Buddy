@@ -25,6 +25,13 @@ ip_guard_enabled = true
 [cache]
 disk_path = "./cache"
 
+# 容量键（U-10）。`disk_max_mb` 与 `[cache.gc].max_disk_mb` 同义，同时非 0 取更小者；
+# `memory_max_mb` 是内存切片索引的字节预算（按每条约 256 B 换算成条目数）：
+# disk_max_mb = 0
+# memory_max_mb = 4      # 128 MB 实例可考虑，≈ 1.56 万条；`0` = 不限
+# `segment_cache_max_mb`/`m3u8_max_entries`/`segment_max_entries` 是目标兼容键，
+# 目标 v0.8.2 与本实现都不消费，别用它们限容（见 `04-config-and-storage.md` §11.5）。
+
 # 内存与磁盘索引同步受限：把每个频道的索引条数压到 200。
 # `0` 时只用内置默认 4096 兜底，不再随清单刷新无限增长。
 [cache.segments]

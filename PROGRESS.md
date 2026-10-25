@@ -69,7 +69,15 @@
   - 磁盘索引 `seg_url/*.json` 随清单刷新无限增长 → `save_index` 加上限；
     `[cache.segments].per_channel_max = 0`（默认）时用内置 `DEFAULT_INDEX_MAX = 4096`。
     截断按**登记时间**而非 suffix：suffix 是 `sha256(上游 URL)` 前缀，不是递增序号。
-- **质量门**：`cargo fmt --check`；283 项测试通过（201 单元 + 82 契约）；
+- **U-10 `[cache]` 容量键收口**：目标这四个容量键**都没观测到生效**（F-015 / S-CACHE-03）。
+  - `disk_max_mb` 接进 GC：与 `[cache.gc].max_disk_mb` 同义，同时非 0 时取更小者。
+  - `memory_max_mb` 接进内存索引：按每条约 256 B 估算成条目预算，与
+    `[cache.segments].global_max` 取更小者。
+  - `segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries` 保留键面、**不消费**：
+    默认值非 0（`50`/`500`/`2000`），与用户显式填写的同值无法区分，生效会静默压容。
+  - 两个生效键默认 `0` = 不限，所以默认配置的行为与序列化都不变。
+  - 文档：`04-config-and-storage.md` §11.5、`06` §3.4。
+- **质量门**：`cargo fmt --check`；285 项测试通过（203 单元 + 82 契约）；
   clippy 0 error（27 条历史 warning，新增文件 0 条）；`pnpm build`；
   冒烟 `smoke-m2`/`smoke-panel`/`smoke-cli`/`smoke-backup`/`smoke-assets`/`smoke-share` 通过。
 
@@ -149,9 +157,9 @@
 | 项 | 结果 |
 | --- | --- |
 | `cargo fmt --check` | ✅ 通过 |
-| `cargo test --offline --all-targets` | ✅ 283 项通过（201 单元 + 82 契约） |
+| `cargo test --offline --all-targets` | ✅ 285 项通过（203 单元 + 82 契约） |
 | `cargo clippy --offline --all-targets` | ✅ 无 error；27 条历史 warning（本轮新增文件 0 条） |
-| 冒烟脚本 | ✅ 本轮重跑 6 个：`m2`、`panel`、`cli`、`backup`、`assets`、`share`；其余 9 个上次通过 |
+| 冒烟脚本 | ✅ 低配置轮次重跑 6 个：`m2`、`panel`、`cli`、`backup`、`assets`、`share`；U-10 收口后重跑 `m2`、`panel`、`cli`；其余 9 个上次通过 |
 | `pnpm build` | ✅ 通过（含 `tsc --noEmit`） |
 | 发布校验 | ⏳ 本轮未重跑（上次 2026-10-24 双架构产物通过 `verify-release.sh`） |
 | CI | ✅ 仅 `v*` tag 触发；fmt/clippy/test、CLI 冒烟与双架构校验已配置 |
@@ -229,9 +237,11 @@
 2. **真机验收**：`06` §10 的 S4（造 200 MB → 一个周期回落到上限；占满磁盘走紧急清理）
    与 S6（64 MB 实例 24h 无 OOM、`seg_bytes` 不涨、tick 不抖动）需要目标 VPS，
    本地只覆盖了公式与淘汰逻辑的单测。
-3. **未生效的配置键**：`[cache.segments]` 的 `global_max`/`per_channel_max` 仍默认 `0`（不限），
-   内存索引的上限同样没开；低配样例里已显式设 `per_channel_max = 200`，
-   但 `[cache]` 的 `disk_max_mb` / `memory_max_mb` / `segment_cache_max_mb` **依然无人消费**（U-10）。
+3. **`[cache]` 容量键已收口**（U-10）：`disk_max_mb` 接进 GC（与 `[cache.gc].max_disk_mb`
+   取更小者），`memory_max_mb` 接进内存索引条目预算；`segment_cache_max_mb`、
+   `m3u8_max_entries`、`segment_max_entries` 保留键面但不消费（默认值非 0，与显式填写的
+   同值无法区分）。`[cache.segments]` 的 `global_max`/`per_channel_max` 仍默认 `0`（不限），
+   低配样例里已显式设 `per_channel_max = 200`。见 §2.1、`04` §11.5。
 4. 上一轮遗留的 V-08/V-10 与其余登记差异（见 §2.2、§2.3）状态未变。
 
 下一轮建议顺序：
@@ -251,7 +261,7 @@
 | U-07 | P2 | 订阅源缓存跨重启 | ✅ 完成：正文落盘 `<cache>/sub_url/`，状态 `<cache>/subs/status.json`；重启后按源级 TTL 命中 | 可补目标缓存文件名格式对拍（不影响行为） |
 | U-08 | P1 | 磁盘回收与索引上限 | ✅ 完成：新增 `[cache.gc]` 与 `src/cache_gc.rs`；`save_index` 加上限 | 真机跑 S4/S6（见 §1.7） |
 | U-09 | P1 | CDN 兜底与被动实测推荐 | ✅ 完成：`[cdn]`、`src/cache_estimate.rs`、`POST /panel/api/cdn/estimate` | T0 的 CDN 面板侧配置待人工完成 |
-| U-10 | P2 | `[cache]` 的 MB 上限是死配置 | ⏳ 未做：`disk_max_mb`、`memory_max_mb`、`segment_cache_max_mb` 全仓库无消费点 | 接进 GC/索引，或从配置模型删掉，避免「配了没反应」 |
+| U-10 | P2 | `[cache]` 的容量键 | ✅ 完成：`disk_max_mb` 接入 GC（与 `[cache.gc].max_disk_mb` 取更小者）；`memory_max_mb` 接入内存索引条目预算；其余三个键登记为兼容保留（目标同键亦不生效） | 无 |
 
 ### 2.2 待补目标证据
 
@@ -293,16 +303,18 @@
 | `[cdn]` / `[cache.gc]` / 分组 `prefetch` | 目标 v0.8.2 无此配置面；本实现新增，默认全部不改变既有行为 | `06` §6、§7 |
 | 磁盘索引内置上限 4096 | 目标未观测；本实现为防 `seg_url/*.json` 随清单刷新无限增长而设，`per_channel_max > 0` 时按配置 | `06` §6.2 |
 | 磁盘回收按 mtime LRU | 不按频道整组淘汰；`segment_path` 的文件名经 `slug()` 后无法反解回 `gid/cid` | `06` §6.2 |
+| `[cache].disk_max_mb`、`memory_max_mb` | **生效**：目标不消费这两个键（F-015），本实现分别接进 GC 与内存索引；默认 `0` = 不限，行为与序列化都不变 | U-10、`04` §11.5 |
+| `segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries` | **不消费**：目标同样未观测到生效；默认值非 0（`50`/`500`/`2000`），与显式填写的同值无法区分，生效会静默压容 | F-015、S-CACHE-03、`04` §11.5 |
+| 内存索引条目按 256 B/条估算 | 估算值，只作上限、偏保守；目标给的是字节预算，本实现按条目计数 | U-10、`04` §11.5 |
 
 ## 3. 建议推进顺序
 
 1. **T0 + 真机验收**：在 CDN 面板按 `06` §2 配五处，跑 §2.4 四条命令；在目标 VPS 上跑 S4/S6。
-2. **回填死配置**：`[cache]` 的 `disk_max_mb`/`memory_max_mb`/`segment_cache_max_mb` 目前无人消费（U-10）。
-3. **V-10 收尾**：字段级设置表单（低配置三段已做成表单，其余仍为原始 JSON 编辑）、素材/分享子页、逐屏对拍。
-4. 扩展名轮换与 `match-report` 形状：先补证据，再决定是否改实现。
-5. V-01 URL 池回退：目标可复现时再补；否则保持登记。
-6. 可选：逐像素对齐 U-06 其余效果与缩放采样。
-7. 每项完成后运行完整质量门，更新本文件与对应 `docs/`，提交并立即 push `rust` 分支。
+2. **V-10 收尾**：字段级设置表单（低配置三段已做成表单，其余仍为原始 JSON 编辑）、素材/分享子页、逐屏对拍。
+3. 扩展名轮换与 `match-report` 形状：先补证据，再决定是否改实现。
+4. V-01 URL 池回退：目标可复现时再补；否则保持登记。
+5. 可选：逐像素对齐 U-06 其余效果与缩放采样。
+6. 每项完成后运行完整质量门，更新本文件与对应 `docs/`，提交并立即 push `rust` 分支。
 
 ## 4. 关键设计结论
 
@@ -329,6 +341,11 @@
 - 磁盘上限 = `clamp(min(工作集, 可用空间×0.8 − 100MB), 50MB, 总容量×0.7)`；工作集 = `round10(3 × N × seg_mb × 1.5)`。
 - `statvfs` 取 `f_bavail`（非特权用户可写块数）与 `f_frsize`；失败回退 150MB。
 - 工作集按**十进制 MB**（10⁶）计算，与设计稿 §3.3 的算例一致。
+- `[cache].disk_max_mb` 与 `[cache.gc].max_disk_mb` 同义：同时非 0 时取更小者；`0` = 不限。
+- `[cache].memory_max_mb` 是内存索引的字节预算，按每条约 256 B 估算成条目数，
+  再与 `[cache.segments].global_max` 取更小者。
+- `segment_cache_max_mb`／`m3u8_max_entries`／`segment_max_entries` 保留键面但不消费：
+  默认值非 0，与用户显式填写的同值无法区分。
 - 预取合并顺序与 `proxy_for` 同：**频道 > 分组 > 全局**；覆盖字段是三态 `Option`，未设置不输出。
 - 磁盘切片索引按**登记时间**截断（suffix 是哈希，不能当序号）；`per_channel_max=0` 时用内置 4096。
 - GC 淘汰顺序：超龄（`max_age_secs`）→ 超量 mtime LRU → `free < reserve_mb` 时紧急（忽略龄，删到 cap/2）。

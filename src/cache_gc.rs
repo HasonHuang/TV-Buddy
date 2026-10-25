@@ -19,7 +19,7 @@ use std::{
 
 use crate::{
     cache_estimate::{FALLBACK_DISK_MB, MB},
-    config::model::CacheGcCfg,
+    config::model::{CacheCfg, CacheGcCfg},
     state::AppState,
 };
 
@@ -41,17 +41,34 @@ pub struct Plan {
     pub emergency: bool,
 }
 
-/// 按 `05` §3.3 算上限；`max_disk_mb != 0` 时直接用它（显式配置优先）。
+/// 解析 `[cache]` 的显式总量上限。
+///
+/// `[cache].disk_max_mb` 与 `[cache.gc].max_disk_mb` 同义：两者都限制切片缓存的
+/// 占用总量，同时非 0 时取更小者；都为 0（不限）时返回 0，交给 §3.3 的公式。
+///
+/// `[cache].segment_cache_max_mb` **不参与**：它的默认值是 50，与用户显式填写的 50
+/// 无法区分。一旦生效，会把缓存静默压到 50 MB，低于 §3.3 算出的工作集（1 GB 盘约
+/// 140 MB），反而让 L1 提前淘汰、回源变多。理由见 `06` §3.4。
+pub fn explicit_cap_mb(cache: &CacheCfg) -> u64 {
+    [cache.gc.max_disk_mb, cache.disk_max_mb]
+        .into_iter()
+        .filter(|mb| *mb != 0)
+        .min()
+        .unwrap_or(0)
+}
+
+/// 按 `06` §3.3 算上限；`explicit_mb != 0` 时直接用它（显式配置优先）。
 ///
 /// `working_mb` 为空（尚无实测）时用回退值 150 MB。
 pub fn effective_cap_mb(
     cfg: &CacheGcCfg,
+    explicit_mb: u64,
     total_mb: u64,
     free_mb: u64,
     working_mb: Option<u64>,
 ) -> u64 {
-    if cfg.max_disk_mb != 0 {
-        return cfg.max_disk_mb;
+    if explicit_mb != 0 {
+        return explicit_mb;
     }
     let working = working_mb.unwrap_or(FALLBACK_DISK_MB);
     let budget = (free_mb as f64 * cfg.disk_budget_ratio - cfg.reserve_mb as f64).max(0.0) as u64;
@@ -60,15 +77,21 @@ pub fn effective_cap_mb(
 }
 
 /// 组装回收计划。`space` 为空（`statvfs` 失败）时按回退值设限，不进入紧急模式。
-pub fn plan(cfg: &CacheGcCfg, space: Option<(u64, u64)>, working_mb: Option<u64>) -> Plan {
+pub fn plan(
+    cfg: &CacheGcCfg,
+    explicit_mb: u64,
+    space: Option<(u64, u64)>,
+    working_mb: Option<u64>,
+) -> Plan {
     match space {
         Some((total_mb, free_mb)) => Plan {
-            cap_bytes: effective_cap_mb(cfg, total_mb, free_mb, working_mb).saturating_mul(MB),
+            cap_bytes: effective_cap_mb(cfg, explicit_mb, total_mb, free_mb, working_mb)
+                .saturating_mul(MB),
             emergency: free_mb < cfg.reserve_mb,
         },
         None => Plan {
-            cap_bytes: if cfg.max_disk_mb != 0 {
-                cfg.max_disk_mb.saturating_mul(MB)
+            cap_bytes: if explicit_mb != 0 {
+                explicit_mb.saturating_mul(MB)
             } else {
                 FALLBACK_DISK_MB.saturating_mul(MB)
             },
@@ -236,7 +259,7 @@ async fn tick(state: &Arc<AppState>) {
     if space.is_none() {
         tracing::warn!(dir = %root.display(), "读磁盘空间失败；按回退值回收");
     }
-    let plan = plan(&gc, space, working);
+    let plan = plan(&gc, explicit_cap_mb(&config.cache), space, working);
     let max_age = Duration::from_secs(gc.max_age_secs);
     let limit = gc.scan_limit.max(1) as usize;
     // 目录遍历是阻塞系统调用：放到阻塞线程池，避免 1 vCPU 上抖动。
@@ -264,7 +287,8 @@ pub fn recommendation(state: &AppState) -> serde_json::Value {
     let space = fs_space(&state.cache_dir);
 
     let ttl_manual = config.cdn.segment_max_age_secs != 0;
-    let disk_manual = config.cache.gc.max_disk_mb != 0;
+    let explicit_mb = explicit_cap_mb(&config.cache);
+    let disk_manual = explicit_mb != 0;
     let source = if ttl_manual || disk_manual {
         "manual"
     } else if measured_ttl.is_some() {
@@ -279,11 +303,11 @@ pub fn recommendation(state: &AppState) -> serde_json::Value {
         measured_ttl.unwrap_or(crate::cache_estimate::FALLBACK_TTL_SECS)
     };
     let disk_cap_mb = if disk_manual {
-        config.cache.gc.max_disk_mb
+        explicit_mb
     } else {
         match space {
             Some((total_mb, free_mb)) => {
-                effective_cap_mb(&config.cache.gc, total_mb, free_mb, working)
+                effective_cap_mb(&config.cache.gc, 0, total_mb, free_mb, working)
             }
             None => working.unwrap_or(FALLBACK_DISK_MB),
         }
@@ -318,34 +342,74 @@ mod tests {
 
     #[test]
     fn effective_cap_matches_design_table() {
-        // `05` §3.3 四行（1 GB 盘 = 1024 MB）。
-        assert_eq!(effective_cap_mb(&cfg(), 1024, 800, Some(140)), 140);
-        assert_eq!(effective_cap_mb(&cfg(), 1024, 300, Some(140)), 140);
-        assert_eq!(effective_cap_mb(&cfg(), 1024, 120, Some(140)), 50);
-        assert_eq!(effective_cap_mb(&cfg(), 1024, 800, Some(486)), 486);
+        // `06` §3.3 四行（1 GB 盘 = 1024 MB）。
+        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 800, Some(140)), 140);
+        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 300, Some(140)), 140);
+        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 120, Some(140)), 50);
+        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 800, Some(486)), 486);
         // 工作集为空 → 回退 150 MB（受 budget 限制时取 budget）。
-        assert_eq!(effective_cap_mb(&cfg(), 1024, 800, None), 150);
-        assert_eq!(effective_cap_mb(&cfg(), 1024, 120, None), 50);
+        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 800, None), 150);
+        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 120, None), 50);
     }
 
     #[test]
-    fn explicit_max_disk_mb_skips_formula() {
-        let cfg = CacheGcCfg {
-            max_disk_mb: 200,
-            ..CacheGcCfg::default()
+    fn explicit_cap_skips_formula() {
+        assert_eq!(effective_cap_mb(&cfg(), 200, 1024, 800, Some(140)), 200);
+        assert_eq!(effective_cap_mb(&cfg(), 200, 1024, 10, Some(140)), 200);
+    }
+
+    /// U-10：`[cache].disk_max_mb` 与 `[cache.gc].max_disk_mb` 同义，取更小者；
+    /// `segment_cache_max_mb` 的默认 50 不参与，否则会静默压到 50 MB。
+    #[test]
+    fn explicit_cap_resolves_cache_aliases() {
+        assert_eq!(explicit_cap_mb(&CacheCfg::default()), 0, "默认都交给公式");
+
+        let only_cache = CacheCfg {
+            disk_max_mb: 120,
+            ..CacheCfg::default()
         };
-        assert_eq!(effective_cap_mb(&cfg, 1024, 800, Some(140)), 200);
-        assert_eq!(effective_cap_mb(&cfg, 1024, 10, Some(140)), 200);
+        assert_eq!(explicit_cap_mb(&only_cache), 120);
+
+        let gc_cfg = |max_disk_mb| CacheCfg {
+            gc: CacheGcCfg {
+                max_disk_mb,
+                ..CacheGcCfg::default()
+            },
+            ..CacheCfg::default()
+        };
+        assert_eq!(explicit_cap_mb(&gc_cfg(200)), 200);
+
+        let both = CacheCfg {
+            disk_max_mb: 120,
+            ..gc_cfg(200)
+        };
+        assert_eq!(explicit_cap_mb(&both), 120, "两个键同时设置取更小者");
+
+        let default_cfg = CacheCfg::default();
+        assert_eq!(default_cfg.segment_cache_max_mb, 50);
+        assert_eq!(
+            effective_cap_mb(
+                &default_cfg.gc,
+                explicit_cap_mb(&default_cfg),
+                1024,
+                800,
+                Some(140)
+            ),
+            140,
+            "段缓存默认 50 MB 不参与，上限仍是工作集"
+        );
     }
 
     #[test]
     fn plan_emergency_when_below_reserve() {
-        assert!(!plan(&cfg(), Some((1024, 800)), Some(140)).emergency);
-        assert!(plan(&cfg(), Some((1024, 80)), Some(140)).emergency);
+        assert!(!plan(&cfg(), 0, Some((1024, 800)), Some(140)).emergency);
+        assert!(plan(&cfg(), 0, Some((1024, 80)), Some(140)).emergency);
         // statvfs 失败：用回退上限，不紧急。
-        let fallback = plan(&cfg(), None, Some(140));
+        let fallback = plan(&cfg(), 0, None, Some(140));
         assert!(!fallback.emergency);
         assert_eq!(fallback.cap_bytes, FALLBACK_DISK_MB * MB);
+        // 显式值在读空间失败时仍然生效。
+        assert_eq!(plan(&cfg(), 200, None, Some(140)).cap_bytes, 200 * MB);
     }
 
     fn temp_dir(tag: &str) -> PathBuf {

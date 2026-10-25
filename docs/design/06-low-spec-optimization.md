@@ -199,6 +199,12 @@ cap     = clamp( min(working, budget), 50 MB, total × 0.7 )
 | CDN 控制台 | 应用不能写第三方面板。缓存状态页显示推荐 TTL，附「复制」按钮。你复制后填入统一面板 |
 | `[cdn].segment_max_age_secs = 0` | 运行时取实测值。填数则覆盖 |
 | `[cache.gc].max_disk_mb = 0` | 运行时取 §3.3 的公式值。填数则覆盖 |
+| `[cache].disk_max_mb` | 与 `[cache.gc].max_disk_mb` 同义；同时非 0 时取更小者（U-10） |
+| `[cache].memory_max_mb` | 内存切片索引的字节预算；按约 256 B/条换算成条目数，与 `[cache.segments].global_max` 取更小者（U-10） |
+| `[cache].segment_cache_max_mb` | **不消费**（U-10）。目标同键亦不生效；默认 50 与显式值无法区分，生效会静默压容 |
+
+`[cache]` 里其余容量键（`m3u8_max_entries`、`segment_max_entries`）同样保留键面、不消费：
+目标既不生效，本实现也不消费。详见 [`04-config-and-storage.md`](04-config-and-storage.md) §11.5。
 
 - 统计按分组存在内存，重启后清零并重新累积。同时落盘 `<cache>/cache_estimate.json`，重启后可延续。
 - 更新节流：每 5 分钟最多刷新一次推荐值。GC 上限在下个扫描周期生效。

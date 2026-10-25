@@ -32,6 +32,34 @@ pub struct Entry {
 /// JSON 每天可长到几十 MB，1 GB 盘上无法接受。
 pub const DEFAULT_INDEX_MAX: usize = 4096;
 
+/// 内存索引每条记录的粗略占用（字节）：`HashMap` 的键字符串，加 `Entry` 里两个
+/// `String` 的头与容量，再加桶开销。
+///
+/// 只用于把 `[cache].memory_max_mb` 的字节预算换算成条目预算（U-10）。是估算值，
+/// 不是实测；换算结果只作上限，偏保守。
+pub const ENTRY_BYTES_EST: u64 = 256;
+
+/// 把 `[cache].memory_max_mb` 换算成内存索引的条目预算；`0`（默认）表示不限。
+pub fn memory_budget_entries(mb: u64) -> u64 {
+    if mb == 0 {
+        return 0;
+    }
+    mb.saturating_mul(crate::cache_estimate::MB) / ENTRY_BYTES_EST
+}
+
+/// 合并 `[cache.segments].global_max` 与 `[cache].memory_max_mb`。
+///
+/// 两个键都限制内存索引的条目数，因此同时非 0 时取更小者；都为 0 表示不限。
+/// 上游按键计数，而 `memory_max_mb` 给的是字节预算，所以先按
+/// [`ENTRY_BYTES_EST`] 换算。
+pub fn global_limit(global_max: u64, memory_max_mb: u64) -> u64 {
+    match (global_max, memory_budget_entries(memory_max_mb)) {
+        (0, budget) => budget,
+        (global, 0) => global,
+        (global, budget) => global.min(budget),
+    }
+}
+
 /// 内存索引容量限制；`0` 表示不限制。
 #[derive(Default, Clone, Copy)]
 struct Limits {
@@ -325,6 +353,21 @@ mod tests {
             .count();
         assert_eq!(live, 2);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn global_limit_folds_memory_budget() {
+        // 默认全 0 → 不限。
+        assert_eq!(global_limit(0, 0), 0);
+        assert_eq!(memory_budget_entries(0), 0);
+        // 只设条目上限（`[cache.segments].global_max`）。
+        assert_eq!(global_limit(10, 0), 10);
+        // 只设字节预算（`[cache].memory_max_mb`）：1 MB ÷ 256 B ≈ 3906 条。
+        assert_eq!(memory_budget_entries(1), 1_000_000 / ENTRY_BYTES_EST);
+        assert_eq!(global_limit(0, 1), 3_906);
+        // 两者都设 → 取更小者。
+        assert_eq!(global_limit(10, 1), 10);
+        assert_eq!(global_limit(100_000, 1), 3_906);
     }
 
     #[test]

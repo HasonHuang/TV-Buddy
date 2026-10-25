@@ -211,10 +211,21 @@ impl Default for CdnCfg {
 pub struct CacheCfg {
     pub backend: String,
     pub disk_path: String,
+    /// 内存清单条数上限。目标同键**未观测到生效**（S-CACHE-03）；本实现保留键面，
+    /// 不消费（U-10）。
     pub m3u8_max_entries: u64,
+    /// 内存切片索引条数上限。同样未观测到目标生效，本实现不消费；实际限制走
+    /// `[cache.segments]` 与 `[cache].memory_max_mb`（U-10）。
     pub segment_max_entries: u64,
+    /// 切片缓存总量上限（MB）；`0` = 不限。与 `[cache.gc].max_disk_mb` 同义，
+    /// 同时非 0 时取更小者（U-10）。
     pub disk_max_mb: u64,
+    /// 内存切片索引的字节预算（MB）；`0` = 不限。按每条约 256 B 估算成条目数，
+    /// 再与 `[cache.segments].global_max` 取更小者（U-10）。
     pub memory_max_mb: u64,
+    /// 段缓存上限（MB）。目标同键**未观测到生效**（S-CACHE-03）；其默认值 50 与用户
+    /// 显式填写的 50 无法区分，一旦生效会把缓存静默压到 50 MB，因此本实现保留键面
+    /// 但**不消费**，限容走 `[cache.gc]`（U-10）。
     pub segment_cache_max_mb: u64,
     pub prefetch: CachePrefetchCfg,
     pub segments: CacheSegmentsCfg,

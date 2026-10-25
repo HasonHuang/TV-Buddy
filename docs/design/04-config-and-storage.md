@@ -254,3 +254,24 @@ concurrency = 2
 | `<cache>/cache_estimate.json` | 被动实测统计（带 `v` 版本号；不匹配即丢弃）。由 GC tick 节流落盘（≥300s） |
 | `GET /panel/api/cache/stats` | 新增只读 `recommend` 块：推荐 TTL、磁盘上限、数据来源（`measured`/`manual`/`fallback`）、覆盖分组数、更新时间 |
 | `POST /panel/api/cdn/estimate` | 一次性估算：前 3 个非归档分组各第 1 个频道，抓清单与首个切片长度；全失败仍返回 `200`（`source` 回落 `fallback`），并发请求返回 `409` |
+
+### 11.5 `[cache]` 里的容量键（U-10）
+
+目标 v0.8.2 的四个容量键**都没观测到生效**（F-015 / S-CACHE-03）：`m3u8_max_entries=2`
+仍留 6–7 条，`segment_max_entries=2` 仍留 17 条，`disk_max_mb=2` 占 2.79 MB，
+`segment_cache_max_mb=1` 占 2.7 MB。本实现按下面的规则收口，避免「配了没反应」。
+
+| 键 | 本实现的用法 |
+| --- | --- |
+| `disk_max_mb` | **生效**。与 `[cache.gc].max_disk_mb` 同义；同时非 0 时取更小者。默认 `0` = 不限 |
+| `memory_max_mb` | **生效**。内存切片索引的字节预算。按每条约 256 B 估算成条目数，再与 `[cache.segments].global_max` 取更小者。默认 `0` = 不限 |
+| `segment_cache_max_mb` | 保留键面，**不消费** |
+| `m3u8_max_entries`、`segment_max_entries` | 保留键面，**不消费** |
+
+`segment_cache_max_mb` 不消费的原因：它的默认值是 `50`，与用户显式填写的 `50` 无法区分。
+一旦按「非 0 即生效」处理，`segment_cache_max_mb = 50` 会把缓存静默压到 50 MB，
+低于 §3.3 在 1 GB 盘上算出的工作集（约 140 MB），L1 提前淘汰、回源变多。
+限容请用 `[cache.gc].max_disk_mb` 或 `[cache].disk_max_mb`。
+`m3u8_max_entries`／`segment_max_entries` 同样保留键面：目标既不生效，本实现也不消费，
+限条目数请用 `[cache.segments]` 的两个键。
+`memory_max_mb` 的 256 B/条 是估算值，只用作上限，偏保守。

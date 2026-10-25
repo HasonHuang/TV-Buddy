@@ -15,7 +15,7 @@ use crate::{
     auth::{PlayTokenStore, SessionStore},
     config::Config,
     logging::RingBuffer,
-    proxy::{AddressCache, SegmentIndex, TtlCache},
+    proxy::{segments, AddressCache, SegmentIndex, TtlCache},
     stats::Stats,
     watchdog::Watchdog,
 };
@@ -92,7 +92,7 @@ impl AppState {
         ensure_cache_dirs(&cache_dir);
         let segments = SegmentIndex::new();
         segments.set_limits(
-            config.cache.segments.global_max,
+            segments::global_limit(config.cache.segments.global_max, config.cache.memory_max_mb),
             config.cache.segments.per_channel_max,
         );
         let sources_ttl = Duration::from_secs(config.cache.ttl.sub_url_secs.max(1));
@@ -192,7 +192,7 @@ impl AppState {
     pub fn replace(&self, config: Config) {
         self.watchdog.clear_all();
         self.segments.set_limits(
-            config.cache.segments.global_max,
+            segments::global_limit(config.cache.segments.global_max, config.cache.memory_max_mb),
             config.cache.segments.per_channel_max,
         );
         self.sources
