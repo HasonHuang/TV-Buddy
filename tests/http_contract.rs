@@ -4741,6 +4741,8 @@ async fn cdn_shared_cache_hits_makes_hit_public() {
     let path = segment_path(&body, &fixture.base, 1);
     let response = fetch(&fixture, &path).await;
     assert_eq!(header(&response, "cache-control"), "public, max-age=300");
+    // 读完正文，确保切片已落盘，第二次才是真正的磁盘命中。
+    assert_eq!(response.bytes().await.expect("读字节").as_ref(), SEGMENT);
     // 第二次是磁盘命中路径：默认 `private`，开了共享缓存后应为 `public`。
     let response = fetch(&fixture, &path).await;
     assert_eq!(header(&response, "cache-control"), "public, max-age=300");
@@ -4798,6 +4800,9 @@ async fn cdn_disabled_matches_legacy() {
     let path = segment_path(&body, &fixture.base, 1);
     let response = fetch(&fixture, &path).await;
     assert_eq!(header(&response, "cache-control"), "public, max-age=300");
+    // 必须把正文读完：切片是边转发边写缓存，写盘在流结束之后。
+    // 丢掉响应会取消流、不落盘，下一次请求就仍走上游（CI 上偶发）。
+    assert_eq!(response.bytes().await.expect("读字节").as_ref(), SEGMENT);
     let response = fetch(&fixture, &path).await;
     assert_eq!(
         header(&response, "cache-control"),
