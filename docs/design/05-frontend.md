@@ -90,6 +90,26 @@
 - 新密码在浏览器里算 SHA-256（`frontend/src/sha256.ts`）。不用 `crypto.subtle`：
   面板常走 `http://<内网 IP>`，非安全上下文里它不可用。
 
+### 4.2 逐屏字段清单对拍（C1a）
+
+基线：`reference/README.md` §3.1 / §3.2 的「关键元素」列与对应截图。判据是**元素与信息层级**，
+不做像素比对（缺目标操作录像）。已对齐的分区不列；下表每一行都有可复现的证据。
+
+| 分区 | 目标有的元素 | 本实现现状（证据） |
+| --- | --- | --- |
+| `dashboard` | 实时指标（下行·回源、上行·出网、进程内存、CPU、整盘内存峰值）；快速操作（清空缓存、热重载、刷新状态、导出全部 M3U）；系统信息含 RSS | `/panel/api/status` 只返回 name / version / uptime_secs / bind / log_level / groups / channels / sessions / cache_* / entry_exts / hls / mpd，页面直接渲染这些键值 → **无指标、无快速操作** |
+| `groups` | 组卡的上移 / 下移 | `groups.tsx` 无排序相关代码 → **缺** |
+| `security` | 白名单、限流 `l1`/`l2`、会话 TTL 与并发、防爆破 | `SecurityPage`（`ops.tsx`）只有播放 Token（含宽限旧值、轮换）与 IP 统计 / 封禁 → **缺四组** |
+| `logs` | 级别过滤 | `LogsPage`（`ops.tsx`）无 level 过滤 → **缺** |
+| `epg` | 翻译设置（`m08` 翻译模型）；采集节奏 | `EpgPanelPage`（`ops.tsx`）有手工映射、额外频道、历史天数 → **缺翻译与节奏** |
+| `logos` | 动效（`m09`）、转码参数（最大边 / 质量 / 转 WebP） | `logo.tsx` 有列表、上传、改名、匹配报告（`/logo/match-report`）→ **缺动效与转码参数**（后端动效已实现，面板未接） |
+| `schedule` | 「从 EPG 加载节目」 | `schedule.tsx` 无相关调用，而端点 `/panel/api/schedule/from-epg` 已存在 → **面板未接** |
+| `subs` | 源行的「读取分组」 | 有源规则、全局排除、预检结果；`/subs/groups` 端点已在 → **需核对 UI** |
+
+已对齐的部分：`cache` 按目录渲染 `/cache/stats` 的 `entries`（含 `seg_url` / `sub_url`）；
+`stats` 显示在线窗口与热度排行；`assets` 见 §4.1；`livestream` 有回看列表与缓冲；
+`settings` 见 §4.1。弹窗族本轮未逐项核对。
+
 ## 5. 组件清单
 
 | 组件 | 职责 | 对应参考截图 |
