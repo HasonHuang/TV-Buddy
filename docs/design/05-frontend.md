@@ -98,7 +98,7 @@
 | 分区 | 目标有的元素 | 本实现现状（证据） |
 | --- | --- | --- |
 | `dashboard` | 实时指标（下行·回源、上行·出网、进程内存、CPU、整盘内存峰值）；快速操作（清空缓存、热重载、刷新状态、导出全部 M3U）；系统信息含 RSS | `/panel/api/status` 只返回 name / version / uptime_secs / bind / log_level / groups / channels / sessions / cache_* / entry_exts / hls / mpd，页面直接渲染这些键值 → **无指标、无快速操作** |
-| `groups` | 组卡的上移 / 下移 | `groups.tsx` 无排序相关代码 → **缺** |
+| `groups` | 组卡的上移 / 下移（本行原依据 `reference/README.md` 的 `p02` 描述） | ⚠️ **与 `08` S-BUG-02 冲突**：该条记目标面板无排序控件、路由表无 `move`/`order`。以 S-BUG-02 为准，`p02` 的描述待 `p02-groups.png` 复核；见 `07-coverage-and-plan.md` §3.C1 |
 | `security` | 白名单、限流 `l1`/`l2`、会话 TTL 与并发、防爆破 | `SecurityPage`（`ops.tsx`）只有播放 Token（含宽限旧值、轮换）与 IP 统计 / 封禁 → **缺四组** |
 | `logs` | 级别过滤 | `LogsPage`（`ops.tsx`）无 level 过滤 → **缺** |
 | `epg` | 翻译设置（`m08` 翻译模型）；采集节奏 | `EpgPanelPage`（`ops.tsx`）有手工映射、额外频道、历史天数 → **缺翻译与节奏** |
