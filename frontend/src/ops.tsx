@@ -673,7 +673,387 @@ type EpgMapData = {
   extra: EpgExtra[];
 };
 
-/** 节目指南：采集状态、手工映射与额外频道。 */
+/** `[epg.translate]` 的运行时视图（`GET /panel/api/epg/translate/status`）。 */
+type TranslateStatus = {
+  enabled: boolean;
+  engine: string;
+  url: string;
+  source: string;
+  targets: string[];
+  translation_first: boolean;
+  cache: number;
+};
+
+/** 翻译卡片：`[epg.translate]` 的关键键 + 立即翻译 + 清缓存。 */
+function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
+  const [config, setConfig] = useState<Record<string, unknown> | null>(null);
+  const [status, setStatus] = useState<TranslateStatus | null>(null);
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [targets, setTargets] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const [nextConfig, nextStatus] = await Promise.all([
+        api<Record<string, unknown>>('GET', '/config'),
+        api<TranslateStatus>('GET', '/epg/translate/status'),
+      ]);
+      setConfig(nextConfig);
+      setStatus(nextStatus);
+      const epg = (nextConfig.epg ?? {}) as Record<string, unknown>;
+      const translate = (epg.translate ?? {}) as Record<string, unknown>;
+      const list = Array.isArray(translate.targets)
+        ? translate.targets
+        : typeof translate.target === 'string'
+          ? [translate.target]
+          : [];
+      setTargets(list.map((item) => String(item)).join('\n'));
+      setError('');
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (!config) {
+    return (
+      <div className="card">
+        <h2>EPG 翻译</h2>
+        {error ? <div className="msg err">{error}</div> : <p className="muted">读取中…</p>}
+      </div>
+    );
+  }
+
+  const epg = (config.epg ?? {}) as Record<string, unknown>;
+  const translate = (epg.translate ?? {}) as Record<string, unknown>;
+
+  /** 改 `[epg.translate]` 的一个键（整份回写，同设置页机制）。 */
+  const setKey = (key: string, value: unknown) =>
+    setConfig({ ...config, epg: { ...epg, translate: { ...translate, [key]: value } } });
+
+  const num = (key: string) => {
+    const value = translate[key];
+    return typeof value === 'number' ? String(value) : '';
+  };
+  const text = (key: string) => (typeof translate[key] === 'string' ? String(translate[key]) : '');
+
+  const save = async () => {
+    setBusy(true);
+    setNote('');
+    setError('');
+    try {
+      const list = targets
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const next = {
+        ...config,
+        epg: {
+          ...epg,
+          translate: {
+            ...translate,
+            targets: list,
+            // `target` 是单目标别名；多目标时指向第一个，保持键面语义一致。
+            target: list[0] ?? '',
+          },
+        },
+      };
+      await api('PUT', '/config', next);
+      setNote('EPG 翻译配置已保存');
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runNow = async () => {
+    setBusy(true);
+    setNote('');
+    setError('');
+    try {
+      const result = await api<{ channels: number; programmes: number; translated: number }>(
+        'POST',
+        '/epg/translate/run',
+      );
+      setNote(
+        `已翻译：${result.channels} 个频道、${result.programmes} 条节目、${result.translated} 条译文`,
+      );
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearCache = async () => {
+    setBusy(true);
+    setNote('');
+    setError('');
+    try {
+      const result = await api<{ cleared: number }>('POST', '/epg/translate/clear-engine');
+      setNote(`已清空翻译缓存（${result.cleared} 个文件）`);
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const testMtran = async () => {
+    setBusy(true);
+    setNote('');
+    setError('');
+    try {
+      const result = await api<{ ok: boolean; result?: string; error?: string }>(
+        'POST',
+        '/epg/translate/mtran/test',
+        { text: 'hello' },
+      );
+      if (result.ok) setNote(`MTranServer 可用：「hello」→「${result.result ?? ''}」`);
+      else setError(result.error || 'MTranServer 不可用');
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="row between">
+        <div>
+          <h2>EPG 翻译</h2>
+          <p className="muted">
+            引擎负责把节目名/简介翻成目标语言，译文按 `lang` 写进 XMLTV。
+            本实现只实现 MTranServer 的 HTTP 批量接口（`/translate/batch`，失败回退单条）。
+          </p>
+        </div>
+        <div className="row">
+          <button className="ghost" disabled={busy} onClick={() => void testMtran()}>
+            测试连接
+          </button>
+          <button className="ghost" disabled={busy} onClick={() => void clearCache()}>
+            清空译文缓存
+          </button>
+          <button disabled={busy} onClick={() => void save()}>
+            {busy ? '处理中…' : '保存翻译设置'}
+          </button>
+        </div>
+      </div>
+
+      <div className="fields">
+        <label className="field">
+          <span>启用</span>
+          <select
+            value={translate.enabled === true ? 'on' : 'off'}
+            onChange={(event) => setKey('enabled', event.target.value === 'on')}
+          >
+            <option value="off">关闭</option>
+            <option value="on">开启</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>引擎</span>
+          <select
+            value={text('engine') || 'mtran'}
+            onChange={(event) => setKey('engine', event.target.value)}
+          >
+            <option value="mtran">MTranServer</option>
+            <option value="google">google（目标键面；本实现仅走 URL 的 HTTP 接口）</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>MTranServer 地址</span>
+          <input
+            placeholder="http://127.0.0.1:8989"
+            value={text('mtran_url')}
+            onChange={(event) => setKey('mtran_url', event.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>Token（可选）</span>
+          <input
+            value={text('mtran_token')}
+            onChange={(event) => setKey('mtran_token', event.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>批量大小</span>
+          <input
+            type="number"
+            min={1}
+            max={500}
+            value={num('mtran_batch')}
+            onChange={(event) => setKey('mtran_batch', Number(event.target.value) || 0)}
+          />
+        </label>
+        <label className="field">
+          <span>每轮上限</span>
+          <input
+            type="number"
+            min={0}
+            value={num('mtran_max_per_round')}
+            onChange={(event) => setKey('mtran_max_per_round', Number(event.target.value) || 0)}
+          />
+        </label>
+      </div>
+      <div className="fields">
+        <label className="field">
+          <span>源语言</span>
+          <input
+            value={text('mtran_source') || 'auto'}
+            onChange={(event) => setKey('mtran_source', event.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>目标语言（每行一个）</span>
+          <textarea
+            rows={3}
+            placeholder="zh-cn"
+            value={targets}
+            onChange={(event) => setTargets(event.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>译文位置</span>
+          <select
+            value={translate.translation_first === true ? 'first' : 'second'}
+            onChange={(event) => setKey('translation_first', event.target.value === 'first')}
+          >
+            <option value="first">译文在上（原文在下）</option>
+            <option value="second">原文在上</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="row">
+        <button className="ghost" disabled={busy} onClick={() => void runNow()}>
+          立即翻译
+        </button>
+        <span className="muted">
+          状态：{status?.enabled ? '已启用' : '未启用'}；引擎 {status?.engine ?? '—'}；
+          目标 {status?.targets?.join('/') || '—'}；缓存 {status?.cache ?? 0} 条
+        </span>
+      </div>
+
+      {note && <div className="msg ok">{note}</div>}
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
+
+/** 采集节奏：`[epg].cron` + `cron-preview` 校验（A5 的下半部分）。 */
+function EpgCronCard({ onChanged }: { onChanged: () => void }) {
+  const [expr, setExpr] = useState('');
+  const [saved, setSaved] = useState('');
+  const [next, setNext] = useState<string[]>([]);
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const config = await api<{ epg?: { cron?: string } }>('GET', '/config');
+      const cron = config.epg?.cron ?? '';
+      setExpr(cron);
+      setSaved(cron);
+      setError('');
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const preview = async () => {
+    setNote('');
+    setError('');
+    try {
+      const result = await api<{ ok: boolean; next?: string[]; error?: string }>(
+        'POST',
+        '/epg/cron-preview',
+        { expr },
+      );
+      if (result.ok) {
+        setNext(result.next ?? []);
+        setNote(`表达式合法，接下来 ${result.next?.length ?? 0} 次触发如下`);
+      } else {
+        setNext([]);
+        setError(result.error ?? '表达式不合法');
+      }
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  const save = async () => {
+    setBusy(true);
+    setNote('');
+    setError('');
+    try {
+      const config = await api<Record<string, unknown>>('GET', '/config');
+      const epg = (config.epg ?? {}) as Record<string, unknown>;
+      // `[epg]` 段（含源列表）在启动时读取，改 cron 也不会立刻换调度；界面上写明。
+      await api('PUT', '/config', { ...config, epg: { ...epg, cron: expr.trim() } });
+      setSaved(expr.trim());
+      setNote('采集节奏已保存；`[epg]` 段需重启后重新排程');
+      onChanged();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>采集节奏</h2>
+      <p className="muted">
+        cron 表达式（5 段：分 时 日 月 周），按 `[server].timezone_offset_hours` 解释。
+        默认 `0 */4 * * *`。`[epg]` 段在启动时读取，改动需重启才生效。
+      </p>
+      <div className="row">
+        <input
+          className="mono"
+          style={{ flex: 2 }}
+          value={expr}
+          onChange={(event) => setExpr(event.target.value)}
+        />
+        <button className="ghost" onClick={() => void preview()}>
+          预览
+        </button>
+        <button disabled={busy || expr.trim() === saved} onClick={() => void save()}>
+          {busy ? '保存中…' : '保存'}
+        </button>
+      </div>
+      {next.length > 0 && (
+        <ul className="muted">
+          {next.map((item) => (
+            <li key={item} className="mono">
+              {item}
+            </li>
+          ))}
+        </ul>
+      )}
+      {note && <div className="msg ok">{note}</div>}
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
+
+/** 节目指南：采集状态、采集节奏、翻译设置、手工映射与额外频道。 */
 export function EpgPanelPage() {
   const [status, setStatus] = useState<EpgStatus | null>(null);
   const [data, setData] = useState<EpgMapData>({ mappings: {}, extra: [] });
@@ -844,6 +1224,8 @@ export function EpgPanelPage() {
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}
       </div>
+      <EpgCronCard onChanged={() => void load()} />
+      <EpgTranslateCard onChanged={() => void load()} />
       <div className="card">
         <h2>手工映射</h2>
         <div className="row">

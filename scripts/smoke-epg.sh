@@ -111,10 +111,12 @@ check "EPG 浏览页 200" "200" "$(curl -s -o "$WORK/page.html" -w '%{http_code}
 check "EPG 浏览页含前端资源" "1" "$(grep -c '/assets/epg-' "$WORK/page.html")"
 
 check "EPG 频道接口 200" "200" "$(curl -s -o "$WORK/channels.json" -w '%{http_code}' "$B/epg/api/channels")"
-check "EPG 频道接口计数" "1" "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(1 if d["count"]>=1 and d["channels"][0]["id"]=="c1" else 0)' "$WORK/channels.json")"
+# 公开 EPG API 的字段以 F-023 为准：`channels` 用 `total`，`programmes`/`search` 没有 `count`。
+check "EPG 频道接口计数" "1" "$(python3 scripts/epg_assert.py "$WORK/channels.json" channels)"
 check "EPG 节目接口 200" "200" "$(curl -s -o "$WORK/prog.json" -w '%{http_code}' "$B/epg/api/programmes/c1")"
-check "EPG 节目含标题" "1" "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(1 if d["count"]==1 and d["programmes"][0]["title"]=="新闻" else 0)' "$WORK/prog.json")"
-check "EPG 搜索命中" "1" "$(curl -s "$B/epg/api/search?q=%E6%96%B0%E9%97%BB" | python3 -c 'import json,sys;print(1 if json.load(sys.stdin)["count"]==1 else 0)')"
+check "EPG 节目含标题" "1" "$(python3 scripts/epg_assert.py "$WORK/prog.json" programmes)"
+curl -s "$B/epg/api/search?q=%E6%96%B0%E9%97%BB" > "$WORK/search.json"
+check "EPG 搜索命中" "1" "$(python3 scripts/epg_assert.py "$WORK/search.json" search)"
 
 COOKIE=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' -D - -o "$WORK/login.json" | awk 'BEGIN{IGNORECASE=1}/^set-cookie:/{sub(/\r$/,"");print substr($0,13)}')
@@ -129,6 +131,70 @@ check "EPG 刷新后映射" "1" "$(curl -s -o /dev/null -w '%{http_code}' -X POS
 check "EPG 匹配报告 200" "200" "$(curl -s -o "$WORK/report.txt" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/match-report")"
 check "EPG 报告含 manual" "1" "$(grep -c 'manual' "$WORK/report.txt")"
 check "EPG 映射清除 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"gid":"g1","cid":"c1","source_id":"","source_channel_id":""}' "$B/panel/api/epg/mapping")"
+
+# --- 采集节奏与翻译设置（A5） ---
+A="Authorization: Bearer $TOKEN"
+
+check "cron 预览合法" "True" \
+  "$(curl -s -X POST "$B/panel/api/epg/cron-preview" -H "$A" -H 'content-type: application/json' \
+    -d '{"expr":"*/30 * * * *"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["ok"])')"
+check "cron 预览返回 3 个时间点" "3" \
+  "$(curl -s -X POST "$B/panel/api/epg/cron-preview" -H "$A" -H 'content-type: application/json' \
+    -d '{"expr":"*/30 * * * *"}' | python3 -c 'import json,sys;print(len(json.load(sys.stdin).get("next") or []))')"
+check "cron 非法表达式不通过" "False" \
+  "$(curl -s -X POST "$B/panel/api/epg/cron-preview" -H "$A" -H 'content-type: application/json' \
+    -d '{"expr":"not a cron"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["ok"])')"
+
+check "翻译状态 200" "200" \
+  "$(curl -s -o "$WORK/tr.json" -w '%{http_code}' -H "$A" "$B/panel/api/epg/translate/status")"
+check "翻译默认关闭" "False" \
+  "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["enabled"])' "$WORK/tr.json")"
+check "翻译状态有 cache 计数" "0" \
+  "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["cache"])' "$WORK/tr.json")"
+
+# 改写 `[epg.translate]` 后回读（面板翻译卡片就是这么保存的）。
+curl -s -H "$A" "$B/panel/api/config" > "$WORK/cfg.json"
+python3 - "$WORK/cfg.json" "$WORK/put.json" <<'PYEOF'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+# 夹具里没有 `[epg.translate]`（它落在 EpgCfg.extra 里），面板保存时也是从空表开始建。
+tr = cfg["epg"].setdefault("translate", {})
+tr["enabled"] = True
+tr["mtran_url"] = "http://127.0.0.1:9"
+tr["mtran_batch"] = 25
+tr["targets"] = ["zh-cn", "en"]
+cfg["epg"]["cron"] = "*/30 * * * *"
+json.dump(cfg, open(sys.argv[2], "w"))
+PYEOF
+check "写翻译设置 200" "200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" -H "$A" \
+    -H 'content-type: application/json' --data-binary "@$WORK/put.json")"
+curl -s -H "$A" "$B/panel/api/config" > "$WORK/after.json"
+check "翻译已启用" "True" \
+  "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["epg"]["translate"]["enabled"])' "$WORK/after.json")"
+check "批量大小已落盘" "25" \
+  "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["epg"]["translate"]["mtran_batch"])' "$WORK/after.json")"
+check "多目标已落盘" "zh-cn,en" \
+  "$(python3 -c 'import json,sys;print(",".join(json.load(open(sys.argv[1]))["epg"]["translate"]["targets"]))' "$WORK/after.json")"
+check "cron 已落盘" "*/30 * * * *" \
+  "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["epg"]["cron"])' "$WORK/after.json")"
+
+# 不可达的 MTranServer：测试接口要报告失败而不是 5xx。
+check "MTran 不可达时报告失败" "False" \
+  "$(curl -s -X POST "$B/panel/api/epg/translate/mtran/test" -H "$A" \
+    -H 'content-type: application/json' -d '{"text":"hello"}' | \
+    python3 -c 'import json,sys;print(json.load(sys.stdin).get("ok"))')"
+
+# 前端已内嵌这两张卡片（ASCII needle）。
+ASSET=$(curl -s -H "$A" "$B/panel" | grep -oE '/__assets/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+PJS=$(curl -s "$B$ASSET")
+for needle in 'epg/cron-preview' 'epg/translate/run' 'epg/translate/clear-engine' \
+  'epg/translate/mtran/test' 'mtran_max_per_round'; do
+  case "$PJS" in
+    *"$needle"*) printf 'ok   %s\n' "EPG 页包含 $needle" ;;
+    *) printf 'FAIL EPG 页缺少 %s\n' "$needle"; fail=1 ;;
+  esac
+done
 
 if [ "$fail" = "0" ]; then
   echo "EPG 冒烟测试全部通过"

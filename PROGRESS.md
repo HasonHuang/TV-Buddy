@@ -112,7 +112,7 @@
   - 缺口分四组：A 面板接线（8 项，端点已存在）、B 需新后端（概览实时指标）、
     C 冲突与文档债（分组排序冲突、i18n 决策）、D 已登记不实现。
   - 规划：P2 文档债 → P1 面板接线 → P3 指标 → P4 深化；难验证项各自给了对比方案。
-- **P1 面板接线（进行中，A1/A2/A3/A4/A6/A7/A8/A9/A10 已完；只剩 A5）**：
+- **P1 面板接线（完成，A1–A10 全部 + A11 的配置型徽章）**：
   - 设置页「DASH 调优」卡片（三组折叠，覆盖 `[cache.dash]` 全部键，组名与说明沿用 `p12` 文案）；
     概览页快速操作（刷新状态 / 清空缓存 / 热重载配置 / 导出全部 M3U）。
   - 分组管理：分组卡与频道行各加 `▲`/`▼`，机制与目标一致（前端改数组顺序 →
@@ -133,8 +133,12 @@
     `[auth]` 的 13 个原本落在 `extra` 里的目标键（`l1_*`、`l2_*`、`violation_*`、
     `ban_*`、`auth_fail_ban_*`）已建成类型化字段，默认值与目标 `config.toml` 一致；
     本实现不消费的键在界面与模型注释里都标 `未消费`。
+  - 节目指南：新增「采集节奏」（cron + `cron-preview` 预览，注明 `[epg]` 重启生效）
+    与「EPG 翻译」（`[epg.translate]` 关键键 + 测试连接 + 立即翻译 + 清空译文缓存）。
   - 冒烟补强：`smoke-security.sh` 增 10 条（键面 25 个、未消费键默认值、白名单写入与
     回读、前端 chunk needle）；`smoke-settings.sh` 增 23 条 `auth.*` 路径断言。
+  - `smoke-epg.sh` 修 3 条过期断言（公开 EPG API 的字段以 F-023 为准：`channels` 用
+    `total`，`programmes`/`search` 没有 `count`），并增 15 条覆盖 A5。
   - 冒烟补强：`smoke-logo.sh` 增 15 条（动效 10 帧/2220 ms、`quality` 必须是字符串、
     还原后体积回原值、前端 chunk 含 animate/restore/toBlob/webp）；
     `smoke-settings.sh` 增 `/subs/groups` 与级别词 needle；`smoke-m4.sh` 增

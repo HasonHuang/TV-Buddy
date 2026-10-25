@@ -101,7 +101,7 @@
 | `groups` | 分组与频道排序（`▲`/`▼`，组名左侧另有拖拽柄）；工具栏 `M3U 导入`/`JSON 导入`/`JSON 覆盖`/`导出全部`/`多选`；频道行状态点与 `异常`/`常驻`/`全轨道` 徽章 | ⚠️ **已做大部分**。排序：分组卡与频道行各有 `▲`/`▼`，写回机制与目标一致（改数组顺序 → `PUT /panel/api/config` 全量保存，无新端点）。工具栏：四个入口已接（`/groups/import/m3u`、`/groups/import`、`/groups/import/force`、`/groups/export`）；`多选` 的目标语义未观测，**不做**。徽章：配置型三枚已做（`常驻`=`livestream`、`全轨道`=DASH 且 `selected_tracks` 空、`tvg-id`/`Logo`）；**绿点与 `异常` 缺数据源**（`/panel/api/health` 无逐频道字段），转 `07` §3.B3。拖拽柄未做（等价功能由上/下移覆盖）。证据：`reference/img/p02-groups.png`（2026-10-25 复核）；`07` `D-006`、§3.A9–A11 |
 | `security` | 白名单、限流 `l1`/`l2`、会话 TTL 与并发、防爆破 | ✅ 已加「访问控制」卡片：读整份配置改 `[auth]` 子树后 `PUT /panel/api/config`（与设置页同机制），四组都在。**未消费的键**（白名单、`max_sessions_per_ip`/`session_ttl_secs`、`l1/l2`、升级封禁）逐项标 `未消费` 并写明不改变运行行为 |
 | `logs` | 级别过滤 | ✅ 已加级别下拉（全部/TRACE/DEBUG/INFO/WARN/ERROR），前端按行过滤；顺带剥掉环形缓冲里的 ANSI 颜色码（原先直接塞 `<pre>` 会显示成控制符） |
-| `epg` | 翻译设置（`m08` 翻译模型）；采集节奏 | `EpgPanelPage`（`ops.tsx`）有手工映射、额外频道、历史天数 → **缺翻译与节奏** |
+| `epg` | 翻译设置（`m08` 翻译模型）；采集节奏 | ✅ 已加两张卡：「采集节奏」= cron 输入 + `POST /panel/api/epg/cron-preview` 预览下 3 次触发（并注明 `[epg]` 需重启生效）；「EPG 翻译」= 启用/引擎/MTranServer 地址与 Token/批量/每轮上限/源语言/多目标语言/译文位置 + 测试连接 + 立即翻译 + 清空译文缓存 |
 | `logos` | 动效（`m09`）、转码参数（最大边 / 质量 / 转 WebP） | ✅ 已接：上传前在浏览器里按最长边等比缩放、可选转 WebP（目标同，服务端不转码）；每个台标卡加「动效」→ 6 效果选择 + `POST /panel/api/logo/animate`，生成后显示帧数/尺寸/时长/体积变化；有 `.orig/` 备份的显示「还原」 |
 | `schedule` | 「从 EPG 加载节目」 | ✅ 已接：选好分组与频道后「从 EPG 加载节目」→ `GET /panel/api/epg/programmes/{epgKey}`（`epgKey` = `tvg_id` 或频道 id 的小写，与 `epg::channel_targets` 的 `out_id` 同规则）。节目表每条可「填入」（取已含 `record_pad_*` 的 `rec_start`/`rec_end`）或「排期」（`POST /panel/api/schedule/from-epg` 单条提交） |
 | `subs` | 源行的「读取分组」 | ✅ 已加：源行「读取分组」按钮 → `POST /panel/api/subs/groups`，结果表列出分组名与频道数，可「加入映射」填 `group_map` |
