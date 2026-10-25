@@ -14,7 +14,7 @@
 
 ## 1. 方法
 
-1. 用两个公开 HLS 源和三个 源站 频道做真实链路测试。
+1. 用两个公开 HLS 源和三个源站频道做真实链路测试。
 2. 用本机 Python 慢速源站控制正文发送时序，测目标超时与错误语义。
 3. 目标容器与本站使用同形配置：`mode=proxy`、`access=open/public`、`cache.prefetch.enabled=false`。
 4. 慢速源站收到请求后先发 200 头和 100 字节，再休眠 90 秒，最后发剩余 900 字节。
@@ -27,7 +27,7 @@
 | 源站 `fct` | `http://<实测域名>/hk-dd/fct.m3u8` | 直播；切片为 `.jpg`，带查询串 |
 | 源站 `wxxw` | `http://<实测域名>/hk-dd/wxxw.m3u8` | 直播；切片无扩展名 |
 | 源站 `now-wx` | `http://<实测域名>/hk-dd/now-wx.m3u8` | 直播；大切片 |
-| 源站 订阅 | `https://<实测域名>/hk-dd/playlist.m3u` | 3 个频道 |
+| 源站订阅 | `https://<实测域名>/hk-dd/playlist.m3u` | 3 个频道 |
 
 ## 2. 结论摘要
 
@@ -42,7 +42,7 @@
 | 7 | VOD 媒体清单 `public, max-age=<TARGETDURATION>, s-maxage=…` | 同目标 | ✅ |
 | 8 | 直播媒体清单 `no-cache, no-store` | 同目标 | ✅ |
 | 9 | 上游扩展名已在 `[cache.disguise].formats` 中时保留，例如 `.jpg` 仍为 `.jpg` | 保留 | ✅ |
-| 10 | 源站 入口 HTTP → HTTPS 的 301 自动跟随 | reqwest 默认跟随 | ✅ |
+| 10 | 源站入口 HTTP → HTTPS 的 301 自动跟随 | reqwest 默认跟随 | ✅ |
 
 ## 3. 超时与错误路径
 
@@ -111,7 +111,7 @@
 | 上游 | 目标头 | 本实现 |
 | --- | --- | --- |
 | Mux VOD（`#EXT-X-PLAYLIST-TYPE:VOD`） | `public, max-age=11, s-maxage=11` | 同 |
-| 源站 直播（无 `ENDLIST`） | `no-cache, no-store` | 同 |
+| 源站直播（无 `ENDLIST`） | `no-cache, no-store` | 同 |
 | 本地 VOD（只有 `#EXT-X-ENDLIST`） | 未逐项采样；按 VOD 处理 | `public, max-age=<TARGETDURATION>` |
 
 ### 4.3 扩展名
@@ -151,7 +151,7 @@
 - 首切片完整下载 **5,866,540 字节**，约 4.8 秒。
 - 上游切片扩展名不在 `formats` 中，按轮换输出图片后缀。
 
-### 5.5 源站 订阅
+### 5.5 源站订阅
 
 - `GET /playlist.m3u` 聚合 3 个频道，正文为原始上游 URL。
 - 必需的 `x-tvg-url` 由本实现按 `[epg].enabled` 注入。

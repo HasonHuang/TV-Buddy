@@ -132,7 +132,7 @@ flowchart LR
 > - **U-04 `proxy` + MPD**：`mpd_keep_seconds > 0` 时裁剪 `SegmentTemplate/SegmentTimeline` 与 `SegmentList`，并推进 `$Number$` 的 `startNumber`；绝对 `<BaseURL>` 按目标证据保持直连。
 > - **U-05 配置段**：新增 `[cache.{prefetch,segments,ttl,dash,remux}]` 模型；接入切片索引上限、`ttl.sub_url_secs`/`segment_secs`、媒体切片预取、DASH MPD/切片超时、重试退避、会话空闲回收、媒体窗口 `playlist_min_secs`、`start_time_offset_secs`、Remux 目标时长/窗口/重连退避。`[cache.dash]` 的 `watchdog_rebuild_max`/`watchdog_cooldown_secs` 已接入；`fast_start_secs`/`publish_delay_secs` 与其余 watchdog 参数仍待接入。
 > - **U-06 资源/台标部分**：`/panel/api/assets/{convert,list,remove}` 支持 `[assets].map` 与本地 HLS，新增公开 `GET /assets/*path`；`/panel/api/logo/{restore,animate}` 已实现，动效覆盖 6 种效果与 APNG 编码，`logo/list` 增加 `has_original`/`animated`。动效输入支持目标白名单 `png/jpg/jpeg/webp/bmp/avif`。
-> - **V-11 真实 HLS/M3U 验证**：用 Mux 与 源站 真实源对拍目标；补齐 25 秒总超时、流式部分正文、切片 404 → 200 空正文、清单失败 → 302 `error_url`、HLS 清单 4 次重试、主清单属性白名单、VOD/直播媒体缓存头、已知扩展名保留。详见 F-019。Mux 不再 502；源站 `fct`/`wxxw`/`now-wx` 首切片均完整下载。
+> - **V-11 真实 HLS/M3U 验证**：用 Mux 与源站真实源对拍目标；补齐 25 秒总超时、流式部分正文、切片 404 → 200 空正文、清单失败 → 302 `error_url`、HLS 清单 4 次重试、主清单属性白名单、VOD/直播媒体缓存头、已知扩展名保留。详见 F-019。Mux 不再 502；源站 `fct`/`wxxw`/`now-wx` 首切片均完整下载。
 
 #### 0.8.2 待验（目标证据）
 
