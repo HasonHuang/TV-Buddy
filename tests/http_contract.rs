@@ -1172,6 +1172,95 @@ async fn single_segment_unknown_path_is_404() {
     }
 }
 
+/// 伪装切片的校验口径（2026-10-25 对目标 v0.8.2 逐条实测）。
+///
+/// 目标对切片面的错误一律 `302 error_url`，只有分组/频道不存在才 `not_found_url`。
+#[tokio::test]
+async fn disguised_segment_validation_matches_target() {
+    let fixture = fixture().await;
+    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let body = response.text().await.expect("读正文");
+    let url = media_lines(&body)[0].to_string();
+    let tail = url.rsplit('/').next().expect("取文件名").to_string();
+    let (prefix, rest) = tail.split_once('_').expect("应含下划线");
+    let suffix = rest.split_once('.').expect("应含扩展名").0;
+    let path = format!("/pg/c1/{tail}");
+    let error_url = "http://placeholder.test/mistake.mp4";
+
+    // 基线可播。
+    assert_eq!(fetch(&fixture, &path).await.status(), StatusCode::OK);
+
+    let cases: [(&str, String); 9] = [
+        ("缺 <P>", format!("/pg/c1/{suffix}.jpg")),
+        ("截短 <P>", format!("/pg/c1/ea86_{suffix}.jpg")),
+        ("错 <P>", format!("/pg/c1/0000000000000000_{suffix}.jpg")),
+        (
+            "大写 <P>",
+            format!("/pg/c1/{}_{suffix}.jpg", prefix.to_uppercase()),
+        ),
+        (
+            "错 <S>",
+            format!("/pg/c1/{prefix}_00000000000000000000000000000000.jpg"),
+        ),
+        ("扩展名两点", format!("/pg/c1/{prefix}_{suffix}.a.b")),
+        ("双下划线", format!("/pg/c1/{prefix}__{suffix}.jpg")),
+        ("前缀前多一段", format!("/pg/c1/x_{prefix}_{suffix}.jpg")),
+        ("前缀后多一段", format!("/pg/c1/{prefix}_{suffix}_x.jpg")),
+    ];
+    for (label, path) in cases {
+        let response = fetch(&fixture, &path).await;
+        assert_eq!(response.status(), StatusCode::FOUND, "{label} 应 302");
+        assert_eq!(header(&response, "location"), error_url, "{label}");
+    }
+
+    // 扩展名不参与校验（S-DIS-05）；整段扩展名可省略。
+    for ext in ["", ".", ".png", ".ts", ".txt"] {
+        let response = fetch(&fixture, &format!("/pg/c1/{prefix}_{suffix}{ext}")).await;
+        assert_eq!(response.status(), StatusCode::OK, "ext={ext} 应可播");
+    }
+}
+
+/// 非 `proxy` 模式的切片子路径一律 `302 not_found_url`（2026-10-25 实测）。
+#[tokio::test]
+async fn non_proxy_modes_have_no_disguised_segment_surface() {
+    let fixture = fixture().await;
+    // `pt` 是 passthrough，`badlist` 是 proxy 但上游坏；先确认 `ar`（归档）之外的
+    // passthrough 组在子路径上都是 not_found。
+    for path in ["/pt/c1/video/index.txt", "/pt/c1/foo.jpg", "/pt/c1/a/b"] {
+        let response = fetch(&fixture, path).await;
+        assert_eq!(response.status(), StatusCode::FOUND, "{path}");
+        assert_eq!(
+            header(&response, "location"),
+            "http://placeholder.test/404.mp4",
+            "{path}"
+        );
+    }
+}
+
+/// 入口扩展名白名单：`.m3u8` / `.mpd` / `.txt` 与不带扩展名等价，其余 302。
+#[tokio::test]
+async fn entry_extension_allowlist() {
+    let fixture = fixture().await;
+    for ext in ["", ".m3u8", ".mpd", ".txt"] {
+        let response = fetch(&fixture, &format!("/pt/c1{ext}?token={}", fixture.token)).await;
+        assert_eq!(response.status(), StatusCode::FOUND, "pt/c1{ext}");
+        assert_eq!(
+            header(&response, "location"),
+            format!("{}/live.m3u8", fixture.upstream),
+            "pt/c1{ext} 应跳到上游"
+        );
+    }
+    for ext in [".mp4", ".ts", ".M3U8", ".", ".m3u8.txt"] {
+        let response = fetch(&fixture, &format!("/pt/c1{ext}?token={}", fixture.token)).await;
+        assert_eq!(response.status(), StatusCode::FOUND, "pt/c1{ext} 应 302");
+        assert_eq!(
+            header(&response, "location"),
+            "http://placeholder.test/404.mp4",
+            "pt/c1{ext}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn epg_manual_mapping_and_match_report() {
     let fixture = fixture_with(true).await;

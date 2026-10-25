@@ -173,12 +173,12 @@
 | S-DIS-09 | 切片不插入 SDT 或 `lumberjack` 水印；首片保留源流 SDT，后续片从 PAT/PMT 开始 | D-disg | ✅【观测】代理切片与源逐字节相同；Remux 首两片与源切片逐字节相同，无 `lumberjack` |
 | S-DIS-10 | 媒体清单伪装成 `.txt`（`.../video/index.txt`），主清单入口仍为 `.m3u8`；媒体清单无 `#EXT-X-MAP` | D-disg | ✅【观测】 |
 | S-DIS-11 | 文件名混淆由独立的 `cache.dash.obfuscate_filenames` 控制，**与伪装无关** | D-panel | ✅【观测】位于 `[cache.dash]`，与 `[cache.disguise]` 分区不同 |
-| S-DIS-12 | 伪装切片 URL 形状 `/{gid}/{cid}/<16hex>_<32hex>.<ext>` | 二进制 | ✅ |
-| S-DIS-13 | 切片 `Content-Type` 由后缀映射（图片→图片类型；其余→`video/mp2t`） | 二进制 | ✅ |
+| S-DIS-12 | 伪装切片 URL 形状 `/{gid}/{cid}/<16hex>_<32hex>.<ext>`；扩展名整段可省略、至多一个 `.` | 二进制 | ✅【观测】F-017 §5.2 |
+| S-DIS-13 | 切片 `Content-Type` 由后缀映射：白名单 `jpg/jpeg`→`image/jpeg`、`png`/`gif`/`bmp`/`webp` 各自对应，**其余一律 `video/mp2t`**（含空后缀、`ts`、`m4s`、`txt`、`m3u8`、`svg`、`ico`）；比较不区分大小写 | 二进制 | ✅【观测】F-017 §5.2 |
 | S-DIS-14 | 频道入口清单以 `text/plain` 下发（`[cache.disguise].playlist=true`） | 二进制 | ✅ |
-| S-DIS-15 | 未知/无效切片 ID → 302 到 `server.not_found_url` | 二进制 | ✅ |
+| S-DIS-15 | 未知/无效切片 ID → 302 占位。**两种占位分流**：分组/频道不存在、归档组、非 `proxy` 模式的任意子路径 → `not_found_url`；`<P>`/`<S>` 形状或取值不对、形状合法但未登记 → `error_url` | 二进制 | ✅【观测】F-017 §5.2 |
 | S-DIS-16 | 切片（段）**不受** `token_enabled` 保护；安全性依赖不可猜测的切片 ID | 二进制 | ✅ |
-| S-DIS-17 | 切片 ID **参与校验**：`<P>` 或 `<S>` 错误/截短/缺失 → 302 占位；**扩展名不校验**（`.png` 与 `.jpg` 同字节） | D-disg | ✅【观测】F-017 |
+| S-DIS-17 | 切片 ID **参与校验**：`<P>` 或 `<S>` 错误/截短/缺失/**大写**/非 hex → `302 error_url`；扩展名**整段可省**（`<P>_<S>` 与 `<P>_<S>.` 均 200），且取值不校验（`.png` 与 `.jpg` 同字节），但**最多一个 `.`**（`a.b` → 302）。`<P>`/`<S>` 大小写敏感 | D-disg | ✅【观测】F-017 §5.2 |
 
 ## 10. 缓存
 

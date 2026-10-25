@@ -75,25 +75,41 @@ pub async fn entry(
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     let config = state.snapshot();
-    let self_base = self_base(&config, &headers);
     let Some((cid, ext)) = split_entry(&file) else {
         return placeholder(&config);
     };
-    let Some(group) = config.group(&gid) else {
-        return unknown_endpoint(&state, &config, &query);
+    play_entry(&state, &gid, &cid, &ext, &query, &headers).await
+}
+
+/// 入口逻辑的实体：`/{gid}/{cid}.m3u8` 与子路径别名 `/{gid}/{cid}/index.m3u8` 共用。
+///
+/// 目标是「别名与入口同义」（2026-10-25 实测：`redirect` / `rewrite` 两组的两条路径
+/// 给出完全相同的 `302` 目标或清单正文），所以不能再按模式分裂实现。
+async fn play_entry(
+    state: &Arc<AppState>,
+    gid: &str,
+    cid: &str,
+    ext: &str,
+    query: &HashMap<String, String>,
+    headers: &HeaderMap,
+) -> Response {
+    let config = state.snapshot();
+    let self_base = self_base(&config, headers);
+    let Some(group) = config.group(gid) else {
+        return unknown_endpoint(state, &config, query);
     };
     // 归档组停播（F-009）。
     if group.access == "archived" {
         return placeholder(&config);
     }
     let Some(channel) = group.channels.iter().find(|channel| channel.id == cid) else {
-        return unknown_endpoint(&state, &config, &query);
+        return unknown_endpoint(state, &config, query);
     };
-    if !token_ok(&state, &config, group, &query) {
+    if !token_ok(state, &config, group, query) {
         return redirect_asset(&config, &config.auth.token_failure_url);
     }
     // 上游解析脚本：每次播放前算地址（S-RES-01）。
-    let resolved = match crate::resolver::resolve(&state, &gid, &cid, channel).await {
+    let resolved = match crate::resolver::resolve(state, gid, cid, channel).await {
         Ok(value) => value,
         Err(error) => {
             tracing::warn!(gid = %gid, cid = %cid, "解析脚本失败: {error:#}");
@@ -102,13 +118,13 @@ pub async fn entry(
     };
     let base = resolved.unwrap_or_else(|| channel.url.clone());
     // 回看：只把 `playseek` 原样追加到上游（S-EP-04），其余回看参数丢弃。
-    let mut upstream = with_playseek(&base, &query);
+    let mut upstream = with_playseek(&base, query);
     // 本地回看：点亮 `livestream` 的频道优先读缓冲；未命中落回实时（S-TS-01）。
     if channel.livestream || channel.dash_timeshift {
         if let Some((start, end)) =
-            crate::timeshift::range(&query, config.server.timezone_offset_hours as i64)
+            crate::timeshift::range(query, config.server.timezone_offset_hours as i64)
         {
-            if let Some(body) = state.timeshift.playlist(&state, &gid, &cid, start, end) {
+            if let Some(body) = state.timeshift.playlist(state, gid, cid, start, end) {
                 return crate::timeshift::vad_response(body);
             }
             upstream = base.clone();
@@ -121,21 +137,21 @@ pub async fn entry(
 
     match group.mode.as_str() {
         // 302 直连上游；缓存解析出的地址（S-MODE-08/13）。
-        "redirect" => redirect_entry(&state, &config, group, &cid, &upstream).await,
+        "redirect" => redirect_entry(state, &config, group, cid, &upstream).await,
         // 清单绝对化，客户端直连上游切片（S-MODE-09/14）。
-        "rewrite" => rewrite_entry(&state, &config, group, &cid, &upstream).await,
+        "rewrite" => rewrite_entry(state, &config, group, cid, &upstream).await,
         // 连续流转封装：纯 Rust 切片；未产出前 503（S-MODE-16/18）。
         "remux" => {
-            let session = state.remux.ensure(&state, &gid, &cid, &upstream);
+            let session = state.remux.ensure(state, gid, cid, &upstream);
             match session.playlist() {
                 Some(body) => remux_playlist(body),
                 None => warming_up(),
             }
         }
         // 就绪门：30 秒内拿到上游主清单，否则 503（S-MODE-15）。
-        "dash" => dash_entry(&state, group, &gid, &cid, &upstream, &self_base).await,
+        "dash" => dash_entry(state, group, gid, cid, &upstream, &self_base).await,
         // 代理：上游是主清单则自造单变体主清单；上游是媒体清单则直接改写。
-        _ => proxy_entry(&state, &config, &gid, &cid, &upstream, &self_base, &ext).await,
+        _ => proxy_entry(state, &config, gid, cid, &upstream, &self_base, ext).await,
     }
 }
 
@@ -349,41 +365,28 @@ pub async fn wildcard(
         "video/index.txt" => {
             variant_playlist(&state, &gid, &cid, &self_base(&config, &headers)).await
         }
-        // 兼容别名：与入口同义。
+        // 兼容别名：与入口同义（目标实测：`redirect` / `rewrite` 两条路径结果一致）。
         "index.m3u8" => {
-            let Some((group, url)) = resolve(&config, &gid, &cid) else {
-                return placeholder(&config);
-            };
-            if group.mode == "remux" {
-                let session = state.remux.ensure(&state, &gid, &cid, &url);
-                match session.playlist() {
-                    Some(body) => remux_playlist(body),
-                    None => warming_up(),
-                }
-            } else if group.mode == "dash" {
-                dash_entry(
-                    &state,
-                    &group,
-                    &gid,
-                    &cid,
-                    &url,
-                    &self_base(&config, &headers),
-                )
-                .await
-            } else if group.mode == "proxy" {
-                proxy_entry(
-                    &state,
-                    &config,
-                    &gid,
-                    &cid,
-                    &url,
-                    &self_base(&config, &headers),
-                    "m3u8",
-                )
-                .await
-            } else {
-                segment(&state, &gid, &cid, &rest).await
-            }
+            let query: HashMap<String, String> = raw_query
+                .as_deref()
+                .map(|raw| {
+                    url::form_urlencoded::parse(raw.as_bytes())
+                        .into_owned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            play_entry(&state, &gid, &cid, "m3u8", &query, &headers).await
+        }
+        // 非 `proxy` 模式没有伪装切片面：目标实测（2026-10-25）`remux`/`rewrite`/
+        // `passthrough`/`redirect` 下的任意子路径（含 `video/index.txt`、合法 remux 名、
+        // 伪装切片形状）一律 `302 not_found_url`。只有 `proxy` 模式的切片分支才用
+        // `error_url`，两者不能混。
+        _ if !matches!(
+            resolve(&config, &gid, &cid).map(|(group, _)| group.mode),
+            Some(mode) if mode == "proxy"
+        ) =>
+        {
+            placeholder(&config)
         }
         _ => segment(&state, &gid, &cid, &rest).await,
     }
@@ -516,8 +519,8 @@ fn spawn_prefetch(
     tokio::spawn(async move {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
         let mut tasks = tokio::task::JoinSet::new();
-        for (suffix, url, ext) in entries {
-            let path = proxy::segment_path(&state.cache_dir, &gid, &cid, &suffix, &ext);
+        for (suffix, url, _ext) in entries {
+            let path = proxy::segment_path(&state.cache_dir, &gid, &cid, &suffix);
             if path.is_file() {
                 continue;
             }
@@ -574,6 +577,11 @@ fn media_cache_control(upstream: &str) -> String {
 }
 
 /// 变体媒体清单：抓最佳变体的清单再改写。
+/// 变体媒体清单（`.../video/index.txt`）。
+///
+/// 只有 `proxy` 模式会自造主清单、才有这条路径；其它模式与未知频道一律
+/// `302 not_found_url`（目标实测 2026-10-25：`rewrite`/`redirect`/`passthrough`
+/// 下该路径是 `404.mp4`，而 `proxy` 模式下上游没有主清单才是 `error_url`）。
 async fn variant_playlist(
     state: &Arc<AppState>,
     gid: &str,
@@ -582,9 +590,9 @@ async fn variant_playlist(
 ) -> Response {
     let config = state.snapshot();
     let Some((group, channel_url)) = resolve(&config, gid, cid) else {
-        return (StatusCode::NOT_FOUND, "Channel not found").into_response();
+        return placeholder(&config);
     };
-    if group.access == "archived" {
+    if group.access == "archived" || group.mode != "proxy" {
         return placeholder(&config);
     }
     let upstream = match upstream_playlist(state, &channel_url, gid, cid).await {
@@ -1190,18 +1198,21 @@ async fn segment(state: &Arc<AppState>, gid: &str, cid: &str, name: &str) -> Res
         return placeholder(&config);
     }
     let expected = proxy::prefix(&group.id, cid);
-    let Some((suffix, ext)) = proxy::parse_segment(name) else {
-        return placeholder(&config);
+    let Some(segment) = proxy::parse_segment(name) else {
+        // 文件名不合文法 → 302 error_url（目标实测：错 <P>/<S>、多点、多下划线同此）。
+        return redirect_asset(&config, &config.server.error_url);
     };
-    if !proxy::prefix_matches(&expected, name) {
-        // 前缀错值 → 302 占位（S-DIS-17）。
-        return placeholder(&config);
+    if segment.prefix != expected {
+        // 前缀错值 → 302 error_url（S-DIS-17）。
+        return redirect_asset(&config, &config.server.error_url);
     }
+    let (suffix, ext) = (segment.suffix, segment.ext);
     let Some(entry) = state.segments.get(&state.cache_dir, gid, cid, &suffix) else {
-        return (StatusCode::NOT_FOUND, "Segment not found").into_response();
+        // 目标是 302 error_url，不是 404（2026-10-25 实测：形状合法但未登记的 <S>）。
+        return redirect_asset(&config, &config.server.error_url);
     };
 
-    let path = proxy::segment_path(&state.cache_dir, gid, cid, &suffix, &ext);
+    let path = proxy::segment_path(&state.cache_dir, gid, cid, &suffix);
     if let Ok(bytes) = std::fs::read(&path) {
         state.stats.record_segment(true);
         state.estimate.observe_segment(gid, bytes.len() as u64);
@@ -1253,7 +1264,7 @@ async fn stream_segment(
             return empty_segment_response(&config, &ext, &cache_control);
         }
     };
-    let mime = mime_guess::from_ext(&ext).first_or_octet_stream();
+    let mime = proxy::segment_content_type(&ext);
     // 被动实测：上游声明长度时立刻采样（早于流结束）；缺失时在流结束时按实收字节补报。
     let declared = response.content_length();
     if let Some(len) = declared {
@@ -1300,9 +1311,9 @@ async fn stream_segment(
     });
     let body = Body::from_stream(futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx)));
     let mut response = Response::new(body);
-    if let Ok(value) = HeaderValue::from_str(mime.as_ref()) {
-        response.headers_mut().insert(header::CONTENT_TYPE, value);
-    }
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
     insert_header(&mut response, header::CACHE_CONTROL, &cache_control);
     response
 }
@@ -1314,10 +1325,21 @@ fn resolve(config: &Config, gid: &str, cid: &str) -> Option<(Group, String)> {
     Some((group.clone(), channel.url.clone()))
 }
 
-/// 拆入口文件名：`c1.m3u8` → `("c1", "m3u8")`。
+/// 拆入口文件名。
+///
+/// 目标实测（2026-10-25，容器 `rea82v09`）：`/{gid}/<cid>` 后接的扩展名是
+/// **白名单** `.m3u8` / `.mpd` / `.txt`，另外**整段扩展名可以不写**；其余
+/// （`.ts`、`.mp4`、`.m3u`、`.`、大写 `.M3U8`、`.m3u8.txt`）一律 `302 not_found_url`。
+/// 三种后缀给出的清单正文完全相同——即扩展名只做形状门槛，不改变行为。
 fn split_entry(file: &str) -> Option<(String, String)> {
-    let (cid, ext) = file.rsplit_once('.')?;
-    if cid.is_empty() || !matches!(ext, "m3u8" | "mpd") {
+    let (cid, ext) = match file.split_once('.') {
+        // 有点但扩展名为空（`c1.`）：目标拒绝。
+        Some((_, "")) => return None,
+        Some((cid, ext)) if !ext.contains('.') => (cid, ext),
+        Some(_) => return None,
+        None => (file, "m3u8"),
+    };
+    if cid.is_empty() || !matches!(ext, "m3u8" | "mpd" | "txt") {
         return None;
     }
     Some((cid.to_string(), ext.to_string()))
@@ -1381,7 +1403,7 @@ fn redirect(url: &str) -> Response {
     }
 }
 
-/// 切片响应：按伪装扩展名给类型；忽略 `Range`，总是返回全量（S-DIS-07）。
+/// 切片响应：按伪装扩展名给类型（S-DIS-13 的 5 项白名单）；忽略 `Range`，总是返回全量（S-DIS-07）。
 fn segment_response(bytes: Vec<u8>, ext: &str, cache_control: &str) -> Response {
     segment_response_with_status(StatusCode::OK, bytes, ext, cache_control)
 }
@@ -1393,12 +1415,12 @@ fn segment_response_with_status(
     ext: &str,
     cache_control: &str,
 ) -> Response {
-    let mime = mime_guess::from_ext(ext).first_or_octet_stream();
     let mut response = Response::new(Body::from(bytes));
     *response.status_mut() = status;
-    if let Ok(value) = HeaderValue::from_str(mime.as_ref()) {
-        response.headers_mut().insert(header::CONTENT_TYPE, value);
-    }
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(proxy::segment_content_type(ext)),
+    );
     insert_header(&mut response, header::CACHE_CONTROL, cache_control);
     response
 }

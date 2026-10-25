@@ -55,7 +55,7 @@
 | GET | `/{gid}/{cid}/video/index.txt` | 无 | `200` `text/plain` 媒体清单（仅主清单上游）；否则 `302 error_url` | M2 | F-004、F-018 |
 | GET | `/{gid}/{cid}/<P>_<S>.<ext>` | 无 | `200` 切片 | M2 | S-DIS-04 |
 | GET | `/{gid}/{cid}/timeshift/{filename}` | 按 token 开关 | `200` 本地回看 | P1 | F-014 |
-| GET | `/{gid}/{cid}/dash-timeshift/{track}/{...}` | 按 token 开关 | `200` DASH 回看 | P2 | S-EP-16 |
+| GET | `/{gid}/{cid}/dash-timeshift/{track}/{...}` | 按 token 开关 | **未实现**（❌ 见 `07` §3.B4）；当前落到通配路由 → `dash` 模式 `404 Segment not found`、其它模式 `302` | ❌ | S-EP-16、S-TS-01 |
 | GET | `/epg` | 无 | `200` `text/html`；EPG 关 → `404` | ✅ P1 | S-EP-05 |
 | GET | `/epg.xml`、`/epg.xml.gz` | 无 | `200` `application/xml` / `application/gzip`；EPG 关 → `404` | ✅ P1 | S-EP-05 |
 | GET | `/epg/api/{channels,programmes/:channel,search}` | 无 | `200` JSON | P1 | S-EP-16 |
@@ -112,16 +112,18 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 | --- | --- | --- |
 | 清单缓存窗口 | **VOD**：`max-age` = `#EXT-X-TARGETDURATION`（缺失按 6 秒）；**直播**：`no-cache, no-store` | F-018、F-019 |
 | 切片地址 | 绝对地址（`http://<Host>/…`），不是根相对路径 | F-018 |
-| 扩展名 | `format=hls` → `.m3u8`；`format=mpd` → `.mpd` | S-URL-01 |
-| `<S>` | `sha256(上游切片绝对 URL)` 前 32 hex | S-DIS-04 |
-| `<P>` | 16 hex，仅依赖 `(gid,cid)`；错值 → `302` | S-DIS-17、F-017 |
+| 扩展名 | 入口后缀白名单 `.m3u8` / `.mpd` / `.txt`，**或不带后缀**；三者正文相同。`format` 只决定订阅里下发哪个后缀 | S-URL-01、F-017 §5.2 |
+| `<S>` | `sha256(上游切片绝对 URL)` 前 32 hex，小写 | S-DIS-04 |
+| `<P>` | 16 hex，仅依赖 `(gid,cid)`，小写；错/缺/截短/大写 → `302 error_url` | S-DIS-17、F-017 |
+| 切片文件名 | `<P>_<S>[.<ext>]`：扩展名整段可省，但最多一个 `.`；只允许恰好一个 `_` | S-DIS-12、F-017 §5.2 |
 | 扩展名轮换 | 上游扩展名已在 `[cache.disguise].formats` 中时保留；否则按频道序列轮换 | S-DIS-04、F-019 |
 | 上游超时 | 单个上游请求总超时 **25 秒**；正文中断后保持 `200` 并发送已收字节 | F-019 |
-| 切片类型 | 按伪装后缀给 `Content-Type` | S-DIS-13 |
+| 切片类型 | 白名单 `jpg/jpeg`→`image/jpeg`、`png`/`gif`/`bmp`/`webp` 各自对应；**其余一律 `video/mp2t`**（含空后缀） | S-DIS-13、F-017 §5.2 |
 | 载荷 | 不改字节 | S-DIS-02 |
 | Token | 入口按开关校验；**切片与子路径不校验** | F-007、F-018 |
 | 未知分组/频道（入口形状） | 无/错 Token → `token_failure_url`；Token 合法 → `not_found_url` | F-018 |
 | 未知路径（其它形状） | `302 not_found_url`，不看 Token | F-018 |
+| 切片段占位分流 | `<P>`/`<S>` 取值或形状不对、形状合法但未登记 → `302 error_url`；非 `proxy` 模式的任意子路径 → `302 not_found_url` | S-DIS-15、F-017 §5.2 |
 | 归档组 | 入口 `302 not_found_url`（先于 Token 判定）；订阅 `404` | F-009、F-018 |
 | `Range` | 忽略 | S-DIS-07 |
 | 回看 `playseek` | 只把 `playseek` 原样追加到上游 URL；`start`/`end`/`utc`/`utcend` 丢弃 | S-EP-04 |
@@ -133,12 +135,12 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 
 | 项 | 取值 | 说明 |
 | --- | --- | --- |
-| `<P>` 算法 | `sha256("<gid>:<cid>")` 前 16 位十六进制 | 目标算法未解（F-017）；校验失败仍按契约 302 |
-| 扩展名轮换起点 | `sha256("<gid>:<cid>")` 首字节 + 切片序号 | 目标轮换算法未解；只保证取自配置列表 |
+| `<P>` 算法 | `sha256("rea-iptv/segment-v1\0" ‖ len(gid) ‖ gid ‖ len(cid) ‖ cid)` 前 16 位十六进制 | 目标算法未解（F-017）；长度前缀避免 `("a:b","c")` 与 `("a","b:c")` 撞车；校验失败仍按契约 302 |
+| 扩展名轮换起点 | 同一份频道摘要的首字节 + 切片序号 | 目标轮换算法未解；只保证取自配置列表 |
 | 入口 Host | 取请求 `Host` 头；有 `X-Forwarded-Proto` 时用其 scheme | 用于拼切片绝对地址 |
 | 上游清单复用 | 进程内 TTL 5 秒 | 防突发请求打穿上游 |
-| 切片索引 | `cache/seg_url/<sha256(gid/cid)[..16]>.json`（`S` → 上游 URL + 扩展名） | 内部实现 |
-| 切片正文 | `cache/seg_bytes/<gid>_<cid>_<S>.<ext>` | 同上 |
+| 切片索引 | `cache/seg_url/<P>.json`（`S` → 上游 URL + 扩展名） | 内部实现；文件名用 `<P>` 保证 `(gid,cid)` 不共用 |
+| 切片正文 | `cache/seg_bytes/<gid>_<cid>_<S>.<ext>` | 与扩展名无关地复用：先按 `<S>` 查索引 |
 | 伪装关闭 | 媒体清单直接给上游绝对地址，不建索引 | 目标行为未采证 |
 | `#EXT-X-KEY` 等 | `URI="…"` 绝对化，不改名 | S-DIS-02（不改载荷） |
 | 主清单属性 | 只保留 `BANDWIDTH`、`CODECS`、`RESOLUTION`、`FRAME-RATE` | F-019 |
@@ -681,7 +683,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 差异 | 处理 | 依据 |
 | --- | --- | --- |
-| `<P>` 生成算法未解 | 自研 `sha256("{gid}:{cid}")[:16]` + 校验；客户端从清单取值 | F-017 |
+| `<P>` 生成算法未解 | 自研 `sha256("rea-iptv/segment-v1\0"‖len‖gid‖len‖cid)[:16]` + 严格校验；客户端从清单取值 | F-017 §5.2 |
 | `rewrite` + MPD 正文损坏 | 不复刻该缺陷 | D-005 |
 | `/epg/api/*` 仅 v0.8.8 | P0 不实现 | S-GAP-02 |
 | 缓存上限未生效（目标缺陷） | P0 不实现上限 | F-015 |

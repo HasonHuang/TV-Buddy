@@ -150,38 +150,69 @@ check "变体清单 302" "302" "$(status "$B/p1/c1/video/index.txt")"
 check "变体清单跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B/p1/c1/video/index.txt")"
 check "切片后缀 = sha256 前 32 位" \
   "$(python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:32])' "http://127.0.0.1:$UP/seg1.ts")" "$S"
-check "切片前缀 = sha256(gid:cid) 前 16 位" \
-  "$(python3 -c 'import hashlib;print(hashlib.sha256(b"p1:c1").hexdigest()[:16])')" "$P"
+# `<P>` 的算法目标未解（F-017），这里只断言目标可观测的性质：16 hex、纯函数、随频道变化。
+check "切片前缀为 16 hex" "1" "$(printf '%s' "$P" | grep -cE '^[0-9a-f]{16}$')"
+P_OPEN=$(curl -s "$B/op/c8.m3u8" | grep -oE '/op/c8/[0-9a-f]{16}_' | head -n1)
+P_OPEN=${P_OPEN:7:16}
+check "前缀随频道不同" "1" "$([ -n "$P_OPEN" ] && [ "$P_OPEN" != "$P" ] && echo 1 || echo 0)"
+check "前缀与 gid/cid 分隔符无关" "1" \
+  "$(P2=$(curl -s "$B/p1/c1.m3u8" | grep -oE '/p1/c1/[0-9a-f]{16}_' | head -n1); [ "${P2:7:16}" = "$P" ] && echo 1 || echo 0)"
 
 # --- 切片 ---
+# 首个切片的扩展名由频道摘要决定（轮换起点），所以类型按扩展名推导，不写死。
+FIRST_EXT=${FIRST_URL##*.}
+case "$FIRST_EXT" in
+  jpg|jpeg) FIRST_CT=image/jpeg ;;
+  png) FIRST_CT=image/png ;;
+  *) FIRST_CT=video/mp2t ;;
+esac
 # 首次请求同时取状态、头与正文，用来断言「首写」缓存头。
 CODE=$(curl -s -o "$WORK/seg1" -D "$WORK/seg1.h" -w '%{http_code}' "$B$FIRST")
 check "切片 200" "200" "$CODE"
 check "切片首写缓存头" "public, max-age=300" "$(hfile "$WORK/seg1.h" cache-control)"
-check "切片内容类型" "image/jpeg" "$(hfile "$WORK/seg1.h" content-type)"
+check "切片内容类型" "$FIRST_CT" "$(hfile "$WORK/seg1.h" content-type)"
 check "切片字节一致" "1" \
   "$(cmp -s "$WORK/seg1" "$WORK/up/seg1.ts" && echo 1 || echo 0)"
 check "切片命中缓存头" "private, max-age=300" "$(header "$B$FIRST" cache-control)"
 check "切片落盘" "1" "$(find "$CACHE/seg_bytes" -type f | grep -c . || true)"
-check "命中不改类型" "image/jpeg" "$(header "$B$FIRST" content-type)"
+check "命中不改类型" "$FIRST_CT" "$(header "$B$FIRST" content-type)"
 check "Range 被忽略" "200" \
   "$(curl -s -o "$WORK/range" -w '%{http_code}' -H 'Range: bytes=0-9' "$B$FIRST")"
 check "Range 返回全量" "1" \
   "$(cmp -s "$WORK/range" "$WORK/up/seg1.ts" && echo 1 || echo 0)"
 
 # --- 占位与错误 ---
+# 目标 v0.8.2 实测（2026-10-25，容器 rea82v09）：
+#   未知 gid/cid、归档组           → 302 not_found_url（404.mp4）
+#   <P>/<S> 形状或取值不对、未登记 → 302 error_url（mistake.mp4）
+# 即两种占位要分开断言，不能都当 not_found_url。
 BAD="/p1/c1/0000000000000000_${S}.jpg"
 check "错前缀 302" "302" "$(status "$B$BAD")"
-check "错前缀跳占位" "http://placeholder.test/404.mp4" "$(location "$B$BAD")"
+check "错前缀跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B$BAD")"
+check "缺前缀 302" "302" "$(status "$B/p1/c1/${S}.jpg")"
+check "缺前缀跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B/p1/c1/${S}.jpg")"
+check "截短前缀 302" "302" "$(status "$B/p1/c1/ea86_${S}.jpg")"
+check "大写前缀 302" "302" \
+  "$(status "$B/p1/c1/$(printf '%s' "$P" | tr 'a-f' 'A-F')_${S}.jpg")"
+check "错后缀 302" "302" "$(status "$B/p1/c1/${P}_00000000000000000000000000000000.jpg")"
+check "扩展名两点 302" "302" "$(status "$B/p1/c1/${P}_${S}.a.b")"
+check "双下划线 302" "302" "$(status "$B/p1/c1/${P}__${S}.jpg")"
+check "扩展名不校验" "200" "$(status "$B/p1/c1/${P}_${S}.png")"
+check "p1/c1 错后缀跳错误页" "http://placeholder.test/mistake.mp4" \
+  "$(location "$B/p1/c1/${P}_00000000000000000000000000000000.jpg")"
 check "未知频道 302" "302" "$(status "$B/p1/ghost.m3u8")"
 check "未知频道跳占位" "http://placeholder.test/404.mp4" "$(location "$B/p1/ghost.m3u8")"
 check "未知分组 302" "302" "$(status "$B/ghost/c1.m3u8")"
 check "归档组 302" "302" "$(status "$B/arc/c9.m3u8")"
 check "归档组跳占位" "http://placeholder.test/404.mp4" "$(location "$B/arc/c9.m3u8")"
 UNKNOWN="/p1/c1/${P}_$(python3 -c 'print("a"*32)').jpg"
-check "未知切片 404" "404" "$(status "$B$UNKNOWN")"
-check "未知切片错误串" "Segment not found" "$(cat "$WORK/body")"
-check "非法入口名 302" "302" "$(status "$B/p1/c1.txt")"
+check "未知切片 302" "302" "$(status "$B$UNKNOWN")"
+check "未知切片跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B$UNKNOWN")"
+# 入口扩展名白名单（目标实测 2026-10-25）：`.m3u8` / `.mpd` / `.txt` / 无后缀等价，其余 302。
+check "入口 .txt 等价" "200" "$(status "$B/p1/c1.txt")"
+check "入口无后缀等价" "200" "$(status "$B/p1/c1")"
+check "非法入口名 302" "302" "$(status "$B/p1/c1.mp4")"
+check "非法入口名跳占位" "http://placeholder.test/404.mp4" "$(location "$B/p1/c1.mp4")"
 
 # --- 主清单上游：自造单变体主清单 ---
 CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/p1/m1.m3u8")

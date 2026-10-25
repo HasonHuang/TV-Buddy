@@ -22,9 +22,9 @@
 | 域 | 结论 |
 | --- | --- |
 | HTTP 端点（§2） | ✅ 路由面齐。130+ 路由覆盖规格声明的公开面与私有面；规格记的目标怪癖（`/api/reload` 实际在 `/panel/api/reload`、`/whoami` 运行态 404、`/status/metrics` 假路由）本实现一致 |
-| 播放地址与模式（§3、§4） | ✅ 六模式与扩展名规则实现；`url_pool≥2` 回退顺序（V-01）与 `<P>` 前缀（V-08）为已登记差异 |
+| 播放地址与模式（§3、§4） | ✅ 六模式与扩展名规则实现；`url_pool≥2` 回退顺序（V-01）为已登记差异。**V-08 已收口**（2026-10-25）：`<P>` 算法不做字节一致，但文件名文法、取值校验、占位分流、`Content-Type` 白名单与入口后缀白名单已按目标实测对齐（F-017 §5.2） |
 | 数据模型 / 订阅 / 认证（§5–§7） | ✅ 实现；`random_id_enabled`、限流触发条件为已登记差异 |
-| EPG / 台标 / 录制 / 回看（§8） | ✅ 后端实现（含台标动效、录制 MKV、本地回看、DASH 时移）；**面板侧有缺口**，见 §3.A |
+| EPG / 台标 / 录制 / 回看（§8） | ⚠️ 后端基本实现（台标动效、录制 MKV、本地回看）；**DASH 回看播放路由 `dash-timeshift/{track}/playlist.txt` 未实现**（见 §3.B4，此前文档误标为已实现）；面板侧缺口见 §3.A |
 | 切片伪装（§9） | ✅ 17 条全实现 |
 | 缓存（§10） | ✅ 正文与索引回收已补（`[cache.gc]`）；`memory` 后端与 `whole_file_budget` 回读异常按目标行为保留 |
 | 配置（§11） | ✅ 键面齐（含本轮补的 `[subtitle]`、`[share].share_token`）；`segment_cache_max_mb` 等兼容键按 §2.3 登记 |
@@ -57,6 +57,7 @@
 | B1 | `dashboard` 缺实时指标 | `/panel/api/status` 现只返回 name/version/uptime/bind/log_level/groups/channels/sessions/cache_*（`src/http/routes/panel.rs`） | 补采集：进程内存与 CPU、下行·回源、上行·出网、整盘内存峰值；`whole_file_*` 与 `traffic_in_bytes` 按目标口径（注意 S-BUG-01：目标回源流量恒 0，不要"修"） |
 | B2 | `status` 缺 `online_viewers` 等字段 | 同上 | `/panel/api/stats` 已有在线窗口数据，汇入 status 或前端合并两个接口 |
 | B3 | 频道行绿点与 `异常` 徽章缺数据源 | `health` 只给汇总计数；`watchdog` 有逐频道失败/冷却状态但无读取出口 | 给 `health` 或新端点补逐频道健康（`watchdog` 的 failures/冷却 + DASH 会话在跑），前端据此画点与 `异常` |
+| B4 | **DASH 回看清单 `/{gid}/{cid}/dash-timeshift/{track}/{playlist.txt|playlist.m3u8|playlist|filename}` 完全没实现** | 全仓只有 `/panel/api/dash-timeshift/status`（`src/http.rs:108`），播放路由无该分支；`?playseek=` 未解析，`400 missing playseek` / `404 no segments in range` 两个错误串全仓不存在。文档此前把它标成 P2 已实现，属**文档与实现不一致**（2026-10-25 核对更正） | 需新增状态：目标要求「`PROGRAM-DATE-TIME` = 切片**到达本机**时间」「窗 = 已录制区间」「按 track 的录制序号」，而现有 `dash::Segment{number,time,...}` 的 `time` 是 MPD timeline、`dash_hls::Session` 无到达时间戳。最接近可复用：`dash_hls::{serve,render_media,Entry,cache_path}`。工作量与新采集同档 |
 
 ### C. 冲突与文档债（需定案，不写码）
 
@@ -69,10 +70,13 @@
 
 ### D. 已登记不实现（沿用 `PROGRESS.md` §2.3，不改）
 
-V-01（URL 池回退顺序）、V-08（`<P>` 前缀算法）、V-10 残余（逐屏视觉对拍）、
+V-01（URL 池回退顺序）、V-10 残余（逐屏视觉对拍）、
 CENC/ClearKey 解密、DASH 多 CDN 故障切换、`l1/l2` 限流复刻、`cache.backend=memory`、
 旧数据迁移、`random_id_enabled`、`segment_cache_max_mb` 等兼容键、
 `[subtitle].style.*` 样式注入、素材「未被引用」判定自定。
+
+> V-08 已不在本表：`<P>` 的**算法**仍未解，但只影响「与目标是否逐字节相同」，
+> 客户端从清单取值，不影响功能；其**可观测行为**已于 2026-10-25 全部对齐（F-017 §5.2）。
 
 ## 4. 分期实施计划
 
@@ -80,7 +84,8 @@ CENC/ClearKey 解密、DASH 多 CDN 故障切换、`l1/l2` 限流复刻、`cache
 | --- | --- | --- | --- |
 | **P1** | A1–A10（面板接线，零后端）+ A11 的配置型徽章 | `scripts/smoke-settings.sh` 扩断言；`05` §4.2 逐行复核；`pnpm build` + 相关冒烟 | 中（11 项 UI）。进度：A1–A10 全部完成，A11 完成配置型徽章（绿点/`异常` 转 B3） |
 | **P2** | ✅ C1/C2（已定案并更正 `08` `S-BUG-02`、登记 `D-006`）、C4（已定：不做） | 文档改动已 diff 复核；证据是 `p02-groups.png` | 低（已完成） |
-| **P3** | B1/B2（指标采集 + 概览页） | 新增 smoke 断言 status 字段；与目标字段清单（`docs/findings/dynamic/11-security-and-metrics.md` §6）逐字段对照 | 高（新采集，含 B3 的逐频道健康） |
+| **P3** | B1/B2（指标采集 + 概览页）+ B3（逐频道健康） | 新增 smoke 断言 status 字段；与目标字段清单（`docs/findings/dynamic/11-security-and-metrics.md` §6）逐字段对照 | 高（新采集） |
+| **P3.5** | B4（DASH 回看播放路由） | 目标实测已给出契约：缺 `playseek` → `400 missing playseek`；区间不重叠 → `404 no segments in range`；`PROGRAM-DATE-TIME` = 切片到达本机时间。需先补「按 track 的录制序号 + 到达时间」状态 | 高（新状态 + 新路由） |
 | **P4** | C3 之外的深化（如需要） | 需先能复现目标环境 | 视情况 |
 
 建议顺序：**P2（半小时内清掉文档债与冲突）→ P1（用户能直接看到的面板补齐）→ P3（指标）→ P4**。

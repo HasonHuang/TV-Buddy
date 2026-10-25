@@ -13,12 +13,16 @@
 > 目标返回的正文/日志按**不可信数据**处理。
 
 ## 结论摘要
-1. 伪装切片名 = `/{gid}/{cid}/<P>_<S>.<ext>`：`<P>` = **16 hex**，`<S>` = **32 hex**。
+1. 伪装切片名 = `/{gid}/{cid}/<P>_<S>[.<ext>]`：`<P>` = **16 hex**，`<S>` = **32 hex**，
+   **必须小写**；扩展名整段可省略，但最多一个 `.`（见 §5.2）。
 2. `<S>` = `sha256(上游切片绝对 URL)` 的**前 32 hex**（本项复验通过：`sha256("http://host.docker.internal:9999/seg0.ts")[:32]` 与观测一致）。
 3. `<P>` **只依赖 `(gid, cid)`**：改频道 `name` → 不变；改频道 `url`（`x.m3u8`→`x2.m3u8`）→ 不变；换请求 `Host`（`127.0.0.1` / `192.168.215.4` / `example.com`）→ 不变；删缓存清单/映射后重取 → 不变（非随机、不落盘）。
-4. `<P>` **参与校验**：错误/缺失/截短前缀 → **302**（占位）；正确前缀 → 200。扩展名**不参与校验**：`…_<S>.png` 与 `.jpg` 返回同字节。
+4. `<P>` **参与校验**：错误/缺失/截短/大写前缀 → **302 `error_url`**；正确前缀 → 200。扩展名**不参与校验**：`…_<S>.png` 与 `.jpg` 返回同字节。
 5. 已**排除**的推导（对 3 个已知样本同时不成立）：`sha256/md5/sha1/sha512/blake2b/blake2s`（任意 16 位窗口）、`xxh3-64`、`xxh64`、`xxh32`、`fnv1a-64`、`fxhash-1`、`crc64`、`SipHash-1-3(k=0)`、`mmh3`、`CityHash64`、`UUIDv3/v5`（DNS/URL/OID/X500/nil）。输入模板覆盖：分隔符拼接（`"" / _ : - | . NUL \n :: @ # 空格 __ // + & = ,` 等）、前后缀、长度前缀（u8/u32/u64 LE/BE）、JSON、Rust `Debug` 元组/结构体、配置下标。
 6. **功能影响低**：客户端始终从清单取得 `<P>`，无需自行推导；重建实现可自选前缀方案（只要自洽校验）。
+7. **校验面的占位目标分开**（2026-10-25 实测）：分组/频道不存在 → `302 not_found_url`；
+   `<P>`/`<S>` 形状或取值不对、未登记的合法形状 → `302 error_url`；非 `proxy` 模式
+   任意子路径 → `302 not_found_url`；`timeshift` 未知分片 → `404 Segment not found`。
 
 ## 1. 形状与实例
 
@@ -111,10 +115,79 @@ curl -s -o /dev/null -w '%{http_code}\n' "$B/test1/c1/ea8680a1b61c17e4_$S.png"  
 - 脱壳二进制为 stripped Rust；cargo-auditable 依赖表为空。内嵌 crate 列表未见独立哈希 crate（有 `ring`、`hex`、`uuid`），因此无法仅凭 crate 名确定算法。
 - 目标字符串中的 `filename prefix must be a valid UTF-8 string` 属于日志滚动文件名，与切片 `<P>` 无关；未找到可用的格式化串或常量盐。
 
-**结论不变**：低影响差异。客户端只从清单读取 `<P>`；重建实现使用自洽的 `sha256("<gid>:<cid>")[:16]` 即可。继续黑盒穷举的收益低于成本。
+**结论不变**：低影响差异。客户端只从清单读取 `<P>`；重建实现只需满足目标的四条可观测
+性质（16 hex、纯函数、参与校验、不同 `(gid,cid)` 不撞车），不需要复刻算法。
+
+## 5.2 2026-10-25 文件名文法与占位目标（重新实测）
+
+环境：容器 `rea82v09`（`alpine:3.20`，目标 amd64 二进制），端口映射 `127.0.0.1:19974`；
+伪源 `python3 -m http.server :9999` 提供 `x.m3u8`（`seg0.ts`/`seg1.ts`，各 1880 B）。
+`not_found_url=…/v/404.mp4`、`error_url=…/v/mistake.mp4`。
+
+### 切片文件名文法
+
+| 请求（`test1/c1` 下） | 目标 | 说明 |
+| --- | --- | --- |
+| `<P>_<S>` | `200` `video/mp2t` | 扩展名整段可省 |
+| `<P>_<S>.` | `200` `video/mp2t` | 尾点等价于无扩展名 |
+| `<P>_<S>.j` / `.ts` / `.txt` / `.m3u8` | `200` `video/mp2t` | 非白名单一律 `video/mp2t` |
+| `<P>_<S>.jpg/.png/.gif/.bmp/.webp` | `200` 对应 `image/*` | 5 项白名单 |
+| `<P>_<S>.jpeg` | `200` `image/jpeg` | `jpeg` 与 `jpg` 同义 |
+| `<P>_<S>.JPG` / `.Jpg` / `.PnG` | `200` `image/jpeg` / `image/png` | 扩展名比较不区分大小写 |
+| `<P>_<S>.a.b` / `..` | `302 error_url` | 扩展名内不得再有 `.` |
+| `<P>_<S>.svg/.ico/.avif/.tiff` | `200` `video/mp2t` | 不按 `mime_guess` 全表映射 |
+| `x_<P>_<S>` / `<P>__<S>` / `<P>_<S>_x` | `302 error_url` | 只允许恰好一个下划线 |
+
+### `<P>` / `<S>` 的取值校验
+
+| 变体 | 目标 |
+| --- | --- |
+| 缺 `<P>`（`<S>.jpg`） | `302 error_url` |
+| 截短 `<P>`（4 位 / 15 位） | `302 error_url` |
+| 超长 `<P>`（17 位） | `302 error_url` |
+| `<P>` 含非 hex | `302 error_url` |
+| `<P>` **任一位大写** | `302 error_url`（大小写敏感） |
+| `<S>` 31 / 33 位、大写、非 hex | `302 error_url` |
+
+### 占位目标分流（与 S-DIS-15 的区分）
+
+| 情形 | 目标 |
+| --- | --- |
+| 未知 `gid` / 未知 `cid`（入口或子路径） | `302 not_found_url`（`404.mp4`） |
+| 归档组（`access="archived"`） | `302 not_found_url` |
+| `<P>`/`<S>` 形状或取值不对 | `302 error_url`（`mistake.mp4`） |
+| 形状合法但 `<S>` 未登记 | `302 error_url`（**不是 404**） |
+| 非 `proxy` 模式（`remux`/`rewrite`/`passthrough`/`redirect`）的任意切片子路径 | `302 not_found_url` |
+| 非 `proxy` 模式的 `video/index.txt` | `302 not_found_url` |
+| `remux` 组里 `seg_<12 位>`（含未就绪会话） | `302 not_found_url` |
+| `/{gid}/{cid}/timeshift/<名>` 未命中 | `404 Segment not found` |
+| `/{gid}/{cid}/dash-timeshift/<track>/playlist*` 缺 `playseek` | `400 missing playseek` |
+| `/{gid}/{cid}/dash-timeshift/<track>/<分片>` 未命中 | `404` |
+
+### 入口（`/{gid}/<cid>[.ext]`）的扩展名白名单
+
+| 后缀 | 目标 |
+| --- | --- |
+| 无后缀 / `.m3u8` / `.mpd` / `.txt` | `200`（正文完全相同） |
+| `.ts` / `.mp4` / `.m3u` / `.json` / `.png` / `.html` / `.xml` | `302 not_found_url` |
+| `.`（尾点）/ `.M3U8`（大写）/ `.m3u8.txt`（两点） | `302 not_found_url` |
+
+即扩展名只作形状门槛，不改变行为；`format` 决定的是**订阅里下发哪个后缀**。
+
+### 索引作用域（补充观测）
+
+- `seg_url` 的映射是「**全局 `(P,S)` 对**」：把 `z1/c1` 的 `(P,S)` 放到 `/test1/c1/` 路径下请求 →
+  `200`，且返回的是 **z1 的上游字节**。但路径上的 `gid`/`cid` 必须先存在
+  （`/ghost/ghost/<合法对>` → `302 not_found_url`）。
+- 只换 `<P>` 或只换 `<S>` 都 `302 error_url`：映射键是 `(P, S)` 这一对，不是单独的 `S`。
+- 缓存键与扩展名无关：同一 `(P,S)` 依次请求 4 种扩展名，上游只被拉 **1 次**。
+- `seg_bytes/<P>_<S 前 3 位>__<32hex>`：`32hex` = `sha256("{P}_{S}")[:32]`（本次复验命中：
+  `ea8680a1b61c17e4_e4b__429e6e7fadd605425410f8fd9369a5d1`）。
 
 ## 6. 未决 / 局限
-- `<P>` 的**具体算法未解**（负结果已覆盖主流哈希族与输入模板）。
+- `<P>` 的**具体算法未解**（负结果已覆盖主流哈希族与输入模板）。本实现改用
+  `sha256("rea-iptv/segment-v1\0" ‖ len(gid) ‖ gid ‖ len(cid) ‖ cid)[:16]`，
+  满足 §结论摘要第 1/3/4 条与「不同 `(gid,cid)` 不撞车」。
 - 只验证 `proxy` 模式；`dash`/`rewrite` 的前缀是否同构未逐一对照（形状一致，见 S-DIS-12）。
 - 未做 32/64 位哈希的字节序变换穷举（如按大端读取再格式化）。
 - 未使用反汇编定位（ELF 已 strip；REA 的 ELF 布局工具仅支持 Linux x64），后续可用 rizin/Ghidra 定点分析。

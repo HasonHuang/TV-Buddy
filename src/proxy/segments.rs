@@ -163,10 +163,13 @@ impl SegmentIndex {
 }
 
 /// 索引文件路径。
+///
+/// 文件名取自 [`super::media::prefix`] 的同一份频道摘要（`<P>`）：`(gid, cid)` 不同则
+/// `<P>` 不同，两个频道不会共用一份索引文件。不用 `"{gid}/{cid}"` 拼键——那样
+/// `("a/b", "c")` 与 `("a", "b/c")` 会落到同一个文件名。
 fn index_path(dir: &Path, gid: &str, cid: &str) -> PathBuf {
-    let digest = Sha256::digest(format!("{gid}/{cid}").as_bytes());
     dir.join("seg_url")
-        .join(format!("{}.json", &hex::encode(digest)[..16]))
+        .join(format!("{}.json", super::media::prefix(gid, cid)))
 }
 
 /// 读索引文件。文件不存在或损坏时返回空表。
@@ -241,14 +244,14 @@ fn now_epoch() -> u64 {
 }
 
 /// 切片正文缓存路径。
-pub fn segment_path(dir: &Path, gid: &str, cid: &str, suffix: &str, ext: &str) -> PathBuf {
-    dir.join("seg_bytes").join(format!(
-        "{}_{}_{}.{}",
-        slug(gid),
-        slug(cid),
-        suffix,
-        slug(ext)
-    ))
+///
+/// **不含扩展名**：目标实测（2026-10-25）同一 `(P, S)` 依次请求 `.jpg`/`.png`/`.ts`/`.bmp`
+/// 时上游只被拉 **1 次**，`seg_bytes/` 里也只有一份文件（`<P>_<S 前 3 位>__<尾部哈希>`，
+/// 同样没有扩展名）。扩展名只影响响应头里的 `Content-Type`（S-DIS-05、S-DIS-13），
+/// 不该生成多份副本——否则伪装后缀一换就要重新回源。
+pub fn segment_path(dir: &Path, gid: &str, cid: &str, suffix: &str) -> PathBuf {
+    dir.join("seg_bytes")
+        .join(format!("{}_{}_{}", slug(gid), slug(cid), suffix))
 }
 
 /// 把标识压成文件名安全的形式。
@@ -377,9 +380,19 @@ mod tests {
             "g/1",
             "c 1",
             "ab".repeat(16).as_str(),
-            "jpg",
         );
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         assert!(!name.contains('/'), "{name}");
+    }
+
+    /// 缓存路径与扩展名无关：伪装后缀换了不该多写一份文件（目标同此行为）。
+    #[test]
+    fn segment_path_ignores_extension() {
+        let first = segment_path(Path::new("/tmp/cache"), "g", "c", "ab".repeat(16).as_str());
+        assert!(!first.to_string_lossy().contains(".jpg"));
+        // 索引文件按 `<P>` 命名，同一 `(gid,cid)` 只有一个文件。
+        let a = index_path(Path::new("/tmp/cache"), "a:b", "c");
+        let b = index_path(Path::new("/tmp/cache"), "a", "b:c");
+        assert_ne!(a, b, "不同 (gid,cid) 不能共用索引文件");
     }
 }

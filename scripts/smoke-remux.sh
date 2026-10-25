@@ -65,6 +65,10 @@ check "含伪装切片" "yes" "$(grep -q '/rx/c1/seg_.*[.][a-z]*' "$WORK/list.m3
 SEG=$(grep -o '/rx/c1/seg_[0-9]*\.[a-z]*' "$WORK/list.m3u8" | head -1)
 check "切片 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$B$SEG")"
 check "切片类型为图片" "1" "$(curl -s -o /dev/null -D - "$B$SEG" | grep -ci '^content-type: image/')"
-check "未知切片 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/rx/c1/seg_999999999999.png")"
+# 非 proxy 模式的切片分支：目标实测（2026-10-25）未知切片名一律 302 not_found_url。
+check "未知切片 302" "302" "$(curl -s -o /dev/null -w '%{http_code}' "$B/rx/c1/seg_999999999999.png")"
+check "未知切片跳占位" "yes" \
+  "$(curl -s -o /dev/null -D - "$B/rx/c1/seg_999999999999.png" | grep -qi '^location:.*404\.mp4' && echo yes || echo no)"
+check "非切片子路径 302" "302" "$(curl -s -o /dev/null -w '%{http_code}' "$B/rx/c1/video/index.txt")"
 
 if [ "$fail" = "0" ]; then echo "Remux 冒烟测试全部通过"; else echo "Remux 冒烟测试有失败项"; exit 1; fi

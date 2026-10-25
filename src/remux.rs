@@ -186,7 +186,12 @@ impl Manager {
         session
     }
 
-    /// 交给请求路径：返回 `Some` 表示已处理。
+    /// 交给请求路径：返回 `Some` 表示已处理；`None` 表示不归 remux 管。
+    ///
+    /// 会话未就绪或切片缺失都返回 `None`，由上层统一给 `302 not_found_url`：
+    /// 目标实测（2026-10-25）remux 组里任何取不到切片的请求（未就绪会话的
+    /// `seg_<12 位>`、合法切片名但文件不在、`badname.png`、伪装切片形状）一律
+    /// `302 not_found_url`，而不是 `404`。
     pub fn serve(&self, gid: &str, cid: &str, name: &str) -> Option<Response> {
         if !Session::owns(name) {
             return None;
@@ -196,13 +201,8 @@ impl Manager {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(&format!("{gid}/{cid}"))
-            .cloned();
-        let Some(session) = session else {
-            return Some((StatusCode::NOT_FOUND, "Segment not found").into_response());
-        };
-        let Some(bytes) = session.segment(name) else {
-            return Some((StatusCode::NOT_FOUND, "Segment not found").into_response());
-        };
+            .cloned()?;
+        let bytes = session.segment(name)?;
         let ext = name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("png");
         let mut response = (StatusCode::OK, Body::from(bytes)).into_response();
         response.headers_mut().insert(
