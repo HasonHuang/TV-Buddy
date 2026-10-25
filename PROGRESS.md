@@ -112,9 +112,17 @@
   - 缺口分四组：A 面板接线（8 项，端点已存在）、B 需新后端（概览实时指标）、
     C 冲突与文档债（分组排序冲突、i18n 决策）、D 已登记不实现。
   - 规划：P2 文档债 → P1 面板接线 → P3 指标 → P4 深化；难验证项各自给了对比方案。
-- **P1 面板接线（进行中）**：设置页新增「DASH 调优」卡片（三组折叠，覆盖 `[cache.dash]` 全部键，
-  组名与说明沿用 `p12` 文案）；概览页新增快速操作（刷新状态 / 清空缓存 / 热重载配置 / 导出全部 M3U）。
-  `smoke-settings.sh` 补 29 条 `cache.dash.*` 路径断言。
+- **P1 面板接线（进行中，A6/A8/A9/A10 已完）**：
+  - 设置页「DASH 调优」卡片（三组折叠，覆盖 `[cache.dash]` 全部键，组名与说明沿用 `p12` 文案）；
+    概览页快速操作（刷新状态 / 清空缓存 / 热重载配置 / 导出全部 M3U）。
+  - 分组管理：分组卡与频道行各加 `▲`/`▼`，机制与目标一致（前端改数组顺序 →
+    `PUT /panel/api/config` 全量保存，**无新端点**；订阅顺序即数组顺序）；工具栏补
+    `M3U 导入` / `JSON 导入` / `JSON 覆盖` / `导出全部`；频道行补配置型徽章
+    （`常驻`=`livestream`、`全轨道`=DASH 且 `selected_tracks` 空、`tvg-id`/`Logo`）。
+  - 新增 `scripts/smoke-groups.sh`（41 条）：排序经 `PUT /config` 往返后订阅顺序随之改变、
+    三种导入语义与错误码、徽章字段可读、前端入口已内嵌。
+  - `smoke-m1.sh` 两条过期断言修正：`[epg].enabled=true` 时首行带 `x-tvg-url`；
+    Token 断言改为只取播放条目行（首行的 `x-tvg-url` 也是 `http://` 开头）。
 - **质量门**：`cargo fmt --check`；285 项测试通过（203 单元 + 82 契约）；
   clippy 0 error（27 条历史 warning，新增文件 0 条）；`pnpm build`；
   冒烟 `smoke-m2`/`smoke-panel`/`smoke-cli`/`smoke-backup`/`smoke-assets`/`smoke-share` 通过。

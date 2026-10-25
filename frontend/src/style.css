@@ -380,6 +380,19 @@ button.danger {
   cursor: pointer;
 }
 
+/* 上移/下移：小一号，且在边界处明显不可点。 */
+.icon-btn.move {
+  font-size: 13px;
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.icon-btn.move:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 /* --- 提示条 --- */
 .toast {
   position: fixed;

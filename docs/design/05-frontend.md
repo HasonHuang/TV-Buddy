@@ -98,7 +98,7 @@
 | 分区 | 目标有的元素 | 本实现现状（证据） |
 | --- | --- | --- |
 | `dashboard` | 实时指标（下行·回源、上行·出网、进程内存、CPU、整盘内存峰值）；快速操作（清空缓存、热重载、刷新状态、导出全部 M3U）；系统信息含 RSS | `/panel/api/status` 只返回 name / version / uptime_secs / bind / log_level / groups / channels / sessions / cache_* / entry_exts / hls / mpd，页面直接渲染这些键值 → **无指标、无快速操作** |
-| `groups` | 分组与频道排序（`▲`/`▼`，组名左侧另有拖拽柄）；工具栏 `JSON 导入`/`JSON 覆盖`/`导出全部`/`多选`；频道行状态点与 `异常`/`常驻`/`全轨道` 徽章 | ❌ **缺**。证据：`reference/img/p02-groups.png`（2026-10-25 复核）；`groups.tsx` 无排序与工具栏相关代码。`08` S-BUG-02 的相反结论已更正（`07` `D-006`）。见 `07` §3.A9–A11 |
+| `groups` | 分组与频道排序（`▲`/`▼`，组名左侧另有拖拽柄）；工具栏 `M3U 导入`/`JSON 导入`/`JSON 覆盖`/`导出全部`/`多选`；频道行状态点与 `异常`/`常驻`/`全轨道` 徽章 | ⚠️ **已做大部分**。排序：分组卡与频道行各有 `▲`/`▼`，写回机制与目标一致（改数组顺序 → `PUT /panel/api/config` 全量保存，无新端点）。工具栏：四个入口已接（`/groups/import/m3u`、`/groups/import`、`/groups/import/force`、`/groups/export`）；`多选` 的目标语义未观测，**不做**。徽章：配置型三枚已做（`常驻`=`livestream`、`全轨道`=DASH 且 `selected_tracks` 空、`tvg-id`/`Logo`）；**绿点与 `异常` 缺数据源**（`/panel/api/health` 无逐频道字段），转 `07` §3.B3。拖拽柄未做（等价功能由上/下移覆盖）。证据：`reference/img/p02-groups.png`（2026-10-25 复核）；`07` `D-006`、§3.A9–A11 |
 | `security` | 白名单、限流 `l1`/`l2`、会话 TTL 与并发、防爆破 | `SecurityPage`（`ops.tsx`）只有播放 Token（含宽限旧值、轮换）与 IP 统计 / 封禁 → **缺四组** |
 | `logs` | 级别过滤 | `LogsPage`（`ops.tsx`）无 level 过滤 → **缺** |
 | `epg` | 翻译设置（`m08` 翻译模型）；采集节奏 | `EpgPanelPage`（`ops.tsx`）有手工映射、额外频道、历史天数 → **缺翻译与节奏** |

@@ -46,9 +46,9 @@
 | A6 ✅ | `settings` 的 DASH 调优卡片 | `05` §4.1；`[cache.dash]` 已建模 | 按 `[cache.dash]` 键自拟三组（播放体验 / 网络性能 / 特殊场景），组名沿用 `p12` 文案 |
 | A7 | `subs` 的「读取分组」待核 | `05` §4.2；`/panel/api/subs/groups` 已在 | 先核 UI 是否有入口，没有就加一个「读取分组」按钮 |
 | A8 ✅ | `dashboard` 的快速操作 | `05` §4.2；`/cache/flush`、`/reload`、M3U 导出端点都在 | 概览页加四个按钮 |
-| A9 | `groups` 缺**分组与频道排序** | `p02-groups.png`：目标有 `▲`/`▼` 与拖拽柄；`groups.tsx` 无排序代码。`08` S-BUG-02 的相反结论已更正（`07` `D-006`） | 前端数组重排 + `PUT /panel/api/config` 全量回写（**无需新端点**），与目标机制一致 |
-| A10 | `groups` 工具栏缺 `JSON 导入`/`JSON 覆盖`/`导出全部` | 同上截图；端点 `/panel/api/groups/{import,import/force,export}` 已在 `src/http.rs` | 工具栏补三个入口；`多选`（批量操作语义未观测）先不做，登记待核 |
-| A11 | 频道行缺状态点与 `异常`/`常驻`/`全轨道` 徽章 | 同上截图（绿点、`异常`、`常驻`、`全轨道`） | 需先确认健康数据出口：`/panel/api/health` 的载荷是否含逐频道字段；没有则属 §3.B 类 |
+| A9 ✅ | `groups` 的**分组与频道排序** | `p02-groups.png`：目标有 `▲`/`▼` 与拖拽柄；`groups.tsx` 无排序代码。`08` S-BUG-02 的相反结论已更正（`07` `D-006`） | 前端数组重排 + `PUT /panel/api/config` 全量回写（**无需新端点**），与目标机制一致 |
+| A10 ✅ | `groups` 工具栏的 `JSON 导入`/`JSON 覆盖`/`导出全部` | 同上截图；端点 `/panel/api/groups/{import,import/force,export}` 已在 `src/http.rs` | 工具栏补三个入口；`多选`（批量操作语义未观测）先不做，登记待核 |
+| A11 ⚠️ | 频道行状态点与 `异常`/`常驻`/`全轨道` 徽章 | 同上截图（绿点、`异常`、`常驻`、`全轨道`） | 已做**配置型**三枚：`常驻`（`livestream`）、`全轨道`（DASH 且 `selected_tracks` 为空）、`tvg-id`/`Logo`。**未做**绿点与 `异常`：需逐频道运行时健康，`/panel/api/health` 无此字段，已转 §3.B3 |
 
 ### B. 面板 UI：需要新后端能力
 
@@ -56,6 +56,7 @@
 | --- | --- | --- | --- |
 | B1 | `dashboard` 缺实时指标 | `/panel/api/status` 现只返回 name/version/uptime/bind/log_level/groups/channels/sessions/cache_*（`src/http/routes/panel.rs`） | 补采集：进程内存与 CPU、下行·回源、上行·出网、整盘内存峰值；`whole_file_*` 与 `traffic_in_bytes` 按目标口径（注意 S-BUG-01：目标回源流量恒 0，不要"修"） |
 | B2 | `status` 缺 `online_viewers` 等字段 | 同上 | `/panel/api/stats` 已有在线窗口数据，汇入 status 或前端合并两个接口 |
+| B3 | 频道行绿点与 `异常` 徽章缺数据源 | `health` 只给汇总计数；`watchdog` 有逐频道失败/冷却状态但无读取出口 | 给 `health` 或新端点补逐频道健康（`watchdog` 的 failures/冷却 + DASH 会话在跑），前端据此画点与 `异常` |
 
 ### C. 冲突与文档债（需定案，不写码）
 
@@ -77,9 +78,9 @@ CENC/ClearKey 解密、DASH 多 CDN 故障切换、`l1/l2` 限流复刻、`cache
 
 | 阶段 | 内容 | 验收方式 | 相对成本 |
 | --- | --- | --- | --- |
-| **P1** | A1–A11（面板接线，零后端） | `scripts/smoke-settings.sh` 扩断言；`05` §4.2 逐行复核；`pnpm build` + 相关冒烟 | 中（11 项 UI）。进度：A6/A8 已完成 |
+| **P1** | A1–A10（面板接线，零后端）+ A11 的配置型徽章 | `scripts/smoke-settings.sh` 扩断言；`05` §4.2 逐行复核；`pnpm build` + 相关冒烟 | 中（11 项 UI）。进度：A6/A8/A9/A10/A11(部分) 已完成 |
 | **P2** | ✅ C1/C2（已定案并更正 `08` `S-BUG-02`、登记 `D-006`）、C4（已定：不做） | 文档改动已 diff 复核；证据是 `p02-groups.png` | 低（已完成） |
-| **P3** | B1/B2（指标采集 + 概览页） | 新增 smoke 断言 status 字段；与目标字段清单（`docs/findings/dynamic/11-security-and-metrics.md` §6）逐字段对照 | 高（新采集） |
+| **P3** | B1/B2（指标采集 + 概览页） | 新增 smoke 断言 status 字段；与目标字段清单（`docs/findings/dynamic/11-security-and-metrics.md` §6）逐字段对照 | 高（新采集，含 B3 的逐频道健康） |
 | **P4** | C3 之外的深化（如需要） | 需先能复现目标环境 | 视情况 |
 
 建议顺序：**P2（半小时内清掉文档债与冲突）→ P1（用户能直接看到的面板补齐）→ P3（指标）→ P4**。

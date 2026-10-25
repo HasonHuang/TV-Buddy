@@ -9,6 +9,10 @@ export type Channel = {
   id: string;
   name: string;
   url: string;
+  /** 本地回看（`常驻` 徽章的来源）。 */
+  livestream?: boolean;
+  /** DASH 轨道选择；空数组 = 全轨道（`全轨道` 徽章的来源）。 */
+  selected_tracks?: string[];
   [key: string]: unknown;
 };
 
@@ -123,6 +127,31 @@ function PrefetchBadge({ raw }: { raw: unknown }) {
   return <Badge tone={form.state === 'off' ? 'warn' : 'muted'}>{label}</Badge>;
 }
 
+/**
+ * 频道行的配置型徽章（`p02-groups.png`）。
+ *
+ * 这三项都只由配置决定，不需要运行时数据：
+ * - `tvg-id` / `Logo`：频道带了 EPG 标识或台标；
+ * - `常驻`：`livestream = true`，服务启动了本地回看缓冲；
+ * - `全轨道`：DASH 频道未选子集轨道（`selected_tracks` 为空）。
+ *
+ * 目标的绿点（可用性）与 `异常`（冷却中）需要运行时数据，
+ * 本实现的 `/panel/api/health` 没有逐频道字段，见 `07-coverage-and-plan.md` §3.B3。
+ */
+function ChannelBadges({ group, channel }: { group: Group; channel: Channel }) {
+  const tvgId = channel.tvg_id ?? channel.tvg_name;
+  const logo = channel.logo ?? channel.tvg_logo;
+  const tracks = channel.selected_tracks ?? [];
+  return (
+    <>
+      {typeof tvgId === 'string' && tvgId !== '' && <Badge tone="muted">tvg-id</Badge>}
+      {typeof logo === 'string' && logo !== '' && <Badge tone="muted">Logo</Badge>}
+      {channel.livestream === true && <Badge tone="info">常驻</Badge>}
+      {group.mode === 'dash' && tracks.length === 0 && <Badge tone="muted">全轨道</Badge>}
+    </>
+  );
+}
+
 export function GroupsPage() {
   const { node, ok, err } = useToast();
   const [groups, setGroups] = useState<Group[]>([]);
@@ -136,6 +165,9 @@ export function GroupsPage() {
   const [removing, setRemoving] = useState<
     { kind: 'group' | 'channel'; gid: string; cid?: string; label: string } | null
   >(null);
+  const [importing, setImporting] = useState<{ kind: 'json' | 'm3u'; force: boolean } | null>(null);
+  const [importText, setImportText] = useState('');
+  const [m3uMode, setM3uMode] = useState<'append' | 'merge' | 'replace'>('append');
 
   const load = useCallback(async () => {
     try {
@@ -218,6 +250,109 @@ export function GroupsPage() {
     else err('复制失败，请手动选取');
   };
 
+  /**
+   * 重排后整份回写（A9）。
+   *
+   * 目标没有单独的排序端点：它在前端改数组顺序后 `PUT /panel/api/config` 全量保存，
+   * 本实现与之一致。播放列表按 `[[groups]]` / `[[groups.channels]]` 的数组顺序输出
+   * （`playlist::render_total`），所以顺序即订阅里的顺序。
+   */
+  const reorder = async (mutate: (groups: Group[]) => boolean) => {
+    try {
+      const config = await api<{ groups?: Group[] } & Record<string, unknown>>('GET', '/config');
+      const groups = config.groups ?? [];
+      if (!mutate(groups)) return;
+      await api('PUT', '/config', { ...config, groups });
+      ok('顺序已保存');
+      await load();
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const moveGroup = (index: number, delta: number) =>
+    reorder((groups) => {
+      const target = index + delta;
+      if (target < 0 || target >= groups.length) return false;
+      const [moved] = groups.splice(index, 1);
+      groups.splice(target, 0, moved);
+      return true;
+    });
+
+  const moveChannel = (gid: string, index: number, delta: number) =>
+    reorder((groups) => {
+      const channels = groups.find((item) => item.id === gid)?.channels;
+      if (!channels) return false;
+      const target = index + delta;
+      if (target < 0 || target >= channels.length) return false;
+      const [moved] = channels.splice(index, 1);
+      channels.splice(target, 0, moved);
+      return true;
+    });
+
+  const submitImport = async () => {
+    if (!importing) return;
+    const { kind, force } = importing;
+    try {
+      if (kind === 'm3u') {
+        const result = await api<{
+          parsed_channels: number;
+          added_groups: number;
+          merged_channels: number;
+          replaced_groups: number;
+          skipped_groups: number;
+        }>('POST', '/groups/import/m3u', { text: importText, mode: m3uMode });
+        ok(
+          `已解析 ${result.parsed_channels} 个频道：新增 ${result.added_groups} 组、合并 ${result.merged_channels} 个频道、替换 ${result.replaced_groups} 组、跳过 ${result.skipped_groups} 组`,
+        );
+      } else {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(importText);
+        } catch {
+          err('JSON 解析失败，请检查格式');
+          return;
+        }
+        if (!Array.isArray(parsed)) {
+          err('JSON 必须是分组数组');
+          return;
+        }
+        const result = await api<{ imported: number; skipped: number }>(
+          'POST',
+          force ? '/groups/import/force' : '/groups/import',
+          parsed,
+        );
+        ok(
+          force
+            ? `已覆盖导入 ${result.imported} 个分组`
+            : `已导入 ${result.imported} 个分组，跳过 ${result.skipped} 个同 ID`,
+        );
+      }
+      setImporting(null);
+      setImportText('');
+      await load();
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  /** 导出全部：把 `GET /groups/export` 的原文下载成 `groups.json`。 */
+  const exportAll = async () => {
+    try {
+      const data = await api<unknown>('GET', '/groups/export');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'groups.json';
+      anchor.click();
+      URL.revokeObjectURL(url);
+      ok('分组已导出');
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const keyword = filter.trim().toLowerCase();
   const visible = keyword
     ? groups.filter((group) => {
@@ -251,6 +386,36 @@ export function GroupsPage() {
               刷新
             </button>
             <button
+              className="ghost"
+              onClick={() => {
+                setImporting({ kind: 'm3u', force: false });
+                setImportText('');
+              }}
+            >
+              M3U 导入
+            </button>
+            <button
+              className="ghost"
+              onClick={() => {
+                setImporting({ kind: 'json', force: false });
+                setImportText('');
+              }}
+            >
+              JSON 导入
+            </button>
+            <button
+              className="ghost"
+              onClick={() => {
+                setImporting({ kind: 'json', force: true });
+                setImportText('');
+              }}
+            >
+              JSON 覆盖
+            </button>
+            <button className="ghost" onClick={() => void exportAll()}>
+              导出全部
+            </button>
+            <button
               onClick={() =>
                 setGroupForm({
                   form: {
@@ -275,10 +440,28 @@ export function GroupsPage() {
       {visible.map((group) => {
         const channels = group.channels ?? [];
         const listUrl = `${location.origin}/${group.id}/playlist.m3u`;
+        // 排序按 `groups` 的绝对下标；搜索过滤时也不会错位。
+        const groupIndex = groups.indexOf(group);
         return (
           <div className="card" key={group.id}>
             <div className="row between">
               <div className="row">
+                <button
+                  className="icon-btn move"
+                  disabled={groupIndex <= 0}
+                  title="上移分组"
+                  onClick={() => void moveGroup(groupIndex, -1)}
+                >
+                  ▲
+                </button>
+                <button
+                  className="icon-btn move"
+                  disabled={groupIndex < 0 || groupIndex >= groups.length - 1}
+                  title="下移分组"
+                  onClick={() => void moveGroup(groupIndex, 1)}
+                >
+                  ▼
+                </button>
                 <strong>{group.name || group.id}</strong>
                 <span className="muted mono">{group.id}</span>
                 <Badge tone="info">{group.mode}</Badge>
@@ -331,12 +514,13 @@ export function GroupsPage() {
                 </tr>
               </thead>
               <tbody>
-                {channels.map((channel) => (
+                {channels.map((channel, channelIndex) => (
                   <tr key={channel.id}>
                     <td>
                       {channel.name || channel.id}
                       <div className="muted mono">{channel.id}</div>
                       <PrefetchBadge raw={channel.prefetch} />
+                      <ChannelBadges group={group} channel={channel} />
                     </td>
                     <td className="mono ellipsis">{channel.url}</td>
                     <td className="mono ellipsis">
@@ -349,6 +533,22 @@ export function GroupsPage() {
                       )}
                     </td>
                     <td className="right nowrap">
+                      <button
+                        className="icon-btn move"
+                        disabled={channelIndex === 0}
+                        title="上移频道"
+                        onClick={() => void moveChannel(group.id, channelIndex, -1)}
+                      >
+                        ▲
+                      </button>
+                      <button
+                        className="icon-btn move"
+                        disabled={channelIndex >= channels.length - 1}
+                        title="下移频道"
+                        onClick={() => void moveChannel(group.id, channelIndex, 1)}
+                      >
+                        ▼
+                      </button>
                       <button
                         className="ghost"
                         onClick={() =>
@@ -533,6 +733,64 @@ export function GroupsPage() {
               setChannelForm({ ...channelForm, form: { ...channelForm.form, prefetch } })
             }
           />
+        </Modal>
+      )}
+
+      {importing && (
+        <Modal
+          title={
+            importing.kind === 'm3u'
+              ? 'M3U 导入'
+              : importing.force
+                ? 'JSON 覆盖导入'
+                : 'JSON 导入'
+          }
+          onClose={() => setImporting(null)}
+          footer={
+            <>
+              <button className="ghost" onClick={() => setImporting(null)}>
+                取消
+              </button>
+              <button disabled={importText.trim() === ''} onClick={() => void submitImport()}>
+                导入
+              </button>
+            </>
+          }
+        >
+          {importing.kind === 'm3u' ? (
+            <div className="field">
+              <label>同名分组处理</label>
+              <select
+                value={m3uMode}
+                onChange={(event) =>
+                  setM3uMode(event.target.value as 'append' | 'merge' | 'replace')
+                }
+              >
+                <option value="append">append —— 同名分组跳过</option>
+                <option value="merge">merge —— 同名分组补频道</option>
+                <option value="replace">replace —— 同名分组整体替换</option>
+              </select>
+            </div>
+          ) : (
+            <p className="muted">
+              {importing.force
+                ? '按分组 ID 覆盖：已存在的分组整体替换，其余追加。'
+                : '按分组 ID 追加：已存在的分组跳过，其余新增。'}
+            </p>
+          )}
+          <div className="field">
+            <label>{importing.kind === 'm3u' ? 'M3U 文本' : '分组 JSON 数组'}</label>
+            <textarea
+              rows={12}
+              placeholder={
+                importing.kind === 'm3u'
+                  ? '#EXTM3U\n#EXTINF:-1 tvg-id="cctv1" group-title="央视",CCTV-1\nhttp://…'
+                  : '[{ "id": "cctv", "name": "央视", "mode": "proxy", "channels": [] }]'
+              }
+              value={importText}
+              onChange={(event) => setImportText(event.target.value)}
+            />
+          </div>
         </Modal>
       )}
 
