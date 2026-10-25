@@ -3,14 +3,13 @@ import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getToken, setToken, UNAUTHORIZED_EVENT } from './api';
 import { GroupsPage } from './groups';
-import { BackupPage, EpgPanelPage, LogsPage, SecurityPage } from './ops';
+import { EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
 import { AssetsPage } from './assets';
-import { LowSpecForms } from './lowcfg';
+import { SettingsPage } from './settings';
 import { LogosPage } from './logo';
 import { PlaylistPage } from './playlist';
 import { LivestreamPage, SchedulePage } from './schedule';
-import { SystemPage } from './system';
 import './style.css';
 
 /** 侧栏分区；顺序按目标面板。 */
@@ -140,63 +139,6 @@ function Overview() {
   );
 }
 
-/** 系统设置：原始配置编辑、运行状态与备份恢复。 */
-function SettingsPage() {
-  const [config, setConfig] = useState('');
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  const load = useCallback(async () => {
-    try {
-      const next = await api<unknown>('GET', '/config');
-      setConfig(JSON.stringify(next, null, 2));
-      setError('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const save = async () => {
-    setMessage('');
-    setError('');
-    try {
-      await api('PUT', '/config', JSON.parse(config) as unknown);
-      setMessage('配置已保存');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  return (
-    <>
-      <LowSpecForms />
-      <div className="card">
-        <div className="row between">
-          <h1>系统设置</h1>
-          <button className="ghost" onClick={() => void load()}>
-            重新读取
-          </button>
-        </div>
-        <h2>配置（config.toml 全量）</h2>
-        <p className="muted">
-          上面的表单覆盖 CDN、磁盘回收与预取；这里编辑其余全部字段，保存同样整份生效。
-        </p>
-        <textarea value={config} onChange={(e) => setConfig(e.target.value)} spellCheck={false} />
-        <div style={{ marginTop: 12 }}>
-          <button onClick={() => void save()}>保存</button>
-        </div>
-        {message && <div className="msg ok">{message}</div>}
-        {error && <div className="msg err">{error}</div>}
-      </div>
-      <SystemPage />
-      <BackupPage />
-    </>
-  );
-}
 
 function Shell({ onLogout }: { onLogout: () => void }) {
   const [section, setSection] = useState<SectionId>('dashboard');

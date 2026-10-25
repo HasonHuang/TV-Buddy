@@ -43,7 +43,7 @@
 | 1 | 概览 | `dashboard` | `/status`、`/stats`、`/cache/stats` | M0 部分 ✅ |
 | 2 | 缓存状态 | `cache` | `/cache/stats`、`/cache/flush` | M2 |
 | 3 | 分组管理 | `groups` | `/groups*`、导出、M3U | **M1** |
-| 4 | 系统设置 | `settings` | `/config`（全量保存） | M0 部分 ✅ |
+| 4 | 系统设置 | `settings` | `/config`（全量保存） | ✅ 字段级表单见 §4.1（字幕/DASH/语言待补） |
 | 5 | 安全管控 | `security` | `/security/*` | P1 |
 | 6 | 频道热度 | `stats` | `/stats` | M3 |
 | 7 | 定时录制 | `schedule` | `/schedule*` | P1 |
@@ -56,6 +56,35 @@
 
 弹窗体系（对齐目标，共 13 类）：分组编辑、频道编辑/新建、M3U 导入、录制任务、EPG 脚本、源频道浏览器、翻译模型、台标动效、批量解封、后台节流详情、台标选择器、确认框。M0 只实现确认框。
 
+### 4.1 系统设置页的字段级表单
+
+基线：`reference/img/p12-settings.png`（目标同一分区的 10 张卡片）。
+一次 `GET /panel/api/config` 取整份配置到草稿，顶部「保存设置」一次 `PUT` 回去
+（对应目标的「修改后点击保存生效」）。
+
+| 卡片 | 配置段 | 字段 | 状态 |
+| --- | --- | --- | --- |
+| 服务器 | `[server]` | `bind`、`timezone_offset_hours`、`catchup_tpl`、`log_level`、`home_url`、`not_found_url`、`error_url`、`m3u_header_lines` | ✅ |
+| 面板认证 | `[panel]` | `username`；新密码（浏览器算 `password_sha256`） | ✅ |
+| 切片伪装 | `[cache.disguise]` | `enabled`、`subtitle`、`playlist`、`master`、`formats` | ✅ |
+| 监控 | `[health]`、`[stats]` | `enabled`、`interval_secs`、`timeout_secs`、`concurrency`；`enabled`、`online_window_secs` | ✅ |
+| 缓存配置 | `[cache]` | `backend`、`disk_path`、`disk_max_mb`、`memory_max_mb`；清空本地缓存 | ✅ |
+| 预载配置 | `[cache.prefetch]` | `enabled`、`concurrency`、`timeout`、`prefetch_limit`、`mpd_readahead`、`skip_tail` | ✅ |
+| 磁盘回收 | `[cache.gc]` | §11.2 的八个键；立即估算 | ✅ |
+| CDN 兜底 | `[cdn]` | §11.1 的键 | ✅ |
+| 切片缓存 | `[cache.segments]` | `global_max`、`per_channel_max`、`retain_count`（本实现扩展） | ✅ |
+| 字幕设置 | `[subtitle]` | 样式、机翻、目标语言、MTranServer | ⏳ |
+| DASH 调优 | `[cache.dash]` | 播放体验 / 网络性能 / 特殊场景三组 | ⏳ |
+| 备份与迁移 | — | 复用 `BackupPage` 卡片 | ✅ |
+| 语言 | — | 界面语言（目标为「跟随浏览器」） | ⏳ 待决策 |
+| 其余字段（JSON） | — | 未做成表单的段 | 兜底 |
+
+- 保存写回**整份配置**，所以「其余字段（JSON）」里的改动也会一起生效。
+- 契约由 `scripts/smoke-settings.sh` 守住：`GET → PUT → GET` 必须逐字节等价（不丢未知键、
+  不改类型），字段路径必须存在，改口令后新口令可登录。
+- 新密码在浏览器里算 SHA-256（`frontend/src/sha256.ts`）。不用 `crypto.subtle`：
+  面板常走 `http://<内网 IP>`，非安全上下文里它不可用。
+
 ## 5. 组件清单
 
 | 组件 | 职责 | 对应参考截图 |
@@ -67,7 +96,8 @@
 | `Modal` | 弹窗壳（遮罩、标题、动作区） | `m01`–`m13` |
 | `Toast` | 操作反馈 | — |
 | `Badge` | 模式、状态、access 徽章 | `p02`、`p04` |
-| `Field` | 表单控件（输入、下拉、开关、多行） | `m01`、`m02` |
+| `Field` | 表单控件（输入、下拉、开关、多选、多行） | `m01`、`m02`、`p12` |
+| `settings.tsx` | 系统设置页：配置草稿 + 顶部单一保存 + 字段卡片（§4.1） | `p12` |
 | `LoginPanel` | 登录卡 | `p00` |
 
 ## 6. 交互约定
@@ -76,7 +106,7 @@
 | --- | --- |
 | 登录 | 成功后 token 存 `localStorage.iptv_token`；失败显示错误文案 |
 | 401 | 清除 token，回到登录卡 |
-| 保存配置 | 全量 `PUT /config`；成功提示"配置已保存" |
+| 保存配置 | 顶部单一「保存设置」按钮；整份 `PUT /config`；成功后提示"设置已保存"并刷新推荐值 |
 | 分组/频道改动 | 立即调用对应接口；成功后刷新列表 |
 | 危险操作 | 先弹**自研确认框**（目标另有 20 处原生 `confirm()`，不复刻） |
 | 长列表 | 客户端搜索过滤 |
@@ -103,4 +133,4 @@
 | --- | --- |
 | 是否需要键位快捷操作（目标含 keybind 提示） | 先不做；按需追加 |
 | 移动端适配 | 目标无移动布局；我们只做 ≥1280 px |
-| 是否引入 i18n | 目标只有中文；不做 |
+| 是否引入 i18n | 目标 `p12` 有「语言」区（界面语言可跟随浏览器，实际生效 `简体中文`）。本实现目前只有中文。复刻与否待决策，见 §4.1 |
