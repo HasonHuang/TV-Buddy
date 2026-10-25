@@ -231,8 +231,12 @@ check "dash 未就绪文案" "timeout waiting for master playlist" "$(cat "$WORK
 # --- Proxy + MPD ---
 CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/mp/m1.mpd")
 check "proxy MPD 200" "200" "$CODE"
-check "proxy MPD 类型" "application/dash+xml" "$(hfile "$WORK/h" content-type)"
-check "proxy MPD 改写 BaseURL" "1" "$(grep -c "<BaseURL>http://127.0.0.1:$PORT/mp/m1/mpd/</BaseURL>" "$WORK/body")"
+# 契约：`application/dash+xml; charset=utf-8`（`stream.rs` 的 MPD_CONTENT_TYPE）。
+check "proxy MPD 类型" "application/dash+xml; charset=utf-8" "$(hfile "$WORK/h" content-type)"
+# 契约：`<BaseURL>` 改成本地反代 `/{gid}/{cid}/mpd/{token}/{Base64URL(上游基址)}/`
+# （见 `04` §3 的「proxy MPD 反代」行），不是裸的 `/mpd/`。
+check "proxy MPD 改写 BaseURL" "1" \
+  "$(grep -cE "<BaseURL>http://127.0.0.1:$PORT/mp/m1/mpd/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/</BaseURL>" "$WORK/body")"
 check "proxy MPD 切片 200" "200" "$(status "$B/mp/m1/mpd/dash-1.m4s")"
 check "proxy MPD 切片非空" "yes" "$([ -s "$WORK/body" ] && echo yes || echo no)"
 

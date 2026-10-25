@@ -137,6 +137,8 @@
     与「EPG 翻译」（`[epg.translate]` 关键键 + 测试连接 + 立即翻译 + 清空译文缓存）。
   - 冒烟补强：`smoke-security.sh` 增 10 条（键面 25 个、未消费键默认值、白名单写入与
     回读、前端 chunk needle）；`smoke-settings.sh` 增 23 条 `auth.*` 路径断言。
+  - `smoke-m3.sh` 修 2 条过期断言（MPD 的 `content-type` 带 `; charset=utf-8`；
+    `<BaseURL>` 是本地反代 `/{gid}/{cid}/mpd/{token}/{Base64URL}/`，不是裸 `/mpd/`）。
   - `smoke-epg.sh` 修 3 条过期断言（公开 EPG API 的字段以 F-023 为准：`channels` 用
     `total`，`programmes`/`search` 没有 `count`），并增 15 条覆盖 A5。
   - 冒烟补强：`smoke-logo.sh` 增 15 条（动效 10 帧/2220 ms、`quality` 必须是字符串、
