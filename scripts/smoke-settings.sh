@@ -201,7 +201,9 @@ for needle in \
   'share.follower_urls' \
   '/assets/' \
   'cache.dash.watchdog_rebuild_stagger_ms' \
-  'DraftCtx'
+  'DraftCtx' \
+  '/subs/groups' \
+  'TRACE|DEBUG|INFO|WARN|ERROR'
 do
   case "$BUNDLE" in
     *"$needle"*) printf 'ok   %s\n' "前端包含 $needle" ;;

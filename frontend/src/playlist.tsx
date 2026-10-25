@@ -76,6 +76,10 @@ export function PlaylistPage() {
   const [cfg, setCfg] = useState<PlaylistCfg>(EMPTY);
   const [excludeText, setExcludeText] = useState('');
   const [preview, setPreview] = useState('');
+  /** 每个源「读取分组」的结果：下标 → 分组与频道数。 */
+  const [groupList, setGroupList] = useState<
+    Record<number, { name: string; count: number }[] | { error: string }>
+  >({});
   const { node, ok, err } = useToast();
 
   const load = useCallback(async () => {
@@ -138,6 +142,26 @@ export function PlaylistPage() {
     }
   };
 
+  /**
+   * 「读取分组」（`POST /panel/api/subs/groups`）：抓源并统计分组名与频道数，
+   * 用来填分组映射。该接口只看 URL，源自身的规则不参与。
+   */
+  const readGroups = async (index: number, source: Source) => {
+    try {
+      const data = await api<{ groups: { name: string; count: number }[]; total: number }>(
+        'POST',
+        '/subs/groups',
+        { url: source.url },
+      );
+      setGroupList((current) => ({ ...current, [index]: data.groups ?? [] }));
+      ok(`读到 ${(data.groups ?? []).length} 个分组、${data.total} 个频道`);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      setGroupList((current) => ({ ...current, [index]: { error: text } }));
+      err(text);
+    }
+  };
+
   return (
     <>
       <div className="card">
@@ -191,9 +215,10 @@ export function PlaylistPage() {
           <h2>聚合源</h2>
           <button
             className="ghost"
-            onClick={() =>
-              setCfg({ ...cfg, sources: [...cfg.sources, newSource()] })
-            }
+            onClick={() => {
+              setGroupList({});
+              setCfg({ ...cfg, sources: [...cfg.sources, newSource()] });
+            }}
           >
             添加源
           </button>
@@ -244,18 +269,26 @@ export function PlaylistPage() {
                 <td>
                   <button
                     className="ghost"
+                    disabled={source.url.trim() === ''}
+                    onClick={() => void readGroups(index, source)}
+                  >
+                    读取分组
+                  </button>
+                  <button
+                    className="ghost"
                     onClick={() => void runPreview(source)}
                   >
                     预检
                   </button>
                   <button
                     className="icon-btn"
-                    onClick={() =>
+                    onClick={() => {
+                      setGroupList({});
                       setCfg({
                         ...cfg,
                         sources: cfg.sources.filter((_, current) => current !== index),
-                      })
-                    }
+                      });
+                    }}
                   >
                     删除
                   </button>
@@ -326,6 +359,51 @@ export function PlaylistPage() {
                 }
               />
             </label>
+            {groupList[index] !== undefined && (
+              <div className="field">
+                <label>该源的分组（点「读取分组」获取）</label>
+                {'error' in (groupList[index] as object) ? (
+                  <p className="muted">
+                    读取失败：{(groupList[index] as { error: string }).error}
+                  </p>
+                ) : (groupList[index] as { name: string; count: number }[]).length === 0 ? (
+                  <p className="muted">该源没有解析到分组。</p>
+                ) : (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>分组</th>
+                        <th className="right">频道</th>
+                        <th className="right">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(groupList[index] as { name: string; count: number }[]).map((group) => (
+                        <tr key={group.name}>
+                          <td>{group.name}</td>
+                          <td className="right">{group.count}</td>
+                          <td className="right">
+                            <button
+                              className="ghost"
+                              onClick={() =>
+                                updateSource(index, {
+                                  group_map: {
+                                    ...source.group_map,
+                                    [group.name]: source.group_map[group.name] ?? group.name,
+                                  },
+                                })
+                              }
+                            >
+                              加入映射
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
             <div className="row">
               <label>
                 include

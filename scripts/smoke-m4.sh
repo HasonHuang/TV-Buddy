@@ -144,7 +144,11 @@ for _ in $(seq 1 6); do
 done
 check "冷却后仍 503" "503" "$(status "$B/dg/d1.m3u8")"
 check "冷却文案" "timeout waiting for master playlist" "$(cat "$WORK/body")"
-check "冷却已记录日志" "1" "$(grep -c '进入冷却 3600s' "$WORK/iptv-proxy.log")"
+# 日志里是「DASH 连续失败，进入冷却」加字段 `cooldown_secs=3600`，冷却秒数不在文案里。
+# 字段名与值之间插着 ANSI 复位码，所以分开断言。
+check "冷却已记录日志" "1" "$(grep -c 'DASH 连续失败，进入冷却' "$WORK/iptv-proxy.log")"
+check "冷却秒数字段在场" "1" "$(grep -c 'cooldown_secs' "$WORK/iptv-proxy.log")"
+check "冷却秒数为 3600" "1" "$(grep 'cooldown_secs' "$WORK/iptv-proxy.log" | grep -c '3600')"
 # 修好上游并触发热重载 → 立即解除冷却（S-MODE-17）
 python3 - <<PY
 text = open("$CFG", encoding="utf-8").read().replace("http://127.0.0.1:1/dead.mpd", "http://127.0.0.1:$UP/main.mpd")
@@ -177,6 +181,22 @@ check "日志 200" "200" "$(code "${A[@]}" "$B/panel/api/logs?limit=50")"
 check "日志有内容" "1" "$(jget '1 if d["total"]>0 and len(d["lines"])>0 else 0')"
 check "日志含清空记录" "1" "$(jget '1 if any("缓存已清空" in line for line in d["lines"]) else 0')"
 check "日志文件存在" "1" "$([ -s "$WORK/iptv-proxy.log" ] && echo 1 || echo 0)"
+# 面板按级别过滤（A4）：环形缓冲的行带 ANSI 颜色，前端先剥掉再取级别词。
+# 这里复刻同一套抽取逻辑，确保每一行都能判出级别（否则该级别永远筛不出来）。
+cat > "$WORK/level.py" <<'PYEOF'
+import json, re, sys
+lines = json.load(open(sys.argv[1]))["lines"]
+ansi = re.compile("\u001b\\[[0-9;]*m")
+seen = set()
+for line in lines:
+    match = re.search(r"\s(TRACE|DEBUG|INFO|WARN|ERROR)\s", ansi.sub("", line))
+    if not match:
+        print(0)
+        raise SystemExit
+    seen.add(match.group(1).lower())
+print(1 if seen else 0)
+PYEOF
+check "日志行都能判出级别" "1" "$(python3 "$WORK/level.py" "$WORK/body")"
 
 if [ "$fail" = "0" ]; then
   printf 'M4 冒烟测试全部通过\n'

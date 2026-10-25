@@ -100,11 +100,11 @@
 | `dashboard` | 实时指标（下行·回源、上行·出网、进程内存、CPU、整盘内存峰值）；快速操作（清空缓存、热重载、刷新状态、导出全部 M3U）；系统信息含 RSS | `/panel/api/status` 只返回 name / version / uptime_secs / bind / log_level / groups / channels / sessions / cache_* / entry_exts / hls / mpd，页面直接渲染这些键值 → **无指标、无快速操作** |
 | `groups` | 分组与频道排序（`▲`/`▼`，组名左侧另有拖拽柄）；工具栏 `M3U 导入`/`JSON 导入`/`JSON 覆盖`/`导出全部`/`多选`；频道行状态点与 `异常`/`常驻`/`全轨道` 徽章 | ⚠️ **已做大部分**。排序：分组卡与频道行各有 `▲`/`▼`，写回机制与目标一致（改数组顺序 → `PUT /panel/api/config` 全量保存，无新端点）。工具栏：四个入口已接（`/groups/import/m3u`、`/groups/import`、`/groups/import/force`、`/groups/export`）；`多选` 的目标语义未观测，**不做**。徽章：配置型三枚已做（`常驻`=`livestream`、`全轨道`=DASH 且 `selected_tracks` 空、`tvg-id`/`Logo`）；**绿点与 `异常` 缺数据源**（`/panel/api/health` 无逐频道字段），转 `07` §3.B3。拖拽柄未做（等价功能由上/下移覆盖）。证据：`reference/img/p02-groups.png`（2026-10-25 复核）；`07` `D-006`、§3.A9–A11 |
 | `security` | 白名单、限流 `l1`/`l2`、会话 TTL 与并发、防爆破 | `SecurityPage`（`ops.tsx`）只有播放 Token（含宽限旧值、轮换）与 IP 统计 / 封禁 → **缺四组** |
-| `logs` | 级别过滤 | `LogsPage`（`ops.tsx`）无 level 过滤 → **缺** |
+| `logs` | 级别过滤 | ✅ 已加级别下拉（全部/TRACE/DEBUG/INFO/WARN/ERROR），前端按行过滤；顺带剥掉环形缓冲里的 ANSI 颜色码（原先直接塞 `<pre>` 会显示成控制符） |
 | `epg` | 翻译设置（`m08` 翻译模型）；采集节奏 | `EpgPanelPage`（`ops.tsx`）有手工映射、额外频道、历史天数 → **缺翻译与节奏** |
 | `logos` | 动效（`m09`）、转码参数（最大边 / 质量 / 转 WebP） | `logo.tsx` 有列表、上传、改名、匹配报告（`/logo/match-report`）→ **缺动效与转码参数**（后端动效已实现，面板未接） |
 | `schedule` | 「从 EPG 加载节目」 | `schedule.tsx` 无相关调用，而端点 `/panel/api/schedule/from-epg` 已存在 → **面板未接** |
-| `subs` | 源行的「读取分组」 | 有源规则、全局排除、预检结果；`/subs/groups` 端点已在 → **需核对 UI** |
+| `subs` | 源行的「读取分组」 | ✅ 已加：源行「读取分组」按钮 → `POST /panel/api/subs/groups`，结果表列出分组名与频道数，可「加入映射」填 `group_map` |
 
 已对齐的部分：`cache` 按目录渲染 `/cache/stats` 的 `entries`（含 `seg_url` / `sub_url`）；
 `stats` 显示在线窗口与热度排行；`assets` 见 §4.1；`livestream` 有回看列表与缓冲；

@@ -191,12 +191,34 @@ export function SecurityPage() {
   );
 }
 
+/**
+ * 日志级别：`tracing_subscriber::fmt` 的默认文本格式里级别是一个大写单词
+ * （`2026-10-25T12:00:00Z  WARN iptv_proxy::…: …`）。
+ * 过滤在前端做：环形缓冲固定 500 行，按级别筛选不需要重新请求。
+ */
+const LEVELS = ['all', 'trace', 'debug', 'info', 'warn', 'error'] as const;
+type Level = (typeof LEVELS)[number];
+
+/** 环形缓冲里的行带 ANSI 颜色，直接塞进 `<pre>` 会显示成乱码控制符。 */
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-9;]*m/g;
+
+function plain(line: string): string {
+  return line.replace(ANSI, '');
+}
+
+function levelOf(line: string): string {
+  const match = plain(line).match(/\s(TRACE|DEBUG|INFO|WARN|ERROR)\s/);
+  return match ? match[1].toLowerCase() : '';
+}
+
 /** 运行日志：轮询 `/panel/api/logs`。 */
 export function LogsPage() {
   const [lines, setLines] = useState<string[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
   const [limit, setLimit] = useState('200');
+  const [level, setLevel] = useState<Level>('all');
 
   const load = useCallback(async () => {
     try {
@@ -218,14 +240,30 @@ export function LogsPage() {
     return () => window.clearInterval(timer);
   }, [load]);
 
+  const shown = level === 'all' ? lines : lines.filter((line) => levelOf(line) === level);
+
   return (
     <div className="card">
       <div className="row between">
         <div>
           <h1>运行日志</h1>
-          <h2>最近 {lines.length} 行（共 {total} 行）</h2>
+          <h2>
+            最近 {shown.length} 行
+            {level === 'all' ? '' : `（${level.toUpperCase()}）`}（共 {total} 行）
+          </h2>
         </div>
         <div className="row">
+          <select
+            value={level}
+            style={{ width: 120 }}
+            onChange={(event) => setLevel(event.target.value as Level)}
+          >
+            {LEVELS.map((item) => (
+              <option key={item} value={item}>
+                {item === 'all' ? '全部级别' : item.toUpperCase()}
+              </option>
+            ))}
+          </select>
           <input
             value={limit}
             onChange={(event) => setLimit(event.target.value)}
@@ -237,7 +275,10 @@ export function LogsPage() {
         </div>
       </div>
       {error && <div className="msg err">{error}</div>}
-      <pre className="log">{lines.join('\n')}</pre>
+      <pre className="log">{shown.map(plain).join('\n')}</pre>
+      {level !== 'all' && shown.length === 0 && (
+        <p className="muted">当前缓冲里没有 {level.toUpperCase()} 级别的行。</p>
+      )}
     </div>
   );
 }

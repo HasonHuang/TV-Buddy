@@ -112,7 +112,7 @@
   - 缺口分四组：A 面板接线（8 项，端点已存在）、B 需新后端（概览实时指标）、
     C 冲突与文档债（分组排序冲突、i18n 决策）、D 已登记不实现。
   - 规划：P2 文档债 → P1 面板接线 → P3 指标 → P4 深化；难验证项各自给了对比方案。
-- **P1 面板接线（进行中，A6/A8/A9/A10 已完）**：
+- **P1 面板接线（进行中，A6/A7/A8/A9/A10 已完；剩 A1/A2/A3/A5）**：
   - 设置页「DASH 调优」卡片（三组折叠，覆盖 `[cache.dash]` 全部键，组名与说明沿用 `p12` 文案）；
     概览页快速操作（刷新状态 / 清空缓存 / 热重载配置 / 导出全部 M3U）。
   - 分组管理：分组卡与频道行各加 `▲`/`▼`，机制与目标一致（前端改数组顺序 →
@@ -121,8 +121,14 @@
     （`常驻`=`livestream`、`全轨道`=DASH 且 `selected_tracks` 空、`tvg-id`/`Logo`）。
   - 新增 `scripts/smoke-groups.sh`（41 条）：排序经 `PUT /config` 往返后订阅顺序随之改变、
     三种导入语义与错误码、徽章字段可读、前端入口已内嵌。
-  - `smoke-m1.sh` 两条过期断言修正：`[epg].enabled=true` 时首行带 `x-tvg-url`；
-    Token 断言改为只取播放条目行（首行的 `x-tvg-url` 也是 `http://` 开头）。
+  - 运行日志加级别过滤（全部/TRACE…ERROR）；顺手剥掉环形缓冲行里的 ANSI 颜色码
+    （原先直接塞进 `<pre>` 会显示成控制符）。
+  - 订阅聚合：源行加「读取分组」（`POST /panel/api/subs/groups`），结果表可「加入映射」。
+  - 冒烟补强：`smoke-settings.sh` 增 `/subs/groups` 与级别词 needle；`smoke-m4.sh` 增
+    「每行都能判出级别」（复刻前端的 ANSI 剥离 + 级别抽取）。
+  - 三条过期断言修正（都是断言落后于实现，不是实现回归）：
+    `smoke-m1.sh` 的 `x-tvg-url` 首行与 Token 取行方式；`smoke-m4.sh` 的冷却日志文案
+    （实际是「DASH 连续失败，进入冷却」+ `cooldown_secs=3600` 字段）。
 - **质量门**：`cargo fmt --check`；285 项测试通过（203 单元 + 82 契约）；
   clippy 0 error（27 条历史 warning，新增文件 0 条）；`pnpm build`；
   冒烟 `smoke-m2`/`smoke-panel`/`smoke-cli`/`smoke-backup`/`smoke-assets`/`smoke-share` 通过。
