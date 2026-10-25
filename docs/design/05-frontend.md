@@ -99,7 +99,7 @@
 | --- | --- | --- |
 | `dashboard` | 实时指标（下行·回源、上行·出网、进程内存、CPU、整盘内存峰值）；快速操作（清空缓存、热重载、刷新状态、导出全部 M3U）；系统信息含 RSS | `/panel/api/status` 只返回 name / version / uptime_secs / bind / log_level / groups / channels / sessions / cache_* / entry_exts / hls / mpd，页面直接渲染这些键值 → **无指标、无快速操作** |
 | `groups` | 分组与频道排序（`▲`/`▼`，组名左侧另有拖拽柄）；工具栏 `M3U 导入`/`JSON 导入`/`JSON 覆盖`/`导出全部`/`多选`；频道行状态点与 `异常`/`常驻`/`全轨道` 徽章 | ⚠️ **已做大部分**。排序：分组卡与频道行各有 `▲`/`▼`，写回机制与目标一致（改数组顺序 → `PUT /panel/api/config` 全量保存，无新端点）。工具栏：四个入口已接（`/groups/import/m3u`、`/groups/import`、`/groups/import/force`、`/groups/export`）；`多选` 的目标语义未观测，**不做**。徽章：配置型三枚已做（`常驻`=`livestream`、`全轨道`=DASH 且 `selected_tracks` 空、`tvg-id`/`Logo`）；**绿点与 `异常` 缺数据源**（`/panel/api/health` 无逐频道字段），转 `07` §3.B3。拖拽柄未做（等价功能由上/下移覆盖）。证据：`reference/img/p02-groups.png`（2026-10-25 复核）；`07` `D-006`、§3.A9–A11 |
-| `security` | 白名单、限流 `l1`/`l2`、会话 TTL 与并发、防爆破 | `SecurityPage`（`ops.tsx`）只有播放 Token（含宽限旧值、轮换）与 IP 统计 / 封禁 → **缺四组** |
+| `security` | 白名单、限流 `l1`/`l2`、会话 TTL 与并发、防爆破 | ✅ 已加「访问控制」卡片：读整份配置改 `[auth]` 子树后 `PUT /panel/api/config`（与设置页同机制），四组都在。**未消费的键**（白名单、`max_sessions_per_ip`/`session_ttl_secs`、`l1/l2`、升级封禁）逐项标 `未消费` 并写明不改变运行行为 |
 | `logs` | 级别过滤 | ✅ 已加级别下拉（全部/TRACE/DEBUG/INFO/WARN/ERROR），前端按行过滤；顺带剥掉环形缓冲里的 ANSI 颜色码（原先直接塞 `<pre>` 会显示成控制符） |
 | `epg` | 翻译设置（`m08` 翻译模型）；采集节奏 | `EpgPanelPage`（`ops.tsx`）有手工映射、额外频道、历史天数 → **缺翻译与节奏** |
 | `logos` | 动效（`m09`）、转码参数（最大边 / 质量 / 转 WebP） | ✅ 已接：上传前在浏览器里按最长边等比缩放、可选转 WebP（目标同，服务端不转码）；每个台标卡加「动效」→ 6 效果选择 + `POST /panel/api/logo/animate`，生成后显示帧数/尺寸/时长/体积变化；有 `.orig/` 备份的显示「还原」 |

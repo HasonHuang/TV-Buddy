@@ -77,4 +77,68 @@ curl -s -o "$WORK/batch.json" -X POST -H "$AUTH" -H 'content-type: application/j
   -d '{"ips":["8.8.8.8","9.9.9.9"]}' "$B/panel/api/security/ip/unban-batch"
 check "批量解封 2 个" "2" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["removed"])' "$WORK/batch.json")"
 
+# --- 访问控制卡片（A3）：`[auth]` 段可读可写，且写回后键面齐全 ---
+curl -s -H "$AUTH" "$B/panel/api/config" > "$WORK/cfg.json"
+check "配置含 [auth]" "1" \
+  "$(python3 -c 'import json,sys;print(1 if "auth" in json.load(open(sys.argv[1])) else 0)' "$WORK/cfg.json")"
+check "auth 有 23 个键" "1" \
+  "$(python3 -c '
+import json,sys
+want = {
+  "token_enabled","token_ttl_hours","token_failure_url","random_id_enabled","ip_guard_enabled",
+  "max_sessions_per_ip","session_ttl_secs","limit_url","ban_url","whitelist",
+  "l1_window_secs","l1_limit","l2_window_secs","l2_limit","cooldown_secs",
+  "violation_window_secs","violation_decay_secs","ban_threshold","ban_duration_secs",
+  "auth_fail_window_secs","auth_fail_free_per_window","auth_fail_ban_threshold",
+  "auth_fail_ban_duration_secs","auth_fail_ban_repeat_duration_secs",
+  "auth_fail_ban_escalate_window_secs",
+}
+auth = json.load(open(sys.argv[1]))["auth"]
+missing = want - set(auth)
+print(1 if not missing else 0)
+' "$WORK/cfg.json")"
+check "未消费键的默认值与目标一致" "1" \
+  "$(python3 -c '
+import json,sys
+auth = json.load(open(sys.argv[1]))["auth"]
+expect = {"l1_window_secs":30,"l1_limit":30,"l2_window_secs":30,"l2_limit":8,
+          "cooldown_secs":3,"violation_window_secs":300,"violation_decay_secs":1800,
+          "ban_threshold":3,"ban_duration_secs":2592000,
+          "auth_fail_ban_duration_secs":3600,
+          "auth_fail_ban_repeat_duration_secs":2592000,
+          "auth_fail_ban_escalate_window_secs":86400}
+print(1 if all(auth.get(k) == v for k,v in expect.items()) else 0)
+' "$WORK/cfg.json")"
+
+# 写白名单 + 改 IP 管控开关，回读确认落盘（面板卡片就是这么做的）。
+python3 - "$WORK/cfg.json" "$WORK/put.json" <<'PYEOF'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+cfg["auth"]["whitelist"] = ["203.0.113.7", "10.0.0.0/8", "*"]
+cfg["auth"]["ip_guard_enabled"] = True
+json.dump(cfg, open(sys.argv[2], "w"))
+PYEOF
+check "写白名单 PUT 200" "200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" -H "$AUTH" \
+    -H 'content-type: application/json' --data-binary "@$WORK/put.json")"
+curl -s -H "$AUTH" "$B/panel/api/config" > "$WORK/after.json"
+check "白名单已落盘" "3" \
+  "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["auth"]["whitelist"]))' "$WORK/after.json")"
+check "IP 管控已开启" "True" \
+  "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["auth"]["ip_guard_enabled"])' "$WORK/after.json")"
+check "开启 IP 管控后 /unban/whoami 可用" "True" \
+  "$(curl -s -H 'X-Forwarded-For: 203.0.113.7' "$B/unban/whoami" | \
+    python3 -c 'import json,sys;print(json.load(sys.stdin).get("enabled"))')"
+
+# 前端已内嵌访问控制卡片（ASCII needle：esbuild 会转义中文）。
+ASSET=$(curl -s "$B/panel" | grep -oE '/__assets/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+PJS=$(curl -s "$B$ASSET")
+for needle in 'auth_fail_window_secs' 'auth_fail_ban_escalate_window_secs' \
+  'max_sessions_per_ip' 'violation_decay_secs' 'ip_guard_enabled'; do
+  case "$PJS" in
+    *"$needle"*) printf 'ok   %s\n' "安全页包含 $needle" ;;
+    *) printf 'FAIL 安全页缺少 %s\n' "$needle"; fail=1 ;;
+  esac
+done
+
 if [ "$fail" = "0" ]; then echo "安全面冒烟测试全部通过"; else echo "安全面冒烟测试有失败项"; exit 1; fi

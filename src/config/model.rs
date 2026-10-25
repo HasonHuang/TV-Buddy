@@ -658,10 +658,14 @@ pub struct AuthCfg {
     pub token_failure_url: String,
     pub random_id_enabled: bool,
     pub ip_guard_enabled: bool,
+    /// 每 IP 并发会话上限。**未消费**：目标未观测到生效。
     pub max_sessions_per_ip: u32,
+    /// 会话超时（秒）。**未消费**：目标未观测到生效。
     pub session_ttl_secs: u64,
     pub limit_url: String,
     pub ban_url: String,
+    /// 白名单（精确地址 / CIDR / `*`）。**未消费**：豁免语义在目标上未观测到行为，
+    /// 只保留键面与面板编辑入口（同 `random_id_enabled`、`share_token`）。
     pub whitelist: Vec<String>,
     /// 登录失败统计窗口（秒）。
     pub auth_fail_window_secs: u64,
@@ -669,8 +673,34 @@ pub struct AuthCfg {
     pub auth_fail_free_per_window: u64,
     /// 超出免费次数后，再累计多少次触发锁定。
     pub auth_fail_ban_threshold: u64,
-    /// 锁定秒数。
+    /// 首次锁定秒数。目标首次锁实测固定 ~300s（`auth_fail_ban_duration_secs` 改小也不变），
+    /// 所以本实现的锁定就用这个键的默认值 `300`；目标文件里没有这个键名。
     pub auth_fail_lock_secs: u64,
+    // --- 以下键面与目标 v0.8.2 一致，本实现**未消费**（见 PROGRESS §2.3） ---
+    /// 一级限流窗口（秒）。**未消费**：`l1/l2` 触发条件未复现。
+    pub l1_window_secs: u64,
+    /// 一级窗口次数上限。**未消费**。
+    pub l1_limit: u64,
+    /// 二级限流窗口（秒）。**未消费**。
+    pub l2_window_secs: u64,
+    /// 二级窗口次数上限。**未消费**。
+    pub l2_limit: u64,
+    /// 违规冷却（秒）。**未消费**。
+    pub cooldown_secs: u64,
+    /// 违规统计窗口（秒）。**未消费**。
+    pub violation_window_secs: u64,
+    /// 违规衰减（秒）。**未消费**。
+    pub violation_decay_secs: u64,
+    /// 违规多少次升级为封禁。**未消费**。
+    pub ban_threshold: u64,
+    /// 封禁时长（秒，默认 30 天）。**未消费**：面板封禁走 `POST /security/ip/ban` 的入参。
+    pub ban_duration_secs: u64,
+    /// 首次登录爆破封禁时长（秒）。**未消费**：首锁固定 300s（见 `auth_fail_lock_secs`）。
+    pub auth_fail_ban_duration_secs: u64,
+    /// 重复爆破的封禁时长（秒）。**未消费**。
+    pub auth_fail_ban_repeat_duration_secs: u64,
+    /// 升级为重复封禁的统计窗口（秒）。**未消费**。
+    pub auth_fail_ban_escalate_window_secs: u64,
     #[serde(flatten)]
     pub extra: toml::Table,
 }
@@ -692,6 +722,18 @@ impl Default for AuthCfg {
             auth_fail_free_per_window: 15,
             auth_fail_ban_threshold: 6,
             auth_fail_lock_secs: 300,
+            l1_window_secs: 30,
+            l1_limit: 30,
+            l2_window_secs: 30,
+            l2_limit: 8,
+            cooldown_secs: 3,
+            violation_window_secs: 300,
+            violation_decay_secs: 1800,
+            ban_threshold: 3,
+            ban_duration_secs: 2_592_000,
+            auth_fail_ban_duration_secs: 3_600,
+            auth_fail_ban_repeat_duration_secs: 2_592_000,
+            auth_fail_ban_escalate_window_secs: 86_400,
             extra: toml::Table::new(),
         }
     }

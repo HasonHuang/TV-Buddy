@@ -29,6 +29,274 @@ type IpStats = {
   entries: IpEntry[];
 };
 
+/**
+ * `[auth]` 段的可编辑视图（A3）。
+ *
+ * 后端没有单独的 auth 写接口，所以与设置页同一机制：`GET /panel/api/config`
+ * 取整份 → 改 `auth` 子树 → `PUT /panel/api/config` 全量回写（S-CFG-01）。
+ *
+ * 标注 `未消费` 的键是目标 v0.8.2 也有、但本实现尚未实现的（限流 `l1/l2`、
+ * 升级封禁等）；键面保留以便配置文件在本实现与目标之间来回搬，编辑它们不会
+ * 改变运行行为——界面上明确写出，避免「配了没反应」。
+ */
+type AuthCfg = Record<string, unknown>;
+type FullConfig = { auth?: AuthCfg } & Record<string, unknown>;
+
+/** 数字字段：路径 + 标签 + 单位。 */
+type NumField = { key: string; label: string; hint?: string; unconsumed?: boolean };
+
+const AUTH_LIMIT: NumField[] = [
+  {
+    key: 'max_sessions_per_ip',
+    label: '每 IP 并发会话',
+    hint: '0 = 不限；目标未观测到生效，本实现未消费',
+    unconsumed: true,
+  },
+  {
+    key: 'session_ttl_secs',
+    label: '会话超时',
+    hint: '秒；目标未观测到生效，本实现未消费',
+    unconsumed: true,
+  },
+  { key: 'l1_window_secs', label: '一级窗口', hint: '秒', unconsumed: true },
+  { key: 'l1_limit', label: '一级窗口次数', unconsumed: true },
+  { key: 'l2_window_secs', label: '二级窗口', hint: '秒', unconsumed: true },
+  { key: 'l2_limit', label: '二级窗口次数', unconsumed: true },
+  { key: 'cooldown_secs', label: '违规冷却', hint: '秒', unconsumed: true },
+  { key: 'violation_window_secs', label: '违规统计窗口', hint: '秒', unconsumed: true },
+  { key: 'violation_decay_secs', label: '违规衰减', hint: '秒', unconsumed: true },
+  { key: 'ban_threshold', label: '升级封禁的违规次数', unconsumed: true },
+  { key: 'ban_duration_secs', label: '封禁时长', hint: '秒，默认 30 天', unconsumed: true },
+];
+
+const AUTH_LOCK: NumField[] = [
+  { key: 'auth_fail_window_secs', label: '失败统计窗口', hint: '秒' },
+  { key: 'auth_fail_free_per_window', label: '窗口内免费次数' },
+  { key: 'auth_fail_ban_threshold', label: '免费后再失败几次锁定' },
+  {
+    key: 'auth_fail_ban_duration_secs',
+    label: '首次封禁时长',
+    hint: '秒；目标首次锁实测固定 ≈300s，本实现同',
+    unconsumed: true,
+  },
+  { key: 'auth_fail_ban_repeat_duration_secs', label: '重复封禁时长', hint: '秒', unconsumed: true },
+  {
+    key: 'auth_fail_ban_escalate_window_secs',
+    label: '升级为重复封禁的窗口',
+    hint: '秒',
+    unconsumed: true,
+  },
+];
+
+function authNumber(auth: AuthCfg, key: string): string {
+  const value = auth[key];
+  return typeof value === 'number' ? String(value) : '';
+}
+
+function NumberField({
+  field,
+  value,
+  onChange,
+}: {
+  field: NumField;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <label className="field">
+      <span>
+        {field.label}
+        {field.unconsumed && <span className="tag" style={{ marginLeft: 6 }}>未消费</span>}
+      </span>
+      <input
+        type="number"
+        min={0}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {field.hint && <div className="hint">{field.hint}</div>}
+    </label>
+  );
+}
+
+/** `[auth]` 四组编辑卡片：白名单、IP 管控与限流、会话与 Token、防爆破。 */
+function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
+  const [config, setConfig] = useState<FullConfig | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const [whitelist, setWhitelist] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const next = await api<FullConfig>('GET', '/config');
+      setConfig(next);
+      const list = Array.isArray(next.auth?.whitelist) ? next.auth.whitelist : [];
+      setWhitelist(list.map((item) => String(item)).join('\n'));
+      setError('');
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (error && !config) {
+    return (
+      <div className="card">
+        <h2>访问控制</h2>
+        <div className="msg err">{error}</div>
+      </div>
+    );
+  }
+  if (!config) {
+    return <div className="card muted">读取配置…</div>;
+  }
+
+  const auth = config.auth ?? {};
+  const setKey = (key: string, value: unknown) =>
+    setConfig({ ...config, auth: { ...auth, [key]: value } });
+
+  const save = async () => {
+    setSaving(true);
+    setNote('');
+    setError('');
+    try {
+      const next: FullConfig = {
+        ...config,
+        auth: {
+          ...auth,
+          whitelist: whitelist
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean),
+        },
+      };
+      await api('PUT', '/config', next);
+      setNote('访问控制已保存并生效');
+      await load();
+      onSaved();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="row between">
+        <div>
+          <h2>访问控制</h2>
+          <p className="muted">
+            写 `[auth]` 段：改完点保存，整份配置原子替换（与设置页同一机制）。
+          </p>
+        </div>
+        <button disabled={saving} onClick={() => void save()}>
+          {saving ? '保存中…' : '保存访问控制'}
+        </button>
+      </div>
+
+      <h3>
+        白名单<span className="tag" style={{ marginLeft: 6 }}>未消费</span>
+      </h3>
+      <p className="muted">
+        每行一个地址，支持精确 IP、CIDR 与 `*`。目标键面里有它，但白名单是否豁免 IP 管控与封禁
+        在目标上**未观测到行为**，所以本实现只保留键面与编辑入口、不参与判定
+        （同 `random_id_enabled`、`share_token` 的处理，见 `PROGRESS.md` §2.3）。
+      </p>
+      <textarea
+        rows={4}
+        placeholder="203.0.113.7&#10;10.0.0.0/8&#10;*"
+        value={whitelist}
+        onChange={(event) => setWhitelist(event.target.value)}
+      />
+
+      <h3>会话与 Token</h3>
+      <div className="fields">
+        <label className="field">
+          <span>IP 管控</span>
+          <select
+            value={auth.ip_guard_enabled === true ? 'on' : 'off'}
+            onChange={(event) => setKey('ip_guard_enabled', event.target.value === 'on')}
+          >
+            <option value="off">关闭</option>
+            <option value="on">开启</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>播放 Token</span>
+          <select
+            value={auth.token_enabled === true ? 'on' : 'off'}
+            onChange={(event) => setKey('token_enabled', event.target.value === 'on')}
+          >
+            <option value="off">关闭</option>
+            <option value="on">开启</option>
+          </select>
+        </label>
+        <NumberField
+          field={{ key: 'token_ttl_hours', label: 'Token 有效期', hint: '小时' }}
+          value={authNumber(auth, 'token_ttl_hours')}
+          onChange={(next) => setKey('token_ttl_hours', Number(next) || 0)}
+        />
+      </div>
+
+      <h3>限流与会话</h3>
+      <p className="muted">
+        带「未消费」的键是本实现尚未实现的行为（限流的触发条件在目标上未复现，
+        见 `PROGRESS.md` §2.3）；保留键面以便配置在两边的文件间来回搬。
+      </p>
+      <div className="fields">
+        {AUTH_LIMIT.map((field) => (
+          <NumberField
+            key={field.key}
+            field={field}
+            value={authNumber(auth, field.key)}
+            onChange={(next) => setKey(field.key, Number(next) || 0)}
+          />
+        ))}
+      </div>
+      <div className="fields">
+        <label className="field">
+          <span>限流跳转地址</span>
+          <input
+            value={typeof auth.limit_url === 'string' ? auth.limit_url : ''}
+            onChange={(event) => setKey('limit_url', event.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>封禁跳转地址</span>
+          <input
+            value={typeof auth.ban_url === 'string' ? auth.ban_url : ''}
+            onChange={(event) => setKey('ban_url', event.target.value)}
+          />
+        </label>
+      </div>
+
+      <h3>登录防爆破</h3>
+      <p className="muted">
+        窗口内累计失败达到「免费次数 + 阈值」后，该 IP 的 `/panel/api/login` 返回 `429`；
+        锁不波及已有的 Bearer 会话。首次锁定时长固定 ≈300s（与目标观测一致）。
+      </p>
+      <div className="fields">
+        {AUTH_LOCK.map((field) => (
+          <NumberField
+            key={field.key}
+            field={field}
+            value={authNumber(auth, field.key)}
+            onChange={(next) => setKey(field.key, Number(next) || 0)}
+          />
+        ))}
+      </div>
+
+      {note && <div className="msg ok">{note}</div>}
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -128,6 +396,8 @@ export function SecurityPage() {
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}
       </div>
+
+      <AuthConfigCard onSaved={() => void load()} />
 
       <div className="card">
         <h2>IP 统计与封禁</h2>
