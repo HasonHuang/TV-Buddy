@@ -55,9 +55,10 @@
 | # | 缺口 | 依据 | 做法 |
 | --- | --- | --- | --- |
 | B1 | `dashboard` 缺实时指标 | `/panel/api/status` 现只返回 name/version/uptime/bind/log_level/groups/channels/sessions/cache_*（`src/http/routes/panel.rs`） | 补采集：进程内存与 CPU、下行·回源、上行·出网、整盘内存峰值；`whole_file_*` 与 `traffic_in_bytes` 按目标口径（注意 S-BUG-01：目标回源流量恒 0，不要"修"） |
-| B2 | `status` 缺 `online_viewers` 等字段 | 同上 | `/panel/api/stats` 已有在线窗口数据，汇入 status 或前端合并两个接口 |
+| B2 | `status` 缺 `online_viewers` 等字段 | 同上 | `/panel/api/stats` **目前也没有**在线观众数据：只有请求计数、分组请求数，`online_window_secs` 只是配置回显。需要先加滑动窗口统计，再汇入 status 或由前端合并两个接口 |
 | B3 | 频道行绿点与 `异常` 徽章缺数据源 | `health` 只给汇总计数；`watchdog` 有逐频道失败/冷却状态但无读取出口 | 给 `health` 或新端点补逐频道健康（`watchdog` 的 failures/冷却 + DASH 会话在跑），前端据此画点与 `异常` |
-| B4 | **DASH 回看清单 `/{gid}/{cid}/dash-timeshift/{track}/{playlist.txt|playlist.m3u8|playlist|filename}` 完全没实现** | 全仓只有 `/panel/api/dash-timeshift/status`（`src/http.rs:108`），播放路由无该分支；`?playseek=` 未解析，`400 missing playseek` / `404 no segments in range` 两个错误串全仓不存在。文档此前把它标成 P2 已实现，属**文档与实现不一致**（2026-10-25 核对更正） | 需新增状态：目标要求「`PROGRAM-DATE-TIME` = 切片**到达本机**时间」「窗 = 已录制区间」「按 track 的录制序号」，而现有 `dash::Segment{number,time,...}` 的 `time` 是 MPD timeline、`dash_hls::Session` 无到达时间戳。最接近可复用：`dash_hls::{serve,render_media,Entry,cache_path}`。工作量与新采集同档 |
+| B5 | 面板未接线的端点 | 端点都在 `src/http.rs`，前端无调用：`assets/convert`、`dash/{status,tracks,scan-url}`、`epg/{match-report,scripts,script,script-delete,suggest,search,source-channels,tz-preview,viewer-channels}`、`epg/translate/{models,probe}`、`link-info`、`security/ip/unban-batch`、`subs/status`、`groups/:gid/export`、`logo/list`、`resolver/remove`；另有分组工具栏「多选」 | 纯接线，可分批。清单与逐项说明见 `PROGRESS.md` §3.2 |
+| B4 | **DASH 回看清单 `/{gid}/{cid}/dash-timeshift/{track}/{playlist.txt,playlist.m3u8,playlist,filename}` 完全没实现** | 全仓只有 `/panel/api/dash-timeshift/status`（`src/http.rs:108`），播放路由无该分支；`?playseek=` 未解析，`400 missing playseek` / `404 no segments in range` 两个错误串全仓不存在。文档此前把它标成 P2 已实现，属**文档与实现不一致**（2026-10-25 核对更正） | 需新增状态：目标要求「`PROGRAM-DATE-TIME` = 切片**到达本机**时间」「窗 = 已录制区间」「按 track 的录制序号」，而现有 `dash::Segment{number,time,...}` 的 `time` 是 MPD timeline、`dash_hls::Session` 无到达时间戳。最接近可复用：`dash_hls::{serve,render_media,Entry,cache_path}`。工作量与新采集同档 |
 
 **B4 的实施落点**（2026-10-25 核对，供动手时省一轮搜索）：
 
