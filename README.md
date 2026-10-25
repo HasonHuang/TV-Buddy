@@ -50,6 +50,8 @@ sudo sh install.sh --version v2026.3.0
 sudo sh install.sh --version v2026.3.0 --repo HasonHuang/TV-Buddy
 ```
 
+预发布版本（tag 带 `-beta`/`-rc` 等后缀）不会被 `/releases/latest` 选中，必须用 `--version` 指定。
+
 ### 从发布包安装
 
 ```bash
