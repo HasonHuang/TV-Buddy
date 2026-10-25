@@ -104,4 +104,60 @@ SUGGEST=$(curl -s -o "$WORK/suggest.json" -w '%{http_code}' -X POST "$B/panel/ap
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"threshold":0.1}')
 check "推荐 200" "200" "$SUGGEST"
 
+# --- 动效与还原（A2）：`/panel/api/logo/animate` 输出固定 10 帧无损动画 WebP ---
+# 用 ASCII 名，避免 URL 编码干扰断言。
+UP2="{\"items\":[{\"name\":\"anim.png\",\"ext\":\"png\",\"data\":\"data:image/png;base64,$PNG\"}]}"
+check "上传待动效台标 200" "200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/upload" \
+    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "$UP2")"
+
+check "动效 200" "200" \
+  "$(curl -s -o "$WORK/anim.json" -w '%{http_code}' -X POST "$B/panel/api/logo/animate" \
+    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+    -d '{"file":"anim.png","effect":"breathe","quality":"80"}')"
+check "动效 10 帧" "10" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["frames"])' "$WORK/anim.json")"
+check "动效总时长 2220ms" "2220" \
+  "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["total_ms"])' "$WORK/anim.json")"
+check "动效后体积变大" "1" \
+  "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(1 if d["bytes_after"]>d["bytes_before"] else 0)' "$WORK/anim.json")"
+check "动效已备份原图" "1" \
+  "$(curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/logo/list" | \
+    python3 -c 'import json,sys;print(1 if any(l["file"]=="anim.png" and l["has_original"] for l in json.load(sys.stdin)["logos"]) else 0)')"
+
+check "未知动效 400" "400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/animate" \
+    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+    -d '{"file":"anim.png","effect":"nope"}')"
+check "缺 file 400" "400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/animate" \
+    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"effect":"breathe"}')"
+# `quality` 必须是字符串：整数会被拒（S-LOGO-03 的目标行为）。
+check "整数 quality 400" "400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/animate" \
+    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+    -d '{"file":"anim.png","effect":"breathe","quality":80}')"
+
+check "还原 200" "200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/restore" \
+    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"file":"anim.png"}')"
+# `.orig/` 备份保留在磁盘上（还原是复制回来，不删备份），所以 `has_original` 仍为 true。
+# 断言点改成「文件内容回到原图大小」。
+check "还原回原图大小" "70" \
+  "$(curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/logo/list" | \
+    python3 -c 'import json,sys;print(next(l["bytes"] for l in json.load(sys.stdin)["logos"] if l["file"]=="anim.png"))')"
+
+# --- 前端接线（A2）：动效与浏览器侧转码参数已内嵌 ---
+# 台标页的实现在 modulepreload 的第二个 chunk（入口只做挂载），所以把所有 logo-*.js 拼起来查。
+check "台标页引用 logo 资源" "yes" \
+  "$(curl -s "$B/logo" | grep -q '/__assets/assets/logo-' && echo yes || echo no)"
+LJS=$(for asset in $(curl -s "$B/logo" | grep -oE '/__assets/assets/logo-[A-Za-z0-9_.-]+\.js'); do
+  curl -s "$B$asset"
+done)
+for needle in 'logo/animate' 'logo/restore' 'toBlob' 'image/webp'; do
+  case "$LJS" in
+    *"$needle"*) printf 'ok   %s\n' "台标页包含 $needle" ;;
+    *) printf 'FAIL 台标页缺少 %s\n' "$needle"; fail=1 ;;
+  esac
+done
+
 if [ "$fail" = "0" ]; then echo "台标库冒烟测试全部通过"; else echo "台标库冒烟测试有失败项"; exit 1; fi
