@@ -141,7 +141,7 @@
   - 聚合按 URL 跨源去重。
   - `/subs/{status,groups,preview}` 与 `/panel/api/subs/*` 已对齐。
   - 证据：F-020、`docs/findings/dynamic/17-subscription-merge.md`。
-- 提交：`6911fa8 feat(playlist): align subscription merge semantics with target`。
+- 提交：`66bacd9 feat(playlist): align subscription merge semantics with target`。
 - 修复 `scripts/smoke-aggregate.sh` 的新分组语义。
 
 2026-10-22 及以前：
@@ -175,9 +175,9 @@
 
 本轮已完成并推送：
 
-- `96d5f7c feat(panel)`：面板改为目标的 13 个一级分区；系统设置合并配置/状态/备份；台标与回看独立；订阅源规则/预检；EPG 手工映射/额外频道。
-- `56066c9 feat(subs)`：订阅源正文落盘 `<cache>/sub_url/*.json`，状态落盘 `<cache>/subs/status.json`；重启后按源级 TTL 命中；`cache/flush` 清正文。
-- `50ec323 fix(dash)`：proxy MPD 错令牌 → `302 error_url`；已有 `minimumUpdatePeriod` → `PT1S`；已有 `publishTime` → 当前 UTC；响应头改为 `application/dash+xml; charset=utf-8` 与 `max-age=1, s-maxage=1`。
+- `5f9d85c feat(panel)`：面板改为目标的 13 个一级分区；系统设置合并配置/状态/备份；台标与回看独立；订阅源规则/预检；EPG 手工映射/额外频道。
+- `7859b52 feat(subs)`：订阅源正文落盘 `<cache>/sub_url/*.json`，状态落盘 `<cache>/subs/status.json`；重启后按源级 TTL 命中；`cache/flush` 清正文。
+- `b101e23 fix(dash)`：proxy MPD 错令牌 → `302 error_url`；已有 `minimumUpdatePeriod` → `PT1S`；已有 `publishTime` → 当前 UTC；响应头改为 `application/dash+xml; charset=utf-8` 与 `max-age=1, s-maxage=1`。
 - V-08 收口：目标 `<P>` 新增 5 个样本（`x1/c1`、`x1/c2`、`x2/c1`、`x_3/c-4`、`ts1/c1`）；约 2005 种输入模板与主流哈希族均不匹配；判定为低影响，停止黑盒穷举。
 - 质量门：`cargo fmt --check`；237 项测试（168 单元 + 69 集成）；`pnpm build`；`smoke-panel.sh`、`smoke-logo.sh` 通过。
 - 目标清理：已删除测试分组 `x1`、`x2`、`x_3`、`gprobe`；宿主 `:19994` 源站已停止；目标容器 `rea82v09` 保留。
