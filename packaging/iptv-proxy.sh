@@ -449,6 +449,15 @@ latest_tag() {
     printf '%s' "$tag"
 }
 
+# 从 Release JSON 里挑一条与架构匹配的资产地址。
+release_asset_url() { # $1=arch $2=json
+    printf '%s\n' "$2" \
+        | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
+        | sed 's/.*"\(https[^"]*\)"/\1/' \
+        | grep -e "-$1\.tar\.gz\$" \
+        | head -n 1
+}
+
 # 查 Release 中当前架构的 tar.gz 地址。优先枚举真实资产名；
 # API 不可用时按 tag 拼地址。
 release_url() {
@@ -466,14 +475,23 @@ release_url() {
     fi
     json=$(fetch_json "$probe" 2>/dev/null) || json=
     if [ -n "$json" ]; then
-        url=$(printf '%s\n' "$json" \
-            | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
-            | sed 's/.*"\(https[^"]*\)"/\1/' \
-            | grep -e "-$arch\.tar\.gz\$" \
-            | head -n 1)
-        [ -n "$url" ] || return 1
-        printf '%s' "$url"
-        return 0
+        url=$(release_asset_url "$arch" "$json")
+        if [ -n "$url" ]; then
+            printf '%s' "$url"
+            return 0
+        fi
+        [ "$IPTV_PROXY_VERSION" = "latest" ] || return 1
+    fi
+
+    if [ "$IPTV_PROXY_VERSION" = "latest" ]; then
+        # `releases/latest` 只认正式版；只有预发布时退回最新一条。
+        list=$(fetch_json "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=30" 2>/dev/null) || list=
+        url=$(release_asset_url "$arch" "$list")
+        if [ -n "$url" ]; then
+            echo "未找到正式版，改用最新 Release：${url##*/}" >&2
+            printf '%s' "$url"
+            return 0
+        fi
     fi
 
     [ -n "$tag" ] || return 1

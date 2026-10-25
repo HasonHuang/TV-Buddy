@@ -50,7 +50,7 @@ sudo sh install.sh --version v2026.3.0
 sudo sh install.sh --version v2026.3.0 --repo HasonHuang/TV-Buddy
 ```
 
-预发布版本（tag 带 `-beta`/`-rc` 等后缀）不会被 `/releases/latest` 选中，必须用 `--version` 指定。
+预发布版本（tag 带 `-beta`/`-rc` 等后缀）不会被 GitHub 的 `/releases/latest` 选中。仓库里只有预发布时，脚本会自动退回最新一条 Release，并在下载前打印「未找到正式版，改用最新 Release：…」。
 
 ### 从发布包安装
 

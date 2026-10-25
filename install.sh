@@ -200,6 +200,17 @@ latest_tag() {
     printf '%s' "$tag"
 }
 
+# 从 Release 列表里挑一条与架构匹配的资产地址。
+# `releases/latest` 只认正式版；仓库只有预发布（tag 带 -beta/-rc）时会 404，
+# 这时退回列表里最新的一条（含预发布）。
+release_asset_url() { # $1=arch $2=json
+    printf '%s\n' "$2" \
+        | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
+        | sed 's/.*"\(https[^"]*\)"/\1/' \
+        | grep -e "-$1\.tar\.gz\$" \
+        | head -n 1
+}
+
 # 查 Release 里与当前架构匹配的 tar.gz。优先枚举真实资产名；
 # API 不可用（限流/无 curl）时按 tag 拼下载地址。
 release_url() {
@@ -219,17 +230,24 @@ release_url() {
     fi
     json=$(fetch_json "$probe" 2>/dev/null) || json=
     if [ -n "$json" ]; then
-        url=$(printf '%s\n' "$json" \
-            | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
-            | sed 's/.*"\(https[^"]*\)"/\1/' \
-            | grep -e "-$arch\.tar\.gz\$" \
-            | head -n 1)
+        url=$(release_asset_url "$arch" "$json")
         if [ -n "$url" ]; then
             printf '%s' "$url"
             return 0
         fi
-        # API 通了但没有该架构的包，说明版本/架构不对，不必再猜地址。
-        return 1
+        # 指定了版本却没有该架构的包：版本/架构不对，不必再猜地址。
+        [ "$VERSION" = "latest" ] || return 1
+    fi
+
+    if [ "$VERSION" = "latest" ]; then
+        # 没有正式版（或正式版里没有该架构的包）：退回最新一条 release，含预发布。
+        list=$(fetch_json "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=30" 2>/dev/null) || list=
+        url=$(release_asset_url "$arch" "$list")
+        if [ -n "$url" ]; then
+            echo "未找到正式版，改用最新 Release：${url##*/}" >&2
+            printf '%s' "$url"
+            return 0
+        fi
     fi
 
     [ -n "$tag" ] || return 1
