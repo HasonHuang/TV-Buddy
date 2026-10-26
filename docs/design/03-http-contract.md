@@ -237,7 +237,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | --- | --- | --- | --- |
 | POST | `/panel/api/login` | `{"username","password"}` | `{"token":"<uuid>"}`；错 → `401`；失败过多 → `429`（`locked_for_secs`） |
 | POST | `/panel/api/logout` | — | `{"ok":true}` |
-| GET | `/panel/api/status` | — | 状态 JSON（含 `version`、`entry_exts`） |
+| GET | `/panel/api/status` | — | 目标字段：`uptime_secs, cache_backend, active_sessions, online_viewers, group_count, channel_count, version, mem_rss_mb, cpu_seconds, disk_cache_mb, recording_mb, low_resource_mode, poll_interval_secs, traffic_in_bytes, traffic_out_bytes, whole_file_{committed,budget,peak,hits,fallbacks}, entry_exts{gid → ext}, cpu_cores`。附加字段：`name, bind, log_level, timezone_offset_hours, cache_disk_path`。`traffic_in_bytes` 恒 0（S-BUG-01） |
 | GET | `/panel/api/config` | — | 全量配置 JSON |
 | PUT | `/panel/api/config` | 全量配置 | `{"ok":true}`；非法 → `400` |
 | POST | `/panel/api/reload` | — | `{"ok":true}` |
@@ -314,7 +314,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 方法 | 路径 | 响应 |
 | --- | --- | --- |
-| `GET` | `/panel/api/cache/stats` | `{"backend","disk_path","entries":{"m3u8","seg_url","seg_bytes","sub_url","dash"},"bytes","playlist_cache_entries"}` |
+| `GET` | `/panel/api/cache/stats` | 目标字段：`backend, disk_bytes, m3u8_entries, segment_entries, segment_url_entries, sub_url_entries, dash_disk_bytes, timeshift_disk_bytes, recording_disk_bytes, livestream_disk_bytes`。附加字段：`disk_path, entries, bytes, playlist_cache_entries, recommend` |
 | `POST` | `/panel/api/cache/flush` | `{"ok":true,"removed":<文件数>}`；清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash`**（S-CACHE-06）；同时丢弃进程内索引与清单缓存 |
 | `GET` | `/panel/api/stats` | `{"version","uptime_secs","requests","playlists","segments","segment_hits","upstream_failures","online_window_secs","groups":[{"id","requests"}]}` |
 | `GET` | `/panel/api/logs?limit=n` | `{"total","lines":[…]}`；`limit` 上限 500，默认 200；来源为进程内环形缓冲（500 行） |
@@ -383,7 +383,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 项 | 规则 |
 | --- | --- |
-| 备份请求 | `GET /panel/api/backup?include=all|epg-scripts|resolver`；其它值回退 `all` |
+| 备份请求 | `GET /panel/api/backup?include=all\|epg-scripts\|resolver`；其它值回退 `all` |
 | 备份响应 | `200 application/gzip`；`Content-Disposition: attachment; filename="iptv-proxy-backup-YYYYmmdd-HHMMSS.tar.gz"`（UTC） |
 | 包内布局 | `iptv-proxy-backup/config.toml`、`logos/*`、`epg/scripts/*.py`、`epg/epg_map.json`、`resolvers/*.py`、`manifest.json`（`generator`/`version`/`created`/`scope`） |
 | 恢复请求 | `POST /panel/api/restore`，`Content-Type: application/gzip`，体为 tar.gz 原文；上限 64 MiB |
@@ -400,8 +400,8 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 方法 | 路径 | 响应 |
 | --- | --- | --- |
 | `GET` | `/panel/api/link-info` | `{"aliases":{},"random_id_enabled":false,"token":"","token_enabled":false,"use_alias":false}`；形状与目标一致（S-GAP-04）；Token 关闭时 `token` 为空串 |
-| `GET` | `/panel/api/security/token` | `{"enabled","ttl_hours","current","old"}`；`old` 为宽限期内的旧值 |
-| `POST` | `/panel/api/security/token/rotate` | `{"ok":true,"token":"<48hex>"}`；旧值保留 1 小时宽限（S-AUTH-09） |
+| `GET` | `/panel/api/security/token` | 目标字段：`{current_value, enabled, status{current{remaining_secs,valid,value}, old, ttl_hours}, ttl_hours}`；`status` 里的 `value` 是掩码（前 4 + `****` + 后 4）。附加字段：`current`、`old` |
+| `POST` | `/panel/api/security/token/rotate` | `{ok, new_token, expires_in_hours}`；附加字段 `token`。旧值保留 1 小时宽限（S-AUTH-09） |
 | `GET` | `/panel/api/security/ip/stats` | `{"count","banned","entries":[{"ip","requests","failures","banned","remaining_secs"}]}`，按请求数降序 |
 | `POST` | `/panel/api/security/ip/ban` | `{"ip","seconds"}`；`seconds = 0` 用默认 3600，上限 30 天；返回实际时长 |
 | `POST` | `/panel/api/security/ip/unban`<br>`POST …/ip/unban-batch` | `{"ip"}` 或 `{"ips":[…]}`；`{"ok":true,"removed":n,"requested":n}`；两个路径同义 |
@@ -500,7 +500,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/panel/api/health` | `{ok, version, uptime_secs, time, bind, groups, channels, sessions, cache, epg, security, share}` |
+| `GET` | `/panel/api/health` | 目标字段：`{enabled, entries{"<gid>/<cid>": {checked_at, consecutive_fails, error, http_status, latency_ms, ok}}}`。附加字段：`{ok, version, uptime_secs, time, bind, groups, channels, sessions, cache, epg, security, share}` |
 | `GET` | `/panel/api/dash/status` | 运行中的 DASH 会话数组；`stream_key`、`source_url`、`phase`、`segment_count`、`active_tracks` 等 |
 | `GET` | `/panel/api/dash/tracks/:gid/:cid` | 抓频道 MPD 并列出轨道；未知频道 → `404 Channel not found` |
 | `POST` | `/panel/api/dash/scan-url` | `{"url"}`；只解析，不改配置；非 HTTP(S) → `400` |
@@ -597,11 +597,11 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 | 项 | 规则 |
 | --- | --- |
-| 启用 | 频道 `livestream = true`（代理）或 `dash_timeshift = true`（DASH）；启动时或点亮后开始缓冲 |
+| 启用 | 频道 `livestream = true`（代理）。DASH 频道走 `/dash-timeshift/…`，见 §6.19 |
 | 缓冲 | 抓上游媒体清单，增量下载切片；主清单取最高码率；窗口 `timeshift_hours`，容量 `timeshift_max_gb`（0 = 不限） |
 | 参数 | `?start=<unix>&end=<unix>` 或 `?playseek=<本地 yyyymmddHHMMSS-yyyymmddHHMMSS>` |
 | 清单 | `#EXT-X-PLAYLIST-TYPE:VOD`、`#EXT-X-TARGETDURATION`、`#EXT-X-ENDLIST`；`Cache-Control: no-cache, must-revalidate` |
-| 切片 | `/{gid}/{cid}/timeshift/<16hex>.<png|gif|bmp|jpg|webp>`；图片 Content-Type；`Cache-Control: private, max-age=3600` |
+| 切片 | `/{gid}/{cid}/timeshift/<16hex>.<png\|gif\|bmp\|jpg\|webp>`；图片 Content-Type；`Cache-Control: private, max-age=3600` |
 | 越界 | 缓冲区无交集 → 落回实时清单，不报错 |
 | 会话 | 键 `gid/cid`；15 分钟无访问回收；索引在内存，重启后从空开始 |
 | 范围 | 代理频道；DASH 频道设 `dash_timeshift = true` 时，用 ffmpeg 转本地 HLS 后缓冲（需 ffmpeg 含 DASH 解复用器） |
@@ -661,6 +661,27 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | UA | 默认 Chrome/124；`user_agent` 频道覆盖分组；分组显式 `User-Agent` 头优先 |
 | 生效范围 | 清单、切片、回看、Remux、录制、DASH 回看 |
 | 客户端缓存 | 键为规范化 URL + `username` + `password`，配置热重载后按新键重建 |
+
+### 6.19 DASH 时移（P3.5 已实现）
+
+证据：F-016 §5.1（2026-10-26 目标实测）。
+
+| 项 | 规则 |
+| --- | --- |
+| 启用 | `mode = "dash"` 的分组，频道 `dash_timeshift = true` |
+| 清单 | `GET /{gid}/{cid}/dash-timeshift/{track}` 或 `…/{playlist,playlist.txt,playlist.m3u8}` |
+| 参数 | `?playseek=<本地 yyyymmddHHMMSS>-<本地 yyyymmddHHMMSS>`；缺或格式错 → `400 missing playseek` |
+| 空区间 | 不重叠、反向、起止相等 → `404 no segments in range` |
+| 未知轨道 | `404 no segments in range`（与空区间同串） |
+| 切片 | `GET /{gid}/{cid}/dash-timeshift/{track}/{段号}.{ext}`；`ext` 取 5 项图片扩展名或磁盘原名 `m4s` |
+| init | `GET …/{track}/init.{ext}`；`ext` 取 5 项图片扩展名或 `mp4` |
+| 未命中 | `404 segment not found`（全小写） |
+| 清单头 | `text/plain; charset=utf-8`；`public, max-age=3600, s-maxage=3600` |
+| 切片头 | 图片类型或 `video/mp4`；`private, max-age=3600` |
+| 清单正文 | `#EXT-X-VERSION:7`、`#EXT-X-PLAYLIST-TYPE:VOD`、`#EXT-X-TARGETDURATION`、`#EXT-X-MEDIA-SEQUENCE`（首条上游段号）、`#EXT-X-PROGRAM-DATE-TIME`（到达本机，UTC）、可选 `#EXT-X-MAP`、`#EXTINF`、`#EXT-X-ENDLIST` |
+| 非 `dash` 组 / 未知 `gid` / 未开时移 | 同样返回上面两种 `404`，**不跳 302** |
+| 落盘 | `cache/dash_timeshift/{gid}_{cid}/{index.json, init/<track>.mp4, segments/<track>/<段号>.m4s}` |
+| 保留 | `dash_timeshift_hours` 时长 + `dash_timeshift_max_gb` 容量，二者取先到者 |
 
 ## 7. 错误串对照
 

@@ -118,6 +118,8 @@ pub struct ServerCfg {
     pub catchup_tpl: String,
     pub log_level: String,
     pub trust_proxy: Vec<String>,
+    /// 低配模式开关。目标只在 `/panel/api/status` 回显，本实现同此。
+    pub low_resource_mode: bool,
     #[serde(flatten)]
     pub extra: toml::Table,
 }
@@ -134,6 +136,7 @@ impl Default for ServerCfg {
             catchup_tpl: "guonei".into(),
             log_level: "info".into(),
             trust_proxy: Vec::new(),
+            low_resource_mode: false,
             extra: toml::Table::new(),
         }
     }

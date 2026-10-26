@@ -16,6 +16,8 @@ const GRACE: Duration = Duration::from_secs(3600);
 #[derive(Debug)]
 struct Inner {
     current: String,
+    /// 当前 Token 的签发时刻。用于算 `remaining_secs`。
+    created: Instant,
     old: Option<(String, Instant)>,
 }
 
@@ -35,6 +37,7 @@ impl PlayTokenStore {
         Self {
             inner: RwLock::new(Inner {
                 current: generate(),
+                created: Instant::now(),
                 old: None,
             }),
         }
@@ -65,6 +68,7 @@ impl PlayTokenStore {
         let fresh = generate();
         inner.old = Some((inner.current.clone(), Instant::now()));
         inner.current = fresh.clone();
+        inner.created = Instant::now();
         fresh
     }
 
@@ -79,6 +83,7 @@ impl PlayTokenStore {
             .map(|value| (value, Instant::now()))
             .or_else(|| Some((inner.current.clone(), Instant::now())));
         inner.current = current;
+        inner.created = Instant::now();
         true
     }
 
@@ -90,6 +95,18 @@ impl PlayTokenStore {
             inner.current.clone(),
             inner.old.as_ref().map(|(value, _)| value.clone()),
         )
+    }
+
+    /// 当前与旧值的剩余有效期（秒）。旧值按 1 小时宽限算。
+    pub fn remaining(&self, ttl_hours: u64) -> (u64, Option<u64>) {
+        let inner = self.read();
+        let ttl = ttl_hours.max(1) * 3600;
+        let current = ttl.saturating_sub(inner.created.elapsed().as_secs());
+        let old = inner
+            .old
+            .as_ref()
+            .map(|(_, at)| 3600u64.saturating_sub(at.elapsed().as_secs()));
+        (current, old)
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, Inner> {

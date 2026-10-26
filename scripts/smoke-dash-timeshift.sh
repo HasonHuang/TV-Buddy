@@ -59,7 +59,12 @@ NOW=$(date +%s)
 SEEK="$(date -r $((NOW - 900)) +%Y%m%d%H%M%S)-$(date -r $((NOW + 60)) +%Y%m%d%H%M%S)"
 LIST="$B/dg/c1/dash-timeshift/video_240p/playlist.txt?playseek=$SEEK"
 
-CODE=$(curl -s -o "$WORK/list.m3u8" -w '%{http_code}' "$LIST")
+CODE=0
+for _ in $(seq 1 40); do
+  CODE=$(curl -s -o "$WORK/list.m3u8" -w '%{http_code}' "$LIST")
+  grep -q '#EXT-X-PLAYLIST-TYPE:VOD' "$WORK/list.m3u8" && break
+  sleep 0.5
+done
 check "时移清单 200" "200" "$CODE"
 check "VOD 类型" "1" "$(grep -c '#EXT-X-PLAYLIST-TYPE:VOD' "$WORK/list.m3u8" || true)"
 check "ENDLIST" "1" "$(grep -c '#EXT-X-ENDLIST' "$WORK/list.m3u8" || true)"

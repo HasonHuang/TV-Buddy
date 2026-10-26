@@ -11,6 +11,14 @@ import { api, getToken } from './api';
 type TokenInfo = {
   enabled: boolean;
   ttl_hours: number;
+  /** 目标字段：明文 Token。 */
+  current_value?: string;
+  status?: {
+    current?: { remaining_secs: number; valid: boolean; value: string };
+    old?: { remaining_secs: number; valid: boolean; value: string } | null;
+    ttl_hours: number;
+  };
+  /** 本实现附加字段（旧字段）。 */
   current: string;
   old: string | null;
 };
@@ -389,9 +397,15 @@ export function SecurityPage() {
           <dt>有效期</dt>
           <dd>{token ? `${token.ttl_hours} 小时` : '—'}</dd>
           <dt>当前值</dt>
-          <dd className="mono ellipsis">{token?.current ?? '—'}</dd>
+          <dd className="mono ellipsis">{token?.current_value || token?.current || '—'}</dd>
+          <dt>剩余</dt>
+          <dd>
+            {token?.status?.current
+              ? `${Math.max(0, token.status.current.remaining_secs)} 秒`
+              : '—'}
+          </dd>
           <dt>旧值（宽限）</dt>
-          <dd className="mono ellipsis">{token?.old ?? '—'}</dd>
+          <dd className="mono ellipsis">{token?.status?.old?.value ?? token?.old ?? '—'}</dd>
         </dl>
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}

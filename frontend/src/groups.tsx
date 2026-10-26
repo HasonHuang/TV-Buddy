@@ -26,6 +26,16 @@ export type Group = {
   [key: string]: unknown;
 };
 
+/** `/panel/api/health` 的单频道条目。 */
+export type HealthEntry = {
+  checked_at: number;
+  consecutive_fails: number;
+  error: string | null;
+  http_status: number | null;
+  latency_ms: number | null;
+  ok: boolean;
+};
+
 const MODES = ['proxy', 'remux', 'dash', 'redirect', 'rewrite', 'passthrough'];
 const ACCESS = ['public', 'hidden', 'open', 'archived'];
 const ACCESS_TONE: Record<string, string> = {
@@ -130,20 +140,30 @@ function PrefetchBadge({ raw }: { raw: unknown }) {
 /**
  * 频道行的配置型徽章（`p02-groups.png`）。
  *
- * 这三项都只由配置决定，不需要运行时数据：
  * - `tvg-id` / `Logo`：频道带了 EPG 标识或台标；
  * - `常驻`：`livestream = true`，服务启动了本地回看缓冲；
  * - `全轨道`：DASH 频道未选子集轨道（`selected_tracks` 为空）。
  *
- * 目标的绿点（可用性）与 `异常`（冷却中）需要运行时数据，
- * 本实现的 `/panel/api/health` 没有逐频道字段，见 `07-coverage-and-plan.md` §3.B3。
+ * 运行型徽章来自 `/panel/api/health` 的 `entries`：
+ * - 绿点：最近一次探测成功；
+ * - `异常`：最近一次探测失败。
  */
-function ChannelBadges({ group, channel }: { group: Group; channel: Channel }) {
+function ChannelBadges({
+  group,
+  channel,
+  health,
+}: {
+  group: Group;
+  channel: Channel;
+  health?: HealthEntry;
+}) {
   const tvgId = channel.tvg_id ?? channel.tvg_name;
   const logo = channel.logo ?? channel.tvg_logo;
   const tracks = channel.selected_tracks ?? [];
   return (
     <>
+      {health?.ok === true && <Badge tone="ok">●</Badge>}
+      {health?.ok === false && <Badge tone="warn">异常</Badge>}
       {typeof tvgId === 'string' && tvgId !== '' && <Badge tone="muted">tvg-id</Badge>}
       {typeof logo === 'string' && logo !== '' && <Badge tone="muted">Logo</Badge>}
       {channel.livestream === true && <Badge tone="info">常驻</Badge>}
@@ -168,10 +188,14 @@ export function GroupsPage() {
   const [importing, setImporting] = useState<{ kind: 'json' | 'm3u'; force: boolean } | null>(null);
   const [importText, setImportText] = useState('');
   const [m3uMode, setM3uMode] = useState<'append' | 'merge' | 'replace'>('append');
+  const [health, setHealth] = useState<Record<string, HealthEntry>>({});
 
   const load = useCallback(async () => {
     try {
       setGroups(await api<Group[]>('GET', '/groups/export'));
+      // 逐频道探测结果；未启用探测时为空对象。
+      const body = await api<{ entries?: Record<string, HealthEntry> }>('GET', '/health');
+      setHealth(body.entries ?? {});
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     }
@@ -520,7 +544,11 @@ export function GroupsPage() {
                       {channel.name || channel.id}
                       <div className="muted mono">{channel.id}</div>
                       <PrefetchBadge raw={channel.prefetch} />
-                      <ChannelBadges group={group} channel={channel} />
+                      <ChannelBadges
+                        group={group}
+                        channel={channel}
+                        health={health[`${group.id}/${channel.id}`]}
+                      />
                     </td>
                     <td className="mono ellipsis">{channel.url}</td>
                     <td className="mono ellipsis">

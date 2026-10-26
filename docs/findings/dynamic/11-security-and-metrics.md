@@ -55,6 +55,13 @@ POST /panel/api/security/token/rotate → {"ok":true,"new_token":"<48hex>","expi
 - `token_ttl_hours=24`；关闭时 `enabled:false`、`current_value:""`。
 - `GET /panel/api/link-info` → `{"aliases":{},"random_id_enabled":false,"token":"","token_enabled":false,"use_alias":false}`（别名与随机 ID 面）。
 
+复验补充（2026-10-27）：
+
+- `rotate` 的响应还有 `expires_in_hours`（= `token_ttl_hours`）。
+- `status.current.remaining_secs` 从 86398 起递减；`status.old.remaining_secs` 从 3598 起递减。
+- 关闭 Token 时 `enabled=false`、`current_value=""`。
+- 本实现已对齐上述字段，并保留旧的 `current`/`old` 作为附加字段。
+
 ## 3. IP 封禁 / 解封（S-AUTH-10 新）
 
 | 操作 | 请求 | 响应 |
@@ -157,6 +164,46 @@ limit_url="…/limit.mp4", ban_url="…/Ban.mp4", whitelist=[]
 ```
 
 注：`traffic_in_bytes=0` 恒为 0（与 S-BUG-01 一致），`traffic_out_bytes` 有值。
+
+### 6.1 复验（2026-10-27，容器 `rea82v09`）
+
+样本（`token_enabled` 分两种）：
+
+```json
+{"uptime_secs":421,"cache_backend":"disk","active_sessions":1,"online_viewers":0,
+ "group_count":9,"channel_count":10,"version":"0.8.2","mem_rss_mb":43,
+ "cpu_seconds":0.0,"disk_cache_mb":0,"recording_mb":0,"low_resource_mode":false,
+ "poll_interval_secs":10,"traffic_in_bytes":0,"traffic_out_bytes":50,
+ "whole_file_committed":0,"whole_file_budget":536870912,"whole_file_peak":0,
+ "whole_file_hits":0,"whole_file_fallbacks":0,"entry_exts":{"<gid>":".m3u8"},"cpu_cores":10}
+```
+
+补充事实：
+
+| 项 | 目标行为 |
+| --- | --- |
+| `active_sessions` | = **面板会话数**。每登录 1 次 +1；播放请求不改变 |
+| `online_viewers` | = 窗口内**带播放 Token 的不同客户端 IP 数** |
+| 同 IP 重复播放 | `online_viewers` 不增 |
+| 换 `X-Forwarded-For` 再播 | `online_viewers` +1 |
+| `token_enabled=false` 时播放 | `online_viewers` 恒 0 |
+| `entry_exts` | `gid → ".m3u8"`（按分组 `format` 决定） |
+| `whole_file_budget_mb=0` | 报 `536870912`（512 MB） |
+| `poll_interval_secs` | 固定 10，无对应配置键 |
+| `cpu_cores` | 宿主可用核数 |
+
+`/panel/api/cache/stats` 实测字段：
+`backend, disk_bytes, m3u8_entries, segment_entries, segment_url_entries, sub_url_entries, dash_disk_bytes, timeshift_disk_bytes, recording_disk_bytes, livestream_disk_bytes`。
+
+`/panel/api/health` 的条目形状：
+
+```json
+{"checked_at":1793028438,"consecutive_fails":1,"error":"连接失败","http_status":null,"latency_ms":null,"ok":false}
+```
+
+- 连接层失败：`error="连接失败"`，`http_status` 与 `latency_ms` 均为 `null`。
+- 成功：`error=null`，`latency_ms` 为毫秒整数。
+- 同一轮探测的所有条目 `checked_at` 相同。
 
 ## 7. 健康探测出口（形）
 

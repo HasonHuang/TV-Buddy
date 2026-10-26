@@ -64,8 +64,12 @@ pub struct AppState {
     pub cache_dir: PathBuf,
     /// 运行指标。
     pub stats: Stats,
+    /// 出网字节、在线观众与资源占用。
+    pub metrics: Arc<crate::metrics::Metrics>,
     /// 看门狗状态（冷却）。
     pub watchdog: Watchdog,
+    /// 逐频道上游健康探测结果。
+    pub health: crate::health::Health,
     /// 节目单状态。
     pub epg: crate::epg::EpgState,
     /// IP 统计与封禁。
@@ -123,7 +127,9 @@ impl AppState {
             epg: crate::epg::EpgState::load(&cache_dir),
             cache_dir,
             stats: Stats::default(),
+            metrics: Arc::new(crate::metrics::Metrics::new()),
             watchdog: Watchdog::new(),
+            health: crate::health::Health::new(),
             ip_guard: crate::auth::IpGuard::new(),
             login_guard: crate::auth::LoginGuard::new(),
             unban_quota: crate::auth::UnbanQuota::new(),

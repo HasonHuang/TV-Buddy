@@ -771,6 +771,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "hex",
+ "http-body-util",
  "image-webp",
  "mime_guess",
  "notify",

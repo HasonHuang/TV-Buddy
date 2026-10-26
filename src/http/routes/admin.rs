@@ -18,22 +18,51 @@ use crate::{
 const FLUSH_DIRS: [&str; 4] = ["m3u8", "seg_url", "seg_bytes", "sub_url"];
 
 /// `GET /panel/api/cache/stats`。
+///
+/// 字段面按目标 v0.8.2 实测（F-021 §6）。附加字段 `entries`、`recommend`
+/// 供本实现的面板使用。
 pub async fn cache_stats(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
 ) -> Json<Value> {
     let mut entries = serde_json::Map::new();
-    let mut bytes = 0u64;
-    for name in ["m3u8", "seg_url", "seg_bytes", "sub_url", "dash"] {
+    let mut disk_bytes = 0u64;
+    let mut counts: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
+    for name in [
+        "m3u8",
+        "seg_url",
+        "seg_bytes",
+        "sub_url",
+        "dash",
+        "timeshift",
+        "dash_timeshift",
+        "recordings",
+        "livestream",
+    ] {
         let (files, size) = dir_usage(&state.cache_dir.join(name));
-        entries.insert(name.to_string(), json!(files));
-        bytes += size;
+        counts.insert(name, files);
+        disk_bytes += size;
+        if matches!(name, "m3u8" | "seg_url" | "seg_bytes" | "sub_url" | "dash") {
+            entries.insert(name.to_string(), json!(files));
+        }
     }
+    let dir_bytes = |name: &str| dir_usage(&state.cache_dir.join(name)).1;
     Json(json!({
-        "backend": "disk",
+        // 目标字段
+        "backend": state.snapshot().cache.backend,
+        "disk_bytes": disk_bytes,
+        "m3u8_entries": counts.get("m3u8").copied().unwrap_or(0),
+        "segment_entries": counts.get("seg_bytes").copied().unwrap_or(0),
+        "segment_url_entries": counts.get("seg_url").copied().unwrap_or(0),
+        "sub_url_entries": counts.get("sub_url").copied().unwrap_or(0),
+        "dash_disk_bytes": dir_bytes("dash"),
+        "timeshift_disk_bytes": dir_bytes("timeshift") + dir_bytes("dash_timeshift"),
+        "recording_disk_bytes": dir_bytes("recordings"),
+        "livestream_disk_bytes": dir_bytes("livestream"),
+        // 本实现附加字段
         "disk_path": state.cache_dir.display().to_string(),
         "entries": Value::Object(entries),
-        "bytes": bytes,
+        "bytes": disk_bytes,
         "playlist_cache_entries": state.playlist_cache_entries(),
         // 推荐 TTL / 磁盘上限（被动实测，见 `docs/design/06-low-spec-optimization.md` §3）。
         "recommend": crate::cache_gc::recommendation(&state),
@@ -121,7 +150,25 @@ pub async fn count_request(
 ) -> axum::response::Response {
     let gid = group_of(request.uri().path()).unwrap_or_default();
     state.stats.record_request(&gid);
-    next.run(request).await
+    let response = next.run(request).await;
+    count_out(state, response)
+}
+
+/// 把响应体包一层，边发边累加出网字节。
+///
+/// 目标 `traffic_out_bytes` 随响应增长（F-021 §6）。不缓冲正文。
+fn count_out(state: Arc<AppState>, response: axum::response::Response) -> axum::response::Response {
+    use axum::body::Body;
+    use http_body_util::BodyExt;
+    let (parts, body) = response.into_parts();
+    let metrics = state.metrics.clone();
+    let counted = body.map_frame(move |frame| {
+        if let Some(data) = frame.data_ref() {
+            metrics.add_out(data.len() as u64);
+        }
+        frame
+    });
+    axum::response::Response::from_parts(parts, Body::new(counted))
 }
 
 /// 从路径取分组 id。面板、静态资源与公开文件不算。

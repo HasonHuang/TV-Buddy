@@ -94,25 +94,61 @@ pub async fn logout(
 
 /// `GET /panel/api/status`。
 ///
-/// M0 只报本实现自身状态。完整字段面见 `docs/design/03-http-contract.md`（E3）。
+/// 字段面按目标 v0.8.2 实测（F-021 §6）。要点：
+/// - `traffic_in_bytes` 目标恒为 0（S-BUG-01），本实现固定输出 0。
+/// - `online_viewers` 只统计窗口内带播放 Token 的请求。
+/// - `entry_exts` 是 `gid → ".m3u8" | ".mpd"` 的映射，不是固定两项。
 pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let cfg = state.snapshot();
     let channels: usize = cfg.groups.iter().map(|group| group.channels.len()).sum();
+    let disk = state.metrics.disk(&state.cache_dir);
+    let entry_exts: serde_json::Map<String, Value> = cfg
+        .groups
+        .iter()
+        .map(|group| {
+            let ext = if group.format == "mpd" {
+                ".mpd"
+            } else {
+                ".m3u8"
+            };
+            (group.id.clone(), json!(ext))
+        })
+        .collect();
 
     Json(json!({
-        "name": "iptv-proxy",
-        "version": state.version(),
         "uptime_secs": state.uptime_secs(),
+        "cache_backend": cfg.cache.backend,
+        "active_sessions": state.sessions.len(),
+        "online_viewers": state.metrics.online(cfg.stats.online_window_secs),
+        "group_count": cfg.groups.len(),
+        "channel_count": channels,
+        "version": state.version(),
+        "mem_rss_mb": crate::metrics::rss_mb(),
+        "cpu_seconds": crate::metrics::cpu_seconds(),
+        "disk_cache_mb": disk.cache_mb,
+        "recording_mb": disk.recording_mb,
+        "low_resource_mode": cfg.server.low_resource_mode,
+        // 目标没有对应配置键，固定 10。
+        "poll_interval_secs": 10,
+        // 目标缺陷：回源流量恒 0，不修（S-BUG-01）。
+        "traffic_in_bytes": 0,
+        "traffic_out_bytes": state.metrics.out_bytes(),
+        // 整文件缓存未实现，计数恒 0；预算按配置换算。
+        "whole_file_committed": 0,
+        "whole_file_budget": crate::metrics::whole_file_budget(
+            cfg.cache.dash.whole_file_budget_mb,
+        ),
+        "whole_file_peak": 0,
+        "whole_file_hits": 0,
+        "whole_file_fallbacks": 0,
+        "entry_exts": entry_exts,
+        "cpu_cores": crate::metrics::cpu_cores(),
+        // 以下为本实现附加字段，目标没有。便于本地面板排障。
+        "name": "iptv-proxy",
         "bind": cfg.server.bind,
         "log_level": cfg.server.log_level,
         "timezone_offset_hours": cfg.server.timezone_offset_hours,
-        "groups": cfg.groups.len(),
-        "channels": channels,
-        "sessions": state.sessions.len(),
-        "cache_backend": cfg.cache.backend,
         "cache_disk_path": cfg.cache.disk_path,
-        // 入口扩展名由后端计算，前端只查表（S-URL-01）。
-        "entry_exts": { "hls": ".m3u8", "mpd": ".mpd" },
     }))
 }
 

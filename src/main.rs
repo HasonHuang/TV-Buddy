@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
     iptv_proxy::cache_gc::spawn(state.clone());
     iptv_proxy::timeshift::warm(&state);
     state.dash_timeshift.warm(&state);
+    iptv_proxy::health::spawn(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind)
         .await

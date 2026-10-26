@@ -54,9 +54,9 @@
 
 | # | 缺口 | 依据 | 做法 |
 | --- | --- | --- | --- |
-| B1 | `dashboard` 缺实时指标 | `/panel/api/status` 现只返回 name/version/uptime/bind/log_level/groups/channels/sessions/cache_*（`src/http/routes/panel.rs`） | 补采集：进程内存与 CPU、下行·回源、上行·出网、整盘内存峰值；`whole_file_*` 与 `traffic_in_bytes` 按目标口径（注意 S-BUG-01：目标回源流量恒 0，不要"修"） |
-| B2 | `status` 缺 `online_viewers` 等字段 | 同上 | `/panel/api/stats` **目前也没有**在线观众数据：只有请求计数、分组请求数，`online_window_secs` 只是配置回显。需要先加滑动窗口统计，再汇入 status 或由前端合并两个接口 |
-| B3 | 频道行绿点与 `异常` 徽章缺数据源 | `health` 只给汇总计数；`watchdog` 有逐频道失败/冷却状态但无读取出口 | 给 `health` 或新端点补逐频道健康（`watchdog` 的 failures/冷却 + DASH 会话在跑），前端据此画点与 `异常` |
+| B1 ✅ | ~~`dashboard` 缺实时指标~~ **已完成**（2026-10-27） | `src/metrics.rs`；`/panel/api/status` 补齐目标字段 | `traffic_in_bytes` 按目标口径恒 0（S-BUG-01） |
+| B2 ✅ | ~~`status` 缺 `online_viewers`~~ **已完成** | 滑动窗口按**客户端 IP** 去重 | 只在带播放 Token 时计数（目标实测） |
+| B3 ✅ | ~~频道行绿点与 `异常`~~ **已完成** | `src/health.rs` 逐频道探测；`/panel/api/health` 发 `entries` | 前端画绿点与 `异常` |
 | B5 | 面板未接线的端点 | 端点都在 `src/http.rs`，前端无调用：`assets/convert`、`dash/{status,tracks,scan-url}`、`epg/{match-report,scripts,script,script-delete,suggest,search,source-channels,tz-preview,viewer-channels}`、`epg/translate/{models,probe}`、`link-info`、`security/ip/unban-batch`、`subs/status`、`groups/:gid/export`、`logo/list`、`resolver/remove`；另有分组工具栏「多选」 | 纯接线，可分批。清单与逐项说明见 `PROGRESS.md` §3.2 |
 | B4 ✅ | ~~DASH 回看清单~~ **已实现**（2026-10-26） | 新模块 `src/dash_timeshift.rs`；路由在 `wildcard()` 的 `dash-timeshift/` 前缀分支；落盘 `cache/dash_timeshift/{gid}_{cid}/` | 目标契约见 `docs/findings/dynamic/10` §5.1。同一夹具对拍 18 项，差异 1 项（音轨名，已登记 `PROGRESS.md` §3.3） |
 
@@ -89,7 +89,7 @@ CENC/ClearKey 解密、DASH 多 CDN 故障切换、`l1/l2` 限流复刻、`cache
 | --- | --- | --- | --- |
 | **P1** | A1–A10（面板接线，零后端）+ A11 的配置型徽章 | `scripts/smoke-settings.sh` 扩断言；`05` §4.2 逐行复核；`pnpm build` + 相关冒烟 | 中（11 项 UI）。进度：A1–A10 全部完成，A11 完成配置型徽章（绿点/`异常` 转 B3） |
 | **P2** | ✅ C1/C2（已定案并更正 `08` `S-BUG-02`、登记 `D-006`）、C4（已定：不做） | 文档改动已 diff 复核；证据是 `p02-groups.png` | 低（已完成） |
-| **P3** | B1/B2（指标采集 + 概览页）+ B3（逐频道健康） | 新增 smoke 断言 status 字段；与目标字段清单（`docs/findings/dynamic/11-security-and-metrics.md` §6）逐字段对照 | 高（新采集） |
+| **P3** ✅ | B1/B2（指标采集）+ B3（逐频道健康）**已完成**（2026-10-27） | 三张接口的字段集合与目标比对，缺失 0 项 | 已完成 |
 | **P3.5** ✅ | B4（DASH 回看播放路由）**已完成**（2026-10-26） | `smoke-dash-timeshift.sh` 13 项；与目标同夹具对拍 18 项 | 已完成 |
 | **P4** | C3 之外的深化（如需要） | 需先能复现目标环境 | 视情况 |
 

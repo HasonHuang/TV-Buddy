@@ -5,8 +5,19 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { Badge, useToast } from './ui';
 
+type HealthEntry = {
+  checked_at: number;
+  consecutive_fails: number;
+  error: string | null;
+  http_status: number | null;
+  latency_ms: number | null;
+  ok: boolean;
+};
+
 type Health = {
   ok: boolean;
+  enabled?: boolean;
+  entries?: Record<string, HealthEntry>;
   version: string;
   uptime_secs: number;
   time: number;
@@ -129,6 +140,32 @@ export function SystemPage() {
             ))}
           </dd>
         </dl>
+      </div>
+
+      <div className="card">
+        <h2>频道探测</h2>
+        {health?.enabled === false ? (
+          <p className="muted">未启用（`[health].enabled = false`）。</p>
+        ) : (
+          <dl>
+            {Object.entries(health?.entries ?? {}).map(([key, entry]) => (
+              <div key={key} style={{ display: 'contents' }}>
+                <dt className="mono">{key}</dt>
+                <dd>
+                  <Badge tone={entry.ok ? 'ok' : 'warn'}>
+                    {entry.ok ? '正常' : '异常'}
+                  </Badge>{' '}
+                  <span className="muted">
+                    {entry.latency_ms === null ? '—' : `${entry.latency_ms} ms`}
+                    {entry.http_status === null ? '' : ` / HTTP ${entry.http_status}`}
+                    {entry.error ? ` / ${entry.error}` : ''}
+                    {entry.consecutive_fails > 0 ? ` / 连败 ${entry.consecutive_fails}` : ''}
+                  </span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
       </div>
 
       {node}

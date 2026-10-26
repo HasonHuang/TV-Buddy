@@ -133,7 +133,10 @@ pub async fn timeshift_status(
     }))
 }
 
-/// `GET /panel/api/health`——本机健康摘要。
+/// `GET /panel/api/health`——逐频道探测结果与本机摘要。
+///
+/// 目标形状是 `{enabled, entries{"<gid>/<cid>": {...}}}`（F-021 §7）。
+/// 末尾若干字段是本实现附加，供面板系统页使用。
 pub async fn health(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
     let channels: usize = config.groups.iter().map(|group| group.channels.len()).sum();
@@ -143,6 +146,10 @@ pub async fn health(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
         .map(|value| value.as_secs())
         .unwrap_or(0);
     Json(json!({
+        // 目标字段
+        "enabled": config.health.enabled,
+        "entries": state.health.snapshot(),
+        // 本实现附加字段
         "ok": true,
         "version": state.version(),
         "uptime_secs": state.uptime_secs(),

@@ -63,9 +63,9 @@
 
 | # | 缺口 | 现状 | 做法 |
 | --- | --- | --- | --- |
-| B1 | 概览页实时指标 | `/panel/api/status` 只返回 12 个字段：`name`、`version`、`uptime_secs`、`bind`、`log_level`、`timezone_offset_hours`、`groups`、`channels`、`sessions`、`cache_backend`、`cache_disk_path`、`entry_exts`。没有 CPU、进程内存、下行·回源、上行·出网、整盘内存峰值。**采集层不存在** | 新增采集：进程 RSS 与 CPU、按分组流量计数、整盘峰值。`traffic_in_bytes` 按目标口径恒 0，不要"修"（S-BUG-01） |
-| B2 | `status` 缺 `online_viewers` | `/panel/api/stats` 只返回 `requests`、`playlists`、`segments`、`segment_hits`、`upstream_failures`、`online_window_secs`、`groups[].requests`。`online_window_secs` 只是配置回显，**没有在线观众数据** | 需要按 Token 的播放请求做滑动窗口统计。`/stats` 与 `/status` 都要暴露 |
-| B3 | 频道行绿点与 `异常` 徽章 | `/panel/api/health` 只有汇总计数。`watchdog` 有逐频道失败与冷却状态，但没有读取出口 | 给 `health` 或新端点补逐频道健康。前端据此画点与 `异常` |
+| B1 ✅ | 概览页实时指标 | **已完成**（2026-10-27）。见 §3.1.2 | 新增 `src/metrics.rs` |
+| B2 ✅ | `online_viewers` | **已完成**。见 §3.1.2 | 按客户端 IP 的滑动窗口 |
+| B3 ✅ | 频道行绿点与 `异常` 徽章 | **已完成**。见 §3.1.2 | 新增 `src/health.rs`，前端读 `entries` |
 
 B4 已完成。见 §3.1.1。
 
@@ -88,6 +88,43 @@ B4 已完成。见 §3.1.1。
 对拍结果：同一份动态 MPD 与同一时间窗，目标与本实现逐项比对 18 项，差异 1 项。差异是音轨名，见 §3.3。
 
 质量门：302 项测试通过（215 单元 + 87 契约）。`smoke-dash-timeshift.sh` 13 项全部通过。
+
+### 3.1.2 B1 + B2 + B3 完成记录（2026-10-27）
+
+目标 `/panel/api/status`、`/panel/api/cache/stats`、`/panel/api/health` 已实测（容器 `rea82v09`）。
+
+新增两个模块：
+
+| 模块 | 职责 |
+| --- | --- |
+| `src/metrics.rs` | 出网字节、在线观众窗口、进程 RSS 与 CPU、磁盘占用采样 |
+| `src/health.rs` | 逐频道上游探测与结果缓存 |
+
+实现要点：
+
+1. `/panel/api/status` 补齐目标字段：`mem_rss_mb`、`cpu_seconds`、`cpu_cores`、`disk_cache_mb`、`recording_mb`、`low_resource_mode`、`poll_interval_secs`、`traffic_in_bytes`、`traffic_out_bytes`、`whole_file_*`、`online_viewers`、`active_sessions`、`group_count`、`channel_count`。
+2. `traffic_in_bytes` 固定 0。目标同样恒 0，不修（S-BUG-01）。
+3. `traffic_out_bytes` 由中间件累计。响应体边发边计数，不缓冲正文。
+4. `online_viewers` = 窗口内**带播放 Token 的不同客户端 IP 数**。实测依据：
+   - 同 IP 重复播放不增；
+   - 换 `X-Forwarded-For` 增 1；
+   - `token_enabled=false` 时恒 0。
+5. `active_sessions` = 面板会话数。实测：登录 1 次为 1，播放请求不改变。
+6. `entry_exts` 是 `gid → ".m3u8" | ".mpd"` 的映射，不是固定两项。
+7. `/panel/api/cache/stats` 补齐目标字段：`disk_bytes`、`m3u8_entries`、`segment_entries`、`segment_url_entries`、`sub_url_entries`、`dash_disk_bytes`、`timeshift_disk_bytes`、`recording_disk_bytes`、`livestream_disk_bytes`。
+8. `/panel/api/health` 返回 `{enabled, entries{"<gid>/<cid>": {checked_at, consecutive_fails, error, http_status, latency_ms, ok}}}`。
+9. 探测按 `[health]` 的 `interval_secs`、`timeout_secs`、`concurrency` 运行。连接失败时 `error="连接失败"`，`latency_ms=null`。两者与目标实测一致。
+10. 前端接线：
+    - 分组页频道行按 `entries` 画绿点与 `异常`。
+    - 系统页新增「频道探测」卡片。
+11. 顺带对齐 `GET /panel/api/security/token` 与 `POST /panel/api/security/token/rotate` 的目标字段：
+    - 前者补 `current_value`、`status.current/old`（掩码值 + 剩余秒数）。
+    - 后者补 `new_token`、`expires_in_hours`。
+    - 旧字段保留，面板与旧调用方不受影响。
+
+对拍结果：三张接口的字段集合比对，目标字段缺失 0 项。本实现另外保留若干附加字段，供本地面板使用。
+
+质量门：309 项测试通过（222 单元 + 87 契约）。`pnpm build` 通过。
 
 ### 3.2 面板未接线（端点已在，前端无调用）
 
@@ -230,10 +267,9 @@ DASH：
 
 ## 6. 推进顺序
 
-1. **B1 + B2 + B3**：指标采集。三项共用采集层，一起做。
-2. **面板未接线**（§3.2）：只差接线，可分批做。
-3. **T0 与真机验收**：在 CDN 面板按 `06` §2 配五处。在目标 VPS 上跑 S4/S6。
-4. 每项完成后运行完整质量门。更新本文件与对应 `docs/`。提交并立即推送 `rust` 分支。
+1. **面板未接线**（§3.2）：只差接线，可分批做。
+2. **T0 与真机验收**：在 CDN 面板按 `06` §2 配五处。在目标 VPS 上跑 S4/S6。
+3. 每项完成后运行完整质量门。更新本文件与对应 `docs/`。提交并立即推送 `rust` 分支。
 
 ---
 
