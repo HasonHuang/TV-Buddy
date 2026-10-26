@@ -130,12 +130,23 @@ B4 已完成。见 §3.1.1。
 
 下表由静态检索得出。前端用模板字面量拼出的路径已人工核对，不计入缺口。
 
+已接线（2026-10-27）：
+
+| 端点 | 面板位置 |
+| --- | --- |
+| `GET /panel/api/dash/status` | 系统页「DASH 会话」卡片 |
+| `GET /panel/api/dash/tracks/:gid/:cid` | 分组页 DASH 频道的「轨道」按钮（弹窗） |
+| `POST /panel/api/dash/scan-url` | 系统页「DASH 会话」卡片的「扫描轨道」 |
+| `GET /panel/api/groups/:gid/export` | 分组卡片工具栏「导出」 |
+| `POST /panel/api/resolver/remove` | 系统页「解析脚本」的「删除」 |
+| `POST /panel/api/security/ip/unban-batch` | 安全页「批量解封」 |
+| `POST /panel/api/security/ip/ban`（多地址） | 安全页支持逗号或换行分隔多个地址 |
+
+仍未接线：
+
 | 端点 | 面板应做的事 |
 | --- | --- |
 | `POST /panel/api/assets/convert` | 素材转换：ffmpeg 可用时转换上游地址。前端只显示 ffmpeg 状态 |
-| `GET /panel/api/dash/status` | 显示运行中的 DASH 会话 |
-| `GET /panel/api/dash/tracks/:gid/:cid` | 显示频道轨道列表 |
-| `POST /panel/api/dash/scan-url` | 扫描任意 MPD 地址并列出轨道 |
 | `GET /panel/api/epg/match-report` | 显示匹配报告。前端只调台标的 `/logo/match-report`。**注意**：目标是 `text/plain` 表格，面板 JS 期望 JSON。见 §3.3 |
 | `GET/POST /panel/api/epg/{scripts,script,script-delete}` | 管理 EPG 采集脚本 |
 | `GET /panel/api/epg/suggest/:gid/:cid` | 频道匹配建议 |
@@ -144,10 +155,7 @@ B4 已完成。见 §3.1.1。
 | `GET /panel/api/epg/viewer-channels` | 公开查看器的频道集合 |
 | `GET /panel/api/epg/translate/{models,probe}` | 列出翻译模型、探测引擎 |
 | `GET /panel/api/link-info` | 审计播放链接与 Token 剩余期 |
-| `POST /panel/api/security/ip/unban-batch` | 批量解封 |
 | `GET /panel/api/subs/status` | 显示订阅源状态。前端只调 `/subs/preview` 与 `/subs/groups` |
-| `GET /panel/api/groups/:gid/export` | 单个分组的 JSON 导出。前端只有"导出全部" |
-| `POST /panel/api/resolver/remove` | 删除解析脚本。前端只有列表与上传 |
 | `GET /panel/api/logo/list` | 带鉴权的台标列表。前端走公开的 `/logo/api/list` 并自行补报告 |
 | 分组工具栏「多选」 | 目标有多选与批量操作。本实现没有 |
 

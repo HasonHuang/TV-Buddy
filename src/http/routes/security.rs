@@ -138,23 +138,42 @@ pub async fn ip_ban(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
-    let ip = body
-        .get("ip")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if ip.is_empty() {
-        return Err(ApiError::bad_request("ip 不能为空"));
+    // 目标用 `{"ips":[…],"secs":N}`；本实现同时接受单数 `ip` 与 `seconds`。
+    let mut targets: Vec<String> = Vec::new();
+    if let Some(ip) = body.get("ip").and_then(Value::as_str) {
+        targets.push(ip.trim().to_string());
     }
-    let seconds = body.get("seconds").and_then(Value::as_u64).unwrap_or(0);
-    let applied = state.ip_guard.ban(&ip, seconds);
+    if let Some(ips) = body.get("ips").and_then(Value::as_array) {
+        for ip in ips.iter().filter_map(Value::as_str) {
+            targets.push(ip.trim().to_string());
+        }
+    }
+    targets.retain(|ip| !ip.is_empty());
+    targets.dedup();
+    if targets.is_empty() {
+        return Err(ApiError::bad_request("Missing ips array"));
+    }
+    let seconds = body
+        .get("secs")
+        .and_then(Value::as_u64)
+        .or_else(|| body.get("seconds").and_then(Value::as_u64))
+        .unwrap_or(0);
+    let mut results = Vec::with_capacity(targets.len());
+    let mut applied = 0;
+    for ip in &targets {
+        let secs = state.ip_guard.ban(ip, seconds);
+        applied = secs;
+        results.push(json!({ "ip": ip, "ok": true }));
+    }
     Ok(Json(json!({
         "ok": true,
-        "ip": ip,
-        "seconds": applied,
+        "results": results,
+        "secs": applied,
         "max_seconds": MAX_BAN_SECS,
         "default_seconds": DEFAULT_BAN_SECS,
+        // 单条封禁的旧字段。
+        "ip": targets.first().cloned().unwrap_or_default(),
+        "seconds": applied,
     })))
 }
 
@@ -175,7 +194,8 @@ pub async fn ip_unban(
     }
     targets.retain(|ip| !ip.is_empty());
     if targets.is_empty() {
-        return Err(ApiError::bad_request("ip 或 ips 不能为空"));
+        // 目标原文（F-021 §3）。
+        return Err(ApiError::bad_request("Missing ip"));
     }
     let mut removed = 0usize;
     for ip in &targets {

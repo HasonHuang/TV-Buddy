@@ -31,6 +31,16 @@ type Health = {
 
 type ResolverList = { count: number; scripts: { name: string; bytes: number }[] };
 
+/** `/panel/api/dash/status` 的单条会话。 */
+type DashSession = {
+  stream_key: string;
+  phase: string;
+  segment_count: number;
+  last_error: string | null;
+  uptime_secs: number;
+  active_tracks?: { name: string; kind: string }[];
+};
+
 type Timeshift = {
   enabled: boolean;
   ready: boolean;
@@ -51,30 +61,69 @@ export function SystemPage() {
   const [ffmpeg, setFfmpeg] = useState<{ installed: boolean; version: string | null } | null>(null);
   const [resolvers, setResolvers] = useState<ResolverList | null>(null);
   const [timeshift, setTimeshift] = useState<Timeshift | null>(null);
-  const { node, err } = useToast();
+  const [dash, setDash] = useState<DashSession[]>([]);
+  const [scanUrl, setScanUrl] = useState('');
+  const [scan, setScan] = useState<{ kind: string; count: number; tracks: unknown[] } | null>(
+    null,
+  );
+  const { node, ok, err } = useToast();
 
   const load = useCallback(async () => {
     try {
-      const [nextHealth, nextFfmpeg, nextResolvers, nextTimeshift] = await Promise.all([
+      const [nextHealth, nextFfmpeg, nextResolvers, nextTimeshift, nextDash] = await Promise.all([
         api<Health>('GET', '/health'),
         api<{ installed: boolean; version: string | null }>('GET', '/assets/ffmpeg-status'),
         api<ResolverList>('GET', '/resolver/scripts'),
         api<Timeshift>('GET', '/dash-timeshift/status'),
+        api<DashSession[]>('GET', '/dash/status').catch(() => []),
       ]);
       setHealth(nextHealth);
       setFfmpeg(nextFfmpeg);
       setResolvers(nextResolvers);
       setTimeshift(nextTimeshift);
+      setDash(Array.isArray(nextDash) ? nextDash : []);
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     }
   }, [err]);
+
+  /** 删除解析脚本：`POST /resolver/remove {name}`。 */
+  const removeResolver = async (name: string) => {
+    if (!window.confirm(`确认删除解析脚本「${name}」？`)) return;
+    try {
+      await api('POST', '/resolver/remove', { name });
+      ok('解析脚本已删除');
+      await load();
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const buffered = timeshift?.channels.reduce((sum, channel) => sum + channel.segments, 0) ?? 0;
+
+  /** 扫描任意 MPD：`POST /dash/scan-url {url}`，只解析不改配置。 */
+  const scanMpd = async () => {
+    const url = scanUrl.trim();
+    if (url === '') {
+      err('请填写 MPD 地址');
+      return;
+    }
+    try {
+      const data = await api<{ kind: string; count: number; tracks: unknown[] }>(
+        'POST',
+        '/dash/scan-url',
+        { url },
+      );
+      setScan(data);
+      ok(`已解析 ${data.count} 条轨道`);
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   return (
     <>
@@ -134,12 +183,75 @@ export function SystemPage() {
           <dd>
             {resolvers ? `${resolvers.count} 个` : '—'}
             {resolvers?.scripts.map((script) => (
-              <div key={script.name} className="muted">
-                {script.name}（{Math.round(script.bytes / 1024)} KB）
+              <div key={script.name} className="row between">
+                <span className="muted">
+                  {script.name}（{Math.round(script.bytes / 1024)} KB）
+                </span>
+                <button
+                  className="ghost danger-text"
+                  onClick={() => void removeResolver(script.name)}
+                >
+                  删除
+                </button>
               </div>
             ))}
           </dd>
         </dl>
+      </div>
+
+      <div className="card">
+        <h2>DASH 会话</h2>
+        {dash.length === 0 ? (
+          <p className="muted">当前没有运行中的 DASH 会话。</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>会话</th>
+                <th>阶段</th>
+                <th className="right">切片</th>
+                <th className="right">运行</th>
+                <th>轨道</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dash.map((session) => (
+                <tr key={session.stream_key}>
+                  <td className="mono">{session.stream_key}</td>
+                  <td>
+                    <Badge tone={session.phase === 'ready' ? 'ok' : 'warn'}>
+                      {session.phase}
+                    </Badge>
+                    {session.last_error ? (
+                      <span className="muted"> {session.last_error}</span>
+                    ) : null}
+                  </td>
+                  <td className="right">{session.segment_count}</td>
+                  <td className="right">{Math.round(session.uptime_secs)} 秒</td>
+                  <td className="mono">
+                    {(session.active_tracks ?? []).map((track) => track.name).join(', ') || '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div className="row" style={{ marginTop: 12 }}>
+          <input
+            placeholder="MPD 地址，例如 https://host/live.mpd"
+            value={scanUrl}
+            onChange={(event) => setScanUrl(event.target.value)}
+            style={{ flex: 1 }}
+          />
+          <button className="ghost" onClick={() => void scanMpd()}>
+            扫描轨道
+          </button>
+        </div>
+        {scan && (
+          <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>
+            {JSON.stringify(scan.tracks, null, 2)}
+          </pre>
+        )}
       </div>
 
       <div className="card">

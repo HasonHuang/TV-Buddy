@@ -403,8 +403,8 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | `GET` | `/panel/api/security/token` | 目标字段：`{current_value, enabled, status{current{remaining_secs,valid,value}, old, ttl_hours}, ttl_hours}`；`status` 里的 `value` 是掩码（前 4 + `****` + 后 4）。附加字段：`current`、`old` |
 | `POST` | `/panel/api/security/token/rotate` | `{ok, new_token, expires_in_hours}`；附加字段 `token`。旧值保留 1 小时宽限（S-AUTH-09） |
 | `GET` | `/panel/api/security/ip/stats` | `{"count","banned","entries":[{"ip","requests","failures","banned","remaining_secs"}]}`，按请求数降序 |
-| `POST` | `/panel/api/security/ip/ban` | `{"ip","seconds"}`；`seconds = 0` 用默认 3600，上限 30 天；返回实际时长 |
-| `POST` | `/panel/api/security/ip/unban`<br>`POST …/ip/unban-batch` | `{"ip"}` 或 `{"ips":[…]}`；`{"ok":true,"removed":n,"requested":n}`；两个路径同义 |
+| `POST` | `/panel/api/security/ip/ban` | 目标字段：`{"ips":[…],"secs":N}` → `{ok, results[{ip,ok}], secs}`；也接受单数 `{"ip"}` 与 `seconds`。`0` 用默认 3600，上限 30 天 |
+| `POST` | `/panel/api/security/ip/unban`<br>`POST …/ip/unban-batch` | `{"ip"}` 或 `{"ips":[…]}`；`{"ok":true,"removed":n,"requested":n}`；两个路径同义。空请求 → `400 Missing ip` |
 
 执行规则：
 

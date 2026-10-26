@@ -352,11 +352,16 @@ export function SecurityPage() {
     setMessage('');
     setError('');
     try {
+      // 支持一次填多个地址（逗号、空格或换行分隔）。目标字段是 `ips` 数组。
+      const ips = ip
+        .split(/[\s,，;；]+/)
+        .map((item) => item.trim())
+        .filter((item) => item !== '');
       await api('POST', '/security/ip/ban', {
-        ip: ip.trim(),
-        seconds: Number(seconds) || 0,
+        ips,
+        secs: Number(seconds) || 0,
       });
-      setMessage(`已封禁 ${ip.trim()}`);
+      setMessage(`已封禁 ${ips.length} 个地址`);
       setIp('');
       await load();
     } catch (err) {
@@ -370,6 +375,28 @@ export function SecurityPage() {
     try {
       await api('POST', '/security/ip/unban', { ip: target });
       setMessage(`已解封 ${target}`);
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  /** 批量解封：`POST /security/ip/unban-batch`，体为 `{ips:[…]}`。 */
+  const unbanBatch = async () => {
+    const ips = ip
+      .split(/[\s,，;；]+/)
+      .map((item) => item.trim())
+      .filter((item) => item !== '');
+    if (ips.length === 0) {
+      setError('请先填写要解封的地址');
+      return;
+    }
+    setMessage('');
+    setError('');
+    try {
+      await api('POST', '/security/ip/unban-batch', { ips });
+      setMessage(`已批量解封 ${ips.length} 个地址`);
+      setIp('');
       await load();
     } catch (err) {
       setError(errorText(err));
@@ -420,7 +447,7 @@ export function SecurityPage() {
         </p>
         <div className="row">
           <input
-            placeholder="地址，例如 10.0.0.2"
+            placeholder="地址，可用逗号或换行分隔多个"
             value={ip}
             onChange={(event) => setIp(event.target.value)}
             style={{ flex: 2 }}
@@ -433,6 +460,9 @@ export function SecurityPage() {
           />
           <button onClick={() => void ban()} disabled={ip.trim() === ''}>
             封禁
+          </button>
+          <button className="ghost" onClick={() => void unbanBatch()} disabled={ip.trim() === ''}>
+            批量解封
           </button>
         </div>
         <table className="table" style={{ marginTop: 12 }}>

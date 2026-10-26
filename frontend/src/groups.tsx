@@ -189,6 +189,7 @@ export function GroupsPage() {
   const [importText, setImportText] = useState('');
   const [m3uMode, setM3uMode] = useState<'append' | 'merge' | 'replace'>('append');
   const [health, setHealth] = useState<Record<string, HealthEntry>>({});
+  const [tracks, setTracks] = useState<{ gid: string; cid: string; body: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -362,16 +363,35 @@ export function GroupsPage() {
 
   /** 导出全部：把 `GET /groups/export` 的原文下载成 `groups.json`。 */
   const exportAll = async () => {
+    await download('/groups/export', 'groups.json', '分组已导出');
+  };
+
+  /** 导出单个分组：`GET /groups/{gid}/export`。 */
+  const exportGroup = async (gid: string) => {
+    await download(`/groups/${gid}/export`, `${gid}.json`, `分组 ${gid} 已导出`);
+  };
+
+  const download = async (path: string, filename: string, done: string) => {
     try {
-      const data = await api<unknown>('GET', '/groups/export');
+      const data = await api<unknown>('GET', path);
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = 'groups.json';
+      anchor.download = filename;
       anchor.click();
       URL.revokeObjectURL(url);
-      ok('分组已导出');
+      ok(done);
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  /** DASH 轨道预览：`GET /dash/tracks/{gid}/{cid}`。 */
+  const showTracks = async (gid: string, cid: string) => {
+    try {
+      const data = await api<{ tracks?: unknown[] }>('GET', `/dash/tracks/${gid}/${cid}`);
+      setTracks({ gid, cid, body: JSON.stringify(data.tracks ?? data, null, 2) });
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     }
@@ -500,6 +520,9 @@ export function GroupsPage() {
                 <a className="btn ghost" href={listUrl} target="_blank" rel="noreferrer">
                   打开订阅
                 </a>
+                <button className="ghost" onClick={() => void exportGroup(group.id)}>
+                  导出
+                </button>
                 <button
                   className="ghost"
                   onClick={() =>
@@ -590,6 +613,14 @@ export function GroupsPage() {
                       >
                         复制
                       </button>
+                      {group.mode === 'dash' && (
+                        <button
+                          className="ghost"
+                          onClick={() => void showTracks(group.id, channel.id)}
+                        >
+                          轨道
+                        </button>
+                      )}
                       <button
                         className="ghost"
                         onClick={() =>
@@ -819,6 +850,22 @@ export function GroupsPage() {
               onChange={(event) => setImportText(event.target.value)}
             />
           </div>
+        </Modal>
+      )}
+
+      {tracks && (
+        <Modal
+          title={`轨道 ${tracks.gid}/${tracks.cid}`}
+          onClose={() => setTracks(null)}
+          footer={
+            <button className="ghost" onClick={() => setTracks(null)}>
+              关闭
+            </button>
+          }
+        >
+          <pre className="mono" style={{ whiteSpace: 'pre-wrap' }}>
+            {tracks.body}
+          </pre>
         </Modal>
       )}
 
