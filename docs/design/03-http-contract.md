@@ -55,7 +55,8 @@
 | GET | `/{gid}/{cid}/video/index.txt` | 无 | `200` `text/plain` 媒体清单（仅主清单上游）；否则 `302 error_url` | M2 | F-004、F-018 |
 | GET | `/{gid}/{cid}/<P>_<S>.<ext>` | 无 | `200` 切片 | M2 | S-DIS-04 |
 | GET | `/{gid}/{cid}/timeshift/{filename}` | 按 token 开关 | `200` 本地回看 | P1 | F-014 |
-| GET | `/{gid}/{cid}/dash-timeshift/{track}/{...}` | 按 token 开关 | **未实现**（❌ 见 `07` §3.B4）；当前落到通配路由 → `dash` 模式 `404 Segment not found`、其它模式 `302` | ❌ | S-EP-16、S-TS-01 |
+| GET | `/{gid}/{cid}/dash-timeshift/{track}[/{playlist,playlist.txt,playlist.m3u8}]` | 无 | `200` VOD 清单；缺或错 `playseek` → `400 missing playseek`；区间不重叠、未知轨道、非 `dash` 组 → `404 no segments in range` | P3.5 | S-EP-16、S-TS-01、F-016 §5.1 |
+| GET | `/{gid}/{cid}/dash-timeshift/{track}/<段号>.<ext>` | 无 | `200` 切片；ext 取伪装扩展名或 `m4s`；未命中 → `404 segment not found` | P3.5 | 同上 |
 | GET | `/epg` | 无 | `200` `text/html`；EPG 关 → `404` | ✅ P1 | S-EP-05 |
 | GET | `/epg.xml`、`/epg.xml.gz` | 无 | `200` `application/xml` / `application/gzip`；EPG 关 → `404` | ✅ P1 | S-EP-05 |
 | GET | `/epg/api/{channels,programmes/:channel,search}` | 无 | `200` JSON | P1 | S-EP-16 |
@@ -503,7 +504,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | `GET` | `/panel/api/dash/status` | 运行中的 DASH 会话数组；`stream_key`、`source_url`、`phase`、`segment_count`、`active_tracks` 等 |
 | `GET` | `/panel/api/dash/tracks/:gid/:cid` | 抓频道 MPD 并列出轨道；未知频道 → `404 Channel not found` |
 | `POST` | `/panel/api/dash/scan-url` | `{"url"}`；只解析，不改配置；非 HTTP(S) → `400` |
-| `GET` | `/panel/api/dash-timeshift/status` | `{ok,enabled,ready,channels[{group_id,channel_id,hours,segments,mode}],note}`；代理频道直接缓冲，DASH 频道经 ffmpeg 转 HLS 后缓冲 |
+| `GET` | `/panel/api/dash-timeshift/status` | `{ok,enabled,ready,channels[{group_id,channel_id,hours,segments,mode}],note}`；代理频道直接缓冲，DASH 频道按轨道录制 MPD 切片。DASH 频道另带 `tracks`、`bytes`、`oldest_age_secs`、`running`、`last_error`、`max_gb`、`target_duration` |
 
 轨道对象：`{id, kind, codecs, bandwidth, lang, width, height}`。
 `kind` 取 `video`/`audio`/`text`/`unknown`。

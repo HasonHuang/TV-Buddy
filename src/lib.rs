@@ -11,6 +11,7 @@ pub mod cache_gc;
 pub mod config;
 pub mod dash;
 pub mod dash_hls;
+pub mod dash_timeshift;
 pub mod epg;
 pub mod http;
 pub mod logging;

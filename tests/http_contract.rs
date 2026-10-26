@@ -550,6 +550,14 @@ fn local_base_path(body: &str, self_base: &str) -> String {
         .to_string()
 }
 
+/// Unix 秒转 `yyyyMMddHHMMSS`（**本地**时间，按默认 `+8`）。
+fn compact(epoch: i64) -> String {
+    let text = iptv_proxy::schedule::format_local(epoch, 8);
+    text.chars()
+        .filter(|ch| ch.is_ascii_digit())
+        .collect::<String>()
+}
+
 fn header(response: &HttpResponse, name: &str) -> String {
     response
         .headers()
@@ -3194,6 +3202,138 @@ url = "{upstream}/dash/live.mpd"
         .expect("请求 init");
     assert_eq!(init.status(), StatusCode::OK);
     assert_eq!(init.bytes().await.expect("读 init").as_ref(), b"dash-init");
+}
+
+/// DASH 时移：清单要 `playseek`，切片按轨道录制序号命名。
+#[tokio::test]
+async fn dash_timeshift_serves_recorded_playlist_and_segments() {
+    let fixture = fixture_with_extra(
+        r#"
+[[groups]]
+id = "dts"
+name = "DASH 时移"
+mode = "dash"
+access = "open"
+
+[[groups.channels]]
+id = "c1"
+name = "DASH 回看频道"
+url = "{upstream}/dash/live.mpd"
+dash_timeshift = true
+dash_timeshift_hours = 4
+"#,
+    )
+    .await;
+
+    // 缺 playseek → 400。
+    let response = fetch(&fixture, "/dts/c1/dash-timeshift/video_720p/playlist.txt").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(response
+        .text()
+        .await
+        .expect("正文")
+        .contains("missing playseek"));
+
+    // 区间不重叠 → 404。
+    let response = fetch(
+        &fixture,
+        "/dts/c1/dash-timeshift/video_720p/playlist.txt?playseek=20200101000000-20200101000100",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(response
+        .text()
+        .await
+        .expect("正文")
+        .contains("no segments in range"));
+
+    // 当前区间 → 200 VOD 清单。
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("时钟")
+        .as_secs() as i64;
+    let seek = format!("{}-{}", compact(now - 600), compact(now + 600));
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut body = String::new();
+    loop {
+        let response = fetch(
+            &fixture,
+            &format!("/dts/c1/dash-timeshift/video_720p/playlist.txt?playseek={seek}"),
+        )
+        .await;
+        if response.status() == StatusCode::OK {
+            body = response.text().await.expect("正文");
+            if body.contains("#EXT-X-ENDLIST") {
+                break;
+            }
+        }
+        if Instant::now() > deadline {
+            panic!("未在时限内产出清单：{body}");
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    assert!(body.starts_with("#EXTM3U\n"), "{body}");
+    assert!(body.contains("#EXT-X-PLAYLIST-TYPE:VOD"), "{body}");
+    // 目标实测：`MEDIA-SEQUENCE` 取上游 MPD 段号，不是本机计数器。
+    assert!(body.contains("#EXT-X-MEDIA-SEQUENCE:1"), "{body}");
+    assert!(body.contains("#EXT-X-PROGRAM-DATE-TIME:"), "{body}");
+    assert!(
+        body.contains("#EXT-X-MAP:URI=\"/dts/c1/dash-timeshift/video_720p/init."),
+        "{body}"
+    );
+    assert!(
+        body.contains("/dts/c1/dash-timeshift/video_720p/1."),
+        "{body}"
+    );
+
+    // 清单里的切片可取。
+    let segment = body
+        .lines()
+        .find(|line| line.starts_with("/dts/c1/dash-timeshift/video_720p/1."))
+        .expect("切片路径")
+        .to_string();
+    let response = fetch(&fixture, &segment).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = header(&response, "content-type");
+    assert_eq!(
+        response.bytes().await.expect("读切片").as_ref(),
+        b"dash-segment"
+    );
+    assert!(content_type.starts_with("image/"), "{content_type}");
+
+    // 未知轨道 → 404。
+    let response = fetch(
+        &fixture,
+        &format!("/dts/c1/dash-timeshift/nosuch/playlist.txt?playseek={seek}"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// 未点亮 `dash_timeshift` 时，该路径不提供时移面。
+#[tokio::test]
+async fn dash_timeshift_requires_channel_flag() {
+    let fixture = fixture_with_extra(
+        r#"
+[[groups]]
+id = "dnt"
+name = "无时移"
+mode = "dash"
+access = "open"
+[[groups.channels]]
+id = "c1"
+name = "DASH"
+url = "{upstream}/dash/live.mpd"
+"#,
+    )
+    .await;
+    let response = fetch(
+        &fixture,
+        "/dnt/c1/dash-timeshift/video_720p/playlist.txt?playseek=20200101000000-20200101000100",
+    )
+    .await;
+    // 未点亮时落回通用子路径分流：`dash` 模式 → 404。
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

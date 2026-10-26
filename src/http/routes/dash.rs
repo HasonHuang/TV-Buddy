@@ -69,7 +69,7 @@ pub async fn scan_url(
     inspect(&state, url, "", "").await.map(Json)
 }
 
-/// `GET /panel/api/dash-timeshift/status`——回看能力与已缓冲片数。
+/// `GET /panel/api/dash-timeshift/status`——回看能力与已录制片数。
 pub async fn timeshift_status(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -84,13 +84,39 @@ pub async fn timeshift_status(
                 .iter()
                 .filter(|channel| channel.livestream || channel.dash_timeshift)
                 .map(|channel| {
-                    json!({
+                    let dash = group.mode == "dash" && channel.dash_timeshift;
+                    let info = if dash {
+                        state.dash_timeshift.info(&group.id, &channel.id)
+                    } else {
+                        None
+                    };
+                    let hours = if dash {
+                        channel.dash_timeshift_hours
+                    } else {
+                        channel.timeshift_hours
+                    };
+                    let segments = if dash {
+                        info.as_ref().map(|info| info.segments).unwrap_or(0)
+                    } else {
+                        state.timeshift.count(&group.id, &channel.id)
+                    };
+                    let mut value = json!({
                         "group_id": group.id,
                         "channel_id": channel.id,
-                        "hours": channel.timeshift_hours,
-                        "segments": state.timeshift.count(&group.id, &channel.id),
+                        "hours": hours,
+                        "segments": segments,
                         "mode": group.mode,
-                    })
+                    });
+                    if let Some(info) = info {
+                        value["tracks"] = json!(info.tracks);
+                        value["bytes"] = json!(info.bytes);
+                        value["oldest_age_secs"] = json!(info.oldest_age_secs);
+                        value["running"] = json!(info.running);
+                        value["last_error"] = json!(info.last_error);
+                        value["max_gb"] = json!(info.max_gb);
+                        value["target_duration"] = json!(info.target_duration);
+                    }
+                    value
                 })
                 .collect::<Vec<_>>()
         })
@@ -103,7 +129,7 @@ pub async fn timeshift_status(
         "enabled": !channels.is_empty(),
         "ready": ready,
         "channels": channels,
-        "note": "代理频道直接缓冲；DASH 频道经 ffmpeg 转 HLS 后缓冲",
+        "note": "代理频道直接缓冲；DASH 频道按轨道录制 MPD 切片",
     }))
 }
 

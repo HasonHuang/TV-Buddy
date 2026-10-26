@@ -146,6 +146,41 @@ GET /gdash/v/dash-timeshift/video_180p/playlist.txt?playseek=20261018192500-2026
 - 缺 `playseek` → `400 missing playseek`；区间与录制不重叠 → `404 no segments in range`。时间窗 = **已录制切片区间** `[最旧, 最新]`；`oldest_age_secs` 随时间增长。`PROGRAM-DATE-TIME` 取切片**到达本机的时间**。
 - 切片路径 `/{gid}/{cid}/dash-timeshift/{track}/{序号}.{伪装扩展名}`；序号即录制序号。`offset_secs` 只体现在状态字段；本次未分离其对窗口的独立作用（受限）。
 
+### 5.1 复验（2026-10-26，容器 `rea82v09`）
+
+自建动态 MPD（2 秒切片、30 段、`startNumber=1`）。`dash_timeshift=true` 后逐项实测：
+
+| 情形 | 目标响应 |
+| --- | --- |
+| `…/playlist.txt?playseek=<b>-<e>` | `200`；`text/plain; charset=utf-8`；`public, max-age=3600, s-maxage=3600` |
+| `…/playlist`、`…/playlist.m3u8` | 同 `playlist.txt` |
+| `…/{track}`（只有轨道，无文件名） | 同清单；带不带 `playseek` 都一样要求参数 |
+| 缺 `playseek` | `400 missing playseek` |
+| `playseek=abc`（格式错） | `400 missing playseek`（同一串，**不是** `invalid playseek`） |
+| 只给 `start`/`end` | `400 missing playseek` |
+| 区间不重叠 | `404 no segments in range` |
+| 反向区间、起止相等 | `404 no segments in range`（不判 400） |
+| 未知轨道 | `404 no segments in range` |
+| 缺轨道层（`/dash-timeshift/playlist.txt`） | `404 no segments in range` |
+| 尾部斜杠（`/dash-timeshift/{track}/`） | `404`，空正文 |
+| 未知 `gid`/`cid`、非 `dash` 组、未开 `dash_timeshift` | 清单 → `404 no segments in range`；切片 → `404 segment not found`。**不跳 302** |
+| 切片未命中 | `404 segment not found`（全小写） |
+| 切片 `<段号>.<伪装扩展名>` | `200`；`Content-Type: image/*`；`private, max-age=3600` |
+| 切片 `<段号>.m4s`（磁盘原名） | `200`；`Content-Type: video/mp4` |
+| init `init.<伪装扩展名>`、`init.mp4` | `200`；图片类型 / `video/mp4` |
+| `init.m4s`、`<段号>.mp4`、其它后缀 | `404` |
+| 前导零（`09.png`）、非数字主干 | `404` |
+
+清单与索引的事实：
+
+- `#EXT-X-MEDIA-SEQUENCE` 取**上游 MPD 段号**（夹具里是 `9`），不是本机计数器。
+- 切片文件名主干与 `index.json` 的 `seq` 都等于上游段号。
+- `index.json` 形状：`{"version":0,"tracks":{"<track>":{"kind","bandwidth","resolution","codecs","language","segments":[{"seq","filename","ts","dur"}]}}}`。`ts` 是**到达本机**的 Unix 秒；同一轮抓取的切片 `ts` 相同。
+- 落盘布局：`/cache/dash_timeshift/{gid}_{cid}/{index.json, init/<track>.mp4, segments/<track>/<seq>.m4s}`。
+- 清单里 init 的伪装扩展名与切片不同（实测 `init.webp` 对 `9.png`）。扩展名按段轮换，顺序未解。
+- 音轨名带语言：`audio-en`、`audio-fr`；同语言第二条 `audio-en-1`；无语言时 `audio-{序号}`。本实现用 `audio-{序号}`，见 §8 差异。
+- 文字轨在此夹具下**未出现在 master**里。本实现会输出 `SUBTITLES` 组；差异待核。
+
 ## 6. D17a 回看（catchup）
 模板 `[server].catchup_tpl`（默认 `guonei`）：
 

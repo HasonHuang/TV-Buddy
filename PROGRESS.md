@@ -66,14 +66,28 @@
 | B1 | 概览页实时指标 | `/panel/api/status` 只返回 12 个字段：`name`、`version`、`uptime_secs`、`bind`、`log_level`、`timezone_offset_hours`、`groups`、`channels`、`sessions`、`cache_backend`、`cache_disk_path`、`entry_exts`。没有 CPU、进程内存、下行·回源、上行·出网、整盘内存峰值。**采集层不存在** | 新增采集：进程 RSS 与 CPU、按分组流量计数、整盘峰值。`traffic_in_bytes` 按目标口径恒 0，不要"修"（S-BUG-01） |
 | B2 | `status` 缺 `online_viewers` | `/panel/api/stats` 只返回 `requests`、`playlists`、`segments`、`segment_hits`、`upstream_failures`、`online_window_secs`、`groups[].requests`。`online_window_secs` 只是配置回显，**没有在线观众数据** | 需要按 Token 的播放请求做滑动窗口统计。`/stats` 与 `/status` 都要暴露 |
 | B3 | 频道行绿点与 `异常` 徽章 | `/panel/api/health` 只有汇总计数。`watchdog` 有逐频道失败与冷却状态，但没有读取出口 | 给 `health` 或新端点补逐频道健康。前端据此画点与 `异常` |
-| B4 | DASH 回看播放路由 | `/{gid}/{cid}/dash-timeshift/{track}/{playlist.txt,playlist.m3u8,playlist,:filename}` **完全没实现**。只有 `/panel/api/dash-timeshift/status`。`?playseek=` 未解析。`400 missing playseek` 与 `404 no segments in range` 两个错误串全仓不存在 | 需要新状态：按 track 的录制序号、切片到达本机时间。实施落点见 `07` §3.B4 |
 
-B4 的当前行为（2026-10-25 核对）：
+B4 已完成。见 §3.1.1。
 
-1. 请求进入 `wildcard()`。`timeshift/` 前缀不匹配。
-2. remux 的 `owns()` 不匹配。
-3. `dash` 模式把 `track` 解析成字面量 `dash-timeshift`，把 `file` 解析成 `track/playlist.txt`。两者都不是 `index.txt` 或 `index.m3u8`。
-4. 结果是 `404 Segment not found`。非 `dash` 模式返回 `302 not_found_url`。
+### 3.1.1 B4 完成记录（2026-10-26）
+
+新增模块 `src/dash_timeshift.rs`。做法如下：
+
+1. 按 MPD 逐轨道抓取切片原字节。不转封装，不调用 ffmpeg。
+2. 落盘布局与目标一致：`cache/dash_timeshift/{gid}_{cid}/{index.json, init/, segments/}`。
+3. 切片名主干 = 上游 MPD 段号。`#EXT-X-MEDIA-SEQUENCE` 取首条段号。
+4. `#EXT-X-PROGRAM-DATE-TIME` 取切片到达本机的时间，UTC。
+5. 清单按 `playseek` 区间筛选。窗口 = 已录制区间，不取墙钟。
+6. 错误分流按目标实测：
+   - 缺 `playseek` 或格式错 → `400 missing playseek`。
+   - 区间不重叠、反向、相等、未知轨道、非 `dash` 组 → `404 no segments in range`。
+   - 切片未命中 → `404 segment not found`。
+7. 切片扩展名白名单：5 项图片扩展名 + 磁盘原名 `m4s`。init 用 `mp4`。
+8. 旧 `timeshift` 模块删掉 DASH 分支（原用 ffmpeg 转 HLS），避免两条路径重复录制。
+
+对拍结果：同一份动态 MPD 与同一时间窗，目标与本实现逐项比对 18 项，差异 1 项。差异是音轨名，见 §3.3。
+
+质量门：302 项测试通过（215 单元 + 87 契约）。`smoke-dash-timeshift.sh` 13 项全部通过。
 
 ### 3.2 面板未接线（端点已在，前端无调用）
 
@@ -106,6 +120,8 @@ B4 的当前行为（2026-10-25 核对）：
 | --- | --- | --- |
 | `<P>` 算法 | 目标算法未解。不改用其它哈希。四条可观测性质全部对齐 | F-017 §5.2、`06` §12 |
 | 扩展名轮换顺序 | 只保证取自 `[cache.disguise].formats`。目标序列未解 | F-018、F-019 |
+| DASH 音轨名 | 目标是 `audio-{语言}`（如 `audio-en`），同语言加 `-1`；无语言才用 `audio-{序号}`。本实现统一用 `audio-{序号}` | F-016 §5.1 |
+| DASH 文字轨出口 | 目标在实测夹具里不把文字轨写进 master。本实现输出 `SUBTITLES` 组 | F-016 §5.1 |
 | Remux 后缀 | 本实现轮换 5 种。目标是 `.png/.gif/.bmp/.jpg/.webp` 轮换 | F-014 |
 | `out_groups`/`dropped_groups` 顺序 | 目标是哈希序。本实现是稳定排序 | F-020 |
 | `match-report` 形状 | 保留目标的 `text/plain` 表格。面板 JS 期望 JSON。冲突未解 | F-013 |
@@ -214,11 +230,10 @@ DASH：
 
 ## 6. 推进顺序
 
-1. **B4**：DASH 回看播放路由。缺口最大，且有完整的目标契约。
-2. **B1 + B2 + B3**：指标采集。三项共用采集层，一起做。
-3. **面板未接线**（§3.2）：只差接线，可分批做。
-4. **T0 与真机验收**：在 CDN 面板按 `06` §2 配五处。在目标 VPS 上跑 S4/S6。
-5. 每项完成后运行完整质量门。更新本文件与对应 `docs/`。提交并立即推送 `rust` 分支。
+1. **B1 + B2 + B3**：指标采集。三项共用采集层，一起做。
+2. **面板未接线**（§3.2）：只差接线，可分批做。
+3. **T0 与真机验收**：在 CDN 面板按 `06` §2 配五处。在目标 VPS 上跑 S4/S6。
+4. 每项完成后运行完整质量门。更新本文件与对应 `docs/`。提交并立即推送 `rust` 分支。
 
 ---
 

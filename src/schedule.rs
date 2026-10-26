@@ -692,6 +692,19 @@ pub fn format_local(epoch: i64, offset_hours: i64) -> String {
     )
 }
 
+/// UTC ISO-8601 文本（秒级，以 `Z` 结尾）。
+pub fn format_utc_iso(epoch: i64) -> String {
+    let days = epoch.div_euclid(86_400);
+    let rest = epoch.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rest / 3600,
+        (rest % 3600) / 60,
+        rest % 60
+    )
+}
+
 /// Howard Hinnant 的 `days_from_civil`。
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };

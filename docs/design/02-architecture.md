@@ -96,6 +96,7 @@
 | `epg::*` | 采集、匹配、XMLTV 生成、脚本源 | P1 | S-EPG-01…07 |
 | `record` | 定时录制（ffmpeg `-c copy` → MKV） | P1 | S-REC-01/02 |
 | `timeshift` | 本地回看、`cache/livestream/` | P1 | S-TS-01、S-CAP-02 |
+| `dash_timeshift` | 按轨道录制 DASH 切片、`dash-timeshift/{track}/playlist*`、`cache/dash_timeshift/` | P3.5 | S-TS-01、F-016 §5.1 |
 | `subtitle` | WebVTT 透传与 `.vtt` 伪装 | P1 | S-SUB-09、S-DIS-01 |
 | `logo` | 台标库 9 端点、`.orig/` 备份 | P2 | S-LOGO-01…04 |
 | `subs` | 订阅聚合、include/exclude、group_map | P2 | S-GAP-07 |
