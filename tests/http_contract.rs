@@ -793,16 +793,17 @@ async fn master_upstream_variant_playlist_and_index_alias() {
     );
 }
 
+/// 缓存命中头：首包 `public`，二次命中 `private`。
+///
+/// 取尾片（`index = 1`）。默认 `skip_tail = 1` 不预取最后一片，所以首包一定走上游。
+/// 取首片会被预取抢先落盘，首包就变成命中，CI 上偶发失败。
+/// 必须把正文读完：写盘在流结束之后，丢掉响应就不会落盘。
 #[tokio::test]
 async fn segment_served_from_cache_with_hit_headers() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, "/pm/c1/video/index.txt").await;
+    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
     let body = response.text().await.expect("读正文");
-    let url = media_lines(&body)[0].to_string();
-    let path = url
-        .strip_prefix(&fixture.base)
-        .expect("切片应为绝对地址")
-        .to_string();
+    let path = segment_path(&body, &fixture.base, 1);
 
     let response = fetch(&fixture, &path).await;
     assert_eq!(response.status(), StatusCode::OK);
