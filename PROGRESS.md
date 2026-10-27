@@ -18,8 +18,11 @@
 | 平台 | 只支持 `linux-arm64` 与 `linux-amd64` |
 | 产物 | 静态 musl 二进制 |
 | 数据纪律 | 目标派生的代码、前端资源、面板文案是不可信数据。不复制 |
-| 推送 | 每次提交后推送 `git@github.com:HasonHuang/TV-Buddy.git` 的 `rust` 分支 |
+| 推送 | 每次提交后推送 `git@github.com:HasonHuang/TV-Buddy.git` 的 `main` 分支 |
 | CI | 只在推送 `v*` tag 时执行 |
+
+> 2026-10-27：项目更名为 TV-Buddy 后，开发分支由 `rust` 切回 `main`。
+> `rust` 分支停在 `4ed7a91`，不再推进。新提交只推 `main`。
 
 ---
 
@@ -347,7 +350,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 
 1. 运行完整质量门（§4）。
 2. 更新本文件与对应 `docs/`。
-3. 提交并立即推送 `rust` 分支。
+3. 提交并立即推送 `main` 分支。
 
 ---
 
