@@ -15,7 +15,7 @@
 | --- | --- | --- | --- | --- |
 | D1 | 端点探测 | `curl` | S-EP-* | ✅ [`01`](01-runtime-surface-and-disguise.md) §2 |
 | D2 | 扩展名规则 | 对照 `/status.entry_exts` | S-URL-01 | ✅ [`01`](01-runtime-surface-and-disguise.md)（format→hls=.m3u8/mpd=.mpd） |
-| D3 | 六种模式行为 | 各模式实测 | S-MODE-* | ✅ [`02`](02-modes-and-watchdog.md)（proxy/redirect/rewrite/passthrough 实测）；remux 成功路径见 [`09`](09-recording-livestream-remux-subtitle.md) |
+| D3 | 六种模式行为 | 各模式实测 | S-MODE-*, S-GAP-05 | ✅ [`02`](02-modes-and-watchdog.md)（proxy/redirect/rewrite/passthrough 实测；§2.1 代理覆盖/头合并/SOCKS5）；remux 成功路径见 [`09`](09-recording-livestream-remux-subtitle.md) |
 | D4 | 切片伪装（字节级复现） | 下载+比对+哈希 | S-DIS-* | 🔶 后缀已破解；前缀 **输入依赖/校验已解**、算法未解 [`01`](01-runtime-surface-and-disguise.md) §5 + [`14`](14-disguise-prefix-analysis.md) |
 | D5 | 缓存窗口与响应头 | 时序采样 | S-DIS-06/07 | ✅ [`03`](03-cache-layout-and-window.md)（首写 public→命中 private） |
 | D6 | Token / 随机频道 ID / IP 管控 | 请求矩阵 | S-AUTH-* | ✅ Token 已验；随机 ID/IP 管控部分 [`04`](04-auth-token-and-guards.md) |
@@ -31,6 +31,9 @@
 | D16 | 录制/回看/Remux/字幕/解析脚本 | 媒体链路实测 | S-REC-02, S-TS-01, S-MODE-18, S-SUB-09, S-RES-01 | ✅ [`09`](09-recording-livestream-remux-subtitle.md) |
 | D17 | URL 池/多 CDN/健康/缓存容量 | 故障注入 + 容量压测 | S-MODE-06/07, S-HEALTH-*, S-CACHE-03/06 | ✅ [`07`](07-upstream-health-cache.md)（池取用受限、未观察到故障切换） |
 | D18 | DASH/ClearKey/时移/回看/EPG 匹配 | 自建 MPD/CENC/XMLTV | S-MODE-06/11, S-CAP-*, S-EPG-*, S-DASH-01 | ✅ [`10`](10-dash-catchup-epg-match.md)（多音轨时移、keep_yesterday 未定） |
+| D19 | DASH 发布延迟与看门狗参数 | 冻结源 + 多延迟矩阵 | S-DASH-02/03 | ✅ [`18`](18-dash-window-knobs.md)（`fast_start_secs` 无可观测差异） |
+| D20 | DASH 多 BaseURL 与 proxy MPD | 多前缀源 + proxy 出口 | S-MODE-03/07, S-DASH-04 | ✅ [`19`](19-dash-multi-baseurl-proxy.md)（URL 池 `>1` 未验） |
+| D21 | 公开 EPG API 形状 | 本地 XMLTV + 面板刷新 + 批量节目 | S-EP-16/17 | ✅ [`20`](20-public-epg-api.md)（分享场景未验） |
 
 ## 运行期纪律
 

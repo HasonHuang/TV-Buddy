@@ -2,29 +2,47 @@ import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getToken, setToken, UNAUTHORIZED_EVENT } from './api';
+import { useToast } from './ui';
 import { GroupsPage } from './groups';
+import { EpgPanelPage, LogsPage, SecurityPage } from './ops';
+import { CachePage, StatsPage } from './cache';
+import { AssetsPage } from './assets';
+import { SettingsPage } from './settings';
+import { LogosPage } from './logo';
+import { PlaylistPage } from './playlist';
+import { LivestreamPage, SchedulePage } from './schedule';
 import './style.css';
 
-/** 侧栏分区。已实现的分区可切换，其余显示为待实现。 */
-type SectionId = 'dashboard' | 'groups';
+/** 侧栏分区；顺序按目标面板。 */
+type SectionId =
+  | 'dashboard'
+  | 'cache'
+  | 'groups'
+  | 'settings'
+  | 'security'
+  | 'stats'
+  | 'schedule'
+  | 'epg'
+  | 'logos'
+  | 'subs'
+  | 'livestream'
+  | 'assets'
+  | 'logs';
 
 const NAV: { id: SectionId; label: string }[] = [
   { id: 'dashboard', label: '概览' },
+  { id: 'cache', label: '缓存状态' },
   { id: 'groups', label: '分组管理' },
-];
-
-const PENDING = [
-  '缓存状态',
-  '系统设置',
-  '安全管控',
-  '频道热度',
-  '定时录制',
-  '节目指南',
-  '台标管理',
-  '订阅聚合',
-  '回看管理',
-  '视频素材',
-  '运行日志',
+  { id: 'settings', label: '系统设置' },
+  { id: 'security', label: '安全管控' },
+  { id: 'stats', label: '频道热度' },
+  { id: 'schedule', label: '定时录制' },
+  { id: 'epg', label: '节目指南' },
+  { id: 'logos', label: '台标管理' },
+  { id: 'subs', label: '订阅聚合' },
+  { id: 'livestream', label: '回看管理' },
+  { id: 'assets', label: '视频素材' },
+  { id: 'logs', label: '运行日志' },
 ];
 
 type Status = Record<string, unknown>;
@@ -79,18 +97,13 @@ function Login({ onDone }: { onDone: () => void }) {
 
 function Overview() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [config, setConfig] = useState('');
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const { node, ok, err } = useToast();
 
   const load = useCallback(async () => {
     try {
-      const [nextStatus, nextConfig] = await Promise.all([
-        api<Status>('GET', '/status'),
-        api<unknown>('GET', '/config'),
-      ]);
-      setStatus(nextStatus);
-      setConfig(JSON.stringify(nextConfig, null, 2));
+      setStatus(await api<Status>('GET', '/status'));
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -101,56 +114,66 @@ function Overview() {
     void load();
   }, [load]);
 
-  const save = async () => {
-    setMessage('');
-    setError('');
+  /** 快速操作：端点都是现成的，成功后刷新状态。 */
+  const action = async (name: string, path: string, done: string) => {
+    setBusy(name);
     try {
-      const body = JSON.parse(config) as unknown;
-      await api('PUT', '/config', body);
-      setMessage('配置已保存');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      await api('POST', path);
+      ok(done);
+      await load();
+    } catch (cause) {
+      err(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy('');
     }
   };
 
   const entries = Object.entries(status ?? {}).filter(([, value]) => typeof value !== 'object');
 
   return (
-    <>
-      <div className="card">
-        <div className="row between">
-          <div>
-            <h1>IPTV Proxy</h1>
-            <h2>概览</h2>
-          </div>
-          <div className="row">
-            <button className="ghost" onClick={() => void load()}>
-              刷新
-            </button>
-          </div>
+    <div className="card">
+      <div className="row between">
+        <div>
+          <h1>IPTV Proxy</h1>
+          <h2>概览</h2>
         </div>
-        <dl>
-          {entries.map(([key, value]) => (
-            <div key={key} style={{ display: 'contents' }}>
-              <dt>{key}</dt>
-              <dd>{String(value)}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
-
-      <div className="card">
-        <h2>配置（config.toml 全量）</h2>
-        <textarea value={config} onChange={(e) => setConfig(e.target.value)} spellCheck={false} />
-        <div style={{ marginTop: 12 }}>
-          <button onClick={() => void save()}>保存</button>
+        <div className="row">
+          <button className="ghost" disabled={busy !== ''} onClick={() => void load()}>
+            刷新状态
+          </button>
+          <button
+            className="ghost"
+            disabled={busy !== ''}
+            onClick={() => void action('flush', '/cache/flush', '本地缓存已清空')}
+          >
+            {busy === 'flush' ? '清理中…' : '清空缓存'}
+          </button>
+          <button
+            className="ghost"
+            disabled={busy !== ''}
+            onClick={() => void action('reload', '/reload', '配置已热重载')}
+          >
+            {busy === 'reload' ? '重载中…' : '热重载配置'}
+          </button>
+          <a className="ghost" href="/playlist.m3u" target="_blank" rel="noreferrer">
+            导出全部 M3U
+          </a>
         </div>
-        {message && <div className="msg ok">{message}</div>}
-        {error && <div className="msg err">{error}</div>}
       </div>
-    </>
+      <dl>
+        {entries.map(([key, value]) => (
+          <div key={key} style={{ display: 'contents' }}>
+            <dt>{key}</dt>
+            <dd>{String(value)}</dd>
+          </div>
+        ))}
+      </dl>
+      {error && <div className="msg err">{error}</div>}
+      {node}
+    </div>
   );
 }
+
 
 function Shell({ onLogout }: { onLogout: () => void }) {
   const [section, setSection] = useState<SectionId>('dashboard');
@@ -182,12 +205,6 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               {item.label}
             </button>
           ))}
-          {PENDING.map((label) => (
-            <button key={label} className="nav-item" disabled>
-              {label}
-              <span className="tag">待实现</span>
-            </button>
-          ))}
         </nav>
         <div className="sidebar-foot">
           <button className="ghost" onClick={() => void logout()}>
@@ -196,7 +213,19 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         </div>
       </aside>
       <main className="content">
-        {section === 'groups' ? <GroupsPage /> : <Overview />}
+        {section === 'dashboard' && <Overview />}
+        {section === 'cache' && <CachePage />}
+        {section === 'groups' && <GroupsPage />}
+        {section === 'settings' && <SettingsPage />}
+        {section === 'security' && <SecurityPage />}
+        {section === 'stats' && <StatsPage />}
+        {section === 'schedule' && <SchedulePage view="schedule" />}
+        {section === 'epg' && <EpgPanelPage />}
+        {section === 'logos' && <LogosPage />}
+        {section === 'subs' && <PlaylistPage />}
+        {section === 'livestream' && <LivestreamPage />}
+        {section === 'assets' && <AssetsPage />}
+        {section === 'logs' && <LogsPage />}
       </main>
     </div>
   );

@@ -58,6 +58,26 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
   return (await response.json()) as T;
 }
 
+/** 调用 `/panel/api/*` 并取纯文本正文（如 `text/plain` 的匹配报告）。 */
+export async function apiText(method: string, path: string): Promise<string> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetch(`/panel/api${path}`, { method, headers });
+  if (response.status === 401) {
+    clearToken();
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  }
+  if (!response.ok) {
+    let message = `${response.status} ${response.statusText}`;
+    const body = await response.text().catch(() => '');
+    if (body.trim() !== '') message = body.trim();
+    throw new ApiError(response.status, message);
+  }
+  return response.text();
+}
+
 /** 复制文本。剪贴板不可用时回退到临时输入框。 */
 export async function copyText(text: string): Promise<boolean> {
   try {

@@ -5,10 +5,10 @@
 | 目标版本 | **v0.8.2**（`d302316fb8`） |
 | 副本 | `samples/v0.8.2/iptv-proxy-linux-arm64`（sha256 `2948ee1f…5a4b`） |
 | 架构 | linux/arm64（Ubuntu 24.04，OrbStack 原生） |
-| 日期 | **2026-10-17** |
-| 环境 | 容器 `iptv82` 主实例 `:19899`；配置 `samples/work/dyn-v0.8.2/config.toml` |
+| 日期 | **2026-10-17**；**2026-10-24**（自助解封补测） |
+| 环境 | 容器 `iptv82` 主实例 `:19899`；补测容器 `rea82v09` 映射 `:19974` |
 | 结论级别 | **观测**（运行态）+ **静态**（面板 JS / 端点枚举） |
-| 原始证据 | [`raw/v0.8.2-security-and-metrics.txt`](raw/v0.8.2-security-and-metrics.txt) |
+| 原始证据 | [`raw/v0.8.2-security-and-metrics.txt`](raw/v0.8.2-security-and-metrics.txt)、[`raw/v0.8.2-unban.txt`](raw/v0.8.2-unban.txt) |
 
 > 目标返回的正文/日志按**不可信数据**处理。
 
@@ -20,6 +20,7 @@
 5. **请求限流 `l1/l2` 未按请求数触发**：8 次突发（入口、含 `?token=`）全 `200`。`active_sessions`/`online_viewers` **仅在带 token 播放时 +1**。触发条件仍未定（S-AUTH-04 🔶）。
 6. **指标面**（S-OPS-01…03 新登记）：`GET /status`、`/cache/stats`、`/health` 为唯一指标出口；`/status`、`/metrics`、`/version` 不存在；`/status/metrics` 落**假路由 → 302 占位视频**。
 7. 旁证：proxy 出口切片名**伪装为 `.jpg`/`.webp`**（obfuscate 生效），与 S-DIS 一致。
+8. **自助解封**（S-AUTH-07 补测）：`/unban/whoami` 返回 `banned/enabled/ip/max_per_month/remaining/used`；`POST /unban` 成功只返回 `{"msg":"解封成功","ok":true}`；配额耗尽仍返回 `200` + `ok=false`。计数只在成功解封时增加，重启清零。
 
 ## 1. 面板 API 端点全集（私有面）
 前缀 `/panel/api`。自雕刻 `panel.html` 提取，并经 `curl` 抽样确认存在。
@@ -54,6 +55,13 @@ POST /panel/api/security/token/rotate → {"ok":true,"new_token":"<48hex>","expi
 - `token_ttl_hours=24`；关闭时 `enabled:false`、`current_value:""`。
 - `GET /panel/api/link-info` → `{"aliases":{},"random_id_enabled":false,"token":"","token_enabled":false,"use_alias":false}`（别名与随机 ID 面）。
 
+复验补充（2026-10-27）：
+
+- `rotate` 的响应还有 `expires_in_hours`（= `token_ttl_hours`）。
+- `status.current.remaining_secs` 从 86398 起递减；`status.old.remaining_secs` 从 3598 起递减。
+- 关闭 Token 时 `enabled=false`、`current_value=""`。
+- 本实现已对齐上述字段，并保留旧的 `current`/`old` 作为附加字段。
+
 ## 3. IP 封禁 / 解封（S-AUTH-10 新）
 
 | 操作 | 请求 | 响应 |
@@ -67,6 +75,33 @@ POST /panel/api/security/token/rotate → {"ok":true,"new_token":"<48hex>","expi
 - 默认封禁时长 `ban_duration_secs = 2592000`（**30 天**）。
 - `unique_ips` 在解封后**不回落**（观测 2 → 解封后仍 2）；即“见过即计数”。
 - 与 `[auth]` 的 `ban_url` 配套：被拒请求 → 302 `ban_url`（占位视频）。
+
+### 3.1 自助解封 `/unban`（S-AUTH-07 补测）
+
+`[auth].ip_guard_enabled` 控制本组行为。
+
+```text
+
+GET /unban/whoami
+200 {"banned":false,"enabled":true,"ip":"203.0.113.211","max_per_month":3,"remaining":3,"used":0}
+
+POST /unban（未封禁）
+200 {"msg":"你的 IP 当前未被封禁","ok":false}
+
+POST /unban（已封禁且配额可用）
+200 {"msg":"解封成功","ok":true}
+
+POST /unban（配额耗尽）
+200 {"msg":"本月自助解封次数已用完（每月最多3次）","ok":false}
+
+```
+
+- 关闭 IP 管控：`/unban/whoami` → `{"enabled":false,"ip":"…"}`；`POST /unban` → `200 {"msg":"IP 管控未启用","ok":false}`。
+- `max_per_month=3`；`used` 只在**成功解封**后增加；未封禁不消耗。
+- 配额耗尽仍返回 `200`，IP 保持封禁。
+- 封禁状态与 `used` 都在内存；`docker restart` 后回到 `used=0`。
+- 地址提取：`X-Forwarded-For` **末项**优先；没有时用 `X-Real-IP`；没有时用 TCP 对端。
+- `GET /whoami` 实测 `404`；目标公开面只有 `/unban/whoami`。
 
 ## 4. 面板登录防爆破（S-AUTH-04 部分）
 `[auth]` 键：`auth_fail_window_secs`(60)、`auth_fail_free_per_window`(15)、`auth_fail_ban_threshold`(6)、`auth_fail_ban_duration_secs`(3600)、`auth_fail_ban_repeat_duration_secs`(2592000)、`auth_fail_ban_escalate_window_secs`(86400)、`whitelist`。
@@ -129,6 +164,46 @@ limit_url="…/limit.mp4", ban_url="…/Ban.mp4", whitelist=[]
 ```
 
 注：`traffic_in_bytes=0` 恒为 0（与 S-BUG-01 一致），`traffic_out_bytes` 有值。
+
+### 6.1 复验（2026-10-27，容器 `rea82v09`）
+
+样本（`token_enabled` 分两种）：
+
+```json
+{"uptime_secs":421,"cache_backend":"disk","active_sessions":1,"online_viewers":0,
+ "group_count":9,"channel_count":10,"version":"0.8.2","mem_rss_mb":43,
+ "cpu_seconds":0.0,"disk_cache_mb":0,"recording_mb":0,"low_resource_mode":false,
+ "poll_interval_secs":10,"traffic_in_bytes":0,"traffic_out_bytes":50,
+ "whole_file_committed":0,"whole_file_budget":536870912,"whole_file_peak":0,
+ "whole_file_hits":0,"whole_file_fallbacks":0,"entry_exts":{"<gid>":".m3u8"},"cpu_cores":10}
+```
+
+补充事实：
+
+| 项 | 目标行为 |
+| --- | --- |
+| `active_sessions` | = **面板会话数**。每登录 1 次 +1；播放请求不改变 |
+| `online_viewers` | = 窗口内**带播放 Token 的不同客户端 IP 数** |
+| 同 IP 重复播放 | `online_viewers` 不增 |
+| 换 `X-Forwarded-For` 再播 | `online_viewers` +1 |
+| `token_enabled=false` 时播放 | `online_viewers` 恒 0 |
+| `entry_exts` | `gid → ".m3u8"`（按分组 `format` 决定） |
+| `whole_file_budget_mb=0` | 报 `536870912`（512 MB） |
+| `poll_interval_secs` | 固定 10，无对应配置键 |
+| `cpu_cores` | 宿主可用核数 |
+
+`/panel/api/cache/stats` 实测字段：
+`backend, disk_bytes, m3u8_entries, segment_entries, segment_url_entries, sub_url_entries, dash_disk_bytes, timeshift_disk_bytes, recording_disk_bytes, livestream_disk_bytes`。
+
+`/panel/api/health` 的条目形状：
+
+```json
+{"checked_at":1793028438,"consecutive_fails":1,"error":"连接失败","http_status":null,"latency_ms":null,"ok":false}
+```
+
+- 连接层失败：`error="连接失败"`，`http_status` 与 `latency_ms` 均为 `null`。
+- 成功：`error=null`，`latency_ms` 为毫秒整数。
+- 同一轮探测的所有条目 `checked_at` 相同。
 
 ## 7. 健康探测出口（形）
 

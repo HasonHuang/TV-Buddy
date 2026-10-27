@@ -380,6 +380,19 @@ button.danger {
   cursor: pointer;
 }
 
+/* 上移/下移：小一号，且在边界处明显不可点。 */
+.icon-btn.move {
+  font-size: 13px;
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.icon-btn.move:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 /* --- 提示条 --- */
 .toast {
   position: fixed;
@@ -400,4 +413,72 @@ button.danger {
 
 .toast.err {
   border-left-color: var(--danger);
+}
+
+pre.log {
+  margin-top: 12px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0d11;
+  color: var(--text2);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* --- 低配置设置与推荐值（T6） --- */
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 4px 16px;
+  margin-top: 6px;
+}
+
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 2px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+label.check input {
+  width: auto;
+  margin: 0;
+}
+
+.hint {
+  color: var(--text2);
+  font-size: 11px;
+  margin-top: 3px;
+}
+
+.rec {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+
+.rec-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.rec-item .k {
+  color: var(--text2);
+  font-size: 11px;
+}
+
+.rec-item .v {
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 2px;
 }

@@ -1,0 +1,84 @@
+# IPTV Proxy 配置样例（首次安装时复制为 config.toml）
+# 键面对齐目标 v0.8.2；未列出的键取默认值。
+
+[server]
+bind = "[::]:19899"
+log_level = "info"
+
+[auth]
+token_enabled = false
+
+[cache]
+disk_path = "./cache"
+
+# 容量键（U-10）：`disk_max_mb` 与 `[cache.gc].max_disk_mb` 同义（同时非 0 取更小者），
+# `memory_max_mb` 限制内存切片索引（按每条约 256 B 估算成条目数）；两者 `0` = 不限。
+# `segment_cache_max_mb`/`m3u8_max_entries`/`segment_max_entries` 是目标兼容键，
+# 目标 v0.8.2 与本实现都不消费，见 docs/design/04-config-and-storage.md §11.5。
+
+# 低配置（1 vCPU / 128 MB 内存 / 1 GB 磁盘 + 前置 CDN）建议显式配上下面几段；
+# 完整可复制的样例见 docs/design/config-low-spec.toml。
+#
+# [cache.segments]
+# per_channel_max = 200      # 内存与磁盘切片索引同步受限（0 = 仅内置默认 4096）
+#
+# [cache.prefetch]
+# enabled = true
+# concurrency = 2            # 1 vCPU：降低开播瞬间的 CPU 抢占
+#
+# [cache.gc]
+# enabled = true             # 默认已开；关掉后切片正文永不删除，1 GB 盘会被吃满
+# max_disk_mb = 0            # 0 = 按可用空间与实测工作集自动
+#
+# [cdn]
+# enabled = true             # CDN 侧兜底；默认 false 时响应头与旧版逐字节一致
+# auto_tune = true           # 从真实播放流量推算推荐 TTL / 磁盘上限
+# segment_max_age_secs = 0   # 0 = 用实测推荐值（面板「缓存状态」页可复制）
+# empty_status = 502         # 让「200 + 空体」不被 CDN 缓存
+# # public_base = "https://cdn.example"
+
+# 字幕机翻（可选）。url 可写根地址、/translate 或 /translate/batch。
+# [subtitle.translate]
+# enabled = true
+# url = "https://translate.ipacel.cc/translate"
+# target = "zh-cn"
+# source = "auto"
+# token = ""
+
+# EPG 翻译（可选）。engine = "mtran" 时使用 mtran_url。
+# [epg.translate]
+# enabled = true
+# engine = "mtran"
+# mtran_url = "https://translate.ipacel.cc"
+# mtran_token = ""
+# target = "zh-cn"
+# mtran_batch = 50
+
+# DASH 分组把 MPD 转成 HLS。`format = "mpd"` 时订阅用 `.mpd` 扩展名。
+# `mpd_keep_seconds > 0` 只保留媒体清单末尾的时间窗；`0` 保留全部。
+# `url_pool_size > 1` 且 MPD 有多个 <BaseURL> 时，视频用首选，音频/字幕轮询其余。
+#
+# [[groups]]
+# id = "dash"
+# name = "DASH 示例"
+# mode = "dash"
+# access = "public"
+# format = "mpd"
+# mpd_keep_seconds = 0
+#
+# [[groups.channels]]
+# id = "d1"
+# name = "DASH 频道"
+# url = "http://example.com/live.mpd"
+# url_pool_size = 1
+
+[[groups]]
+id = "demo"
+name = "示例分组"
+mode = "proxy"
+access = "public"
+
+[[groups.channels]]
+id = "c1"
+name = "示例频道"
+url = "http://example.com/live.m3u8"

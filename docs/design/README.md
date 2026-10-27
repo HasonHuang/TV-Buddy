@@ -25,10 +25,14 @@
 | --- | --- | --- |
 | [`01-tech-selection.md`](01-tech-selection.md) | 技术选型：语言、框架、依赖、构建、兼容契约 | ✅ 已确认 |
 | [`02-architecture.md`](02-architecture.md) | 模块划分、进程模型、数据流 | ✅ 初稿（M0 骨架已按此实现） |
+| [`03-http-contract.md`](03-http-contract.md) | 路由表与接口契约 | ✅ 初稿（M1 按其 §9 实施） |
+| [`04-config-and-storage.md`](04-config-and-storage.md) | 配置与存储细节 | ✅ 初稿 |
+| [`05-frontend.md`](05-frontend.md) | 前端页面与交互设计 | ✅ 初稿 |
+| [`06-low-spec-optimization.md`](06-low-spec-optimization.md) | 低配置 + 多 CDN 优化：边缘缓存、推荐值、磁盘回收、预取覆盖 | ✅ 已实施（T0 待人工） |
+| [`config-low-spec.toml`](config-low-spec.toml) | 低配 + 多 CDN 示例配置（1 vCPU / 128 MB / 1 GB） | ✅ 已试跑 |
+| [`07-coverage-and-plan.md`](07-coverage-and-plan.md) | 全量覆盖对比（160 条 `S-*`）与分期实施规划 | ✅ 规划就绪 |
 | [`reference/`](reference/) | 目标 UI 参考截图（30 张）+ 功能与证据映射 | ✅ 已采集 |
-| `03-http-contract.md` | 路由表与接口契约 | ✅ 初稿（M1 按其 §9 实施） |
-| `04-config-and-storage.md` | 配置与存储细节 | ✅ 初稿 |
-| `05-frontend.md` | 前端页面与交互设计 | ✅ 初稿 |
+| [`reconciliation-report.md`](reconciliation-report.md) | P0 对拍报告（22 项用例） | ✅ 差异 0 |
 
 ## 3. 写作要求
 

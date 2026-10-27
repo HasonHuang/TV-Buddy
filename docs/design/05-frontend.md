@@ -43,7 +43,7 @@
 | 1 | 概览 | `dashboard` | `/status`、`/stats`、`/cache/stats` | M0 部分 ✅ |
 | 2 | 缓存状态 | `cache` | `/cache/stats`、`/cache/flush` | M2 |
 | 3 | 分组管理 | `groups` | `/groups*`、导出、M3U | **M1** |
-| 4 | 系统设置 | `settings` | `/config`（全量保存） | M0 部分 ✅ |
+| 4 | 系统设置 | `settings` | `/config`（全量保存） | ✅ 字段级表单见 §4.1（字幕/DASH/语言待补） |
 | 5 | 安全管控 | `security` | `/security/*` | P1 |
 | 6 | 频道热度 | `stats` | `/stats` | M3 |
 | 7 | 定时录制 | `schedule` | `/schedule*` | P1 |
@@ -56,6 +56,60 @@
 
 弹窗体系（对齐目标，共 13 类）：分组编辑、频道编辑/新建、M3U 导入、录制任务、EPG 脚本、源频道浏览器、翻译模型、台标动效、批量解封、后台节流详情、台标选择器、确认框。M0 只实现确认框。
 
+### 4.1 系统设置页的字段级表单
+
+基线：`reference/img/p12-settings.png`（目标同一分区的 10 张卡片）。
+一次 `GET /panel/api/config` 取整份配置到草稿，顶部「保存设置」一次 `PUT` 回去
+（对应目标的「修改后点击保存生效」）。
+
+| 卡片 | 配置段 | 字段 | 状态 |
+| --- | --- | --- | --- |
+| 服务器 | `[server]` | `bind`、`timezone_offset_hours`、`catchup_tpl`、`log_level`、`home_url`、`not_found_url`、`error_url`、`m3u_header_lines` | ✅ |
+| 面板认证 | `[panel]` | `username`；新密码（浏览器算 `password_sha256`） | ✅ |
+| 切片伪装 | `[cache.disguise]` | `enabled`、`subtitle`、`playlist`、`master`、`formats` | ✅ |
+| 监控 | `[health]`、`[stats]` | `enabled`、`interval_secs`、`timeout_secs`、`concurrency`；`enabled`、`online_window_secs` | ✅ |
+| 缓存配置 | `[cache]` | `backend`、`disk_path`、`disk_max_mb`、`memory_max_mb`；清空本地缓存 | ✅ |
+| 预载配置 | `[cache.prefetch]` | `enabled`、`concurrency`、`timeout`、`prefetch_limit`、`mpd_readahead`、`skip_tail` | ✅ |
+| 磁盘回收 | `[cache.gc]` | §11.2 的八个键；立即估算 | ✅ |
+| CDN 兜底 | `[cdn]` | §11.1 的键 | ✅ |
+| 切片缓存 | `[cache.segments]` | `global_max`、`per_channel_max`、`retain_count`（本实现扩展） | ✅ |
+| 字幕设置 | `[subtitle]` | `style.*`（开关 / 字号 / 颜色 / 字重 / 位置滑杆）、`translate.*`（机翻、目标语言多选、双语与译文上下、译轴、超时、MTranServer、API Key）+ 测试与清理译文缓存 | ✅（样式注入未实现，兼容保留） |
+| DASH 调优 | `[cache.dash]` | 播放体验 / 网络性能 / 特殊场景三组 | ⏳ |
+| 备份与迁移 | — | 复用 `BackupPage` 卡片 | ✅ |
+| 语言 | — | 界面语言（目标为「跟随浏览器」） | ⏳ 待决策 |
+| 分享（多 VPS） | `[share]` | `enabled`、`role`、`key`、`trust_ips`、`master_url`、`follower_urls`、`share_token`（仅回显）、`poll_secs` | ✅ |
+| 其余字段（JSON） | — | 未做成表单的段 | 兜底 |
+
+- 保存写回**整份配置**，所以「其余字段（JSON）」里的改动也会一起生效。该卡片剩下 DASH 调优、
+  在流等段（见上表的 ⏳ 行）。
+- 视频素材页（`p13`）另加两项行内操作：**复制外链**（`location.origin + /assets/<文件名>`，即公网
+  `GET /assets/*`）与**未被引用**标记。判定标准为本实现自定：配置里没有任何字符串指向
+  `/assets/<文件名>`；目标未观测，故只标不删。
+- 契约由 `scripts/smoke-settings.sh` 守住：`GET → PUT → GET` 必须逐字节等价（不丢未知键、
+  不改类型），字段路径必须存在，改口令后新口令可登录。
+- 新密码在浏览器里算 SHA-256（`frontend/src/sha256.ts`）。不用 `crypto.subtle`：
+  面板常走 `http://<内网 IP>`，非安全上下文里它不可用。
+
+### 4.2 逐屏字段清单对拍（C1a）
+
+基线：`reference/README.md` §3.1 / §3.2 的「关键元素」列与对应截图。判据是**元素与信息层级**，
+不做像素比对（缺目标操作录像）。已对齐的分区不列；下表每一行都有可复现的证据。
+
+| 分区 | 目标有的元素 | 本实现现状（证据） |
+| --- | --- | --- |
+| `dashboard` | 实时指标（下行·回源、上行·出网、进程内存、CPU、整盘内存峰值）；快速操作（清空缓存、热重载、刷新状态、导出全部 M3U）；系统信息含 RSS | ✅ 已对齐（2026-10-27）。`/panel/api/status` 已按目标字段补齐（见 `07` §3.B1/B2），页面直接渲染键值；快速操作四项已在。`traffic_in_bytes` 恒 0，与目标一致 |
+| `groups` | 分组与频道排序（`▲`/`▼`，组名左侧另有拖拽柄）；工具栏 `M3U 导入`/`JSON 导入`/`JSON 覆盖`/`导出全部`/`多选`；频道行状态点与 `异常`/`常驻`/`全轨道` 徽章 | ✅ 已对齐（2026-10-27）。排序、四个导入导出入口、配置型三枚徽章、绿点与 `异常`（来自 `/panel/api/health` 的 `entries`）都在。`多选` 已自定实现：分组复选框 + 批量导出 + 批量删除（目标语义未观测，登记在 `PROGRESS.md` §3.3）。拖拽柄未做（等价功能由上/下移覆盖）。证据：`reference/img/p02-groups.png`；`07` `D-006` |
+| `security` | 白名单、限流 `l1`/`l2`、会话 TTL 与并发、防爆破 | ✅ 已加「访问控制」卡片：读整份配置改 `[auth]` 子树后 `PUT /panel/api/config`（与设置页同机制），四组都在。**未消费的键**（白名单、`max_sessions_per_ip`/`session_ttl_secs`、`l1/l2`、升级封禁）逐项标 `未消费` 并写明不改变运行行为。另加「播放链接审计」卡片显示 `GET /panel/api/link-info` 的 Token 状态、随机 ID 与别名 |
+| `logs` | 级别过滤 | ✅ 已加级别下拉（全部/TRACE/DEBUG/INFO/WARN/ERROR），前端按行过滤；顺带剥掉环形缓冲里的 ANSI 颜色码（原先直接塞 `<pre>` 会显示成控制符） |
+| `epg` | 翻译设置（`m08` 翻译模型）；采集节奏 | ✅ 已加五张卡：「采集节奏」= cron 输入 + `POST /panel/api/epg/cron-preview`；「EPG 翻译」= 引擎与目标语言 + 测试 + 立即翻译 + 清空缓存；「翻译模型」= `GET /panel/api/epg/translate/models` + `probe`；「采集脚本」= `/epg/scripts` 列表 + 上传/覆盖 + 删除；「匹配报告」= `GET /panel/api/epg/match-report` 原样显示 `text/plain` 表格；「匹配工具」= 建议、源频道浏览、时区预览；「公开查看器频道」= `GET /panel/api/epg/viewer-channels` |
+| `logos` | 动效（`m09`）、转码参数（最大边 / 质量 / 转 WebP） | ✅ 已接：上传前在浏览器里按最长边等比缩放、可选转 WebP（目标同，服务端不转码）；每个台标卡加「动效」→ 6 效果选择 + `POST /panel/api/logo/animate`，生成后显示帧数/尺寸/时长/体积变化；有 `.orig/` 备份的显示「还原」 |
+| `schedule` | 「从 EPG 加载节目」 | ✅ 已接：选好分组与频道后「从 EPG 加载节目」→ `GET /panel/api/epg/programmes/{epgKey}`（`epgKey` = `tvg_id` 或频道 id 的小写，与 `epg::channel_targets` 的 `out_id` 同规则）。节目表每条可「填入」（取已含 `record_pad_*` 的 `rec_start`/`rec_end`）或「排期」（`POST /panel/api/schedule/from-epg` 单条提交） |
+| `subs` | 源行的「读取分组」 | ✅ 已加：「读取分组」按钮 → `POST /panel/api/subs/groups`，可「加入映射」填 `group_map`；源名下方显示 `GET /panel/api/subs/status` 的最近结果（频道数或失败原因、最近成功时间） |
+
+已对齐的部分：`cache` 按目录渲染 `/cache/stats` 的 `entries`（含 `seg_url` / `sub_url`）；
+`stats` 显示在线窗口与热度排行；`assets` 见 §4.1；`livestream` 有回看列表与缓冲；
+`settings` 见 §4.1。弹窗族本轮未逐项核对。
+
 ## 5. 组件清单
 
 | 组件 | 职责 | 对应参考截图 |
@@ -67,7 +121,8 @@
 | `Modal` | 弹窗壳（遮罩、标题、动作区） | `m01`–`m13` |
 | `Toast` | 操作反馈 | — |
 | `Badge` | 模式、状态、access 徽章 | `p02`、`p04` |
-| `Field` | 表单控件（输入、下拉、开关、多行） | `m01`、`m02` |
+| `Field` | 表单控件（输入、下拉、开关、多选、多行） | `m01`、`m02`、`p12` |
+| `settings.tsx` | 系统设置页：配置草稿 + 顶部单一保存 + 字段卡片（§4.1） | `p12` |
 | `LoginPanel` | 登录卡 | `p00` |
 
 ## 6. 交互约定
@@ -76,7 +131,7 @@
 | --- | --- |
 | 登录 | 成功后 token 存 `localStorage.iptv_token`；失败显示错误文案 |
 | 401 | 清除 token，回到登录卡 |
-| 保存配置 | 全量 `PUT /config`；成功提示"配置已保存" |
+| 保存配置 | 顶部单一「保存设置」按钮；整份 `PUT /config`；成功后提示"设置已保存"并刷新推荐值 |
 | 分组/频道改动 | 立即调用对应接口；成功后刷新列表 |
 | 危险操作 | 先弹**自研确认框**（目标另有 20 处原生 `confirm()`，不复刻） |
 | 长列表 | 客户端搜索过滤 |
@@ -103,4 +158,4 @@
 | --- | --- |
 | 是否需要键位快捷操作（目标含 keybind 提示） | 先不做；按需追加 |
 | 移动端适配 | 目标无移动布局；我们只做 ≥1280 px |
-| 是否引入 i18n | 目标只有中文；不做 |
+| 是否引入 i18n | **已定：不做**。目标是真 i18n，我们只有中文；只放一个切不动的选择器是「配了没反应」的反模式。已登记为差异（`07` §3.C4）；将来要做需先抽全部文案 |

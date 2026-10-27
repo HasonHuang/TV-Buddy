@@ -1,0 +1,91 @@
+# IPTV Proxy 低配置示例：1 vCPU / 128 MB 内存 / 1 GB 磁盘，前置多 CDN
+#
+# 用法：复制为 `config.toml`，改掉 `[[groups]]` 与 `[panel]`，重启服务。
+# 依据：[`06-low-spec-optimization.md`](06-low-spec-optimization.md)。
+#
+# 两条硬前提（缺一条就会在 1 GB 盘上翻车）：
+#   1. `[cache.gc].enabled = true` —— 切片正文只写不删，靠它回收；
+#   2. CDN 侧按 `06` §2 配好「强制 TTL + 忽略源站头 + 忽略 Cookie」，并下发
+#      `X-Forwarded-Proto: https`（或在此用 `[cdn].public_base` 兜底）。
+#
+# 磁盘索引默认有内置 4096 条上限。想更省可把 `per_channel_max` 设小。
+
+[server]
+bind = "[::]:19899"
+log_level = "info"
+
+[panel]
+enabled = true
+# 默认口令是 `admin`；上线前必须改（`password_sha256` 是口令的 SHA-256 十六进制）。
+
+[auth]
+token_enabled = true
+ip_guard_enabled = true
+
+[cache]
+disk_path = "./cache"
+
+# 容量键（U-10）。`disk_max_mb` 与 `[cache.gc].max_disk_mb` 同义，同时非 0 取更小者；
+# `memory_max_mb` 是内存切片索引的字节预算（按每条约 256 B 换算成条目数）：
+# disk_max_mb = 0
+# memory_max_mb = 4      # 128 MB 实例可考虑，≈ 1.56 万条；`0` = 不限
+# `segment_cache_max_mb`/`m3u8_max_entries`/`segment_max_entries` 是目标兼容键，
+# 目标 v0.8.2 与本实现都不消费，别用它们限容（见 `04-config-and-storage.md` §11.5）。
+
+# 内存与磁盘索引同步受限：把每个频道的索引条数压到 200。
+# `0` 时只用内置默认 4096 兜底，不再随清单刷新无限增长。
+[cache.segments]
+per_channel_max = 200
+
+# 预取只服务重复请求（重连、切台回退、多 CDN 扇出）。
+# 1 vCPU 上把并发降到 2，避免开播瞬间抢占 CPU。
+[cache.prefetch]
+enabled = true
+concurrency = 2
+prefetch_limit = 0
+skip_tail = 1
+
+# 磁盘回收：上限自动，按「可用空间 × 0.8 − 100 MB」与实测工作集取小。
+[cache.gc]
+enabled = true
+max_disk_mb = 0          # 0 = 自动（1 GB 盘通常落在 100–150 MB）
+max_age_secs = 1800
+interval_secs = 300
+scan_limit = 500         # 单轮最多处理的文件数，防 1 vCPU 抖动
+disk_budget_ratio = 0.8
+reserve_mb = 100
+min_mb = 50
+
+# 外部 CDN 侧兜底。CDN 能按 `06` §2 配好的话，这里保持默认即可；
+# 只有某家只能「遵循源站头」时才打开 shared_cache_hits / segment_max_age_secs。
+[cdn]
+enabled = true
+auto_tune = true           # 被动实测；不想有这点开销就设 false
+segment_max_age_secs = 0   # 0 = 用实测推荐值（面板「缓存状态」页可复制）
+shared_cache_hits = false
+dont_cache_empty = false
+empty_status = 502         # 强制 TTL 时用它挡住「200 + 空体」
+# CDN 不下发 X-Forwarded-Proto 时填这里：
+# public_base = "https://cdn.example"
+
+[[groups]]
+id = "hk"
+name = "香港"
+mode = "proxy"
+access = "public"
+format = "hls"
+
+# 热分组可以单独覆盖预取（三态：未设置 = 继承全局）。
+# [groups.prefetch]
+# enabled = true
+# limit = 6
+# concurrency = 2
+
+[[groups.channels]]
+id = "c1"
+name = "示例频道"
+url = "https://upstream.example/live.m3u8"
+
+# 单频道也可覆盖；`enabled = false` 的频道不再预取（例如几乎没人看的源）。
+# [groups.channels.prefetch]
+# enabled = false

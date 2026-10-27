@@ -2,7 +2,7 @@
 //!
 //! 契约见 [`docs/design/03-http-contract.md`](../../../docs/design/03-http-contract.md) §5。
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use axum::{
     body::Body,
@@ -14,14 +14,71 @@ use axum::{
 use crate::{playlist, state::AppState};
 
 /// `GET /playlist.m3u`。
-pub async fn total_playlist(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Response {
+pub async fn total_playlist(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let config = state.snapshot();
     let token = token_for(&state, &config);
-    let body = playlist::render_total(&config, &base_url(&headers), token.as_deref());
+    let local = playlist::render_total(&config, &base_url(&headers), token.as_deref());
+    let extra = aggregate_sources(&state, &config).await;
+    let body = playlist::compose(local, extra, &config.playlist.merge_position);
     m3u_response(body, "playlist.m3u")
+}
+
+/// 抓取并合并聚合源（F-013 §5）。
+///
+/// 单个源失败只记日志；本地订阅照常返回。
+async fn aggregate_sources(state: &Arc<AppState>, config: &crate::config::Config) -> String {
+    let mut extra = String::new();
+    let mut seen = HashSet::new();
+    for source in config
+        .playlist
+        .sources
+        .iter()
+        .filter(|source| source.enabled && !source.url.trim().is_empty())
+    {
+        let key = format!("sub:{}:{}", source.id, source.url);
+        let ttl = std::time::Duration::from_secs(crate::subs::effective_ttl_secs(source.ttl_secs));
+        let body = match state.sources.get_with_ttl(&key, ttl) {
+            Some(body) => body,
+            None => match fetch_source(state, source).await {
+                Ok(text) => text,
+                Err(error) => {
+                    tracing::warn!(url = %source.url, error = %error, "抓取聚合源失败");
+                    state.sources.mark_error(&source.id, error);
+                    continue;
+                }
+            },
+        };
+        let (piece, channels) =
+            playlist::aggregate_seen(source, &config.playlist.global_exclude, &body, &mut seen);
+        extra.push_str(&piece);
+        state.sources.set_channels(&source.id, channels);
+    }
+    extra
+}
+
+/// 抓取单个聚合源；成功时写入缓存与状态。
+async fn fetch_source(
+    state: &Arc<AppState>,
+    source: &crate::config::model::PlaylistSource,
+) -> Result<String, String> {
+    let response = state
+        .http
+        .get(&source.url)
+        .send()
+        .await
+        .map_err(|error| format!("抓取失败: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("上游返回 {}", response.status()));
+    }
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("读取失败: {error}"))?;
+    state
+        .sources
+        .put(&format!("sub:{}:{}", source.id, source.url), text.clone());
+    state.sources.mark_success(&source.id);
+    Ok(text)
 }
 
 /// `GET /{gid}/playlist.m3u`。

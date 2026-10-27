@@ -1,7 +1,7 @@
 # 01 · 技术选型（IPTV Proxy 重实现）
 
 > 设计版本 v1.0 ｜ 2026-10-19 ｜ 状态：**已确认（用户决策）**
-> 依据：[`../spec/08-target-spec.md`](../spec/08-target-spec.md)、[`../spec/03-environment-and-tooling.md`](../spec/03-environment-and-tooling.md)、[`../../PROGRESS.md`](../../PROGRESS.md) §5
+> 依据：[`../spec/08-target-spec.md`](../spec/08-target-spec.md)、[`../spec/03-environment-and-tooling.md`](../spec/03-environment-and-tooling.md)、[`../../PROGRESS_bak.md`](../../PROGRESS_bak.md) 附录 A
 
 ## 1. 目标与约束
 
@@ -109,11 +109,16 @@
 | 项 | 目标行为 | 本实现 |
 | --- | --- | --- |
 | `<S>`（32 hex） | `sha256(上游切片绝对 URL)[:32]`（F-004） | **逐字节一致** |
-| `<P>`（16 hex） | 仅依赖 `(gid,cid)`；参与校验；算法未解（F-017） | 自研稳定算法：`sha256("{gid}:{cid}")[:16]` + 校验 |
-| 扩展名 | 不参与校验；后缀映射 `Content-Type` | 一致 |
+| `<P>`（16 hex） | 仅依赖 `(gid,cid)`；参与校验；**算法未解**（F-017） | 域标签 + 长度前缀摘要 `sha256("rea-iptv/segment-v1\0"‖len‖gid‖len‖cid)[:16]`；四条可观测性质全满足（F-017 §5.2） |
+| 文件名文法 | `<P>_<S>[.<ext>]`：扩展名整段可省、最多一个 `.`、恰好一个 `_`；`<P>`/`<S>` 定长**小写** hex | 一致 |
+| 扩展名 | 取值不参与校验；5 项白名单映射 `Content-Type`，其余 `video/mp2t` | 一致 |
+| 入口后缀 | `.m3u8` / `.mpd` / `.txt` / 无后缀等价，其余 `302 not_found_url` | 一致 |
+| 占位分流 | `<P>`/`<S>` 错取值 → `error_url`；分组/频道不存在、非 `proxy` 模式子路径 → `not_found_url` | 一致 |
 | 兼容性 | 客户端从清单取值 | **不影响 drop-in**（不要求与目标字节相同） |
 
 > 网络客户端从清单读取切片地址。故 `<P>` 无需与目标一致。此差异不登记为 `D-*`。
+> **选长度前缀而非 `"{gid}:{cid}"` 拼接**：id 由用户配置，可含 `:`/`/`；分隔符拼接会让
+> `("a:b","c")` 与 `("a","b:c")` 撞到同一个 `<P>` 并共用切片索引文件（实测过）。
 
 ## 6. 数据与文件布局
 
@@ -149,7 +154,7 @@
 | 项 | 结论 |
 | --- | --- |
 | 目标三元组 | `aarch64-unknown-linux-musl`、`x86_64-unknown-linux-musl`（静态） |
-| 构建工具 | `cargo` + `cross`（Docker，本机具备） |
+| 构建工具 | `cargo` + Docker `rust:1-alpine`（双架构静态构建，见 `design/04` §6） |
 | 前端构建 | `pnpm install && pnpm build` → `dist/` 嵌入 |
 | 发布物 | `iptv-proxy` 二进制（arm64/amd64）+ 安装脚本 |
 | 服务单元 | systemd（Alpine 用 OpenRC），`/opt/iptv-proxy` 布局 | 

@@ -143,6 +143,7 @@ HasonHuang/sontv/docs/iptv-proxy/
 | `D-003` | Remux 的 `503` 被误归因于缺少 ffmpeg | 结论更正 | ✅ 已更正（为预热态） |
 | `D-004` | DASH「多 CDN 故障切换」未观测到 | 实现差异（文档描述） | 🔶 已记录（见 07） |
 | `D-005` | `rewrite` + MPD：输出被逐行当作相对 URL 绝对化，结果不可播放（非基线所述「直连 CDN」） | 实现缺陷/文档不符 | 🔶 已记录（v0.8.2） |
+| `D-006` | `S-BUG-02`：基线称面板「未提供分组排序」，实测**有**排序（`▲`/`▼` 与拖拽柄） | 结论更正（文档描述） | ✅ 已更正（`08` 已改，见下） |
 
 **`D-002` 详情**
 - 基线原文（`08` §6 `S-SUB-03`）：手动/导入频道 `group-title=<显示名>`；**聚合频道 `group-title=<分组ID>`**（不同代码路径）。
@@ -155,6 +156,16 @@ HasonHuang/sontv/docs/iptv-proxy/
 - 证据：Rust 版本常量 `env!("CARGO_PKG_VERSION")` 落在固定 `.rodata` 槽 `…local_path.m3u8start_epoch<VER>logo…`：`d302316fb8`=**0.8.2**、`b6331774f8`(main)=**0.8.8**。见 [`../findings/static/01-sample-packing-and-toolchain.md`](../findings/static/01-sample-packing-and-toolchain.md) §5。
 - 差异范围：**版本差异**（非架构/环境）；上游**无 tag/release**，须以**提交 SHA**锚定。
 - 处置：**已解决**——主分析对象改用 **v0.8.2 = `d302316fb8`**（与基线一致），登记于 [`../findings/artifact.md`](../findings/artifact.md) §2.1；`main`(v0.8.8) 仅作**差异对照**。
+
+**`D-006` 详情**
+- 基线原文（`08` §14 `S-BUG-02`）：面板**未提供**分组排序功能（D-README）；「面板无排序/拖拽控件；路由表无 `move`/`order` 端点」。
+- 证据（2026-10-25，v0.8.2 采集的界面基准）：[`../design/reference/img/p02-groups.png`](../design/reference/img/p02-groups.png)
+  显示——分组卡右侧有 `▲`/`▼`，**频道行右侧同样有 `▲`/`▼`**，组名左侧另有拖拽柄（`⁝⁝`）；
+  工具栏含 `M3U 导入`、`JSON 导入`、`JSON 覆盖`、`导出全部`、`多选`、`+ 新增分组`。
+- 差异范围：**文档描述与实际实现不符**（非版本/架构差异）。
+- 处置：**已更正**——`S-BUG-02` 的声明改为「面板提供分组与频道排序」并标 ⚠️；
+  重排很可能通过 `PUT /panel/api/config` 全量回写 `groups` 数组实现，因此「路由表无 `move` 端点」与该现象并不矛盾。
+  本实现的对应缺口记在 [`../design/07-coverage-and-plan.md`](../design/07-coverage-and-plan.md) §3.A9。
 
 **`D-005` 详情**
 - 基线原文（`08` §5 `S-MODE-10`）：`Rewrite + MPD` / `Redirect + MPD` → **直连 CDN**（不转封装）。

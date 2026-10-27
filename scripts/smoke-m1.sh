@@ -157,7 +157,9 @@ check "再删组 404" "404" "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new
 check "总订阅 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$B/playlist.m3u")"
 check "总订阅类型" "application/x-mpegurl; charset=utf-8" \
   "$(curl -s -o "$WORK/body" -w '%{content_type}' "$B/playlist.m3u")"
-check "总订阅首行" "#EXTM3U" "$(head -n1 "$WORK/body")"
+# `[epg].enabled = true` 时首行带 `x-tvg-url`（S-EPG-01），不是裸 `#EXTM3U`。
+check "总订阅首行带 EPG 头" "#EXTM3U x-tvg-url=\"http://127.0.0.1:$PORT/epg.xml.gz\"" \
+  "$(head -n1 "$WORK/body")"
 check "总订阅头行" "#EXTVLCOPT:http-user-agent=ReaTest/1.0" "$(sed -n '2p' "$WORK/body")"
 check "总订阅含公开组" "1" "$(grep -c "http://127.0.0.1:$PORT/pub/c1.m3u8" "$WORK/body")"
 check "总订阅含直通组" "1" "$(grep -c 'http://example.invalid/live.m3u8' "$WORK/body")"
@@ -184,11 +186,15 @@ json.dump(cfg, open("'"$WORK"'/put.json", "w"))
 check "开启 Token 200" "200" \
   "$(code -X PUT "${A[@]}" --data-binary "@$WORK/put.json" "$B/panel/api/config")"
 curl -s -o "$WORK/body" "$B/pub/playlist.m3u"
+# 只取播放条目行：首行的 `x-tvg-url` 也是 http:// 开头，不能直接抓第一个 http。
 check "Token 随订阅下发" "48" \
   "$(python3 -c '
 import re
-url = re.search(r"http://\S+", open("'"$WORK"'/body").read()).group(0)
-print(len(url.split("token=")[1]) if "token=" in url else 0)
+entry = next(
+    line for line in open("'"$WORK"'/body").read().splitlines()
+    if "/pub/" in line and line.startswith("http")
+)
+print(len(entry.split("token=")[1]) if "token=" in entry else 0)
 ')"
 check "开放组不带 Token" "0" "$(curl -s "$B/op/playlist.m3u" | grep -c 'token=' || true)"
 check "直通组不带 Token" "0" "$(curl -s "$B/playlist.m3u" | grep -c 'example.invalid/live.m3u8?token' || true)"

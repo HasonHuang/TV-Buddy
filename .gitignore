@@ -11,3 +11,12 @@
 # 前端依赖与构建产物（由 scripts/build-frontend.sh 生成）
 frontend/node_modules/
 frontend/dist/
+
+# 运行时缓存（默认 [cache].disk_path = ./cache）
+/cache/
+
+# 发布产物（由 scripts/build-release.sh 生成）
+/dist/
+
+.codegraph/
+.opencode/

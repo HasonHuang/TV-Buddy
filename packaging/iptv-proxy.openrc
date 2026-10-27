@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+# Alpine/OpenRC 服务单元：随系统启动，崩溃后自动重启。
+# 日志由程序自己写入 /opt/iptv-proxy/iptv-proxy.log，这里不重复重定向。
+
+name="iptv-proxy"
+description="IPTV Proxy（目标 v0.8.2 兼容重实现）"
+
+command="/opt/iptv-proxy/iptv-proxy"
+command_args="/opt/iptv-proxy/config.toml"
+command_background=true
+command_user="root"
+pidfile="/run/${RC_SVCNAME}.pid"
+respawn_delay=3
+respawn_max=0
+
+depend() {
+    need net
+    after firewall
+}

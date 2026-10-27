@@ -24,7 +24,7 @@
 │  main ──► 加载配置 ──► 建缓存目录 ──► 起后台任务 ──► 起 HTTP 监听     │
 │                                                                      │
 │  HTTP（axum Router）                                                  │
-│   ├─ 公开面   /health /unban /logo /epg /whoami /__assets             │
+│   ├─ 公开面   /health /unban /logo /epg /unban/whoami /__assets       │
 │   ├─ 播放面   /playlist.m3u /{gid}/playlist.m3u /{gid}/{cid}.{ext}    │
 │   │            切片 …/<P>_<S>.<ext>、timeshift、dash-timeshift        │
 │   └─ 面板面   /panel（静态） + /panel/api/*（Bearer 或 X-Token）      │
@@ -90,19 +90,22 @@
 
 | 模块 | 职责 | 阶段 | 规格 |
 | --- | --- | --- | --- |
-| `proxy::dash` | MPD 解析、转封装 HLS、ClearKey KID 检测 | P1 | S-GAP-01、S-DASH-01 |
+| `dash` | MPD 摘要与完整演示解析（BaseURL、SegmentTemplate/Timeline、SegmentList） | P4 | S-MODE-06、S-DASH-01 |
+| `dash_hls` | MPD→HLS 主/媒体清单、init/切片代理、时间窗与 URL 池 | P4 | S-MODE-06、S-GAP-01 |
 | `proxy::remux` | 连续流切 HLS（不用 ffmpeg） | P1 | F-014（D16） |
 | `epg::*` | 采集、匹配、XMLTV 生成、脚本源 | P1 | S-EPG-01…07 |
 | `record` | 定时录制（ffmpeg `-c copy` → MKV） | P1 | S-REC-01/02 |
 | `timeshift` | 本地回看、`cache/livestream/` | P1 | S-TS-01、S-CAP-02 |
+| `dash_timeshift` | 按轨道录制 DASH 切片、`dash-timeshift/{track}/playlist*`、`cache/dash_timeshift/` | P3.5 | S-TS-01、F-016 §5.1 |
 | `subtitle` | WebVTT 透传与 `.vtt` 伪装 | P1 | S-SUB-09、S-DIS-01 |
 | `logo` | 台标库 9 端点、`.orig/` 备份 | P2 | S-LOGO-01…04 |
 | `subs` | 订阅聚合、include/exclude、group_map | P2 | S-GAP-07 |
+| `source_cache` | 订阅源正文与状态落盘、跨重启 TTL | P2 | S-GAP-07、F-020 |
 | `share` | master/follower 同步 | P2 | S-EP-09、S-AUTH-06 |
 | `edge` | `X-IPP-Edge-Secret` 校验、CF 网段 | P2 | S-EDGE-01…03 |
 | `backup` | tar.gz 备份与恢复 | P2 | S-BAK-01/02 |
 | `assets` | 素材转换、`ffmpeg-status` | P2 | S-DEP-01/04 |
-| `cli` | `update`/`port`/`pass`/`log`/`url`/`uninstall` | P2 | S-CLI-01/02、S-AUTH-08 |
+| `cli` | 交互菜单、`install`/`update`/`port`/`pass`/`log`/`url`/`uninstall` | P2 | S-CLI-01/02、S-AUTH-08 |
 
 ## 5. 请求流水线
 
@@ -180,10 +183,11 @@ struct AppState {
 | 项 | 设计 | 依据 |
 | --- | --- | --- |
 | `<S>` | `sha256(上游切片绝对 URL)[:32]` | S-DIS-04（逐字节一致） |
-| `<P>` | `sha256("{gid}:{cid}")[:16]`（自研；仅依赖 `(gid,cid)`） | F-017（算法未解，不追字节一致） |
-| 校验 | `<P>` 与 `<S>` 必须匹配；扩展名不校验 | S-DIS-17 |
+| `<P>` | `sha256("rea-iptv/segment-v1\0"‖len(gid)‖gid‖len(cid)‖cid)[:16]`（自研；仅依赖 `(gid,cid)`；长度前缀防分隔符撞车） | F-017（算法未解，不追字节一致） |
+| 校验 | `<P>` 与 `<S>` 必须**逐字符**匹配（大小写敏感）；扩展名取值不校验，但**最多一个 `.`** | S-DIS-17、F-017 §5.2 |
+| 占位 | `<P>`/`<S>` 错取值 → `error_url`；分组/频道不存在、非 `proxy` 模式子路径 → `not_found_url` | S-DIS-15 |
 | 后缀 | 从 `[cache.disguise].formats` 按频道稳定轮换 | S-DIS-04 |
-| 类型 | 扩展名 → `Content-Type`（图片类型；其余 `video/mp2t`） | S-DIS-13 |
+| 类型 | 5 项白名单（`jpg`/`jpeg`/`png`/`gif`/`bmp`/`webp`）→ 对应图片类型；其余一律 `video/mp2t` | S-DIS-13 |
 | 载荷 | **不改字节**，仅改 URL 与响应头 | S-DIS-02 |
 
 ## 9. 后台任务与调度
@@ -249,9 +253,9 @@ frontend/            # Vite + React + TS（独立目录）
 | --- | --- | --- |
 | M0 骨架 | 配置加载/写回、面板登录、静态页嵌入 | 能登录、能保存配置 |
 | M1 数据面 | 分组/频道 CRUD、总/分组订阅、access 过滤 | 订阅可导出且形状一致 |
-| M2 播放链路 | proxy 模式、切片伪装、缓存窗口、302 占位 | 播放器可播；切片可校验 |
-| M3 直连模式 | redirect/rewrite/passthrough、redirect 缓存 | 三种模式对拍通过 |
-| M4 P0 收尾 | 看门狗、热重载、错误映射、对拍报告 | P0 验收判据全绿 |
+| M2 播放链路 | proxy 模式、切片伪装、缓存窗口、302 占位 | ✅ 已实现（`smoke-m2.sh`；入口/媒体清单/切片/占位/缓存窗口/Token 全绿） |
+| M3 直连模式 | redirect/rewrite/passthrough、redirect 缓存 | ✅ 已实现（`smoke-m3.sh`；含 remux/dash 就绪语义与 Token 矩阵） |
+| M4 P0 收尾 | 看门狗、热重载、运维接口、对拍报告、打包 | ✅ 看门狗/热重载/运维接口（`smoke-m4.sh`）；对拍 22 项差异 0（`reconciliation-report.md`）；双架构静态包与 `/opt/iptv-proxy` 布局（`build-release.sh`、`verify-release.sh`） |
 
 ## 15. 未决问题
 

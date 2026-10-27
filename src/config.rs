@@ -16,7 +16,12 @@ pub use model::Config;
 pub fn load(path: &Path) -> anyhow::Result<Config> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("无法读取 {}", path.display()))?;
-    let config: Config = toml::from_str(&text).context("TOML 解析失败")?;
+    parse(&text)
+}
+
+/// 解析并校验配置文本。
+pub fn parse(text: &str) -> anyhow::Result<Config> {
+    let config: Config = toml::from_str(text).context("TOML 解析失败")?;
     validate(&config)?;
     Ok(config)
 }

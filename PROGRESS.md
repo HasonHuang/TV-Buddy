@@ -1,211 +1,342 @@
-# PROGRESS · IPTV Proxy 逆向任务
+# PROGRESS · IPTV Proxy 逆向与重实现
 
-> 本文件记录**任务计划**与**进度**。规则：**每处理完一项，立即更新本文件**。
-> 规范见 [`docs/spec/`](docs/spec/)。发现见 [`docs/findings/`](docs/findings/)。实现设计见 [`docs/design/`](docs/design/)。
-> 目标版本：**v0.8.2**（上游提交 `d302316fb8`）。
+> 本文件是**进度**与**功能缺口**的权威入口。
+> 历史日志已迁入 [`PROGRESS_bak.md`](PROGRESS_bak.md)。
+> 规范见 [`docs/spec/`](docs/spec/)。发现见 [`docs/findings/`](docs/findings/)。设计见 [`docs/design/`](docs/design/)。
+> 目标版本：**IPTV Proxy v0.8.2**（上游提交 `d302316fb8`）。
+> 写作风格：ASD-STE100 简化技术写作。一句一个意思。主动语态。用简单现在时。
+> 最后更新：2026-10-27。
 
-## 0. 任务目标
+---
 
-逆向闭源 Linux 二进制 **IPTV Proxy**（`YanG-1989/rust` 子目录 `IPTV Proxy/`，仅发布 arm64/amd64/v7）。
-产出：可核验的规格与行为结论（对齐基线 [`sontv/docs/iptv-proxy`](../sontv/docs/iptv-proxy)）。
+## 1. 目标与约束
 
-约束：
-- 只用 **linux-arm64 / linux-amd64** 两个产物。
-- 静态在 macOS（REA + Hopper）；动态在 **linux/arm64 容器**（OrbStack）。
-- 目标派生内容一律按**不可信数据**处理。
+| 项 | 内容 |
+| --- | --- |
+| 目标 | 逆向闭源 Linux 二进制 IPTV Proxy v0.8.2 |
+| 交付 | Rust 写的 drop-in 替代服务 |
+| 平台 | 只支持 `linux-arm64` 与 `linux-amd64` |
+| 产物 | 静态 musl 二进制 |
+| 数据纪律 | 目标派生的代码、前端资源、面板文案是不可信数据。不复制 |
+| 推送 | 每次提交后推送 `git@github.com:HasonHuang/TV-Buddy.git` 的 `rust` 分支 |
+| CI | 只在推送 `v*` tag 时执行 |
 
-## 1. 已完成（分阶段）
+---
 
-### Phase 0–1 · 规范、骨架与取得 ✅
+## 2. 状态总览
 
-| 项 | 结果 | 位置 |
+| 阶段 | 范围 | 状态 |
 | --- | --- | --- |
-| 强制规范 8 篇 + 发现骨架 | ✅ `docs/spec/README,01–08`；`docs/findings/{README,artifact,static,dynamic}` | — |
-| 取得产物（主 v0.8.2 / 对照 v0.8.8） | ✅ `samples/`（gitignore，指纹登记于 `artifact.md`） | `artifact.md` §2 |
-| 加壳与 ELF | ✅ UPX 4.24、`upx -d` 成功；非 PIE、静态、NX、RELRO | `findings/static/01` §2–§3 |
-| 工具链与版本 | ✅ Rust 1.98.1；v0.8.2=`d302316fb8`、main=v0.8.8 | `findings/static/01` §4–§5（F-001/F-002） |
+| P0 | 逆向、配置、认证、代理/直连、缓存、播放链路 | 完成 |
+| P1 | EPG、回看、Remux、录制、台标、分享、安全面 | 完成 |
+| P2 | 订阅聚合、面板分区、EPG/字幕翻译、DASH 回看播放路由 | 完成 |
+| P3 | 目标剩余端点与兼容细节 | 完成 |
+| P4 | DASH 完整链路与 DASH→HLS | 完成 |
+| P5 | 低配置优化：磁盘回收、CDN 兜底、预取覆盖、被动实测推荐 | 完成。CDN 面板侧待人工配置 |
 
-### Phase 2 · 静态分析
+规模：
 
-| 项 | 状态 | 结果 / 位置 |
+| 项 | 数量 |
+| --- | --- |
+| 路由注册（`src/http.rs`） | 131 |
+| 测试 | 309（222 单元 + 87 契约） |
+| 冒烟脚本（`scripts/smoke-*.sh`） | 26 |
+
+已覆盖的能力：
+
+- 六种分组模式：`proxy`、`redirect`、`rewrite`、`passthrough`、`remux`、`dash`。
+- HLS、MPD、TS 与真实上游的兼容处理。
+- 订阅聚合、Token、访问范围、切片伪装、切片缓存。
+- EPG 采集、匹配、手动映射、额外频道、公开页与面板接口。
+- EPG 翻译与字幕翻译。
+- 定时录制、DASH 定时录制、本地回看、时移。
+- 台标库、素材转换、分享、安全管控、备份恢复。
+- 内嵌管理面板与交互式安装/管理 CLI。
+
+---
+
+## 3. 功能缺口
+
+本章只写**本实现缺什么**。目标侧未验证的项不记为缺口，见 §3.4。
+
+### 3.1 后端缺口（已清空）
+
+当前没有需要新代码的后端缺口。B1–B4 的完成记录留在 §3.1.1 与 §3.1.2。
+
+尚未实现的可选能力见 §6 的优先级清单。
+
+### 3.1.1 B4 完成记录（2026-10-26）
+
+新增模块 `src/dash_timeshift.rs`。做法如下：
+
+1. 按 MPD 逐轨道抓取切片原字节。不转封装，不调用 ffmpeg。
+2. 落盘布局与目标一致：`cache/dash_timeshift/{gid}_{cid}/{index.json, init/, segments/}`。
+3. 切片名主干 = 上游 MPD 段号。`#EXT-X-MEDIA-SEQUENCE` 取首条段号。
+4. `#EXT-X-PROGRAM-DATE-TIME` 取切片到达本机的时间，UTC。
+5. 清单按 `playseek` 区间筛选。窗口 = 已录制区间，不取墙钟。
+6. 错误分流按目标实测：
+   - 缺 `playseek` 或格式错 → `400 missing playseek`。
+   - 区间不重叠、反向、相等、未知轨道、非 `dash` 组 → `404 no segments in range`。
+   - 切片未命中 → `404 segment not found`。
+7. 切片扩展名白名单：5 项图片扩展名 + 磁盘原名 `m4s`。init 用 `mp4`。
+8. 旧 `timeshift` 模块删掉 DASH 分支（原用 ffmpeg 转 HLS），避免两条路径重复录制。
+
+对拍结果：同一份动态 MPD 与同一时间窗，目标与本实现逐项比对 18 项，差异 1 项。差异是音轨名，见 §6 P3-1。
+
+质量门：302 项测试通过（215 单元 + 87 契约）。`smoke-dash-timeshift.sh` 13 项全部通过。
+
+### 3.1.2 B1 + B2 + B3 完成记录（2026-10-27）
+
+目标 `/panel/api/status`、`/panel/api/cache/stats`、`/panel/api/health` 已实测（容器 `rea82v09`）。
+
+新增两个模块：
+
+| 模块 | 职责 |
+| --- | --- |
+| `src/metrics.rs` | 出网字节、在线观众窗口、进程 RSS 与 CPU、磁盘占用采样 |
+| `src/health.rs` | 逐频道上游探测与结果缓存 |
+
+实现要点：
+
+1. `/panel/api/status` 补齐目标字段：`mem_rss_mb`、`cpu_seconds`、`cpu_cores`、`disk_cache_mb`、`recording_mb`、`low_resource_mode`、`poll_interval_secs`、`traffic_in_bytes`、`traffic_out_bytes`、`whole_file_*`、`online_viewers`、`active_sessions`、`group_count`、`channel_count`。
+2. `traffic_in_bytes` 固定 0。目标同样恒 0，不修（S-BUG-01）。
+3. `traffic_out_bytes` 由中间件累计。响应体边发边计数，不缓冲正文。
+4. `online_viewers` = 窗口内**带播放 Token 的不同客户端 IP 数**。实测依据：
+   - 同 IP 重复播放不增；
+   - 换 `X-Forwarded-For` 增 1；
+   - `token_enabled=false` 时恒 0。
+5. `active_sessions` = 面板会话数。实测：登录 1 次为 1，播放请求不改变。
+6. `entry_exts` 是 `gid → ".m3u8" | ".mpd"` 的映射，不是固定两项。
+7. `/panel/api/cache/stats` 补齐目标字段：`disk_bytes`、`m3u8_entries`、`segment_entries`、`segment_url_entries`、`sub_url_entries`、`dash_disk_bytes`、`timeshift_disk_bytes`、`recording_disk_bytes`、`livestream_disk_bytes`。
+8. `/panel/api/health` 返回 `{enabled, entries{"<gid>/<cid>": {checked_at, consecutive_fails, error, http_status, latency_ms, ok}}}`。
+9. 探测按 `[health]` 的 `interval_secs`、`timeout_secs`、`concurrency` 运行。连接失败时 `error="连接失败"`，`latency_ms=null`。两者与目标实测一致。
+10. 前端接线：
+    - 分组页频道行按 `entries` 画绿点与 `异常`。
+    - 系统页新增「频道探测」卡片。
+11. 顺带对齐 `GET /panel/api/security/token` 与 `POST /panel/api/security/token/rotate` 的目标字段：
+    - 前者补 `current_value`、`status.current/old`（掩码值 + 剩余秒数）。
+    - 后者补 `new_token`、`expires_in_hours`。
+    - 旧字段保留，面板与旧调用方不受影响。
+
+对拍结果：三张接口的字段集合比对，目标字段缺失 0 项。本实现另外保留若干附加字段，供本地面板使用。
+
+质量门：309 项测试通过（222 单元 + 87 契约）。`pnpm build` 通过。
+
+### 3.2 面板接线（已完成）
+
+原清单由静态检索得出。2026-10-27 全部接线完成，逐项落点如下。
+
+| 端点 | 面板位置 |
+| --- | --- |
+| `GET /panel/api/dash/status` | 系统页「DASH 会话」卡片 |
+| `GET /panel/api/dash/tracks/:gid/:cid` | 分组页 DASH 频道的「轨道」按钮（弹窗） |
+| `POST /panel/api/dash/scan-url` | 系统页「DASH 会话」卡片的「扫描轨道」 |
+| `GET /panel/api/groups/:gid/export` | 分组卡片工具栏「导出」 |
+| `POST /panel/api/resolver/remove` | 系统页「解析脚本」的「删除」 |
+| `POST /panel/api/security/ip/unban-batch` | 安全页「批量解封」 |
+| `POST /panel/api/security/ip/ban`（多地址） | 安全页支持逗号或换行分隔多个地址 |
+| `POST /panel/api/assets/convert` | 素材页「远程转换」卡片 |
+| `GET /panel/api/epg/{scripts,script,script-delete}` | EPG 页「采集脚本」卡片 |
+| `GET /panel/api/epg/match-report` | EPG 页「匹配报告」卡片（原样显示表格） |
+| `GET /panel/api/epg/suggest/:gid/:cid` | EPG 页「匹配工具」的建议表 |
+| `GET /panel/api/epg/source-channels/:id` | EPG 页「匹配工具」的源频道浏览 |
+| `GET /panel/api/epg/tz-preview/:id` | EPG 页「匹配工具」的时区预览 |
+| `GET /panel/api/epg/viewer-channels` | EPG 页「公开查看器频道」卡片 |
+| `GET /panel/api/epg/translate/{models,probe}` | EPG 页「翻译模型」卡片 |
+| `GET /panel/api/link-info` | 安全页「播放链接审计」卡片 |
+| `GET /panel/api/subs/status` | 订阅页每个源的状态行 |
+| 分组工具栏「多选」 | 分组卡片复选框 + 「批量导出」「批量删除」（语义自定，见 §3.3） |
+
+已确认等价、不算缺口：
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /panel/api/logo/list` | 与公开的 `/logo/api/list` 返回**同一份** `list_body`；面板走公开入口即可 |
+
+仍未接线：无。
+
+### 3.3 已定案差异（不实现）
+
+下表只列**已决定不做**的项。可以再做、但排在后面的能力见 §6。
+
+| 项 | 结论 | 依据 |
 | --- | --- | --- |
-| S1 指纹与 ELF 结构 | ✅ | `artifact.md` §2–§3 |
-| S2 加壳/脱壳 | ✅ | `findings/static/01` §2–§3 |
-| S3 工具链/语言（Rust） | ✅ | `findings/static/01` §4（S-ENV-07 升级为观测） |
-| S4 版本判定 | ✅ | `findings/static/01` §5（F-002） |
-| S5 端点/配置键预扫描 | ✅ | `findings/static/01` §6–§7 |
-| S6 内嵌面板前端 | ✅ 4 页（管理面板 622KB / 节目单 / 台标库 / 自助解封） | `findings/static/02`（F-003） |
-| S7 关键算法反编译 | ✅ 范围内完成（F-017） | 后缀=`sha256(上游切片URL)[:32]`；缓存窗口（F-006）；前缀 `<P>` 仅依赖 `(gid,cid)`、参与校验、**算法未解**（F-017，低影响） |
+| `<P>` 算法 | 目标算法未解。不追字节一致。四条可观测性质已全部对齐 | F-017 §5.2、`06` §12 |
+| 伪装扩展名轮换顺序 | 只保证取自 `[cache.disguise].formats`。目标序列未解，不影响功能 | F-018、F-019 |
+| Remux 伪装后缀集合 | 本实现轮换 5 种图片扩展名。目标具体序列未解 | F-014 |
+| `out_groups`/`dropped_groups` 顺序 | 本实现稳定排序，目标是哈希序。只影响展示顺序 | F-020 |
+| 旧数据迁移 `./var/dash` | 只有 v0.8.8 有这个行为 | F-015 |
+| CENC/ClearKey 解密 | 按原字节代理。目标也不解密 | F-009 |
+| 面板语言（i18n） | 不做。目标是真 i18n，本实现只有中文文案 | `07` §3.C4 |
+| 素材「未被引用」判定 | 自定：配置里没有字符串指向 `/assets/<文件名>`。只标不删 | `05` §4.1 |
+| 分组「多选」的批量语义 | 自定：批量导出（合成 JSON 数组）与批量删除。目标语义未观测 | `07` §3.A10 |
+| `traffic_in_bytes` 恒 0 | 复刻目标缺陷。不要"修" | S-BUG-01 |
 
-### Phase 3 · 动态分析（容器 `iptv82`，v0.8.2）
+> `[cdn]`、`[cache.gc]`、分组 `prefetch` 是本实现新增的配置面。目标 v0.8.2 没有这些键。默认值不改变既有行为。
 
-| 项 | 状态 | 结果 |
+### 3.4 待补目标证据（仅验证类）
+
+下表是**只缺证据、不缺代码**的项。要补代码的项见 §6。
+
+| ID | 项 | 当前结论 |
 | --- | --- | --- |
-| D1–D4 启动/端点/认证/版本 | ✅ | `[::]:19899`；`/health`=200、`/panel`=200、`/unban`=200、**`/status`=404**、EPG 关闭时 `/epg*` 404；未知频道→302 占位视频；`POST /panel/api/login`→`{"token":uuid}`（`Bearer` 或 `X-Token`）；`/panel/api/status`→`"version":"0.8.2"` |
-| D5 配置 schema | ✅ | `/panel/api/config` 全量；见 `findings/dynamic/raw/v0.8.2-config.json` |
-| D6 分组/频道 | ✅ | `POST /panel/api/groups`；`…/groups/{gid}/channels`；`PUT …/channels/{cid}` |
-| D7 六模式行为 | ✅ | proxy/redirect/rewrite/passthrough 实测；dash/remux 失败路径+看门狗（F-005） |
-| D8 切片伪装字节级 | 🔶 | 后缀=`sha256(上游切片绝对URL)[:32]`；前缀仅依赖 `(gid,cid)`、参与校验、扩展名不校验；算法未解（F-017） |
-| D9 缓存窗口 | ✅ | 首写 `public,max-age=300` → 命中 `private,max-age=300`；入口 `public,max-age=5`（F-006） |
-| D10 EPG | ✅ | `/epg.xml[.gz]`、`/epg` 免登录 200；根 `iptv-proxy`；时间裁剪与 `lang`（F-008） |
-| D10b 录制/台标 | ✅ | 台标 `/logo/<file>`（`public,max-age=86400`）；录制 MKV + `ffmpeg -c copy`；`/assets/ffmpeg-status`→`installed:true`（F-014） |
-| D11 播放 Token | ✅ | 入口需 `?token=<48hex>`（TTL 24h）；失效→302 `token_failure_url`；切片无 token 也 200（F-007） |
-| D13 入口改写/访问范围 | ✅ | access 四档（open 不进总订阅）；`m3u_header_lines`；`PUT /panel/api/config` 全量原子保存（与文件直改有竞态）（F-009） |
+| V-10 | 面板逐屏视觉与交互 | API 对拍 22/22 差异 0。13 个一级分区已对齐。逐屏视觉对拍未做 |
+| — | `dash-timeshift/status` 的 `hours` | 本实现对 `dash_timeshift` 频道也返回 `timeshift_hours`。目标用哪个键未验证 |
+| — | U-06 其余 5 种台标效果 | 只有 `breathe` 逐字节一致。其余为近似 |
 
-### Phase 4 · 报告与回填
+---
 
-| 项 | 状态 | 结果 / 位置 |
+## 4. 质量门
+
+2026-10-27 实测：
+
+| 项 | 结果 |
+| --- | --- |
+| `cargo fmt --check` | 通过 |
+| `cargo test --offline --all-targets` | 309 项通过（222 单元 + 87 契约） |
+| `cargo clippy --offline --all-targets` | 0 error，27 条历史 warning |
+| 冒烟脚本 | 26 个全部通过。`smoke-record-dash` 需要 ffmpeg，且要求端口 19970/19971 空闲 |
+| `pnpm build` | 通过（含 `tsc --noEmit`） |
+| 发布校验 | 上一轮双架构产物通过 `verify-release.sh`。本轮未重跑 |
+| CI | 只在 `v*` tag 触发。fmt/clippy/test、CLI 冒烟、双架构校验已配置 |
+
+---
+
+## 5. 关键设计结论
+
+EPG：
+
+- `out_id = tvg_id || channel.id`。
+- 匹配顺序：手工映射 → `tvg_id` → 名称。
+- 名称规范化：删除全部空白，转小写。
+- 手工映射存 `<cache>/epg/mappings.json`。额外频道存 `<cache>/epg/extra.json`。
+- 源正文缓存到 `<cache>/epg/raw/<source_id>.xml`。`regenerate` 只读 raw 缓存。
+- `public_viewer_enabled=false` 时，公开 `/epg` 返回 `404`。
+
+DASH：
+
+- 轨道命名：`video_{高}p`、`audio-{n}`、`text-{n}`。目标音轨用 `audio-{语言}`，见 §6 P3-1。
+- 媒体清单路径：`/{gid}/{cid}/{track}/index.txt`。
+- 媒体窗口取 `[cache.dash].playlist_min_secs`。分组 `mpd_keep_seconds > 0` 时优先。
+- 直播清单按 `start_time_offset_secs` 输出 `#EXT-X-START:TIME-OFFSET=-…`。
+- CENC/ClearKey 不解密，按原字节代理。
+
+伪装与切片：
+
+- `<S>` = `sha256(上游切片绝对 URL)` 的前 32 位十六进制。
+- `<P>` = 16 位十六进制，只依赖 `(gid,cid)`。算法用域标签加长度前缀。
+- 切片名文法：`<P>_<S>[.<ext>]`。扩展名可省。最多一个点。恰好一个下划线。
+- `<P>` 与 `<S>` 必须定长小写十六进制。
+- 切片 `Content-Type` 用 5 项白名单。其余一律 `video/mp2t`。
+- 入口后缀白名单：`.m3u8`、`.mpd`、`.txt`、无后缀。四者正文相同。
+- 占位分流：切片校验失败 → `error_url`。分组或频道不存在、非 `proxy` 模式子路径 → `not_found_url`。
+- 切片正文缓存与扩展名解耦。同一 `(P,S)` 只存一份。
+
+订阅：
+
+- `group_map` 是选择集。`group_mode` 未知值按 `keep`。
+- 源正文落盘 `<cache>/sub_url/`。状态在 `<cache>/subs/status.json`。
+- `ttl_secs=0` 按 3600 秒。源级 TTL 优先于 `merge_ttl_secs`。
+- 聚合按 URL 去重，覆盖同源与跨源。
+
+缓存与低配：
+
+- 推荐 TTL = `clamp(ceil60(W + 2T), 300, 900)`。取各分组最大值。无实测时回退 600 秒。
+- 磁盘上限 = `clamp(min(工作集, 可用空间×0.8 − 100MB), 50MB, 总容量×0.7)`。
+- 工作集 = `round10(3 × N × seg_mb × 1.5)`，按十进制 MB 计算。
+- `statvfs` 取 `f_bavail` 与 `f_frsize`。失败时回退 150 MB。
+- GC 淘汰顺序：超龄 → 超量 mtime LRU → 可用空间低于预留时紧急清理。
+- 磁盘索引按登记时间截断。`per_channel_max=0` 时用内置 4096。
+- 预取合并顺序与 `proxy_for` 相同：频道 > 分组 > 全局。
+- 估算统计落盘 `<cache>/cache_estimate.json`。带版本号。落盘由 GC tick 节流。
+- `[cdn].enabled=false`（默认）时，切片响应头、空体状态码与 `self_base` 推导逐字节等于旧行为。
+
+哈希选型：
+
+- 全部保持 SHA-256。不做非加密哈希替换。
+- 理由：一次清单刷新只算 1 个 `<P>` 加 7–20 个 `<S>`，合计 2–15 µs。1 vCPU 下不可观测。
+- 详见 `06` §12。
+
+---
+
+## 6. 推进顺序
+
+排序原则：**反代与 302 转发 > 必须使用的功能 > 其他功能**。
+
+同优先级内，先做有目标证据的项。没有证据的项，先按 `07` §5 出对比方案，再定实现。
+
+### 6.1 优先级 1：反代与 302 转发
+
+| # | 项 | 现状 | 依据 |
+| --- | --- | --- | --- |
+| P1-1 | URL 池回退顺序（`url_pool_size > 1`） | 只做顺序回退。目标曾失败并产生零切片，无法对拍 | V-01、F-018 |
+| P1-2 | DASH 多 CDN 故障切换 | 只做顺序回退 | F-015 |
+
+### 6.2 优先级 2：必须使用的功能
+
+| # | 项 | 现状 | 依据 |
+| --- | --- | --- | --- |
+| P2-1 | `[auth].whitelist`、`max_sessions_per_ip`、`session_ttl_secs` | 不消费。目标行为未观测。界面标"未消费" | F-010 |
+| P2-2 | `[auth]` 的 `l1/l2` 限流、违规计数、升级封禁（13 个键） | 不消费。触发条件未复现 | F-010 |
+| P2-3 | `random_id_enabled`（播放链接随机化） | 只回显 | F-018 |
+| P2-4 | `[share].share_token`（拉取鉴权） | 只回显 | F-016 |
+| P2-5 | `cache.backend=memory`（内存缓存后端） | 只回显。实际仍落盘 | F-015 |
+| P2-6 | 缓存容量上限（`segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries`） | 不消费。目标同样未观测到生效 | S-CACHE-03、`04` §11.5 |
+
+### 6.3 优先级 3：其他功能
+
+| # | 项 | 现状 | 依据 |
+| --- | --- | --- | --- |
+| P3-1 | DASH 音轨命名对齐 `audio-{语言}` | 本实现统一用 `audio-{序号}` | F-016 §5.1 |
+| P3-2 | DASH 文字轨出口 | 目标在实测夹具里不写 master。本实现输出 `SUBTITLES` 组 | F-016 §5.1 |
+| P3-3 | `[subtitle].style.*` 样式注入 | 保留键面。运行时不注入 VTT | `05` §4.1 |
+| P3-4 | 播放侧 `compat_mode`、`srt_ua_keywords` | 不实现。目标未测出行为 | D19 |
+| P3-5 | U-06 其余 5 种台标效果 | 只有 `breathe` 逐字节一致 | F-011 |
+| P3-6 | 逐屏视觉对拍（验证类） | 13 个一级分区已对齐，逐屏未对拍 | `07` §5、V-10 |
+| P3-7 | `dash-timeshift/status` 的 `hours` 键核对（验证类） | 目标用哪个键未验证 | F-016 §5.1 |
+
+### 6.4 外部依赖（需要你参与）
+
+| # | 项 | 说明 |
 | --- | --- | --- |
-| R1 差异登记 | ✅ | `07` §3.1 `D-001…D-005` |
-| R2 核对矩阵回填 | ✅ | `07` §2.3 动态项覆盖 F-004…F-017（新增 S-DIS-17） |
-| R3 阶段性报告 | ✅ | [`findings/report-stage-01.md`](docs/findings/report-stage-01.md) |
+| E1 | T0 CDN 面板配置 | 按 `06` §2 配五处 |
+| E2 | 真机验收 | 在目标 VPS 上跑 S4/S6 |
 
-### Phase 5 · 实现设计（进行中）
+### 6.5 每项完成后的固定动作
 
-| 项 | 状态 | 结果 / 位置 |
-| --- | --- | --- |
-| E1 技术选型 | ✅ | [`design/01-tech-selection.md`](docs/design/01-tech-selection.md)（Rust + axum/tokio；Vite+React 面板嵌入；drop-in 兼容；首期 P0） |
-| E1b UI 参考截图 | ✅ | [`design/reference/`](docs/design/reference/)（30 张：13 页 + 13 弹窗 + 4 独立页；含功能↔证据映射） |
-| E2 架构与模块 | ✅ | [`design/02-architecture.md`](docs/design/02-architecture.md)（分层、模块清单、流水线、状态、缓存/伪装设计、ADR、里程碑） |
-| E3 HTTP 契约 | ✅ | [`design/03-http-contract.md`](docs/design/03-http-contract.md)（公开/私有路由表、播放与订阅契约、access 矩阵、错误串、M1 清单） |
-| E4 配置与存储 | ✅ | [`design/04-config-and-storage.md`](docs/design/04-config-and-storage.md)（配置写入与热重载矩阵、存储布局、运行时数据、日志、发布布局） |
-| E5 前端设计 | ✅ | [`design/05-frontend.md`](docs/design/05-frontend.md)（技术形态、13 分区与弹窗体系、组件清单、交互约定、分期） |
-| E6 P0 实现 | 🔄 | **M0 骨架 ✅、M1 数据面 ✅**；M2 播放链路 → M3 直连模式 → M4 收尾（判据见 [`design/02-architecture.md`](docs/design/02-architecture.md) §14） |
+1. 运行完整质量门（§4）。
+2. 更新本文件与对应 `docs/`。
+3. 提交并立即推送 `rust` 分支。
 
-## 2. 关键结论
+---
 
-1. 样本：UPX 4.24 加壳；脱壳后 Rust 1.98.1、静态、非 PIE。
-2. 版本：主对象 **v0.8.2**（`d302316fb8`）；`main` = **v0.8.8**；运行时 `/panel/api/status` 报 `0.8.2`。
-3. 技术栈：`axum 0.7.9` + `tokio 1.52.1` + `hyper 1.9.0` + `reqwest 0.12.28` + `rustls` + `tracing`。
-4. 面板前端**完整内嵌**（4 页）；接口前缀 `/panel/api/…`。
-5. 伪装默认开启：`[cache.disguise]` enabled/playlist 开、subtitle/master 关、formats=jpg/png/gif/bmp/webp；`[cache.dash].obfuscate_filenames=true`。与基线 S-DIS-01 一致。
-6. **切片伪装**：形状 `/{gid}/{cid}/<16hex>_<32hex>.<ext>`；`<32hex>` = `sha256(上游切片绝对 URL)[:32]`；
-   `<P>`（16 hex）仅依赖 `(gid,cid)`、参与校验（错→302）、算法未解（F-017）；扩展名不校验。
-7. **清单伪装**：主清单 `/{gid}/{cid}.m3u8`（`no-cache`）；媒体清单 `/{gid}/{cid}/video/index.txt`（`text/plain`）。切片忽略 `Range`。
-8. 未知频道 → **302** 占位视频 `material.yang-1989.eu.org/v/{404,mistake,Failure,limit,Ban}.mp4`。
-9. 面板认证：登录换取 **UUID token**；`Authorization: Bearer` 或 `X-Token` 二选一。
-10. **六种模式**（分组级）：`proxy` 反代+伪装切片；`remux`；`redirect`/`passthrough` → 302 直连上游；`rewrite` 清单绝对化；`dash`。
-    `redirect` 缓存上游地址 TTL 300s。`rewrite` + MPD 正文损坏（`D-005`）。
-11. 看门狗：`dash` 主清单就绪超时 30s；`remux` 预热 `503 Retry-After:2`；连续 5 次失败 → 冷却 3600s。
-12. **切片缓存窗口**：首写 `public, max-age=300` → 命中 `private, max-age=300`；入口 `public, max-age=5, s-maxage=5`。
-13. **播放 Token**：入口需 `?token=<48hex>`（全局稳定、TTL 24h）；失效 → 302 `token_failure_url`；**切片不受保护**。`random_id`/`ip_guard` 无可测效果。
-14. **EPG**：关闭时 `/epg*` 全 404；开启后 `/epg.xml`、`/epg.xml.gz`、`/epg` 免登录 200。
-    输出根 `generator-info-name="iptv-proxy"`；按 `keep_days`/`future_days` 裁剪；缺 `lang` 补 `zh`；配置为严格 TOML。
-15. **访问范围**（`access`）：`public` 进总订阅；`hidden` 不进但可直连/分组订阅；`archived` 全停（EPG 照常）；`open` 免 token 且不进总订阅。
-16. **配置保存**：面板改动经 `PUT /panel/api/config` 全量原子写并规范化；与文件直改有竞态；`m3u_header_lines` 热重载；EPG 开启注入 `x-tvg-url`。
+## 7. 文档入口
 
-## 3. 当前状态与下一步
+| 主题 | 路径 |
+| --- | --- |
+| 目标规范 | [`docs/spec/08-target-spec.md`](docs/spec/08-target-spec.md) |
+| 验证矩阵 | [`docs/spec/07-baseline-and-verification.md`](docs/spec/07-baseline-and-verification.md) |
+| 全量覆盖对比与规划 | [`docs/design/07-coverage-and-plan.md`](docs/design/07-coverage-and-plan.md) |
+| HTTP 契约 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) |
+| 配置与存储 | [`docs/design/04-config-and-storage.md`](docs/design/04-config-and-storage.md) |
+| 低配置优化 | [`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md) |
+| 低配置示例 | [`docs/design/config-low-spec.toml`](docs/design/config-low-spec.toml) |
+| 架构 | [`docs/design/02-architecture.md`](docs/design/02-architecture.md) |
+| 面板字段清单 | [`docs/design/05-frontend.md`](docs/design/05-frontend.md) |
+| 发现索引 | [`docs/findings/README.md`](docs/findings/README.md) |
+| 历史进度 | [`PROGRESS_bak.md`](PROGRESS_bak.md) |
 
-- **路线图已收敛**：§5 的 P0/P1/P2 项均已完成或登记为环境受限/仅 088（见各行状态）。
-- 已建：分组 `test1`（proxy）、`g2`、`gdash`（dash）、`gremux`（remux）；频道 `c1`/`c2`（HLS 上游）、`v`（MPD）、`r`（TS）。
-- **未解项（已定界）**：`<P>` 生成算法（F-017，低影响）；`S-DIS-08/09`（切片 TS 结构/水印）仅部分核验；
-  多 CDN 故障切换未观测到（`D-004`）；`epg/api/*` 仅 088 未测。
-- **收尾**：主实例配置已还原默认；停 6 个测试实例与容器；`samples/work/` 下运行产物不纳入版本控制。
-- 阶段报告：[`docs/findings/report-stage-01.md`](docs/findings/report-stage-01.md)。
+---
 
-## 3b. 下一步（实现阶段）
+## 8. 归档
 
-- 阶段目标：按 [`docs/spec/08`](docs/spec/08-target-spec.md) 重实现 IPTV Proxy v0.8.2 的功能，**drop-in 兼容**。
-- 节奏：先写设计（`docs/design/`），再写 P0 代码；P0 完成后与目标实例逐条对拍。
-- 已完成：rustup 工具链（`rustc 1.99.1`）+ 两个 musl 目标；**M0 骨架**（配置读写、面板登录、内嵌 4 页前端、冒烟测试）；
-  **M1 数据面**（分组/频道 CRUD、订阅导出、总/分组订阅与 `access` 过滤、播放 Token、分组管理页）。
-- 待办：**M2 播放链路**（入口清单 → 媒体清单 → 伪装切片、缓存窗口、302 占位）→ M3 直连模式（`redirect`/`rewrite`/`passthrough`）→ M4 收尾（看门狗、对拍、打包）。
-- 待办（打包）：`cross` 交叉编译 musl 静态产物 + `/opt/iptv-proxy` 布局 + systemd/OpenRC。
+2026-10-25，本文件按 ASD-STE100 重写。旧内容全部迁入 [`PROGRESS_bak.md`](PROGRESS_bak.md)。
 
-## 3c. M1 数据面（已完成）
+归档含：
 
-| 项 | 状态 | 证据 |
-| --- | --- | --- |
-| 分组 CRUD：`POST/PUT/DELETE /panel/api/groups[/{gid}]`（局部更新、`409`/`404` 错误串） | ✅ | `src/http/routes/groups.rs`；`smoke-m1.sh` |
-| 频道 CRUD：`POST/PUT/DELETE /panel/api/groups/{gid}/channels[/{cid}]` | ✅ | 同上 |
-| 导出：`GET /panel/api/groups/export`（数组）、`/{gid}/export`（对象） | ✅ | 同上 |
-| 订阅：`GET /playlist.m3u`、`/{gid}/playlist.m3u`；`access` 过滤；直通组用上游地址；归档组订阅 `404` | ✅ | `src/playlist.rs`（6 个单元测试） |
-| 播放 Token：48 位十六进制、内存、轮换宽限 1 h；`open` 组与直通组不带 Token | ✅ | `src/auth/play_token.rs` |
-| 保存语义：改动立即原子重写 `config.toml`（以磁盘为事实源） | ✅ | `AppState::mutate` |
-| 面板：侧栏 + 分组管理页（分组卡、频道表、弹窗增删改、复制订阅/播放地址） | ✅ | [`reference/ours/m1-groups.png`](docs/design/reference/ours/m1-groups.png) |
-| 验证：`scripts/smoke-m0.sh`（M0 15 项）+ `scripts/smoke-m1.sh`（M1 全绿，debug 与 release）+ 无头浏览器端到端 9 项 | ✅ | 日志见 `PROGRESS` §4 |
-| 未做（属 M2/M3）：播放链路 `/{gid}/{cid}.{ext}`、切片伪装与缓存、`redirect`/`rewrite`/`passthrough` 302 | ⏳ | `design/02` §14 |
+- P0 至 P4 的逐项完成记录。
+- 每轮实现、对拍、测试与发布细节。
+- 旧任务编号与验证命令。
+- 2026-10-25 之前的续接快照。
 
-## 4. 进度日志
-
-| 日期 | 事项 | 结果 |
-| --- | --- | --- |
-| 2026-10-15 | Phase 0–2：规范骨架、取得产物、加壳与工具链、版本判定 | ✅ `de898fe`/`d2ade72`/`c938fbd`（F-001/F-002） |
-| 2026-10-16 | 内嵌面板雕刻 + 接口表面；动态基线（启动/端点/认证/配置 schema/版本） | ✅ `5d94435`（F-003） |
-| 2026-10-16 | 建组/建频道；**切片伪装后缀破解**（sha256） | ✅（F-004）`54a5b9f` |
-| 2026-10-17 | 动态：六种模式+看门狗（F-005）·缓存窗口与布局（F-006）·播放 Token（F-007）·EPG（F-008）·台标 | ✅ `6311561`/`74ee89c`/`14fbe5e` |
-| 2026-10-17 | 路线图 Batch1：**D13** 入口改写/访问范围（F-009）；**D13a+D29** 安全审计/指标面（F-010） | ✅ |
-| 2026-10-17 | 基建：容器装 ffmpeg 6.1.1 + python3 3.12；起 4 个独立实例（19901–19904）；派发 4 个子代理（D12/D15/D21/D28、D24/D25/D27、D16/D18/D19/D19b/D20、D14/D17ab/D22） | ✅ 全部回收（F-013…F-016） |
-| 2026-10-17 | 盘点二进制功能全集（55k 字符串+面板），产出优先级路线图 | ✅ §5 |
-| 2026-10-18 | **D23** 台标库 + 配置段补录（F-011）；**D26** 多 VPS 分享 + 完整路由表（F-012） | ✅ |
-| 2026-10-18 | 子代理：D24/D25/D27（F-013）·D16/D18/D19/D19b/D20（F-014）·D12/D15/D21/D28（F-015）·D14/D17ab/D22（F-016） | ✅ |
-| 2026-10-18 | 收尾：**S7** 伪装前缀（F-017）；资产端点；一致性回填（spec/07-08 + 两个 README）；新增 `D-005`、`S-BUG-02` | ✅ |
-| 2026-10-18 | Phase 4：R3 阶段性报告 | ✅ `findings/report-stage-01.md` |
-| 2026-10-19 | 全库文档精简：删中间过程与重复叙述，保留全部编号/数字/状态；空行规范化 | ✅ 正文约 −25%~−30% |
-| 2026-10-19 | 实现阶段启动 · **E1 技术选型**（Rust + axum；Vite+React 面板嵌入；drop-in；首期 P0） | ✅ [`design/01-tech-selection.md`](docs/design/01-tech-selection.md) |
-| 2026-10-19 | **E1b UI 参考截图**：启动目标主实例造夹具，采集 30 张界面截图并映射功能与证据 | ✅ [`design/reference/`](docs/design/reference/) |
-| 2026-10-19 | **E2 架构与模块设计**：分层、模块清单（P0/P1/P2）、请求流水线、共享状态、缓存/伪装设计、后台任务、ADR、里程碑 | ✅ [`design/02-architecture.md`](docs/design/02-architecture.md) |
-| 2026-10-19 | 工具链：rustup `1.99.1`（stable）+ `aarch64/x86_64-unknown-linux-musl` 目标；两目标 `cargo check` 通过 | ✅ |
-| 2026-10-19 | **E3 HTTP 契约**：公开/私有路由表、播放与订阅契约、`access` 矩阵、错误串对照、已知差异、M1 实施清单 | ✅ [`design/03-http-contract.md`](docs/design/03-http-contract.md)（`b080dec`） |
-| 2026-10-19 | **E6 · M0 骨架**：配置模型/严格加载/原子保存、面板登录（UUID 会话）、状态与配置接口、内嵌 4 页前端（Vite+React）、`scripts/smoke-m0.sh` 15 项全绿 | ✅ 代码入仓（`cargo build` 无警告） |
-| 2026-10-19 | **E4 配置与存储 + E5 前端设计**：热重载矩阵与存储布局、13 分区与弹窗体系、组件与交互约定 | ✅ [`design/04`](docs/design/04-config-and-storage.md)、[`design/05`](docs/design/05-frontend.md)（`aba1d1e`） |
-| 2026-10-19 | **E6 · M1 数据面**：分组/频道 CRUD（局部更新、409/404 错误串）、导出、总/分组订阅与 `access` 过滤、播放 Token；面板分组管理页；`scripts/smoke-m1.sh` 全绿 | ✅ 见 §3c |
-
-## 5. 功能全集路线图（按优先级 · 2026-10-17）
-
-> 来源：委派子代理对**二进制产物**的全量盘点（脱壳 strings 55k 条 + 雕刻面板 `panel.html` + 配置 schema）。
-> 注：盘点证据为内嵌字符串/面板表单，路由前缀（如 `/panel/api`）以实测为准；「状态」为当前验证覆盖。
-
-### P0 · 反代与直连核心
-
-| 域 | 代表能力（二进制证据） | 结论（含路线图项） |
-| --- | --- | --- |
-| ① 反代 HLS（proxy/rewrite） | `/{gid}/{cid}.m3u8`、【代理】×44、`badge-proxy` | ✅ F-004/F-005；`rewrite`+MPD 损坏（`D-005`） |
-| ② 切片伪装 URL | `<16hex>_<32hex>.<ext>`、`invalid segment hash` | ✅ `<S>`=sha256[:32]；`<P>` 依赖/校验已解、算法未解（F-017，低影响）；**S7 ✅** |
-| ③ 切片缓存/预取 | `m3u8_max_entries`、`segment_cache_max_mb`、`prefetch.*`、`/cache/flush`、`/cache/stats` | ✅ 容量上限均未生效；flush 保留 `dash/`；memory 后端统计恒 0（F-015，D12） |
-| ④ 302 直连 redirect | `redirect_mode`、`redirect_ttl`、`redirect_url_…` | ✅ direct + best（选最高 `BANDWIDTH`）（F-016，D17a） |
-| ⑤ passthrough 直链 | `badge-passthrough`；直链不套 token | ✅ D7 |
-| ⑥ Token 鉴权 | `token_enabled/ttl/rotate`、`/security/token{,/rotate}`、`/link-info`、登录 429 锁 | ✅ 轮换+1h 宽限+封禁面（F-010，D13a） |
-| ⑦ 清单改写/聚合 | `m3u_header_lines`、`x-tvg-url`、`subscription-merge`、`access` | ✅ access/头行/导入/聚合/订阅合并（F-009/F-013，D13） |
-| ⑧ MPD/ClearKey | `mpd_keep_seconds`、`license_key`、`#KODIPROP`、`key_manager.rs`(088) | ✅ MPD→HLS；KID 双路检测；不解密；`#KODIPROP` 仅 passthrough（F-016，D14） |
-| ⑨ URL 池 | `url_pool_size`、`pool[0..n]`、`/dash/scan-url`、`final_url` | ✅ 契约已验；仅 DASH；`pool≥2` 本环境 503（环境受限）（F-015，D15） |
-| ⑩ 解析器画质 | `/resolver/scripts`、`resolver_script/ttl/catchup` | ✅ `python3 <cache>/resolvers/<脚本> <arg>`；TTL/SWR；超时转 `error_url`（F-014，D19b） |
-
-### P1 · 流处理与增值
-
-| 域 | 代表能力 | 结论（含路线图项） |
-| --- | --- | --- |
-| Remux（TS/FLV/MMT） | `remux_container(auto/ts/flv/mmt)`、`libx264…aac` | ✅ 仅连续流；输出 HLS/5s/TS/伪装；**不用 ffmpeg**（503=预热态）（F-014，D16） |
-| DASH 时移 | `/dash-timeshift/:track/…`、`dash_timeshift_hours/max_gb` | ✅ `playlist.txt?playseek=` VOD；窗=已录区间；缺参 400、不重叠 404（F-016） |
-| 回看 catchup | `playseek=`、`catchup_days`、`catchup_tpl` | ✅ 只转发 `playseek`；4 模板；`catchup-days` 由 days 或 `timeshift_hours/24` 推导（F-016，D17ab） |
-| 定时录制 | `/schedule{,/from-epg,/:idx/stop}`、`recordings/`、【录制】×49 | ✅ MKV + `ffmpeg -c copy`；`{idx}`=u64 下标（F-014，D18） |
-| 字幕 | `WebVTT` 转换、`.vtt` 伪装 | ✅ SUBTITLES 组保留；`.vtt`/`text/vtt` 透传（F-014，D19） |
-| 推流 livestream | `/livestream/:gid/:cid/start\|stop`、【推流】×35 | ✅ `?start/end`/`?playseek` 回看 + VOD 清单 + `timeshift/<hex>.<ext>`（F-014，D20） |
-| 多 CDN 容错 | `consecutive_fails`、`fallback_pct`(088) | ❌ 未观测到故障切换：按 BANDWIDTH 选变体、失败不重试（F-015，`D-004`，D21） |
-| EPG 匹配/译制 | `match-report`、`mappings`、`epg_map`、gemini/mtran | ✅ 匹配算法已解；译制未测（F-016，D22） |
-| 台标库 | `/logo/{suggest,match-report,apply,animate}`、`to_webp` | ✅ 9 端点全验；转码在浏览器侧；动效 Rust 编码 + `.orig` 备份；改名/删除同步引用（F-011，D23） |
-
-### P2 · 运维与管理面
-
-| 域 | 代表能力 | 结论（含路线图项） |
-| --- | --- | --- |
-| 组导入导出 | `/groups/{export,import,/m3u}`、`channels/:cid/purge`(088) | ✅ JSON 文本导入；组 id 去非 ASCII；merge 仅新增；聚合输出上游原始地址（F-013，D24） |
-| 备份/恢复 | `/panel/api/backup?include=`、`restore` | ✅ 三 scope；restore 另存 `.bak`（F-013，D25） |
-| 多 VPS 分享 | `share.{role,master_url,trust_ips}`、`/api/share/pull` | ✅ GET-only；key+trust_ips 双门禁；token/封禁 20s 同步；follower 禁本地轮换（F-012，D26） |
-| 边缘校验 | `edge_mode(off/proxy/cloudflare)`、`x-ipp-edge-secret` | ✅ 头名 `X-IPP-Edge-Secret`；带转发头且密钥不符→403；`edge_refresh` 拉 CF 段（F-013，D27） |
-| 健康检查 | `health{interval,timeout,concurrency}` | ✅ `GET`+`Range: bytes=0-1`；失败 +1/成功归零；仅展示（F-015，D28） |
-| IP 封禁/解封 | `/security/ip/{ban,stats,unban}`、`/unban` 每月 3 次 | ✅ 面已验；`/unban` 限次未验（F-010，D13a） |
-| 指标/资源 | `/metrics`、`requests_total`、`mem_rss_mb` | ✅ `/status/metrics` 为假路由；指标仅面板私有面（F-010，D29） |
-| 资产/ffmpeg 检测 | `/assets/{convert,list,ffmpeg-status}` | ✅ `ffmpeg-status`→`{"installed":true,"path":"ffmpeg"}`；`assets/list` 列配置项（F-014，D18） |
-| EPG 公开 JSON API | `/epg/api/{channels,programmes,search}` | ⏭ 仅 088；已在 `spec/08` §16 登记，不测 |
-
-### 执行批次（已完成）
-
-- Batch 1：D13 → D13a → D15 → D21 → D24 → D25 → D27 → D29。
-- Batch 2（装 ffmpeg）：D18 → D16 → D19 → D20 → D19b。
-- Batch 3：D14 → D17ab → D22 → **S7**（后缀/缓存窗口完成；`<P>` 输入依赖+校验已定，算法未解 → F-017）。
-
-### spec 缺口登记
-
-盘点新增的 8 项能力（ClearKey/DRM、`epg/api/*`、`dash/scan-url`、`link-info`、每频道代理、旧数据迁移、`subscription-merge`、`l1/l2` 限流）
-已录入 [`spec/08` §16](docs/spec/08-target-spec.md)，状态与证据见该表。
+本文件只保留：目标与约束、状态总览、功能缺口、质量门、设计结论、推进顺序、文档入口。

@@ -1,18 +1,12 @@
 //! IPTV Proxy——与目标 v0.8.2 兼容的重实现。
 //!
-//! 本文件负责启动：解析参数、读配置、建状态、起服务。
-//! 模块划分见 `docs/design/02-architecture.md`。
-
-mod auth;
-mod config;
-mod http;
-mod playlist;
-mod state;
+//! 本文件只负责启动：解析参数、读配置、建状态、起服务、启热重载。
+//! 模块划分见 `docs/design/02-architecture.md`，代码在库根 `src/lib.rs`。
 
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Context;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use iptv_proxy::{config, epg, http, logging, reload, state};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,32 +18,34 @@ async fn main() -> anyhow::Result<()> {
 
     let cfg = config::load(&config_path)
         .with_context(|| format!("读取配置失败: {}", config_path.display()))?;
-    init_tracing(&cfg.server.log_level);
+    let log_path = logging::log_path_for(&config_path);
+    let logs = Arc::new(logging::RingBuffer::default());
+    logging::init(&cfg.server.log_level, log_path.as_deref(), logs.clone());
 
     let bind = cfg.server.bind.clone();
-    let state = Arc::new(state::AppState::new(config_path, cfg));
+    let state = Arc::new(state::AppState::new(config_path, cfg, logs));
+    reload::spawn(state.clone());
+    epg::spawn(state.clone());
+    iptv_proxy::share::spawn(state.clone());
+    iptv_proxy::schedule::spawn(state.clone());
+    iptv_proxy::cache_gc::spawn(state.clone());
+    iptv_proxy::timeshift::warm(&state);
+    state.dash_timeshift.warm(&state);
+    iptv_proxy::health::spawn(state.clone());
 
-    let app = http::router(state);
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
         .with_context(|| format!("监听失败: {bind}"))?;
-
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         bind = %bind,
         "iptv-proxy 启动"
     );
 
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        http::router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
-}
-
-/// 按 `[server].log_level` 初始化日志。
-fn init_tracing(level: &str) {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("iptv_proxy={},tower_http={}", level, level)));
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer())
-        .init();
 }
