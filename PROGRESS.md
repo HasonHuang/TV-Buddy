@@ -141,23 +141,25 @@ B4 已完成。见 §3.1.1。
 | `POST /panel/api/resolver/remove` | 系统页「解析脚本」的「删除」 |
 | `POST /panel/api/security/ip/unban-batch` | 安全页「批量解封」 |
 | `POST /panel/api/security/ip/ban`（多地址） | 安全页支持逗号或换行分隔多个地址 |
+| `POST /panel/api/assets/convert` | 素材页「远程转换」卡片 |
+| `GET /panel/api/epg/{scripts,script,script-delete}` | EPG 页「采集脚本」卡片 |
+| `GET /panel/api/epg/match-report` | EPG 页「匹配报告」卡片（原样显示表格） |
+| `GET /panel/api/epg/suggest/:gid/:cid` | EPG 页「匹配工具」的建议表 |
+| `GET /panel/api/epg/source-channels/:id` | EPG 页「匹配工具」的源频道浏览 |
+| `GET /panel/api/epg/tz-preview/:id` | EPG 页「匹配工具」的时区预览 |
+| `GET /panel/api/epg/viewer-channels` | EPG 页「公开查看器频道」卡片 |
+| `GET /panel/api/epg/translate/{models,probe}` | EPG 页「翻译模型」卡片 |
+| `GET /panel/api/link-info` | 安全页「播放链接审计」卡片 |
+| `GET /panel/api/subs/status` | 订阅页每个源的状态行 |
+| 分组工具栏「多选」 | 分组卡片复选框 + 「批量导出」「批量删除」（语义自定，见 §3.3） |
 
-仍未接线：
+已确认等价、不算缺口：
 
-| 端点 | 面板应做的事 |
+| 端点 | 说明 |
 | --- | --- |
-| `POST /panel/api/assets/convert` | 素材转换：ffmpeg 可用时转换上游地址。前端只显示 ffmpeg 状态 |
-| `GET /panel/api/epg/match-report` | 显示匹配报告。前端只调台标的 `/logo/match-report`。**注意**：目标是 `text/plain` 表格，面板 JS 期望 JSON。见 §3.3 |
-| `GET/POST /panel/api/epg/{scripts,script,script-delete}` | 管理 EPG 采集脚本 |
-| `GET /panel/api/epg/suggest/:gid/:cid` | 频道匹配建议 |
-| `GET /panel/api/epg/source-channels/:id` | 列出某个源的频道 |
-| `GET /panel/api/epg/tz-preview/:id` | 时区预览 |
-| `GET /panel/api/epg/viewer-channels` | 公开查看器的频道集合 |
-| `GET /panel/api/epg/translate/{models,probe}` | 列出翻译模型、探测引擎 |
-| `GET /panel/api/link-info` | 审计播放链接与 Token 剩余期 |
-| `GET /panel/api/subs/status` | 显示订阅源状态。前端只调 `/subs/preview` 与 `/subs/groups` |
-| `GET /panel/api/logo/list` | 带鉴权的台标列表。前端走公开的 `/logo/api/list` 并自行补报告 |
-| 分组工具栏「多选」 | 目标有多选与批量操作。本实现没有 |
+| `GET /panel/api/logo/list` | 与公开的 `/logo/api/list` 返回**同一份** `list_body`；面板走公开入口即可 |
+
+仍未接线：无。
 
 ### 3.3 已登记差异与不实现项
 
@@ -184,6 +186,7 @@ B4 已完成。见 §3.1.1。
 | `[cache].segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries` | 不消费。目标同样未生效。默认值非 0，生效会静默压容 | S-CACHE-03、`04` §11.5 |
 | 面板语言（i18n） | 已定：不做。目标是真 i18n，我们只有中文文案 | `07` §3.C4 |
 | 素材「未被引用」判定 | 本实现自定：配置里没有字符串指向 `/assets/<文件名>`。只标不删 | `05` §4.1 |
+| 分组「多选」的批量操作 | 目标有多选按钮，但批量操作语义未观测。本实现自定：已选分组可批量导出（合成 JSON 数组）与批量删除 | `07` §3.A10 |
 
 > `[cdn]`、`[cache.gc]`、分组 `prefetch` 是本实现新增的配置面。目标 v0.8.2 没有这些键。默认值不改变既有行为。
 

@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { api, getToken } from './api';
+import { api, apiText, getToken } from './api';
 
 type TokenInfo = {
   enabled: boolean;
@@ -439,6 +439,7 @@ export function SecurityPage() {
       </div>
 
       <AuthConfigCard onSaved={() => void load()} />
+      <LinkInfoCard />
 
       <div className="card">
         <h2>IP 统计与封禁</h2>
@@ -1270,6 +1271,10 @@ export function EpgPanelPage() {
       </div>
       <EpgCronCard onChanged={() => void load()} />
       <EpgTranslateCard onChanged={() => void load()} />
+      <EpgModelsCard />
+      <EpgScriptsCard />
+      <EpgMatchReportCard />
+      <EpgViewerCard />
       <div className="card">
         <h2>手工映射</h2>
         <div className="row">
@@ -1332,6 +1337,8 @@ export function EpgPanelPage() {
         </table>
       </div>
 
+      <EpgMatchToolsCard onPick={(pick) => setMapping(pick)} />
+
       <div className="card">
         <h2>额外频道</h2>
         <div className="row">
@@ -1392,5 +1399,532 @@ export function EpgPanelPage() {
         </table>
       </div>
     </>
+  );
+}
+
+/** EPG 采集脚本管理：`GET /epg/scripts`、`POST /epg/script`、`POST /epg/script-delete`。 */
+function EpgScriptsCard() {
+  const [python, setPython] = useState('');
+  const [scripts, setScripts] = useState<{ name: string; size: number }[]>([]);
+  const [name, setName] = useState('');
+  const [content, setContent] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api<{ python: string; scripts: { name: string; size: number }[] }>(
+        'GET',
+        '/epg/scripts',
+      );
+      setPython(data.python ?? '');
+      setScripts(data.scripts ?? []);
+      setError('');
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async () => {
+    setMessage('');
+    setError('');
+    try {
+      await api('POST', '/epg/script', { name: name.trim(), content });
+      setMessage(`脚本 ${name.trim()} 已保存`);
+      setName('');
+      setContent('');
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  const remove = async (target: string) => {
+    if (!window.confirm(`确认删除脚本「${target}」？`)) return;
+    setMessage('');
+    setError('');
+    try {
+      await api('POST', '/epg/script-delete', { name: target });
+      setMessage(`脚本 ${target} 已删除`);
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="row between">
+        <h2>采集脚本</h2>
+        <span className="muted">{python ? `Python ${python}` : 'Python —'}</span>
+      </div>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>文件</th>
+            <th className="right">大小</th>
+            <th className="right">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {scripts.map((script) => (
+            <tr key={script.name}>
+              <td className="mono">{script.name}</td>
+              <td className="right">{Math.max(1, Math.round(script.size / 1024))} KB</td>
+              <td className="right">
+                <button
+                  className="icon-btn danger-text"
+                  onClick={() => void remove(script.name)}
+                >
+                  删除
+                </button>
+              </td>
+            </tr>
+          ))}
+          {scripts.length === 0 && (
+            <tr>
+              <td colSpan={3} className="muted">
+                暂无脚本。
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <div className="row" style={{ marginTop: 8 }}>
+        <input
+          placeholder="脚本名，例如 mysource.py"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          style={{ flex: 1 }}
+        />
+        <button onClick={() => void save()} disabled={name.trim() === ''}>
+          上传/覆盖
+        </button>
+      </div>
+      <textarea
+        placeholder="脚本正文"
+        value={content}
+        onChange={(event) => setContent(event.target.value)}
+        rows={8}
+        style={{ width: '100%', marginTop: 8 }}
+      />
+      {message && <div className="msg ok">{message}</div>}
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
+
+/** 匹配报告：目标是 `text/plain` 表格，这里原样显示。 */
+function EpgMatchReportCard() {
+  const [text, setText] = useState('');
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setText(await apiText('GET', '/epg/match-report'));
+      setError('');
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div className="card">
+      <div className="row between">
+        <h2>匹配报告</h2>
+        <button className="ghost" onClick={() => void load()}>
+          刷新
+        </button>
+      </div>
+      <pre
+        className="mono"
+        style={{ whiteSpace: 'pre-wrap', maxHeight: 360, overflow: 'auto' }}
+      >
+        {text || '—'}
+      </pre>
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
+
+/** 翻译模型与探测：`GET /epg/translate/models`、`POST /epg/translate/probe`。 */
+function EpgModelsCard() {
+  const [models, setModels] = useState<{ enabled: boolean; engine: string; models: string[] }>({
+    enabled: false,
+    engine: 'none',
+    models: [],
+  });
+  const [probe, setProbe] = useState('');
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setModels(
+        await api<{ enabled: boolean; engine: string; models: string[] }>(
+          'GET',
+          '/epg/translate/models',
+        ),
+      );
+      setError('');
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const run = async () => {
+    setProbe('');
+    setError('');
+    try {
+      const result = await api<unknown>('POST', '/epg/translate/probe');
+      setProbe(JSON.stringify(result, null, 2));
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="row between">
+        <h2>翻译模型</h2>
+        <button className="ghost" onClick={() => void run()}>
+          探测引擎
+        </button>
+      </div>
+      <dl>
+        <dt>启用</dt>
+        <dd>{models.enabled ? '是' : '否'}</dd>
+        <dt>引擎</dt>
+        <dd className="mono">{models.engine}</dd>
+        <dt>目标语言</dt>
+        <dd className="mono">{models.models.join(', ') || '—'}</dd>
+      </dl>
+      {probe && (
+        <pre className="mono" style={{ whiteSpace: 'pre-wrap' }}>
+          {probe}
+        </pre>
+      )}
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
+
+/**
+ * 匹配工具：建议、源频道浏览、时区预览。
+ *
+ * 接口：`GET /epg/suggest/{gid}/{cid}`、`GET /epg/source-channels/{id}`、
+ * `GET /epg/tz-preview/{id}?shift=`。
+ */
+function EpgMatchToolsCard({
+  onPick,
+}: {
+  onPick: (pick: { gid: string; cid: string; source_id: string; source_channel_id: string }) => void;
+}) {
+  const [gid, setGid] = useState('');
+  const [cid, setCid] = useState('');
+  const [sourceId, setSourceId] = useState('__all__');
+  const [query, setQuery] = useState('');
+  const [shift, setShift] = useState('0');
+  const [suggestions, setSuggestions] = useState<
+    {
+      source_id: string;
+      source_channel_id: string;
+      source_name: string;
+      display_name: string;
+      score: number;
+    }[]
+  >([]);
+  const [items, setItems] = useState<
+    { id: string; display_names: string[]; source_id: string; source_name: string }[]
+  >([]);
+  const [total, setTotal] = useState(0);
+  const [preview, setPreview] = useState<{ raw: string; current: string; shifted: string } | null>(
+    null,
+  );
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const runSuggest = async () => {
+    setMessage('');
+    setError('');
+    try {
+      const data = await api<{
+        suggestions: {
+          source_id: string;
+          source_channel_id: string;
+          source_name: string;
+          display_name: string;
+          score: number;
+        }[];
+      }>('GET', `/epg/suggest/${encodeURIComponent(gid)}/${encodeURIComponent(cid)}`);
+      setSuggestions(data.suggestions ?? []);
+      setMessage(`找到 ${(data.suggestions ?? []).length} 条建议`);
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  const runSource = async () => {
+    setMessage('');
+    setError('');
+    try {
+      const params = new URLSearchParams({ q: query, limit: '60' });
+      const data = await api<{
+        items: { id: string; display_names: string[]; source_id: string; source_name: string }[];
+        total: number;
+      }>('GET', `/epg/source-channels/${encodeURIComponent(sourceId)}?${params.toString()}`);
+      setItems(data.items ?? []);
+      setTotal(data.total ?? 0);
+      setMessage(`共 ${data.total ?? 0} 个源频道`);
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  const runTz = async () => {
+    setMessage('');
+    setError('');
+    try {
+      const data = await api<{
+        ok: boolean;
+        items?: { raw: string; current: string; shifted: string }[];
+        error?: string;
+      }>('GET', `/epg/tz-preview/${encodeURIComponent(sourceId)}?shift=${Number(shift) || 0}`);
+      if (!data.ok) {
+        setError(data.error ?? '预览失败');
+        return;
+      }
+      setPreview((data.items ?? [])[0] ?? null);
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>匹配工具</h2>
+      <div className="row">
+        <input
+          placeholder="gid"
+          value={gid}
+          onChange={(event) => setGid(event.target.value)}
+          style={{ flex: 1 }}
+        />
+        <input
+          placeholder="cid"
+          value={cid}
+          onChange={(event) => setCid(event.target.value)}
+          style={{ flex: 1 }}
+        />
+        <button
+          className="ghost"
+          onClick={() => void runSuggest()}
+          disabled={gid.trim() === '' || cid.trim() === ''}
+        >
+          匹配建议
+        </button>
+      </div>
+      {suggestions.length > 0 && (
+        <table className="table" style={{ marginTop: 8 }}>
+          <thead>
+            <tr>
+              <th>源</th>
+              <th>源频道</th>
+              <th>名称</th>
+              <th className="right">相似度</th>
+              <th className="right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {suggestions.map((item) => (
+              <tr key={`${item.source_id}/${item.source_channel_id}/${item.display_name}`}>
+                <td className="mono">{item.source_name || item.source_id}</td>
+                <td className="mono">{item.source_channel_id}</td>
+                <td>{item.display_name}</td>
+                <td className="right">{item.score}</td>
+                <td className="right">
+                  <button
+                    className="icon-btn"
+                    onClick={() =>
+                      onPick({
+                        gid: gid.trim(),
+                        cid: cid.trim(),
+                        source_id: item.source_id,
+                        source_channel_id: item.source_channel_id,
+                      })
+                    }
+                  >
+                    填入映射
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <div className="row" style={{ marginTop: 12 }}>
+        <input
+          placeholder="source_id（__all__ = 全部）"
+          value={sourceId}
+          onChange={(event) => setSourceId(event.target.value)}
+          style={{ flex: 1 }}
+        />
+        <input
+          placeholder="搜索词"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          style={{ flex: 1 }}
+        />
+        <button className="ghost" onClick={() => void runSource()}>
+          浏览源频道
+        </button>
+      </div>
+      {items.length > 0 && (
+        <>
+          <p className="muted">共 {total} 个，显示前 {items.length} 个。</p>
+          <ul>
+            {items.map((item) => (
+              <li key={`${item.source_id}/${item.id}`} className="mono">
+                {item.source_name}/{item.id} — {item.display_names.join(' / ') || '—'}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <div className="row" style={{ marginTop: 12 }}>
+        <input
+          placeholder="偏移分钟"
+          value={shift}
+          onChange={(event) => setShift(event.target.value)}
+          style={{ flex: 1 }}
+        />
+        <button className="ghost" onClick={() => void runTz()}>
+          时区预览
+        </button>
+      </div>
+      {preview && (
+        <dl>
+          <dt>原文</dt>
+          <dd className="mono">{preview.raw}</dd>
+          <dt>本机</dt>
+          <dd className="mono">{preview.current}</dd>
+          <dt>偏移后</dt>
+          <dd className="mono">{preview.shifted}</dd>
+        </dl>
+      )}
+      {message && <div className="msg ok">{message}</div>}
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
+
+/** 公开查看器频道集合：`GET /epg/viewer-channels`。 */
+function EpgViewerCard() {
+  const [channels, setChannels] = useState<
+    { id: string; name: string; source_name: string; programme_count: number }[]
+  >([]);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api<{
+        channels: { id: string; name: string; source_name: string; programme_count: number }[];
+      }>('GET', '/epg/viewer-channels');
+      setChannels(data.channels ?? []);
+      setError('');
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div className="card">
+      <div className="row between">
+        <h2>公开查看器频道</h2>
+        <button className="ghost" onClick={() => void load()}>
+          刷新
+        </button>
+      </div>
+      <p className="muted">
+        共 {channels.length} 个频道。公开页面见 <code>/epg</code>。
+      </p>
+      <ul>
+        {channels.slice(0, 50).map((channel) => (
+          <li key={channel.id}>
+            <span className="mono">{channel.id}</span> {channel.name}
+            <span className="muted">
+              {' '}
+              · {channel.source_name || '—'} · {channel.programme_count} 条节目
+            </span>
+          </li>
+        ))}
+      </ul>
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
+
+/** 播放链接审计：`GET /panel/api/link-info`。 */function LinkInfoCard() {
+  const [info, setInfo] = useState<{
+    aliases: Record<string, unknown>;
+    random_id_enabled: boolean;
+    token: string;
+    token_enabled: boolean;
+    use_alias: boolean;
+  } | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setInfo(
+          await api<{
+            aliases: Record<string, unknown>;
+            random_id_enabled: boolean;
+            token: string;
+            token_enabled: boolean;
+            use_alias: boolean;
+          }>('GET', '/link-info'),
+        );
+      } catch (err) {
+        setError(errorText(err));
+      }
+    })();
+  }, []);
+
+  const aliases = Object.keys(info?.aliases ?? {});
+
+  return (
+    <div className="card">
+      <h2>播放链接审计</h2>
+      <dl>
+        <dt>Token 校验</dt>
+        <dd>{info?.token_enabled ? '已开启' : '已关闭'}</dd>
+        <dt>当前 Token</dt>
+        <dd className="mono ellipsis">{info?.token || '—'}</dd>
+        <dt>随机 ID</dt>
+        <dd>{info?.random_id_enabled ? '已开启' : '已关闭'}</dd>
+        <dt>别名</dt>
+        <dd className="mono">{aliases.length > 0 ? aliases.join(', ') : '—'}</dd>
+      </dl>
+      {error && <div className="msg err">{error}</div>}
+    </div>
   );
 }

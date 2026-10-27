@@ -190,6 +190,8 @@ export function GroupsPage() {
   const [m3uMode, setM3uMode] = useState<'append' | 'merge' | 'replace'>('append');
   const [health, setHealth] = useState<Record<string, HealthEntry>>({});
   const [tracks, setTracks] = useState<{ gid: string; cid: string; body: string } | null>(null);
+  /** 多选：批量删除与批量导出（目标有多选，语义未观测；本实现自定）。 */
+  const [selected, setSelected] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -397,6 +399,47 @@ export function GroupsPage() {
     }
   };
 
+  /** 多选切换。 */
+  const toggleSelected = (gid: string) => {
+    setSelected((current) =>
+      current.includes(gid) ? current.filter((item) => item !== gid) : [...current, gid],
+    );
+  };
+
+  /** 批量导出：逐个 `GET /groups/{gid}/export`，合成一个 JSON 数组。 */
+  const exportSelected = async () => {
+    try {
+      const items = await Promise.all(
+        selected.map((gid) => api<unknown>('GET', `/groups/${gid}/export`)),
+      );
+      const blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'groups-selected.json';
+      anchor.click();
+      URL.revokeObjectURL(url);
+      ok(`已导出 ${items.length} 个分组`);
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  /** 批量删除：逐个 `DELETE /groups/{gid}`。 */
+  const removeSelected = async () => {
+    if (!window.confirm(`确认删除选中的 ${selected.length} 个分组？此操作不可撤销。`)) return;
+    try {
+      for (const gid of selected) {
+        await api('DELETE', `/groups/${gid}`);
+      }
+      ok(`已删除 ${selected.length} 个分组`);
+      setSelected([]);
+      await load();
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const keyword = filter.trim().toLowerCase();
   const visible = keyword
     ? groups.filter((group) => {
@@ -479,6 +522,25 @@ export function GroupsPage() {
         </div>
       </div>
 
+      {selected.length > 0 && (
+        <div className="card">
+          <div className="row between">
+            <span>已选 {selected.length} 个分组</span>
+            <div className="row">
+              <button className="ghost" onClick={() => setSelected([])}>
+                清空选择
+              </button>
+              <button className="ghost" onClick={() => void exportSelected()}>
+                批量导出
+              </button>
+              <button className="ghost danger-text" onClick={() => void removeSelected()}>
+                批量删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {visible.length === 0 && <div className="card muted">没有匹配的分组。</div>}
 
       {visible.map((group) => {
@@ -490,6 +552,12 @@ export function GroupsPage() {
           <div className="card" key={group.id}>
             <div className="row between">
               <div className="row">
+                <input
+                  type="checkbox"
+                  title="选择分组"
+                  checked={selected.includes(group.id)}
+                  onChange={() => toggleSelected(group.id)}
+                />
                 <button
                   className="icon-btn move"
                   disabled={groupIndex <= 0}

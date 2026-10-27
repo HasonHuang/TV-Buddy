@@ -322,6 +322,62 @@ function Library({
   );
 }
 
+/** 远程素材转换：`POST /panel/api/assets/convert {url}`。 */
+function ConvertCard({ ready }: { ready: boolean }) {
+  const [url, setUrl] = useState('');
+  const [result, setResult] = useState<{ local_path: string; bytes: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const run = async () => {
+    setBusy(true);
+    setError('');
+    setResult(null);
+    try {
+      setResult(
+        await api<{ local_path: string; bytes: number }>('POST', '/assets/convert', {
+          url: url.trim(),
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>远程转换</h2>
+      <p className="muted">
+        用 ffmpeg 把上游地址转成本地 HLS，并写入 `[assets].map`。需要 ffmpeg。
+      </p>
+      <div className="row">
+        <input
+          placeholder="http(s)://…/live.ts"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          style={{ flex: 1 }}
+        />
+        <button onClick={() => void run()} disabled={!ready || busy || url.trim() === ''}>
+          {busy ? '转换中…' : '转换'}
+        </button>
+      </div>
+      {!ready && <div className="msg err">未检测到 ffmpeg，无法转换。</div>}
+      {result && (
+        <div className="msg ok">
+          已生成{' '}
+          <a href={result.local_path} target="_blank" rel="noreferrer">
+            {result.local_path}
+          </a>{' '}
+          （{result.bytes} 字节）
+        </div>
+      )}
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
+
 /** 素材页：视频、字幕与 ffmpeg 状态。 */
 export function AssetsPage() {
   const [ffmpeg, setFfmpeg] = useState<{ installed: boolean; version: string | null } | null>(null);
@@ -346,6 +402,7 @@ export function AssetsPage() {
         </dl>
       </div>
       <Library kind="assets" accept="video/*" ffmpegReady={Boolean(ffmpeg?.installed)} />
+      <ConvertCard ready={Boolean(ffmpeg?.installed)} />
       <Library kind="subtitle" accept=".srt,.ass,.ssa,.vtt" ffmpegReady={true} />
     </>
   );

@@ -47,8 +47,8 @@
 | A7 ✅ | `subs` 的「读取分组」 | `05` §4.2；`/panel/api/subs/groups` 已在 | 源行加「读取分组」按钮，结果表列出分组名与频道数，可一键「加入映射」 |
 | A8 ✅ | `dashboard` 的快速操作 | `05` §4.2；`/cache/flush`、`/reload`、M3U 导出端点都在 | 概览页加四个按钮 |
 | A9 ✅ | `groups` 的**分组与频道排序** | `p02-groups.png`：目标有 `▲`/`▼` 与拖拽柄；`groups.tsx` 无排序代码。`08` S-BUG-02 的相反结论已更正（`07` `D-006`） | 前端数组重排 + `PUT /panel/api/config` 全量回写（**无需新端点**），与目标机制一致 |
-| A10 ✅ | `groups` 工具栏的 `JSON 导入`/`JSON 覆盖`/`导出全部` | 同上截图；端点 `/panel/api/groups/{import,import/force,export}` 已在 `src/http.rs` | 工具栏补三个入口；`多选`（批量操作语义未观测）先不做，登记待核 |
-| A11 ⚠️ | 频道行状态点与 `异常`/`常驻`/`全轨道` 徽章 | 同上截图（绿点、`异常`、`常驻`、`全轨道`） | 已做**配置型**三枚：`常驻`（`livestream`）、`全轨道`（DASH 且 `selected_tracks` 为空）、`tvg-id`/`Logo`。**未做**绿点与 `异常`：需逐频道运行时健康，`/panel/api/health` 无此字段，已转 §3.B3 |
+| A10 ✅ | `groups` 工具栏的 `JSON 导入`/`JSON 覆盖`/`导出全部`/`多选` | 同上截图；端点 `/panel/api/groups/{import,import/force,export}` 已在 `src/http.rs` | 三个导入导出入口已接；`多选` 于 2026-10-27 自定实现（分组复选框 + 批量导出 + 批量删除），目标语义未观测，登记在 `PROGRESS.md` §3.3 |
+| A11 ✅ | 频道行状态点与 `异常`/`常驻`/`全轨道` 徽章 | 同上截图（绿点、`异常`、`常驻`、`全轨道`） | 配置型三枚与运行型两枚都已完成：绿点与 `异常` 读 `/panel/api/health` 的 `entries`（`07` §3.B3） |
 
 ### B. 面板 UI：需要新后端能力
 
@@ -57,7 +57,7 @@
 | B1 ✅ | ~~`dashboard` 缺实时指标~~ **已完成**（2026-10-27） | `src/metrics.rs`；`/panel/api/status` 补齐目标字段 | `traffic_in_bytes` 按目标口径恒 0（S-BUG-01） |
 | B2 ✅ | ~~`status` 缺 `online_viewers`~~ **已完成** | 滑动窗口按**客户端 IP** 去重 | 只在带播放 Token 时计数（目标实测） |
 | B3 ✅ | ~~频道行绿点与 `异常`~~ **已完成** | `src/health.rs` 逐频道探测；`/panel/api/health` 发 `entries` | 前端画绿点与 `异常` |
-| B5 | 面板未接线的端点 | 端点都在 `src/http.rs`，前端无调用：`assets/convert`、`dash/{status,tracks,scan-url}`、`epg/{match-report,scripts,script,script-delete,suggest,search,source-channels,tz-preview,viewer-channels}`、`epg/translate/{models,probe}`、`link-info`、`security/ip/unban-batch`、`subs/status`、`groups/:gid/export`、`logo/list`、`resolver/remove`；另有分组工具栏「多选」 | 纯接线，可分批。清单与逐项说明见 `PROGRESS.md` §3.2 |
+| B5 ✅ | ~~面板未接线的端点~~ **已完成**（2026-10-27） | 原 19 个端点全部接线；`/panel/api/logo/list` 与公开的 `/logo/api/list` 返回同一份数据，按等价处理 | 逐项落点见 `PROGRESS.md` §3.2 |
 | B4 ✅ | ~~DASH 回看清单~~ **已实现**（2026-10-26） | 新模块 `src/dash_timeshift.rs`；路由在 `wildcard()` 的 `dash-timeshift/` 前缀分支；落盘 `cache/dash_timeshift/{gid}_{cid}/` | 目标契约见 `docs/findings/dynamic/10` §5.1。同一夹具对拍 18 项，差异 1 项（音轨名，已登记 `PROGRESS.md` §3.3） |
 
 > B4 收口说明：原计划的「复用 `dash_hls` 会话」未采用。`dash_hls` 的 `entries` 会在 watchdog

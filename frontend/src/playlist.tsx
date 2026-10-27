@@ -72,13 +72,36 @@ const EMPTY: PlaylistCfg = {
   sources: [],
 };
 
-export function PlaylistPage() {
-  const [cfg, setCfg] = useState<PlaylistCfg>(EMPTY);
+/** 订阅源状态行：`GET /subs/status` 的单条记录。 */
+function SourceStatusLine({
+  status,
+}: {
+  status?: { error: string | null; channels: number; last_ok: number | null };
+}) {
+  if (!status) return null;
+  return (
+    <div className="muted" style={{ fontSize: 12 }}>
+      {status.error ? `上次失败：${status.error}` : `${status.channels} 个频道`}
+      {status.last_ok
+        ? ` · 最近成功 ${new Date(status.last_ok * 1000).toLocaleString()}`
+        : ' · 从未成功'}
+    </div>
+  );
+}
+
+export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EMPTY);
   const [excludeText, setExcludeText] = useState('');
   const [preview, setPreview] = useState('');
   /** 每个源「读取分组」的结果：下标 → 分组与频道数。 */
   const [groupList, setGroupList] = useState<
     Record<number, { name: string; count: number }[] | { error: string }>
+  >({});
+  /** 订阅源运行状态：`GET /subs/status`，按 `id` 索引。 */
+  const [sourceStatus, setSourceStatus] = useState<
+    Record<
+      string,
+      { error: string | null; channels: number; last_ok: number | null; last_try: number | null }
+    >
   >({});
   const { node, ok, err } = useToast();
 
@@ -91,6 +114,19 @@ export function PlaylistPage() {
         sources: (next.sources ?? []).map((source) => ({ ...newSource(), ...source })),
       });
       setExcludeText((next.global_exclude ?? []).join('\n'));
+      // 源状态来自缓存文件；接口失败不影响配置编辑。
+      const status = await api<{
+        sources: {
+          id: string;
+          error: string | null;
+          channels: number;
+          last_ok: number | null;
+          last_try: number | null;
+        }[];
+      }>('GET', '/subs/status').catch(() => ({ sources: [] }));
+      setSourceStatus(
+        Object.fromEntries((status.sources ?? []).map((entry) => [entry.id, entry])),
+      );
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     }
@@ -248,6 +284,7 @@ export function PlaylistPage() {
                     value={source.name}
                     onChange={(event) => updateSource(index, { name: event.target.value })}
                   />
+                  <SourceStatusLine status={sourceStatus[source.id]} />
                 </td>
                 <td>
                   <input
