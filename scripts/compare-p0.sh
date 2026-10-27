@@ -11,7 +11,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-BIN=${BIN:-target/release/iptv-proxy}
+BIN=${BIN:-target/release/tv-buddy}
 BIN=$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")
 UP=${UP:-9999}
 TARGET_PORT=${TARGET_PORT:-19899}

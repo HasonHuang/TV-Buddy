@@ -1,180 +1,251 @@
-# IPTV Proxy（兼容重实现）
+# TV Buddy
 
-按逆向文档重实现 IPTV Proxy。目标：与 **v0.8.2**（linux-arm64 / linux-amd64）**drop-in 兼容**。
+> 自托管的 IPTV 代理服务。带网页管理面板，单二进制部署，静态 musl 编译。
 
-| 文档 | 内容 |
+[![Release](https://img.shields.io/github/v/release/HasonHuang/TV-Buddy?logo=github)](https://github.com/HasonHuang/TV-Buddy/releases/latest)
+[![CI](https://github.com/HasonHuang/TV-Buddy/actions/workflows/ci.yml/badge.svg)](https://github.com/HasonHuang/TV-Buddy/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-linux--amd64%20%7C%20linux--arm64-lightgrey.svg)](#支持平台)
+[![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
+
+TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、缓存、再分发 HLS/DASH 流，并提供工程单、录制、回看、台标库、安全管控与备份恢复。
+
+服务只用一个静态链接的二进制运行。前端资源内嵌在二进制中，不需要 Node 或数据库。默认监听 `19899` 端口。
+
+- **行为兼容**：配置键面、面板接口与播放链路对齐闭源 IPTV Proxy v0.8.2。可直接替换运行。
+- **低配置可跑**：1 vCPU / 128 MB 内存 / 1 GB 磁盘即可运行，配合前置 CDN 承载多观众。见 [低配置部署](#低配置部署)。
+
+---
+
+## 目录
+
+- [功能](#功能)
+- [支持平台](#支持平台)
+- [快速开始](#快速开始)
+- [首次使用](#首次使用)
+- [配置](#配置)
+- [低配置部署](#低配置部署)
+- [命令行管理](#命令行管理)
+- [从源码构建](#从源码构建)
+- [测试](#测试)
+- [接口](#接口)
+- [文档](#文档)
+- [已知限制](#已知限制)
+- [贡献](#贡献)
+- [免责声明](#免责声明)
+- [许可证](#许可证)
+
+---
+
+## 功能
+
+### 直播分发
+
+| 能力 | 说明 |
 | --- | --- |
-| [`docs/spec/`](docs/spec/) | 目标规格（`S-*`）与验证基线 |
-| [`docs/findings/`](docs/findings/) | 逆向证据（`F-*`、`D-*`） |
-| [`docs/design/`](docs/design/) | 本实现的方案（选型、架构、UI 参考） |
-| [`PROGRESS.md`](PROGRESS.md) | 唯一进度权威 |
+| 六种分组模式 | `proxy`、`redirect`、`rewrite`、`passthrough`、`remux`、`dash` |
+| 协议 | HLS（`.m3u8`）、DASH（`.mpd`）、MPEG-TS |
+| 切片缓存 | 磁盘与内存索引可限，按频道设上限 |
+| 切片伪装 | 切片路径改名，不暴露上游地址 |
+| 订阅聚合 | 合并多个远端订阅源，支持过滤与位置 |
+| 预取 | 开播前预取首批切片，减少首帧等待 |
+| CDN 兜底 | 响应头加缓存策略，空响应不落 CDN |
 
-## 构建
+### 节目单（EPG）
+
+- 采集：XML 源与脚本源。
+- 匹配：按频道名自动匹配，可手工映射。
+- 翻译：接 MTranServer，批量翻译标题与描述。
+- 输出：`/epg.xml`、`/epg.xml.gz` 与公开查节目页。
+- 订阅注入：开启后自动写入 `x-tvg-url`。
+
+### 录制与回看
+
+- 定时录制：按时间窗自动录制，产出入库。
+- HLS 与 DASH：DASH 录制用 ffmpeg `-c copy` 并轨，产出 MKV。
+- 本地回看：把录制产物转成可播放的清单。
+- 时移：按 `playseek` 区间回放已录制的切片。
+
+### 面板与运维
+
+- 12 个管理分区，另有独立台标库与解封页面。
+- 台标库：上传、重命名、按名称相似度推荐、批量应用。
+- 素材：视频与字幕上传，ffmpeg 状态检测。
+- 安全：播放 Token 查看与轮换、IP 统计、封禁解封。
+- 备份：一键导出 gzip(tar)，一键回滚。
+- 多 VPS：通过分享密钥同步 Token 与封禁表。
+- 观测：运行指标、运行日志、缓存占用。
+- 交互式 CLI：启停、改端口、改账号密码、更新、重装、卸载。
+
+---
+
+## 支持平台
+
+| 平台 | 架构 | 产物 |
+| --- | --- | --- |
+| Linux | amd64（x86_64） | 静态 musl 二进制 |
+| Linux | arm64（aarch64） | 静态 musl 二进制 |
+
+运行服务只需一个静态二进制。以下能力为可选，用到时才需要：
+
+| 依赖 | 用于 |
+| --- | --- |
+| `ffmpeg` | DASH 录制、素材转换 |
+| systemd 或 OpenRC | 开机自启（安装脚本自动选择） |
+
+> macOS 与 Windows 不在支持范围。开发机上可以跑单元测试与契约测试。
+
+---
+
+## 快速开始
+
+### 一键安装（推荐）
 
 ```bash
-# 1) 前端（Vite + React + TS → frontend/dist）
-scripts/build-frontend.sh
-
-# 2) 后端（Rust）
-cargo build --release
-
-# 交叉编译（静态 musl）
-rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl
-cargo build --release --target aarch64-unknown-linux-musl
+curl -fsSL https://raw.githubusercontent.com/HasonHuang/TV-Buddy/main/install.sh | sh
 ```
 
-## 运行
+脚本按如下步骤工作：
 
-```bash
-target/release/iptv-proxy config.toml
-```
-
-默认监听 `[::]:19899`。面板入口 `http://<host>:19899/panel`，默认口令 `admin` / `admin`。
-
-## 一键安装（Linux）
-
-`install.sh` 只支持 Linux **amd64/arm64**。默认从 GitHub Release 下载同架构安装包；也可以指定已解包的发布目录、仓库 `dist/` 或任意归档（本地路径或 URL）。
-
-### 直接安装（推荐）
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/HasonHuang/TV-Buddy/main/install.sh | sudo sh
-```
-
-脚本会按 `uname -m` 选 `amd64`/`arm64`，从最新 Release 下载 `tv-buddy-<version>-<arch>.tar.gz`，校验同名 `.sha256` 后安装，默认装到 `/opt/iptv-proxy`。
+1. 读取 `uname -m`，选 `amd64` 或 `arm64`。
+2. 从最新 Release 下载 `tv-buddy-<version>-<arch>.tar.gz`。
+3. 校验同名 `.sha256` 文件。
+4. 解包到 `/opt/tv-buddy`。
+5. 注册 systemd 或 OpenRC 服务。
 
 指定版本或仓库：
 
 ```bash
-sudo sh install.sh --version v2026.3.0
-sudo sh install.sh --version v2026.3.0 --repo HasonHuang/TV-Buddy
+sudo sh install.sh --version v2026.0.0
+sudo sh install.sh --version v2026.0.0 --repo HasonHuang/TV-Buddy
 ```
 
-预发布版本（tag 带 `-beta`/`-rc` 等后缀）不会被 GitHub 的 `/releases/latest` 选中。仓库里只有预发布时，脚本会自动退回最新一条 Release，并在下载前打印「未找到正式版，改用最新 Release：…」。
+> 预发布 tag（带 `-beta`、`-rc` 等后缀）不会被 GitHub 的 `/releases/latest` 选中。仓库里只有预发布版本时，脚本自动退回最新一条 Release，并在下载前打印提示。
 
-### 从发布包安装
+### 手动安装
 
 ```bash
-tar -xzf iptv-proxy-2026.3.0-arm64.tar.gz
-cd iptv-proxy-2026.3.0-arm64
-sudo ./install.sh                     # 包就在旁边，直接用，不再下载
+# 1) 下载并解包
+tar -xzf tv-buddy-<version>-arm64.tar.gz
+cd tv-buddy-<version>-arm64
+
+# 2) 安装（包内自带 install.sh，不再下载）
+sudo ./install.sh
 ```
 
-### 从仓库安装
+### 更多安装方式
 
-先构建发布包，再执行根目录脚本：
+| 场景 | 命令 |
+| --- | --- |
+| 从仓库本地构建包安装 | `sudo ./install.sh --local` |
+| 指定归档 | `sudo ./install.sh --archive dist/tv-buddy-<version>-arm64.tar.gz` |
+| 指定 URL | `sudo ./install.sh --archive https://example.com/pkg.tar.gz` |
+| 只装文件，不注册服务 | `./install.sh --prefix "$HOME/tv-buddy" --no-service` |
+| 自定义目录并启动 | `sudo ./install.sh --prefix /srv/tv-buddy --start` |
 
-```bash
-scripts/build-frontend.sh
-scripts/build-release.sh              # 或只构建当前架构：scripts/build-release.sh arm64
-sudo ./install.sh --local             # 用 dist/ 中最新的同架构包
-```
-
-### 指定归档或 URL
-
-```bash
-sudo ./install.sh --archive dist/iptv-proxy-2026.3.0-arm64.tar.gz
-sudo ./install.sh --archive https://example.com/iptv-proxy-2026.3.0-arm64.tar.gz
-```
-
-归档旁有同名 `.sha256` 文件时，脚本自动校验。
-
-### 选项
+`install.sh` 选项：
 
 | 选项 | 说明 |
 | --- | --- |
-| `--prefix <目录>` | 安装目录；默认 `/opt/iptv-proxy` |
+| `--prefix <目录>` | 安装目录。默认 `/opt/tv-buddy` |
 | `--archive <路径或 URL>` | 指定 tar.gz 安装包 |
-| `--version <tag>` | 从 Release 装指定版本，如 `v2026.3.0`；默认最新 |
-| `--repo <owner/name>` | Release 所在仓库；默认内置 |
-| `--local` | 不从 Release 下载，改用本地 `dist/` 中的安装包 |
+| `--version <tag>` | 从 Release 装指定版本。默认最新 |
+| `--repo <owner/name>` | Release 所在仓库。默认内置 |
+| `--local` | 不从 Release 下载，改用本地 `dist/` 中的包 |
 | `--no-service` | 不注册 systemd/OpenRC 服务 |
-| `--no-link` | 不创建 `iptv-proxy` 命令软链 |
+| `--no-link` | 不创建命令软链 |
 | `--start` | 安装后立即启动服务 |
 | `-h`、`--help` | 显示帮助 |
 
 ### 安装内容
 
-- 二进制：`<prefix>/iptv-proxy`
-- 配置：`<prefix>/config.toml`；已有配置不覆盖
-- 缓存：`<prefix>/cache/`
-- 管理脚本：`<prefix>/iptv-proxy.sh`
-- 命令软链：`/usr/local/bin/iptv-proxy`；可用 `--no-link` 跳过
-- 服务单元：systemd 或 OpenRC；按系统自动选择
-
-示例：
-
-```bash
-# 自定义目录并立即启动
-sudo ./install.sh --prefix /srv/iptv --start
-
-# 容器或普通用户：只装文件，不注册服务
-./install.sh --prefix "$HOME/iptv" --no-service
+```text
+<prefix>/
+  tv-buddy            # 服务二进制
+  config.toml         # 配置。已存在时不覆盖
+  cache/              # 切片与录制缓存
+  tv-buddy.sh         # 管理脚本
+/usr/local/bin/tv-buddy     # 命令软链，可用 --no-link 跳过
 ```
 
-## 命令行管理
+服务单元按系统自动选择 systemd 或 OpenRC。
 
-安装后可用 `iptv-proxy` 管理服务。命令由 `<prefix>/iptv-proxy.sh` 提供。
+---
 
-| 命令 | 作用 |
-| --- | --- |
-| `iptv-proxy` / `iptv-proxy menu` | 打开交互菜单 |
-| `iptv-proxy start` | 启动服务 |
-| `iptv-proxy stop` | 停止服务 |
-| `iptv-proxy restart` | 重启服务 |
-| `iptv-proxy status` | 查看状态 |
-| `iptv-proxy log [行数]` | 查看日志；终端下持续跟随 |
-| `iptv-proxy url` | 打印面板地址与账号 |
-| `iptv-proxy port <N>` | 修改面板端口并重启 |
-| `iptv-proxy pass [密码] [账号]` | 修改密码，可同时改账号；无参数进入交互 |
-| `iptv-proxy update` | 更换二进制，保留配置 |
-| `iptv-proxy reinstall` | 备份配置后重装 |
-| `iptv-proxy install [参数]` | 在发布包目录调用 `install.sh` 安装或修复 |
-| `iptv-proxy uninstall` | 移除服务；询问是否删除数据 |
+## 首次使用
 
-无参数或 `menu` 打开交互菜单。菜单含更新、面板地址、启停、状态、日志、改端口、改账号密码、重装与卸载。
-
-`port` 与 `pass` 直接改 `config.toml`，随后重启服务。旧登录会话失效。
-
-`update` 需要更新源。按优先级读取：
+安装完成后执行：
 
 ```bash
-# 本地二进制
-IPTV_PROXY_BIN=/path/to/iptv-proxy iptv-proxy update
-
-# 本地 tar.gz
-IPTV_PROXY_ARCHIVE=/path/to/iptv-proxy.tar.gz iptv-proxy update
-
-# 远程 tar.gz 或二进制；{arch} 替换为 amd64/arm64
-IPTV_PROXY_URL=https://example.com/iptv-proxy-{arch}.tar.gz iptv-proxy update
+sudo tv-buddy url     # 打印面板地址与账号
+sudo tv-buddy start   # 启动服务（未加 --start 时）
 ```
 
-没有设置上面三项时，先查 `<prefix>/dist` 与 `<prefix>/../dist` 下的最新同架构包；都没有则回退到 GitHub Release，默认取最新 tag，可用 `IPTV_PROXY_VERSION` 固定版本、`IPTV_PROXY_REPO` 换仓库：
+打开面板：
 
-```bash
-sudo iptv-proxy update                                # 最新 Release
-sudo IPTV_PROXY_VERSION=v2026.3.0 iptv-proxy update   # 固定版本
+```text
+http://<host>:19899/panel
 ```
 
-下载的 Release 包会校验同名 `.sha256`，不通过则不替换二进制。
+默认账号 `admin`，默认口令 `admin`。
 
-`uninstall` 选择 `N` 只停服务并保留 `<prefix>`。配置与缓存不会删除。
-无人值守时设 `IPTV_PROXY_YES=1`，直接重装或删除数据。
+> **先改口令。** 执行 `sudo tv-buddy pass '新口令' admin`。改后旧会话立即失效。
 
-示例：
+接下来在面板里加分组与频道。也可以直接编辑 `<prefix>/config.toml`，保存后服务自动重载。
 
-```bash
-sudo iptv-proxy                 # 打开菜单
-sudo iptv-proxy port 8080
-sudo iptv-proxy pass 'new-password' admin
-sudo iptv-proxy log 200
+订阅地址形如：
+
+```text
+http://<host>:19899/playlist.m3u          # 全部公开分组
+http://<host>:19899/<gid>/playlist.m3u   # 单个分组
 ```
 
-## 翻译服务（MTranServer）
+---
 
-支持 MTranServer v5 与旧批量接口。客户端优先请求 `/translate/batch`，失败时回退 `/translate`。地址可写根地址、完整 `/translate` 或 `/translate/batch`。
+## 配置
 
-字幕翻译：
+配置文件为 `<prefix>/config.toml`。完整样例见 [`packaging/config.toml.example`](packaging/config.toml.example)。
+
+```toml
+[server]
+bind = "[::]:19899"
+log_level = "info"
+
+[auth]
+token_enabled = false
+
+[cache]
+disk_path = "./cache"
+
+[[groups]]
+id = "demo"
+name = "示例分组"
+mode = "proxy"
+access = "public"
+
+[[groups.channels]]
+id = "c1"
+name = "示例频道"
+url = "http://example.com/live.m3u8"
+```
+
+常用可选项：
+
+| 段 | 键 | 说明 |
+| --- | --- | --- |
+| `[cache.segments]` | `per_channel_max` | 每频道切片上限 |
+| `[cache.prefetch]` | `enabled`、`concurrency` | 预取开关与并发 |
+| `[cache.gc]` | `max_disk_mb` | 磁盘回收上限。`0` 按可用空间自动 |
+| `[cdn]` | `enabled`、`auto_tune` | CDN 兜底与推荐值实测 |
+| `[subtitle.translate]` | `enabled`、`url` | 字幕机翻 |
+| `[epg.translate]` | `enabled`、`mtran_url` | 节目单翻译 |
+| `[[groups]]` | `mode`、`format`、`mpd_keep_seconds` | 分组行为 |
+
+热重载：改 `config.toml` 即生效。`[epg]` 与 `[cache].disk_path` 需要重启。
+
+### 翻译服务
+
+内置客户端支持 MTranServer v5 与旧批量接口。先请求 `/translate/batch`，失败回退 `/translate`。地址可写根地址、`/translate` 或 `/translate/batch`。
 
 ```toml
 [subtitle.translate]
@@ -182,24 +253,10 @@ enabled = true
 url = "https://translate.ipacel.cc/translate"
 target = "zh-cn"
 source = "auto"
-# token = "可选；以 Authorization: Bearer 发送"
+# token = "可选。以 Authorization: Bearer 发送"
 ```
 
-EPG 翻译：
-
-```toml
-[epg.translate]
-enabled = true
-engine = "mtran"
-mtran_url = "https://translate.ipacel.cc"
-target = "zh-cn"
-mtran_batch = 50
-# mtran_token = "可选"
-```
-
-`engine = "mtran"` 时才读取 `mtran_url`。也可以直接写 `[epg.translate].url`。
-
-`https://translate.ipacel.cc/translate` 是社区试用服务。可用性、速度和额度不保证。生产环境建议自建 MTranServer。
+`https://translate.ipacel.cc/translate` 是社区试用服务。可用性、速度与额度不保证。生产环境建议自建 MTranServer。
 
 联调：
 
@@ -213,58 +270,314 @@ TRANSLATE_URL=http://127.0.0.1:8989/translate scripts/smoke-translate-live.sh
 TRANSLATE_URL=http://127.0.0.1:8989 TRANSLATE_TOKEN=secret scripts/smoke-translate-live.sh
 ```
 
-脚本检查 `/subtitle/mtran/test`、EPG 采集与缓存、EPG 探测和字幕翻译。
+---
+
+## 低配置部署
+
+TV Buddy 可在 **1 vCPU / 128 MB 内存 / 1 GB 磁盘** 的实例上运行。前提是前面挂 CDN，把播放流量挡在边缘。
+
+完整样例：[`docs/design/config-low-spec.toml`](docs/design/config-low-spec.toml)。原理与公式：[`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md)。
+
+### 两个硬前提
+
+缺一条就会在 1 GB 磁盘上出问题。
+
+| # | 前提 | 说明 |
+| --- | --- | --- |
+| 1 | `[cache.gc].enabled = true` | 切片正文只写不删，全靠它回收。关掉后磁盘会被吃满 |
+| 2 | CDN 侧强制 TTL + 忽略源站头 + 忽略 Cookie | 四家 CDN 的规则内容相同。见下文 |
+
+### 服务端配置
+
+```toml
+[server]
+bind = "[::]:19899"
+log_level = "info"
+
+[panel]
+enabled = true
+# 上线前必须改口令。password_sha256 是口令的 SHA-256 十六进制。
+
+[auth]
+token_enabled = true
+ip_guard_enabled = true
+
+[cache]
+disk_path = "./cache"
+
+# 每个频道的切片索引压到 200 条。0 = 只用内置默认 4096
+[cache.segments]
+per_channel_max = 200
+
+# 1 vCPU：降低开播瞬间的 CPU 抢占
+[cache.prefetch]
+enabled = true
+concurrency = 2
+
+# 磁盘回收。上限自动，按「可用空间 × 0.8 − 100 MB」与实测工作集取小
+[cache.gc]
+enabled = true
+max_disk_mb = 0          # 0 = 自动。1 GB 盘通常落在 100–150 MB
+max_age_secs = 1800
+interval_secs = 300
+scan_limit = 500         # 单轮最多处理 500 个文件，防抖动
+disk_budget_ratio = 0.8
+reserve_mb = 100
+min_mb = 50
+
+# CDN 兜底。CDN 能忽略源站头时保持默认即可
+[cdn]
+enabled = true
+auto_tune = true           # 被动实测推荐值
+segment_max_age_secs = 0   # 0 = 用实测推荐值
+empty_status = 502         # 强制 TTL 下挡住「200 + 空体」
+# public_base = "https://cdn.example"   # CDN 不下发 XFP 时填这里
+```
+
+### CDN 控制台设置
+
+五个设置项，四个域名各做一遍。面板支持「应用到全部域名」时做一次。
+
+| # | 设置项 | 设成 | 原因 |
+| --- | --- | --- | --- |
+| 1 | 缓存过期时间 | 媒体路径用推荐 TTL | 覆盖窗口加两次重试余量 |
+| 2 | 是否遵循源站缓存头 | 关闭（强制 TTL） | 各家能力不一致，强制 TTL 最容易移植 |
+| 3 | Set-Cookie | 媒体路径关闭注入 | 每个响应带新 Cookie 时 CDN 跳过缓存 |
+| 4 | 图片优化 / 自动 WebP / 压缩改写 | 全部关闭 | 切片是 TS 字节，转码后会「命中但播不动」 |
+| 5 | 回源请求头 | 加 `X-Forwarded-Proto: https` | 否则清单一直给 `http://` |
+
+另外确认：**不缓存 3xx**（`redirect` 模式会 302 到带时效的上游地址）、**不缓存非 200**。
+
+缓存规则用两条，顺序不能颠倒：
+
+```text
+规则 A：不缓存（放最前）
+  /panel*  /epg*  /subs/*  /api/*  /unban*  /share*  /health  /metrics
+  /playlist.m3u  /*/playlist.m3u  /*/*.m3u8  /*/*.mpd
+  /*/*/index.m3u8  /*/*/index.txt  /*/*/video/*  /*/*/mpd/*
+
+规则 B：缓存（放其后）
+  /*/*/* 中的其余路径（伪装切片、remux seg_*、timeshift/*、DASH 轨道切片）
+```
+
+> **不要按扩展名写规则。** 伪装扩展名在 jpg/png/gif/bmp/webp 之间轮换。控制台只支持扩展名时，改用路径前缀 `/{gid}/{cid}/`，逐分组配置。
+
+### 推荐值从哪来
+
+TTL 与磁盘上限不能写死。片源窗口在 48–100 秒，单片 1.1–9 MB，固定值要么提前过期，要么长期多占边缘存储。
+
+服务默认被动实测，不向源站额外发请求。首次安装还没有播放数据时用回退值：**TTL 600s / 磁盘 150 MB**。
+
+拿数字的两个入口：
+
+| 入口 | 位置 |
+| --- | --- |
+| 推荐 TTL（只读，带复制按钮） | 面板 → 缓存状态页顶部 |
+| 「立即估算」 | 面板 → 系统设置页 →「CDN 缓存」卡片 |
+
+「立即估算」探测最多 3 个分组、每组 1 个频道，只跑一次。并发请求返回 409。
+
+也可以直接调接口：
+
+```bash
+curl -X POST http://127.0.0.1:19899/panel/api/cdn/estimate
+```
+
+### 验收
+
+```bash
+# 1) 清单必须不缓存
+curl -s -o /dev/null -D - "https://<域名>/<分组>/<变体>.m3u8" | grep -iE 'x-cache|cache-control'
+
+# 2) 切片必须缓存。第二次应为 HIT 且带 Age
+SEG="https://<域名>/<分组>/<变体>/<从清单复制的切片路径>"
+for i in 1 2; do curl -s -o /dev/null -D - "$SEG" | grep -iE '^(x-cache|age|cache-control|content-length)'; done
+
+# 3) 字节未被改写
+curl -s "$SEG" | shasum -a 256
+
+# 4) 面板与 API 不被缓存
+curl -s -o /dev/null -D - "https://<域名>/panel/api/status" | grep -iE 'x-cache|cache-control'
+```
+
+期望：清单与面板返回 `BYPASS`。切片第二次返回 `HIT` 并带 `Age`。两次哈希一致。
+
+### 排障
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 切片仍 `BYPASS` | 规则未生效、未刷新缓存、Cookie 未关 | 查设置项 1 与 3 |
+| `MISS` 不转 `HIT` | 缓存键含 Cookie 或请求头，或 TTL 太短 | 缓存键去掉 Cookie，TTL 用推荐值 |
+| `HIT` 但花屏或卡住 | 图片优化改写了字节 | 关闭图片处理，比对哈希 |
+| 清单被缓存 | 规则顺序颠倒 | 把规则 A 调到最前 |
+| 换台 404 | 302 被缓存 | 关闭 3xx 缓存 |
+| 清单仍给 `http://` | 未下发 XFP | 加回源请求头，或配 `[cdn].public_base` |
+
+---
+
+## 命令行管理
+
+安装后可用 `tv-buddy` 管理服务。命令由 `<prefix>/tv-buddy.sh` 提供。
+
+```bash
+sudo tv-buddy            # 交互菜单
+sudo tv-buddy status
+sudo tv-buddy port 8080
+sudo tv-buddy pass 'new-password' admin
+sudo tv-buddy log 200
+```
+
+| 命令 | 作用 |
+| --- | --- |
+| `tv-buddy` / `menu` | 打开交互菜单 |
+| `start` / `stop` / `restart` | 启停服务 |
+| `status` | 查看状态 |
+| `log [行数]` | 查看日志。终端下持续跟随 |
+| `url` | 打印面板地址与账号 |
+| `port <N>` | 修改面板端口并重启 |
+| `pass [密码] [账号]` | 修改口令，可同时改账号。无参数进入交互 |
+| `update` | 更换二进制，保留配置 |
+| `reinstall` | 备份配置后重装 |
+| `install [参数]` | 在发布包目录调用 `install.sh` |
+| `uninstall` | 移除服务。询问是否删除数据 |
+
+`update` 的更新源按优先级读取：
+
+```bash
+TV_BUDDY_BIN=/path/to/tv-buddy tv-buddy update
+TV_BUDDY_ARCHIVE=/path/to/pkg.tar.gz tv-buddy update
+TV_BUDDY_URL=https://example.com/tv-buddy-{arch}.tar.gz tv-buddy update
+```
+
+三项都没有时，先查 `<prefix>/dist` 与 `<prefix>/../dist`，再回退到 GitHub Release：
+
+```bash
+sudo tv-buddy update                                 # 最新 Release
+sudo TV_BUDDY_VERSION=v2026.0.0 tv-buddy update    # 固定版本
+```
+
+下载的 Release 包会校验同名 `.sha256`。校验不通过时不替换二进制。
+
+无人值守安装设 `TV_BUDDY_YES=1`，脚本直接重装或删除数据，不再询问。
+
+---
+
+## 从源码构建
+
+### 环境要求
+
+| 工具 | 版本 |
+| --- | --- |
+| Rust | stable（见 `rust-toolchain.toml`） |
+| Node.js | 18 或更高（只构建前端时需要） |
+| Docker | 只交叉编译发布包时需要 |
+
+### 本地构建
+
+```bash
+# 1) 前端（Vite + React + TS → frontend/dist）
+scripts/build-frontend.sh
+
+# 2) 后端（Rust）
+cargo build --release
+
+# 3) 运行
+target/release/tv-buddy config.toml
+```
+
+### 交叉编译静态二进制
+
+```bash
+rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl
+cargo build --release --target aarch64-unknown-linux-musl
+```
+
+### 构建发布包
+
+```bash
+scripts/build-release.sh            # amd64 与 arm64 两个静态 musl 包
+scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
+```
+
+产物在 `dist/tv-buddy-<version>-<arch>.tar.gz`，含二进制、配置样例、启停脚本、安装脚本与服务单元。CI 产出的资产名与本地一致。
+
+构建用 Docker `rust:1-alpine`。镜像宿主三元组即 `*-linux-musl`，直接产出静态二进制。容器无外网，依赖来自宿主 `~/.cargo` 缓存。
+
+### 发布
+
+GitHub Actions 只在推送 `v*` tag 时执行。流水线三阶段：前端构建 → 格式/静态检查/测试 → 交叉编译。通过后自动创建 Release 并上传 `tv-buddy-<version>-<arch>.tar.gz` 与 `.sha256`。
+
+```bash
+git tag v2026.4.0
+git push origin v2026.4.0
+```
+
+---
 
 ## 测试
 
 ```bash
+cargo test                 # 单元测试与契约测试
+cargo clippy -- -D warnings
+cargo fmt --check
+```
+
+端到端冒烟脚本按功能拆分，每个脚本自起真实服务与伪上游：
+
+```bash
 scripts/smoke-m0.sh   # 健康检查、登录、状态、配置读写、鉴权、兜底
 scripts/smoke-m1.sh   # 分组/频道 CRUD、导出、订阅与 access 过滤、播放 Token
-scripts/smoke-m2.sh   # 播放链路、切片伪装、缓存窗口、302 占位（含伪上游）
+scripts/smoke-m2.sh   # 播放链路、切片伪装、缓存窗口、302 占位
 scripts/smoke-m3.sh   # 直连模式：redirect/rewrite/passthrough、remux/dash 就绪语义
 scripts/smoke-m4.sh   # 热重载、看门狗冷却、缓存状态与清空、指标与日志
 scripts/smoke-cli.sh  # CLI：端口、密码、启停、更新、重装、卸载保留数据
-scripts/smoke-translate-live.sh # 真实 MTranServer 联调（需外网）
-scripts/smoke-epg.sh  # EPG：采集、/epg.xml[.gz]、/epg 页面、/epg/api/*、手工映射与匹配报告
-scripts/smoke-logo.sh # 台标库：上传、公开取图与列表、删除
-scripts/smoke-backup.sh # 备份与恢复：导出 gzip、改动后回滚、拒绝非法内容
-scripts/smoke-security.sh # 安全面：Token 查看/轮换、IP 统计、封禁与解封
-scripts/smoke-aggregate.sh # 订阅聚合：远端源合并、过滤与位置
-scripts/smoke-assets.sh # 素材：ffmpeg 状态、视频/字幕上传与删除、解析脚本
-scripts/smoke-share.sh  # 多 VPS：门禁、Token 同步、封禁汇总
-scripts/smoke-panel.sh  # 面板：健康摘要、DASH 探测、回看状态
-scripts/smoke-resolver.sh # 解析脚本：URL 覆盖、TTL 缓存、失败转 error_url
-scripts/smoke-remux.sh    # Remux：预热、清单、伪装切片（需 ffmpeg 生成测试流）
-scripts/smoke-schedule.sh # 录制任务 CRUD、直播开关
-scripts/smoke-timeshift.sh # 回看：VOD 清单、伪装切片（需 ffmpeg）
-scripts/smoke-record.sh   # 录制：调度到期、合并切片、下载产物（需 ffmpeg）
-scripts/smoke-record-dash.sh # DASH 录制：动态 MPD、轨道并轨、下载产物（需 ffmpeg）
-scripts/smoke-dash-timeshift.sh # DASH 回看：ffmpeg 转 HLS 后缓冲（缺 DASH 解复用器时跳过）
-scripts/compare-p0.sh # 对拍：同一夹具下对比目标 v0.8.2（需容器 iptv82）
-tests/             # 路由级集成测试（起真实服务 + 伪上游）
 ```
 
-## 接口（已实现）
+其余脚本覆盖 EPG、台标、备份、安全、订阅聚合、素材、分享、面板、解析脚本、Remux、录制、回看、DASH 与翻译。完整列表：
+
+```bash
+ls scripts/smoke-*.sh
+```
+
+部分脚本需要 `ffmpeg`（Remux、录制、回看）或外网（真实翻译服务）。
+
+`scripts/compare-p0.sh` 在相同夹具下与本实现对比目标 v0.8.2，需要容器 `iptv82`。
+
+---
+
+## 接口
+
+全部路由见 [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md)。常用入口：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/health` | `200 text/plain` `ok` |
-| `GET` | `/playlist.m3u` | 总订阅（只含 `access = "public"` 的组；可聚合 `[playlist].sources`） |
-| `GET` | `/{gid}/playlist.m3u` | 分组订阅（归档组 `404`） |
-| `GET` | `/{gid}/{cid}.m3u8`（`.mpd`） | 入口清单（`public, max-age=5, s-maxage=5`） |
-| `GET` | `/{gid}/{cid}/video/index.txt` | 媒体清单（`text/plain`，切片地址已伪装） |
+| `GET` | `/health` | 健康检查，返回 `ok` |
+| `GET` | `/playlist.m3u` | 总订阅，只含 `access = "public"` 的组 |
+| `GET` | `/{gid}/playlist.m3u` | 分组订阅 |
+| `GET` | `/{gid}/{cid}.m3u8`（或 `.mpd`） | 入口清单 |
+| `GET` | `/{gid}/{cid}/video/index.txt` | 媒体清单 |
+| `GET` | `/epg.xml[.gz]` | 节目单 |
+| `POST` | `/panel/api/login` | 面板登录 |
+| `GET` | `/panel/api/health` | 本机健康摘要 |
+
+<details>
+<summary>展开全部面板与播放接口</summary>
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
 | `GET` | `/{gid}/{cid}/<P>_<S>.<ext>` | 伪装切片（忽略 `Range`） |
-| `POST` | `/panel/api/login` | 登录换取会话 token |
 | `GET`/`PUT` | `/panel/api/config` | 读取 / 全量保存配置 |
-| `GET` | `/panel/api/groups/export` | 导出全部分组（数组） |
+| `GET` | `/panel/api/groups/export` | 导出全部分组 |
 | `GET` | `/panel/api/groups/{gid}/export` | 导出单个分组 |
 | `POST` | `/panel/api/groups` | 新建分组 |
 | `PUT`/`DELETE` | `/panel/api/groups/{gid}` | 局部更新 / 删除分组 |
 | `POST` | `/panel/api/groups/{gid}/channels` | 新建频道 |
 | `PUT`/`DELETE` | `/panel/api/groups/{gid}/channels/{cid}` | 局部更新 / 删除频道 |
+| `POST` | `/panel/api/groups/import[/m3u]` | 批量导入分组（JSON / M3U） |
 | `POST` | `/panel/api/reload` | 立即重读配置 |
-| `GET` | `/panel/api/cache/stats` | 缓存目录条目与占用 |
+| `GET` | `/panel/api/cache/stats` | 缓存条目与占用 |
 | `POST` | `/panel/api/cache/flush` | 清空缓存（保留 `dash/`） |
+| `POST` | `/panel/api/cdn/estimate` | 立即估算推荐 TTL 与磁盘上限 |
 | `GET` | `/panel/api/stats` | 运行指标 |
 | `GET` | `/panel/api/logs` | 最近运行日志 |
 | `GET` | `/panel/api/security/token` | 当前播放 Token 与宽限旧值 |
@@ -273,9 +586,9 @@ tests/             # 路由级集成测试（起真实服务 + 伪上游）
 | `POST` | `/panel/api/security/ip/{ban,unban}` | 封禁 / 解封地址 |
 | `GET` | `/panel/api/backup?include=` | 导出 gzip(tar) 备份 |
 | `POST` | `/panel/api/restore` | 恢复备份并重载 |
-| `GET` | `/logo/<file>` | 台标（`public, max-age=86400`） |
+| `GET` | `/logo/<file>` | 台标图片 |
 | `GET` | `/logo/api/list` | 台标列表 |
-| `POST` | `/panel/api/logo/{upload,delete,rename,apply}` | 上传 / 删除 / 重命名 / 应用到频道 |
+| `POST` | `/panel/api/logo/{upload,delete,rename,apply}` | 台标管理 |
 | `GET` | `/panel/api/logo/match-report` | 缺台标、坏引用与未使用 |
 | `POST` | `/panel/api/logo/suggest` | 按名称相似度推荐台标 |
 | `GET` | `/panel/api/assets/list` | 视频素材列表 |
@@ -284,78 +597,88 @@ tests/             # 路由级集成测试（起真实服务 + 伪上游）
 | `GET`/`POST` | `/panel/api/subtitle/*` | 字幕列表、上传、删除、下载 |
 | `GET`/`POST` | `/panel/api/resolver/{scripts,script,remove}` | 解析脚本管理 |
 | `GET` | `/api/share/pull?key=` | 多 VPS 同步载荷 |
-| `GET` | `/panel/api/health` | 本机健康摘要 |
 | `GET` | `/panel/api/dash/tracks/:gid/:cid` | DASH 轨道列表 |
 | `POST` | `/panel/api/dash/scan-url` | 解析任意 MPD |
-| `GET` | `/epg.xml[.gz]` | 节目单 |
 | `GET` | `/epg/api/{channels,programmes,search}` | 节目单 JSON |
-| `GET` | `/panel/api/epg/{status,mappings,match-report}` | EPG 状态、手工映射与匹配报告 |
-| `POST` | `/panel/api/epg/{refresh,mapping}` | 立即采集、设置/清除手工映射 |
-| `POST` | `/panel/api/groups/import[/m3u]` | 批量导入分组（JSON / M3U） |
+| `GET` | `/panel/api/epg/{status,mappings,match-report}` | EPG 状态、映射与匹配报告 |
+| `POST` | `/panel/api/epg/{refresh,mapping}` | 立即采集、设置或清除映射 |
 
-## 目录
+</details>
+
+---
+
+## 目录结构
 
 ```text
 src/
-  main.rs          启动入口（只做参数、日志、状态、监听）
+  main.rs          启动入口。只做参数、日志、状态、监听
   lib.rs           库根：模块声明
   state.rs         共享状态（ArcSwap 配置快照 + 改动串行化 + 缓存目录）
   config.rs        配置模型入口；config/model.rs 为键面模型
   playlist.rs      M3U 订阅渲染
   proxy.rs         清单改写、切片索引与字节缓存；proxy/{media,modes,segments}.rs
   auth.rs          面板会话、播放 Token；auth/{play_token,session}.rs
-  http.rs          路由、提取器、错误映射、内嵌静态资源；http/routes.rs 与 http/routes/*.rs
+  http.rs          路由、提取器、错误映射、内嵌静态资源
 frontend/          Vite + React + TS 面板（12 个管理分区 + 独立台标/解封页）
-scripts/           构建与冒烟测试脚本
+scripts/           构建、发布与冒烟测试脚本
+packaging/         配置样例、服务单元、管理脚本
+docs/              规格、逆向发现、设计与对拍报告
+tests/             路由级集成测试（起真实服务 + 伪上游）
 ```
 
-## 发布与打包
+---
 
-```bash
-scripts/build-release.sh            # 构建 amd64 与 arm64 两个静态 musl 包
-scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
-```
+## 文档
 
-产物在 `dist/iptv-proxy-<version>-<arch>.tar.gz`，含二进制、配置样例、启停脚本、安装脚本与 systemd/OpenRC 单元。
+| 文档 | 内容 |
+| --- | --- |
+| [`docs/spec/`](docs/spec/) | 目标规格（`S-*`）与验证基线 |
+| [`docs/findings/`](docs/findings/) | 逆向证据（`F-*`、`D-*`） |
+| [`docs/design/`](docs/design/) | 实现方案：选型、架构、HTTP 契约、低配优化 |
+| [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) | 路由表与接口契约 |
+| [`docs/design/reconciliation-report.md`](docs/design/reconciliation-report.md) | 与目标 v0.8.2 的 P0 对拍报告 |
+| [`PROGRESS.md`](PROGRESS.md) | 进度与缺口。唯一进度权威 |
 
-- 构建用 Docker `rust:1-alpine`：镜像宿主三元组即 `*-linux-musl`，直接产出静态二进制。
-- 容器无外网，依赖来自宿主 `~/.cargo` 缓存（`--offline`）。
-- 安装：解包后 `sudo ./install.sh`，默认装到 `/opt/iptv-proxy`。详见上文「一键安装」。
-
-### CI 自动发布
-
-GitHub Actions 只在推送 `v*` 版本 tag 时执行；普通分支推送不触发。
-
-```bash
-git tag v2026.4.0
-git push origin v2026.4.0
-```
-
-流水线三阶段：前端构建 → 格式/静态检查/测试（含 CLI 冒烟）→ 交叉编译 amd64/arm64。测试通过后打包并按 tag 名自动创建 GitHub Release，上传：
-
-```text
-tv-buddy-<version>-amd64.tar.gz[.sha256]       # version = tag 去掉 v 前缀
-tv-buddy-<version>-arm64.tar.gz[.sha256]
-```
-
-资产名与 `install.sh` 的查找规则一致，所以 `install.sh` 和 `iptv-proxy update` 都能直接对着 Release 用。CI 会把仓库名注入 `install.sh`，fork 后无需改脚本。
-
-## 运维
-
-- 配置热重载：改 `config.toml` 即生效（`[epg]`、`[cache].disk_path` 需重启，与目标一致）。
-- 日志：标准输出与 `<配置目录>/iptv-proxy.log`；超过 5 MB 截断。`[server].log_level` 控制级别。
-- 看门狗：同一频道连续失败 5 次后冷却 3600 秒；改配置立即解除。
+---
 
 ## 已知限制
 
-- `remux` 为纯 Rust 切片；冷启动在首批切片产出前返回 `503 remux warming up`，不是恒 503。
-- `dash` 已把 MPD 转成 HLS；需要 `SegmentTimeline`，或 `SegmentTemplate@duration` 加总时长。CENC/ClearKey 不做解密，当前按原字节代理。
-- `proxy` 模式面向 HLS：媒体清单按行改写；MPD 的相对 `<BaseURL>` 改写到本服务并代理 init/切片，绝对地址仍直连上游。
-- `mpd_keep_seconds` 已用于 DASH 媒体清单的时间窗；`url_pool_size` 已用于多个 `<BaseURL>` 的音视频分流与故障回退。目标侧正常取用方式仍未观测。
-- 缓存无容量上限（与目标一致，见 F-015）；`cache.backend=memory` 只回显，实际仍落盘。
-- 运维接口的响应形状为本实现自定；目标只登记存在性（见 `design/03` §6.4）。
-- 面板有 12 个管理分区，另有独立 `/logo` 与 `/unban` 页面；目标前端代码与文案不复制。
-- EPG：支持 `kind = "xml"` 与 `kind = "script"`、EPG 翻译、手工映射与匹配报告；EPG 开启时订阅注入 `x-tvg-url`。录制前后缓冲与其余 EPG 私有端点未实现（`design/03` §6.5）。
-- 定时录制：HLS 频道按切片合并；DASH 频道要求直播 MPD 且系统有 ffmpeg（支持 `-c copy`），产出 MKV。静态 MPD 报「录制区间内无可用切片」。
-- `l1/l2` 限流、每 IP 会话上限、`random_id_enabled` 的随机 ID 行为、`compat_mode`、`srt_ua_keywords`、`socks5` 未实现或仅保留配置键。
-- 与目标的差异以 `docs/design/reconciliation-report.md` 为准（22 项用例差异 0）。
+- **平台**：只支持 Linux amd64 与 arm64。
+- **Remux**：纯 Rust 切片。冷启动时在首批切片产出前返回 `503 remux warming up`，不是恒 503。
+- **DASH**：已把 MPD 转成 HLS。需要 `SegmentTimeline`，或 `SegmentTemplate@duration` 加总时长。CENC/ClearKey 不解密，按原字节代理。
+- **缓存**：无容量上限校验。`cache.backend=memory` 只回显，实际仍落盘。
+- **EPG**：录制前后缓冲与部分私有端点未实现。
+- **录制**：DASH 频道要求直播 MPD 且系统有 ffmpeg。静态 MPD 报「录制区间内无可用切片」。
+- **未实现**：`l1`/`l2` 限流、每 IP 会话上限、`random_id_enabled` 的随机 ID 行为、`compat_mode`、`srt_ua_keywords`、`socks5`。部分只保留配置键。
+- **兼容差异**：以 [`docs/design/reconciliation-report.md`](docs/design/reconciliation-report.md) 为准。22 项对拍用例差异为 0。
+
+---
+
+## 贡献
+
+欢迎提 issue 与 pull request。
+
+提交前请确认：
+
+1. `cargo fmt --check` 与 `cargo clippy -- -D warnings` 通过。
+2. `cargo test` 通过。
+3. 改动涉及播放链路时，跑对应 `scripts/smoke-*.sh`。
+4. 改行为时同步更新 `docs/design/` 与 `PROGRESS.md`。
+
+写作约定：简体中文，按 ASD-STE100 简化技术写作。短句、主动语态、一般现在时、一句一义。
+
+---
+
+## 免责声明
+
+本项目只用于学习、研究与个人合法的自托管场景。
+
+使用者必须自行确认：所接入的直播源已获授权，使用方式符合当地法律与内容服务商的条款。作者不对任何滥用行为负责。
+
+目标程序派生的内容按不可信数据处理。本项目不复制目标的源码、前端资源与面板文案。
+
+---
+
+## 许可证
+
+[MIT](LICENSE) © 2026 Hason

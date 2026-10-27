@@ -5,7 +5,7 @@
 use std::{fs, path::Path};
 
 const PLACEHOLDER: &str = r#"<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>IPTV Proxy</title>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>TV Buddy</title>
 <style>body{font-family:system-ui,sans-serif;background:#111;color:#ddd;display:grid;place-items:center;height:100vh;margin:0}
 code{background:#222;padding:2px 6px;border-radius:4px}</style></head>
 <body><div><h1>前端未构建</h1><p>请运行 <code>scripts/build-frontend.sh</code>，然后重新编译。</p></div></body></html>

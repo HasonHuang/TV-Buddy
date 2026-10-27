@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn index_round_trips_through_disk() {
-        let dir = std::env::temp_dir().join(format!("iptv-seg-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tv-buddy-seg-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let suffix = "a".repeat(32);
         save_index(
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn save_index_truncates_at_max_entries() {
-        let dir = std::env::temp_dir().join(format!("iptv-seg-trunc-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tv-buddy-seg-trunc-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         // 分两批写入，第二批更新：截断后应保留较新的 20 条。
         let first: Vec<(String, String, String)> = (0..80)
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn limits_trim_registered_entries() {
-        let dir = std::env::temp_dir().join(format!("iptv-seg-limit-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tv-buddy-seg-limit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let index = SegmentIndex::new();
         index.set_limits(0, 2);

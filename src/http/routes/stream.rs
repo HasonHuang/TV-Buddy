@@ -980,7 +980,7 @@ fn local_mpd_prefix(gid: &str, cid: &str, self_base: &str) -> String {
 /// 本地 BaseURL 令牌；防止任意改写后的地址直接访问本服务。
 fn mpd_base_token(gid: &str, cid: &str, base: &str) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"rea-iptv/mpd-v1\0");
+    hasher.update(b"tv-buddy/mpd-v1\0");
     hasher.update(gid.as_bytes());
     hasher.update([0]);
     hasher.update(cid.as_bytes());

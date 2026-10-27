@@ -19,8 +19,8 @@ use axum::{
     routing::get,
     Router,
 };
-use iptv_proxy::{config, epg, http, logging::RingBuffer, state::AppState};
 use reqwest::{redirect::Policy, Client, Response as HttpResponse};
+use tv_buddy::{config, epg, http, logging::RingBuffer, state::AppState};
 
 const LIVE_BODY: &str = "#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nseg1.ts\n#EXTINF:4.0,\nseg2.ts\n#EXT-X-ENDLIST\n";
 const LIVE: &str = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nseg1.ts\n#EXTINF:4.0,\nseg2.ts\n#EXT-X-ENDLIST\n";
@@ -290,7 +290,7 @@ async fn fixture_with_options(
     extra_section: &str,
     public_viewer_enabled: bool,
 ) -> Fixture {
-    let dir = std::env::temp_dir().join(format!("iptv-proxy-test-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("tv-buddy-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("建临时目录");
 
     let mut upstream_app = Router::new()
@@ -552,7 +552,7 @@ fn local_base_path(body: &str, self_base: &str) -> String {
 
 /// Unix 秒转 `yyyyMMddHHMMSS`（**本地**时间，按默认 `+8`）。
 fn compact(epoch: i64) -> String {
-    let text = iptv_proxy::schedule::format_local(epoch, 8);
+    let text = tv_buddy::schedule::format_local(epoch, 8);
     text.chars()
         .filter(|ch| ch.is_ascii_digit())
         .collect::<String>()
@@ -894,7 +894,7 @@ async fn epg_enabled_serves_xmltv_and_filters() {
         "application/xml; charset=utf-8"
     );
     let body = response.text().await.expect("读正文");
-    assert!(body.contains("generator-info-name=\"iptv-proxy\""));
+    assert!(body.contains("generator-info-name=\"tv-buddy\""));
     assert!(body.contains("<channel id=\"c1\">"));
     assert!(body.contains("<programme start="));
     assert!(body.contains("channel=\"c1\""));
@@ -1935,7 +1935,7 @@ async fn backup_and_restore_roundtrip() {
         .expect("备份请求");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(header(&response, "content-type"), "application/gzip");
-    assert!(header(&response, "content-disposition").contains("iptv-proxy-backup-"));
+    assert!(header(&response, "content-disposition").contains("tv-buddy-backup-"));
     let data = response.bytes().await.expect("读字节");
     assert_eq!(&data[..2], &[0x1f, 0x8b], "应为 gzip 魔数");
 
@@ -3880,13 +3880,13 @@ url = "{upstream}/dash/base.mpd"
     )
     .await;
     let session = login(&fixture).await;
-    let now = iptv_proxy::schedule::now_epoch();
+    let now = tv_buddy::schedule::now_epoch();
     let task = serde_json::json!({
         "name": "静态 DASH",
         "group_id": "rgd",
         "channel_id": "c1",
-        "start_time": iptv_proxy::schedule::format_local(now - 2, 8),
-        "end_time": iptv_proxy::schedule::format_local(now + 8, 8),
+        "start_time": tv_buddy::schedule::format_local(now - 2, 8),
+        "end_time": tv_buddy::schedule::format_local(now + 8, 8),
         "format": "mkv"
     });
     let response = fixture
@@ -3899,7 +3899,7 @@ url = "{upstream}/dash/base.mpd"
         .await
         .expect("新增");
     assert_eq!(response.status(), StatusCode::OK);
-    iptv_proxy::schedule::spawn(fixture.state.clone());
+    tv_buddy::schedule::spawn(fixture.state.clone());
 
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -4959,7 +4959,7 @@ async fn cdn_disabled_matches_legacy() {
 
 /// 按给定 TOML 起夹具（`{dir}` 会被替换成临时目录）。
 async fn fixture_from_toml(toml: &str) -> Fixture {
-    let dir = std::env::temp_dir().join(format!("iptv-proxy-test-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("tv-buddy-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("建临时目录");
     let body = toml.replace("{dir}", &dir.display().to_string());
     let config_path = dir.join("config.toml");

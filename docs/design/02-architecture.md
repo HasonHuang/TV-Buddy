@@ -40,7 +40,7 @@
 
 启动顺序（对齐目标行为）：
 
-1. 解析 CLI（`iptv-proxy <config.toml>`；子命令见 `cli`）。
+1. 解析 CLI（`tv-buddy <config.toml>`；子命令见 `cli`）。
 2. 读配置并校验（**严格 TOML**：重复键报错，F-008）。
 3. 创建 `cache/` 子目录（仅启动时创建，F-006）。
 4. 初始化缓存索引、Token 存储、封禁表。
@@ -255,7 +255,7 @@ frontend/            # Vite + React + TS（独立目录）
 | M1 数据面 | 分组/频道 CRUD、总/分组订阅、access 过滤 | 订阅可导出且形状一致 |
 | M2 播放链路 | proxy 模式、切片伪装、缓存窗口、302 占位 | ✅ 已实现（`smoke-m2.sh`；入口/媒体清单/切片/占位/缓存窗口/Token 全绿） |
 | M3 直连模式 | redirect/rewrite/passthrough、redirect 缓存 | ✅ 已实现（`smoke-m3.sh`；含 remux/dash 就绪语义与 Token 矩阵） |
-| M4 P0 收尾 | 看门狗、热重载、运维接口、对拍报告、打包 | ✅ 看门狗/热重载/运维接口（`smoke-m4.sh`）；对拍 22 项差异 0（`reconciliation-report.md`）；双架构静态包与 `/opt/iptv-proxy` 布局（`build-release.sh`、`verify-release.sh`） |
+| M4 P0 收尾 | 看门狗、热重载、运维接口、对拍报告、打包 | ✅ 看门狗/热重载/运维接口（`smoke-m4.sh`）；对拍 22 项差异 0（`reconciliation-report.md`）；双架构静态包与 `/opt/tv-buddy` 布局（`build-release.sh`、`verify-release.sh`） |
 
 ## 15. 未决问题
 

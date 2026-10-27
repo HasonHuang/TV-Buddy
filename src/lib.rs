@@ -1,4 +1,4 @@
-//! IPTV Proxy 库根：与目标 v0.8.2 兼容的重实现。
+//! TV Buddy 库根：自托管 IPTV 代理服务。
 //!
 //! 模块划分见 [`docs/design/02-architecture.md`](../docs/design/02-architecture.md)。
 //! 可执行入口在 `src/main.rs`，只负责启动。

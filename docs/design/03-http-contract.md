@@ -366,7 +366,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 额外频道 | `extra.json` 持久化；`out_id` 为空时用源频道 ID；与输出 ID 冲突时跳过 |
 | 频道匹配 | 手工映射优先；否则 `tvg_id`（大小写不敏感）→ 名称（删全部空白含 U+3000、转小写、完全相等，不做子串）；`match_by_name=false` 时只保留 `tvg_id` |
 | 冲突 | 同一源频道被多个本地频道命中 → 配置顺序最后一个获得节目；重复 `out_id` 标为 `duplicate` |
-| 输出 | `<cache>/epg/epg.xml` 与 `epg.xml.gz`；根节点 `generator-info-name="iptv-proxy"`；保留 `programme` 的 `start`/`stop`/`channel` |
+| 输出 | `<cache>/epg/epg.xml` 与 `epg.xml.gz`；根节点 `generator-info-name="tv-buddy"`；保留 `programme` 的 `start`/`stop`/`channel` |
 | 语言 | 文本节点缺 `xml:lang` 时补 `lang="zh"`；显式语言保留 |
 | 原样保留 | `icon`、`credits` 等未建模子节点按原片段输出 |
 | 手工映射 | 存 `<cache>/epg/mappings.json`；`GET /panel/api/epg/mappings` 读取；刷新后补源频道显示名 |
@@ -384,8 +384,8 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 项 | 规则 |
 | --- | --- |
 | 备份请求 | `GET /panel/api/backup?include=all\|epg-scripts\|resolver`；其它值回退 `all` |
-| 备份响应 | `200 application/gzip`；`Content-Disposition: attachment; filename="iptv-proxy-backup-YYYYmmdd-HHMMSS.tar.gz"`（UTC） |
-| 包内布局 | `iptv-proxy-backup/config.toml`、`logos/*`、`epg/scripts/*.py`、`epg/epg_map.json`、`resolvers/*.py`、`manifest.json`（`generator`/`version`/`created`/`scope`） |
+| 备份响应 | `200 application/gzip`；`Content-Disposition: attachment; filename="tv-buddy-backup-YYYYmmdd-HHMMSS.tar.gz"`（UTC） |
+| 包内布局 | `tv-buddy-backup/config.toml`、`logos/*`、`epg/scripts/*.py`、`epg/epg_map.json`、`resolvers/*.py`、`manifest.json`（`generator`/`version`/`created`/`scope`） |
 | 恢复请求 | `POST /panel/api/restore`，`Content-Type: application/gzip`，体为 tar.gz 原文；上限 64 MiB |
 | 恢复步骤 | 解包 → 解析并**校验** `config.toml` → 旧文件另存 `config.toml.bak` → 原子写入 → 恢复台标 → 重载快照（立即解除看门狗冷却） |
 | 恢复响应 | `{"ok":true,"config_reloaded":true,"report":{"files":[…],"skipped":[…]},"groups":N}` |

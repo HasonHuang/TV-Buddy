@@ -144,10 +144,10 @@ mod tests {
 
     #[test]
     fn sink_writes_to_file() {
-        let dir = std::env::temp_dir().join(format!("iptv-log-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tv-buddy-log-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("iptv-proxy.log");
+        let path = dir.join("tv-buddy.log");
         let ring = Arc::new(RingBuffer::default());
         let mut sink = LogSink::new(ring.clone(), &path).unwrap();
         sink.write_all(b"hello\n").unwrap();
@@ -160,7 +160,7 @@ mod tests {
 }
 
 /// 日志文件名（`design/04` §5）。
-pub const LOG_FILE: &str = "iptv-proxy.log";
+pub const LOG_FILE: &str = "tv-buddy.log";
 
 /// 日志文件与配置同目录。
 pub fn log_path_for(config_path: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -177,7 +177,7 @@ pub fn init(level: &str, log_path: Option<&std::path::Path>, ring: std::sync::Ar
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("iptv_proxy={level},tower_http={level}")));
+        .unwrap_or_else(|_| EnvFilter::new(format!("tv_buddy={level},tower_http={level}")));
     let writer = LogWriter::new(ring, log_path.map(|path| path.to_path_buf()));
     tracing_subscriber::registry()
         .with(filter)

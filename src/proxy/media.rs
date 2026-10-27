@@ -13,7 +13,7 @@ use url::Url;
 ///
 /// `<P>`、扩展名轮换起点与切片索引文件名都从这一个摘要派生：加域标签是给
 /// 摘要一个用途边界，换算法时不会与其它哈希混用。
-const CHANNEL_DOMAIN: &[u8] = b"rea-iptv/segment-v1";
+const CHANNEL_DOMAIN: &[u8] = b"tv-buddy/segment-v1";
 
 /// 频道派生摘要：`sha256(域标签 ‖ len(gid) ‖ gid ‖ len(cid) ‖ cid)`。
 ///
@@ -421,7 +421,7 @@ mod tests {
         );
         assert_ne!(first, prefix("g1", "c2"));
         // 固定值：改算法必须同时改这里，避免无意中改掉已下发的切片地址。
-        assert_eq!(first, "f2653cf674a55a0e");
+        assert_eq!(first, "6ad0e22571048384");
     }
 
     /// 目标 `<P>` 的第 4 条性质：不同 `(gid, cid)` 必须得到不同前缀。

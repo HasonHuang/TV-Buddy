@@ -1,4 +1,4 @@
-//! IPTV Proxy——与目标 v0.8.2 兼容的重实现。
+//! TV Buddy——自托管 IPTV 代理服务。
 //!
 //! 本文件只负责启动：解析参数、读配置、建状态、起服务、启热重载。
 //! 模块划分见 `docs/design/02-architecture.md`，代码在库根 `src/lib.rs`。
@@ -6,7 +6,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Context;
-use iptv_proxy::{config, epg, http, logging, reload, state};
+use tv_buddy::{config, epg, http, logging, reload, state};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -26,12 +26,12 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(state::AppState::new(config_path, cfg, logs));
     reload::spawn(state.clone());
     epg::spawn(state.clone());
-    iptv_proxy::share::spawn(state.clone());
-    iptv_proxy::schedule::spawn(state.clone());
-    iptv_proxy::cache_gc::spawn(state.clone());
-    iptv_proxy::timeshift::warm(&state);
+    tv_buddy::share::spawn(state.clone());
+    tv_buddy::schedule::spawn(state.clone());
+    tv_buddy::cache_gc::spawn(state.clone());
+    tv_buddy::timeshift::warm(&state);
     state.dash_timeshift.warm(&state);
-    iptv_proxy::health::spawn(state.clone());
+    tv_buddy::health::spawn(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         bind = %bind,
-        "iptv-proxy 启动"
+        "tv-buddy 启动"
     );
 
     axum::serve(

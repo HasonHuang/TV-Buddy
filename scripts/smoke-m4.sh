@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # 日志要落在 $WORK，所以先切 cwd；BIN 必须是绝对路径。
-BIN=${BIN:-target/debug/iptv-proxy}
+BIN=${BIN:-target/debug/tv-buddy}
 BIN=$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")
 PORT=${PORT:-19918}
 UP=${UP:-19919}
@@ -75,7 +75,7 @@ for _ in $(seq 1 50); do
   curl -fsS "http://127.0.0.1:$UP/live.m3u8" >/dev/null 2>&1 && break
   sleep 0.1
 done
-# 在 $WORK 里启动，日志文件落在 $WORK/iptv-proxy.log。
+# 在 $WORK 里启动，日志文件落在 $WORK/tv-buddy.log。
 (cd "$WORK" && exec "$BIN" "$CFG" >"$WORK/server.log" 2>&1) &
 PID=$!
 trap '{ kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"; } 2>/dev/null' EXIT
@@ -127,14 +127,14 @@ for _ in $(seq 1 50); do
 done
 check "热重载新组可播" "200" "$(status "$B/hot/h1.m3u8")"
 check "热重载后 3 条" "3" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
-check "热重载已记日志" "1" "$(grep -c '配置已热重载' "$WORK/iptv-proxy.log")"
+check "热重载已记日志" "1" "$(grep -c '配置已热重载' "$WORK/tv-buddy.log")"
 
 # 坏配置：保留旧快照
 cp "$CFG" "$CFG.good"
 printf '[server]\nbind = "127.0.0.1:1"\nbind = "127.0.0.1:2"\n' > "$CFG"
 sleep 1
 check "坏配置保留旧快照" "3" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
-check "坏配置已记日志" "1" "$(grep -c '配置解析失败' "$WORK/iptv-proxy.log")"
+check "坏配置已记日志" "1" "$(grep -c '配置解析失败' "$WORK/tv-buddy.log")"
 cp "$CFG.good" "$CFG"
 sleep 1
 
@@ -146,9 +146,9 @@ check "冷却后仍 503" "503" "$(status "$B/dg/d1.m3u8")"
 check "冷却文案" "timeout waiting for master playlist" "$(cat "$WORK/body")"
 # 日志里是「DASH 连续失败，进入冷却」加字段 `cooldown_secs=3600`，冷却秒数不在文案里。
 # 字段名与值之间插着 ANSI 复位码，所以分开断言。
-check "冷却已记录日志" "1" "$(grep -c 'DASH 连续失败，进入冷却' "$WORK/iptv-proxy.log")"
-check "冷却秒数字段在场" "1" "$(grep -c 'cooldown_secs' "$WORK/iptv-proxy.log")"
-check "冷却秒数为 3600" "1" "$(grep 'cooldown_secs' "$WORK/iptv-proxy.log" | grep -c '3600')"
+check "冷却已记录日志" "1" "$(grep -c 'DASH 连续失败，进入冷却' "$WORK/tv-buddy.log")"
+check "冷却秒数字段在场" "1" "$(grep -c 'cooldown_secs' "$WORK/tv-buddy.log")"
+check "冷却秒数为 3600" "1" "$(grep 'cooldown_secs' "$WORK/tv-buddy.log" | grep -c '3600')"
 # 修好上游并触发热重载 → 立即解除冷却（S-MODE-17）
 python3 - <<PY
 text = open("$CFG", encoding="utf-8").read().replace("http://127.0.0.1:1/dead.mpd", "http://127.0.0.1:$UP/main.mpd")
@@ -180,7 +180,7 @@ check "指标含切片数" "1" "$(jget '1 if d["segments"]>=2 else 0')"
 check "日志 200" "200" "$(code "${A[@]}" "$B/panel/api/logs?limit=50")"
 check "日志有内容" "1" "$(jget '1 if d["total"]>0 and len(d["lines"])>0 else 0')"
 check "日志含清空记录" "1" "$(jget '1 if any("缓存已清空" in line for line in d["lines"]) else 0')"
-check "日志文件存在" "1" "$([ -s "$WORK/iptv-proxy.log" ] && echo 1 || echo 0)"
+check "日志文件存在" "1" "$([ -s "$WORK/tv-buddy.log" ] && echo 1 || echo 0)"
 # 面板按级别过滤（A4）：环形缓冲的行带 ANSI 颜色，前端先剥掉再取级别词。
 # 这里复刻同一套抽取逻辑，确保每一行都能判出级别（否则该级别永远筛不出来）。
 cat > "$WORK/level.py" <<'PYEOF'

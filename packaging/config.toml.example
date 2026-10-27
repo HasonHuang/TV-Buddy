@@ -1,4 +1,4 @@
-# IPTV Proxy 配置样例（首次安装时复制为 config.toml）
+# TV Buddy 配置样例（首次安装时复制为 config.toml）
 # 键面对齐目标 v0.8.2；未列出的键取默认值。
 
 [server]

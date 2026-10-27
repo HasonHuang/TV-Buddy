@@ -5,12 +5,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ARCH=${1:-arm64}
-TARBALL=$(ls -1 dist/iptv-proxy-*-"$ARCH".tar.gz 2>/dev/null | tail -1)
+TARBALL=$(ls -1 dist/tv-buddy-*-"$ARCH".tar.gz 2>/dev/null | tail -1)
 [ -n "$TARBALL" ] || { echo "找不到 arch=$ARCH 的发布包"; exit 1; }
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 tar -C "$WORK" -xzf "$TARBALL"
-DIR=$(find "$WORK" -maxdepth 1 -type d -name 'iptv-proxy-*' | head -1)
+DIR=$(find "$WORK" -maxdepth 1 -type d -name 'tv-buddy-*' | head -1)
 
 cat > "$DIR/config.toml" <<'EOF'
 [server]
@@ -32,7 +32,7 @@ url = "http://127.0.0.1:1/x.m3u8"
 EOF
 
 # 静态判定：ELF 程序头里不应有 PT_INTERP（值为 3）。
-python3 - "$DIR/iptv-proxy" <<'PY'
+python3 - "$DIR/tv-buddy" <<'PY'
 import struct
 import sys
 
@@ -54,7 +54,7 @@ PY
 
 docker run --rm --platform "linux/$ARCH" -v "$DIR":/w -w /w alpine:3.20 sh -c '
 set -e
-./iptv-proxy /w/config.toml >/w/run.log 2>&1 &
+./tv-buddy /w/config.toml >/w/run.log 2>&1 &
 pid=$!
 ok=0
 for _ in $(seq 1 50); do

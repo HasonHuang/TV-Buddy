@@ -1,6 +1,6 @@
 /** 面板接口客户端。 */
 
-const TOKEN_KEY = 'iptv_token';
+const TOKEN_KEY = 'tv_buddy_token';
 
 export function getToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? '';
@@ -25,7 +25,7 @@ export class ApiError extends Error {
 }
 
 /** 未登录事件：由 App 监听，用来回到登录卡。 */
-export const UNAUTHORIZED_EVENT = 'iptv:unauthorized';
+export const UNAUTHORIZED_EVENT = 'tv-buddy:unauthorized';
 
 /** 调用 `/panel/api/*`；自动带 Bearer token。401 时清除 token 并广播。 */
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {

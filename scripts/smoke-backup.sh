@@ -3,7 +3,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-BIN=${BIN:-target/debug/iptv-proxy}
+BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19919}
 WORK=$(mktemp -d)
 CFG="$WORK/config.toml"
@@ -44,9 +44,9 @@ AUTH="Authorization: Bearer $TOKEN"
 STATUS=$(curl -s -o "$WORK/backup.tar.gz" -D "$WORK/backup.head" -w '%{http_code}' -H "$AUTH" "$B/panel/api/backup?include=all")
 check "备份 200" "200" "$STATUS"
 check "备份类型" "application/gzip" "$(awk 'BEGIN{IGNORECASE=1}index($0,"content-type:")==1{sub(/\r$/,"");print substr($0,15)}' "$WORK/backup.head")"
-check "备份文件名" "1" "$(awk 'BEGIN{IGNORECASE=1}/^content-disposition:/&&/iptv-proxy-backup-/{n=1}END{print n+0}' "$WORK/backup.head")"
+check "备份文件名" "1" "$(awk 'BEGIN{IGNORECASE=1}/^content-disposition:/&&/tv-buddy-backup-/{n=1}END{print n+0}' "$WORK/backup.head")"
 check "备份魔数" "1f8b" "$(od -An -tx1 -N2 "$WORK/backup.tar.gz" | tr -d ' ')"
-check "备份含配置" "1" "$(tar tzf "$WORK/backup.tar.gz" 2>/dev/null | grep -c 'iptv-proxy-backup/config.toml' || true)"
+check "备份含配置" "1" "$(tar tzf "$WORK/backup.tar.gz" 2>/dev/null | grep -c 'tv-buddy-backup/config.toml' || true)"
 
 IMPORT='[{"id":"tmp","name":"临时组","mode":"proxy"}]'
 curl -s -o /dev/null -X POST "$B/panel/api/groups/import" -H "$AUTH" -H 'content-type: application/json' -d "$IMPORT"

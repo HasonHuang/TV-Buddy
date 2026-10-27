@@ -1,13 +1,13 @@
 [Unit]
-Description=IPTV Proxy（目标 v0.8.2 兼容重实现）
-Documentation=https://github.com/HasonHuang/sontv
+Description=TV Buddy——自托管 IPTV 代理服务
+Documentation=https://github.com/HasonHuang/TV-Buddy
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/iptv-proxy
-ExecStart=/opt/iptv-proxy/iptv-proxy /opt/iptv-proxy/config.toml
+WorkingDirectory=/opt/tv-buddy
+ExecStart=/opt/tv-buddy/tv-buddy /opt/tv-buddy/config.toml
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65536
@@ -15,7 +15,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/iptv-proxy
+ReadWritePaths=/opt/tv-buddy
 
 [Install]
 WantedBy=multi-user.target

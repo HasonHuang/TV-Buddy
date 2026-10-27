@@ -144,7 +144,7 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
         "entry_exts": entry_exts,
         "cpu_cores": crate::metrics::cpu_cores(),
         // 以下为本实现附加字段，目标没有。便于本地面板排障。
-        "name": "iptv-proxy",
+        "name": "tv-buddy",
         "bind": cfg.server.bind,
         "log_level": cfg.server.log_level,
         "timezone_offset_hours": cfg.server.timezone_offset_hours,

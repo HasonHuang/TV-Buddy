@@ -1,12 +1,12 @@
 #!/bin/sh
-# IPTV Proxy 管理 CLI：启动、停止、改端口、改密码、更新、卸载。
+# TV Buddy 管理 CLI：启动、停止、改端口、改密码、更新、卸载。
 #
-# 安装后由 install.sh 软链为 /usr/local/bin/iptv-proxy。
+# 安装后由 install.sh 软链为 /usr/local/bin/tv-buddy。
 # 无 systemd/OpenRC 时退回 PID 文件方式，便于容器内运行。
 
 set -eu
 
-# 解析软链，保证 /usr/local/bin/iptv-proxy 找到真实安装目录。
+# 解析软链，保证 /usr/local/bin/tv-buddy 找到真实安装目录。
 resolve_self() {
     path=$1
     while [ -L "$path" ]; do
@@ -21,22 +21,22 @@ resolve_self() {
 }
 
 BASE_DIR=$(resolve_self "$0")
-BIN="$BASE_DIR/iptv-proxy"
+BIN="$BASE_DIR/tv-buddy"
 CFG="$BASE_DIR/config.toml"
 CFG_EXAMPLE="$BASE_DIR/config.toml.example"
-LOG_FILE="$BASE_DIR/iptv-proxy.log"
-PID_FILE="$BASE_DIR/iptv-proxy.pid"
-SERVICE_NAME=iptv-proxy
+LOG_FILE="$BASE_DIR/tv-buddy.log"
+PID_FILE="$BASE_DIR/tv-buddy.pid"
+SERVICE_NAME=tv-buddy
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 OPENRC_FILE="/etc/init.d/$SERVICE_NAME"
-CLI_LINK=${CLI_LINK:-/usr/local/bin/iptv-proxy}
+CLI_LINK=${CLI_LINK:-/usr/local/bin/tv-buddy}
 DEFAULT_PORT=19899
 DEFAULT_USER=admin
 DEFAULT_PASS=admin
-VERSION=${IPTV_PROXY_CLI_VERSION:-0.1.0}
-# 默认发布源，与 install.sh 一致；可用 IPTV_PROXY_REPO / IPTV_PROXY_VERSION 覆盖。
-GITHUB_REPO=${IPTV_PROXY_REPO:-HasonHuang/TV-Buddy}
-IPTV_PROXY_VERSION=${IPTV_PROXY_VERSION:-latest}
+VERSION=${TV_BUDDY_CLI_VERSION:-0.1.0}
+# 默认发布源，与 install.sh 一致；可用 TV_BUDDY_REPO / TV_BUDDY_VERSION 覆盖。
+GITHUB_REPO=${TV_BUDDY_REPO:-HasonHuang/TV-Buddy}
+TV_BUDDY_VERSION=${TV_BUDDY_VERSION:-latest}
 TMP_DIR=
 
 if [ -t 1 ]; then
@@ -64,9 +64,9 @@ fail() { printf '错误：%s\n' "$*" >&2; exit 1; }
 
 usage() {
     cat <<'EOF'
-iptv-proxy 管理 CLI
+tv-buddy 管理 CLI
 
-用法：iptv-proxy <命令> [参数]
+用法：tv-buddy <命令> [参数]
 
 命令：
   menu                  打开交互菜单（无参数默认）
@@ -84,25 +84,25 @@ iptv-proxy 管理 CLI
   uninstall             卸载服务；询问是否删除数据
 
 update 来源（按优先级）：
-  IPTV_PROXY_BIN        本地二进制
-  IPTV_PROXY_ARCHIVE    本地 tar.gz
-  IPTV_PROXY_URL        远程 tar.gz 或二进制，支持 {arch} 占位符
+  TV_BUDDY_BIN        本地二进制
+  TV_BUDDY_ARCHIVE    本地 tar.gz
+  TV_BUDDY_URL        远程 tar.gz 或二进制，支持 {arch} 占位符
   本地 dist/ 中的安装包
-  GitHub Release       默认；用 IPTV_PROXY_VERSION 指定 tag
+  GitHub Release       默认；用 TV_BUDDY_VERSION 指定 tag
 
 非交互：
-  IPTV_PROXY_YES=1      跳过 reinstall / uninstall 的删除确认
+  TV_BUDDY_YES=1      跳过 reinstall / uninstall 的删除确认
 
 环境变量：
-  IPTV_PROXY_REPO       发布仓库，默认内置
-  IPTV_PROXY_VERSION    要更新的 tag，如 v2026.3.0；默认 latest
+  TV_BUDDY_REPO       发布仓库，默认内置
+  TV_BUDDY_VERSION    要更新的 tag，如 v2026.3.0；默认 latest
 
 示例：
-  iptv-proxy port 8080
-  iptv-proxy pass 'new-password' admin
-  iptv-proxy update                                  # 拉最新 Release
-  IPTV_PROXY_VERSION=v2026.3.0 iptv-proxy update     # 固定版本
-  IPTV_PROXY_URL=https://example.com/iptv-proxy-{arch}.tar.gz iptv-proxy update
+  tv-buddy port 8080
+  tv-buddy pass 'new-password' admin
+  tv-buddy update                                  # 拉最新 Release
+  TV_BUDDY_VERSION=v2026.3.0 tv-buddy update     # 固定版本
+  TV_BUDDY_URL=https://example.com/tv-buddy-{arch}.tar.gz tv-buddy update
 EOF
 }
 
@@ -422,8 +422,8 @@ extract_binary() {
     [ -f "$archive" ] || fail "安装包不存在：$archive"
     TMP_DIR=$(mktemp -d)
     tar -xzf "$archive" -C "$TMP_DIR" || fail "解包失败：$archive"
-    src=$(find "$TMP_DIR" -type f -name iptv-proxy | head -n 1)
-    [ -n "$src" ] || fail "安装包内没有 iptv-proxy：$archive"
+    src=$(find "$TMP_DIR" -type f -name tv-buddy | head -n 1)
+    [ -n "$src" ] || fail "安装包内没有 tv-buddy：$archive"
     printf '%s' "$src"
 }
 
@@ -462,8 +462,8 @@ release_asset_url() { # $1=arch $2=json
 # API 不可用时按 tag 拼地址。
 release_url() {
     arch=$1
-    if [ "$IPTV_PROXY_VERSION" != "latest" ]; then
-        tag=$IPTV_PROXY_VERSION
+    if [ "$TV_BUDDY_VERSION" != "latest" ]; then
+        tag=$TV_BUDDY_VERSION
     else
         tag=$(latest_tag) || tag=
     fi
@@ -480,10 +480,10 @@ release_url() {
             printf '%s' "$url"
             return 0
         fi
-        [ "$IPTV_PROXY_VERSION" = "latest" ] || return 1
+        [ "$TV_BUDDY_VERSION" = "latest" ] || return 1
     fi
 
-    if [ "$IPTV_PROXY_VERSION" = "latest" ]; then
+    if [ "$TV_BUDDY_VERSION" = "latest" ]; then
         # `releases/latest` 只认正式版；只有预发布时退回最新一条。
         list=$(fetch_json "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=30" 2>/dev/null) || list=
         url=$(release_asset_url "$arch" "$list")
@@ -495,8 +495,8 @@ release_url() {
     fi
 
     [ -n "$tag" ] || return 1
-    # 产物名前缀：tv-buddy-*；旧版本用过 iptv-proxy-*，一并试。
-    for prefix in tv-buddy iptv-proxy; do
+    # 产物名前缀：tv-buddy-*；旧版本用过 tv-buddy-*，一并试。
+    for prefix in tv-buddy tv-buddy; do
         for candidate in "$tag" "v${tag#v}"; do
             url="https://github.com/$GITHUB_REPO/releases/download/$candidate/${prefix}-${candidate#v}-$arch.tar.gz"
             if command -v curl >/dev/null 2>&1; then
@@ -511,18 +511,18 @@ release_url() {
 }
 
 update_source() {
-    if [ -n "${IPTV_PROXY_BIN:-}" ]; then
-        [ -f "$IPTV_PROXY_BIN" ] || fail "二进制不存在：$IPTV_PROXY_BIN"
-        printf '%s' "$IPTV_PROXY_BIN"
+    if [ -n "${TV_BUDDY_BIN:-}" ]; then
+        [ -f "$TV_BUDDY_BIN" ] || fail "二进制不存在：$TV_BUDDY_BIN"
+        printf '%s' "$TV_BUDDY_BIN"
         return
     fi
-    if [ -n "${IPTV_PROXY_ARCHIVE:-}" ]; then
-        extract_binary "$IPTV_PROXY_ARCHIVE"
+    if [ -n "${TV_BUDDY_ARCHIVE:-}" ]; then
+        extract_binary "$TV_BUDDY_ARCHIVE"
         return
     fi
-    if [ -n "${IPTV_PROXY_URL:-}" ]; then
+    if [ -n "${TV_BUDDY_URL:-}" ]; then
         arch=$(detect_arch)
-        url=$(printf '%s' "$IPTV_PROXY_URL" | sed "s/{arch}/$arch/g")
+        url=$(printf '%s' "$TV_BUDDY_URL" | sed "s/{arch}/$arch/g")
         TMP_DIR=$(mktemp -d)
         echo "下载：$url" >&2
         download "$url" "$TMP_DIR/pkg"
@@ -537,7 +537,7 @@ update_source() {
     arch=$(detect_arch)
     for dir in "$BASE_DIR/dist" "$BASE_DIR/../dist"; do
         [ -d "$dir" ] || continue
-        latest=$(ls -t "$dir"/iptv-proxy-*-"$arch".tar.gz 2>/dev/null | head -n 1 || true)
+        latest=$(ls -t "$dir"/tv-buddy-*-"$arch".tar.gz 2>/dev/null | head -n 1 || true)
         if [ -n "$latest" ]; then
             extract_binary "$latest"
             return
@@ -545,7 +545,7 @@ update_source() {
     done
 
     # 本地没有产物时，退到 GitHub Release（默认更新源）。
-    release=$(release_url "$arch") || fail "在 $GITHUB_REPO 的 Release $IPTV_PROXY_VERSION 中找不到 $arch 安装包。若是预发布版本，请用 IPTV_PROXY_VERSION=<tag> 指定"
+    release=$(release_url "$arch") || fail "在 $GITHUB_REPO 的 Release $TV_BUDDY_VERSION 中找不到 $arch 安装包。若是预发布版本，请用 TV_BUDDY_VERSION=<tag> 指定"
     TMP_DIR=$(mktemp -d)
     echo "下载：$release" >&2
     download "$release" "$TMP_DIR/pkg.tar.gz" || fail "下载失败：$release"
@@ -583,7 +583,7 @@ install_binary() {
         warn "不是可执行二进制：$src"
         return 1
     }
-    new="$BASE_DIR/.iptv-proxy.new.$$"
+    new="$BASE_DIR/.tv-buddy.new.$$"
     cp "$src" "$new" || {
         warn "复制二进制失败"
         return 1
@@ -608,7 +608,7 @@ cmd_install() {
     installer=$(find_installer) || {
         if is_installed; then
             info "已安装：$BASE_DIR"
-            info "更新用 iptv-proxy update；重装用 iptv-proxy reinstall"
+            info "更新用 tv-buddy update；重装用 tv-buddy reinstall"
             return 0
         fi
         fail "找不到 install.sh；请从发布包运行 ./install.sh"
@@ -693,7 +693,7 @@ cmd_port() {
     require_installed
     port=${1:-}
     if [ -z "$port" ]; then
-        [ -t 0 ] || fail "用法：iptv-proxy port <N>"
+        [ -t 0 ] || fail "用法：tv-buddy port <N>"
         printf '当前端口：%s\n新端口：' "$(get_port)"
         read -r port
     fi
@@ -744,7 +744,7 @@ cmd_pass() {
     password=${1:-}
     account=${2:-}
     if [ -z "$password" ]; then
-        [ -t 0 ] || fail "用法：iptv-proxy pass <密码> [账号]"
+        [ -t 0 ] || fail "用法：tv-buddy pass <密码> [账号]"
         cmd_pass_interactive
         return
     fi
@@ -789,7 +789,7 @@ cmd_update() {
     if health_check "$port"; then
         info "更新完成，服务运行正常"
     else
-        warn "二进制已更新，但健康检查未通过；用 iptv-proxy log 查看"
+        warn "二进制已更新，但健康检查未通过；用 tv-buddy log 查看"
     fi
 }
 
@@ -807,7 +807,7 @@ read_default() {
 cmd_reinstall() {
     require_installed
     ensure_mutable
-    if [ "${IPTV_PROXY_YES:-}" = "1" ]; then
+    if [ "${TV_BUDDY_YES:-}" = "1" ]; then
         :
     else
         if [ -t 0 ]; then
@@ -816,7 +816,7 @@ cmd_reinstall() {
         if read -r answer && { [ "$answer" = "y" ] || [ "$answer" = "Y" ]; }; then
             :
         else
-            info "已取消（非交互重装可设 IPTV_PROXY_YES=1）"
+            info "已取消（非交互重装可设 TV_BUDDY_YES=1）"
             return
         fi
     fi
@@ -826,7 +826,7 @@ cmd_reinstall() {
 
     # 先取更新源，避免停服后才发现下载地址不可用。
     new_bin=
-    if [ -n "${IPTV_PROXY_BIN:-}${IPTV_PROXY_ARCHIVE:-}${IPTV_PROXY_URL:-}" ]; then
+    if [ -n "${TV_BUDDY_BIN:-}${TV_BUDDY_ARCHIVE:-}${TV_BUDDY_URL:-}" ]; then
         new_bin=$(update_source)
     fi
 
@@ -851,9 +851,9 @@ cmd_reinstall() {
     fi
     chmod 600 "$CFG"
 
-    port=${IPTV_PROXY_PORT:-$(read_default "面板端口" "$old_port")}
-    user=${IPTV_PROXY_USER:-$(read_default "面板账号" "$old_user")}
-    password=${IPTV_PROXY_PASS:-}
+    port=${TV_BUDDY_PORT:-$(read_default "面板端口" "$old_port")}
+    user=${TV_BUDDY_USER:-$(read_default "面板账号" "$old_user")}
+    password=${TV_BUDDY_PASS:-}
     if [ -z "$password" ] && [ -t 0 ]; then
         printf '面板密码 [回车=%s]：' "$DEFAULT_PASS"
         stty -echo 2>/dev/null || true
@@ -894,13 +894,13 @@ cmd_uninstall() {
         daemon_stop
     fi
 
-    if [ -L "$CLI_LINK" ] && [ "$(readlink "$CLI_LINK")" = "$BASE_DIR/iptv-proxy.sh" ]; then
+    if [ -L "$CLI_LINK" ] && [ "$(readlink "$CLI_LINK")" = "$BASE_DIR/tv-buddy.sh" ]; then
         rm -f "$CLI_LINK"
         info "已移除命令：$CLI_LINK"
     fi
 
     answer=N
-    if [ "${IPTV_PROXY_YES:-}" = "1" ]; then
+    if [ "${TV_BUDDY_YES:-}" = "1" ]; then
         answer=Y
     else
         if [ -t 0 ]; then
@@ -955,7 +955,7 @@ main_menu() {
             clear 2>/dev/null || true
         fi
         printf '%s=============================================%s\n' "$BLUE" "$RESET"
-        printf '       iptv-proxy 安装 · 管理   %sv%s%s\n' "$DIM" "$VERSION" "$RESET"
+        printf '       tv-buddy 安装 · 管理   %sv%s%s\n' "$DIM" "$VERSION" "$RESET"
         printf '%s=============================================%s\n' "$BLUE" "$RESET"
         printf '  状态: %s\n' "$(state_line)"
         if is_installed; then
@@ -972,7 +972,7 @@ main_menu() {
             printf '%s---------------------------------------------%s\n' "$BLUE" "$RESET"
             printf '   r) %s重装(清空配置重来)%s   u) %s卸载%s\n' "$YELLOW" "$RESET" "$RED" "$RESET"
         else
-            printf '   1) 安装/修复 iptv-proxy\n'
+            printf '   1) 安装/修复 tv-buddy\n'
         fi
         printf '   0) 退出\n'
         printf '%s---------------------------------------------%s\n' "$BLUE" "$RESET"

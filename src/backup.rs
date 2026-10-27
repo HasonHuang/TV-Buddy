@@ -1,6 +1,6 @@
 //! 备份与恢复。
 //!
-//! 备份是 gzip 压缩的 tar，根目录 `iptv-proxy-backup/`（F-013 §8）。
+//! 备份是 gzip 压缩的 tar，根目录 `tv-buddy-backup/`（F-013 §8）。
 //! 作用域：`all`（默认）｜`epg-scripts`｜`resolver`；其它值回退 `all`。
 //! tar 读写由本模块内置，不引入第三方库。
 
@@ -18,7 +18,7 @@ use anyhow::{bail, Context, Result};
 use crate::{config::Config, logo};
 
 /// 备份根目录。
-const ROOT: &str = "iptv-proxy-backup";
+const ROOT: &str = "tv-buddy-backup";
 
 /// 恢复报告。
 #[derive(Debug, Clone, Default)]
@@ -76,7 +76,7 @@ pub fn create(
     }
 
     let manifest = serde_json::json!({
-        "generator": "iptv-proxy",
+        "generator": "tv-buddy",
         "version": version,
         "created": now_secs(),
         "scope": scope,
@@ -93,14 +93,14 @@ pub fn create(
     encoder.finish().context("写 gzip 失败")
 }
 
-/// 文件名：`iptv-proxy-backup-YYYYmmdd-HHMMSS.tar.gz`（UTC）。
+/// 文件名：`tv-buddy-backup-YYYYmmdd-HHMMSS.tar.gz`（UTC）。
 pub fn file_name() -> String {
     let secs = now_secs() as i64;
     let days = secs.div_euclid(86_400);
     let rest = secs.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
     format!(
-        "iptv-proxy-backup-{year:04}{month:02}{day:02}-{:02}{:02}{:02}.tar.gz",
+        "tv-buddy-backup-{year:04}{month:02}{day:02}-{:02}{:02}{:02}.tar.gz",
         rest / 3600,
         (rest % 3600) / 60,
         rest % 60
@@ -232,9 +232,9 @@ mod tests {
     #[test]
     fn file_name_has_timestamp_shape() {
         let name = file_name();
-        assert!(name.starts_with("iptv-proxy-backup-"));
+        assert!(name.starts_with("tv-buddy-backup-"));
         assert!(name.ends_with(".tar.gz"));
-        assert_eq!(name.len(), "iptv-proxy-backup-20260101-000000.tar.gz".len());
+        assert_eq!(name.len(), "tv-buddy-backup-20260101-000000.tar.gz".len());
     }
 
     #[test]

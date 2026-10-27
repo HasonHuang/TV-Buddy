@@ -47,7 +47,7 @@ function formatBytes(bytes: number): string {
 
 /** 带会话头下载面板文件。 */
 async function download(path: string, name: string): Promise<void> {
-  const token = localStorage.getItem('iptv_token') ?? '';
+  const token = localStorage.getItem('tv_buddy_token') ?? '';
   const response = await fetch(`/panel/api${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

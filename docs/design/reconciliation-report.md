@@ -1,8 +1,8 @@
 # P0 对拍报告（本实现 ↔ 目标 v0.8.2）
 
 - 日期：2026-10-20
-- 目标：容器 `iptv82`，二进制 `/app/iptv-proxy`（v0.8.2，linux/amd64）。
-- 本实现：`target/release/iptv-proxy`（同机 macOS/arm64，debug 与 release 行为一致）。
+- 目标：容器 `iptv82`，二进制 `/app/iptv-proxy`（v0.8.2，linux/amd64）。目标程序原名为 IPTV Proxy，本实现改名 TV Buddy，但保持行为兼容。
+- 本实现：`target/release/tv-buddy`（同机 macOS/arm64，debug 与 release 行为一致）。
 - 夹具：同一份伪上游（HLS 媒体清单 + 主清单 + 切片）与同一键面配置；只有 `bind`、`disk_path`、上游主机名不同。
 - 工具：`scripts/compare-p0.sh`（启动两侧）、`scripts/compare_p0.py`（比对）。
 - 结论：**22 项用例，差异 0**。
@@ -64,7 +64,7 @@ scripts/compare-p0.sh
 
 | 项 | 说明 |
 | --- | --- |
-| 伪装前缀 `<P>` | 目标算法未解（F-017）；本实现 `sha256("rea-iptv/segment-v1\0"‖len‖gid‖len‖cid)[:16]`。**文法与校验已对齐**（F-017 §5.2） |
+| 伪装前缀 `<P>` | 目标算法未解（F-017）；本实现 `sha256("tv-buddy/segment-v1\0"‖len‖gid‖len‖cid)[:16]`。**文法与校验已对齐**（F-017 §5.2） |
 | 伪装扩展名轮换 | 取值不同，但都取自 `[cache.disguise].formats` |
 | 缓存文件名 | 目录名一致，文件命名不同 |
 | 运维接口响应形状 | 目标只登记存在性（`design/03` §6.4） |
@@ -89,3 +89,19 @@ scripts/compare-p0.sh
 | `GET /panel/api/link-info` | 形状一致；`token` 在启用时返回当前值，目标样本为空串（有意差异） |
 
 未重跑：面板 UI 逐项交互、录制与回放（依赖 `ffmpeg` 与运行环境）。
+
+## 改名影响（2026-10-27）
+
+产品改名 TV Buddy。以下输出字符串随之改变，**属于有意差异**，不参与对拍：
+
+| 项 | 目标 v0.8.2 | 本实现 |
+| --- | --- | --- |
+| EPG XML 根节点 | `generator-info-name="iptv-proxy"` | `generator-info-name="tv-buddy"` |
+| 备份包根目录 | `iptv-proxy-backup/` | `tv-buddy-backup/` |
+| 备份文件名 | `iptv-proxy-backup-<时间>.tar.gz` | `tv-buddy-backup-<时间>.tar.gz` |
+| 日志文件 | `iptv-proxy.log` | `tv-buddy.log` |
+| 伪装前缀哈希域 | 目标算法未解 | `tv-buddy/segment-v1`、`tv-buddy/mpd-v1` |
+
+恢复逻辑按 tar 条目的 basename 匹配，不依赖根目录名。旧备份包仍可恢复。
+
+配置文件键面、HTTP 路由、响应头与播放链路不变。

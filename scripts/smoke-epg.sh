@@ -3,7 +3,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-BIN=${BIN:-target/debug/iptv-proxy}
+BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19916}
 UP=${UP:-19917}
 WORK=$(mktemp -d)
@@ -98,7 +98,7 @@ done
 
 check "EPG XML 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$B/epg.xml")"
 check "EPG XML 类型" "application/xml; charset=utf-8" "$(header "$B/epg.xml" content-type)"
-check "EPG 生成者" "1" "$(grep -c 'generator-info-name="iptv-proxy"' "$WORK/body")"
+check "EPG 生成者" "1" "$(grep -c 'generator-info-name="tv-buddy"' "$WORK/body")"
 check "EPG 含匹配频道" "1" "$(grep -c '<channel id="c1">' "$WORK/body")"
 check "EPG 含窗口内节目" "1" "$(grep -c '新闻' "$WORK/body")"
 check "EPG 过滤旧节目" "0" "$(grep -c '老节目' "$WORK/body")"

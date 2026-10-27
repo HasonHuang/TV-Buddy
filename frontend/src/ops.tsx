@@ -508,7 +508,7 @@ export function SecurityPage() {
 
 /**
  * 日志级别：`tracing_subscriber::fmt` 的默认文本格式里级别是一个大写单词
- * （`2026-10-25T12:00:00Z  WARN iptv_proxy::…: …`）。
+ * （`2026-10-25T12:00:00Z  WARN tv_buddy::…: …`）。
  * 过滤在前端做：环形缓冲固定 500 行，按级别筛选不需要重新请求。
  */
 const LEVELS = ['all', 'trace', 'debug', 'info', 'warn', 'error'] as const;
@@ -617,7 +617,7 @@ export function BackupPage() {
       }
       const blob = await response.blob();
       const disposition = response.headers.get('content-disposition') ?? '';
-      const name = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'iptv-proxy-backup.tar.gz';
+      const name = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'tv-buddy-backup.tar.gz';
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;

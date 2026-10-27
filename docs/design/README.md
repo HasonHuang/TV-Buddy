@@ -1,6 +1,6 @@
 # 实现设计（docs/design）
 
-本目录存放**重实现 IPTV Proxy 的设计文档**。
+本目录存放 **TV Buddy 的设计文档**。TV Buddy 是闭源 IPTV Proxy v0.8.2 的兼容重实现。
 
 > 设计版本 v1.0 ｜ 2026-10-19
 

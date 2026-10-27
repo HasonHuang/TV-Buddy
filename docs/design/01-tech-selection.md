@@ -1,4 +1,4 @@
-# 01 · 技术选型（IPTV Proxy 重实现）
+# 01 · 技术选型（TV Buddy）
 
 > 设计版本 v1.0 ｜ 2026-10-19 ｜ 状态：**已确认（用户决策）**
 > 依据：[`../spec/08-target-spec.md`](../spec/08-target-spec.md)、[`../spec/03-environment-and-tooling.md`](../spec/03-environment-and-tooling.md)、[`../../PROGRESS_bak.md`](../../PROGRESS_bak.md) 附录 A
@@ -123,11 +123,11 @@
 ## 6. 数据与文件布局
 
 ```
-/opt/iptv-proxy/
-├── iptv-proxy            # 单二进制
-├── config.toml           # 与目标键面一致（spec/08 §11）
-├── iptv-proxy.log        # 5 MB 轮转（S-CACHE-05）
-└── cache/                # cache.disk_path（默认 ./cache）
+/opt/tv-buddy/
+├── tv-buddy            # 单二进制
+├── config.toml         # 与目标键面一致（spec/08 §11）
+├── tv-buddy.log        # 5 MB 轮转（S-CACHE-05）
+└── cache/              # cache.disk_path（默认 ./cache）
     ├── epg/  logos/  m3u8/  recordings/
     └── seg_bytes/  seg_url/  sub_url/  dash/
 ```
@@ -156,8 +156,8 @@
 | 目标三元组 | `aarch64-unknown-linux-musl`、`x86_64-unknown-linux-musl`（静态） |
 | 构建工具 | `cargo` + Docker `rust:1-alpine`（双架构静态构建，见 `design/04` §6） |
 | 前端构建 | `pnpm install && pnpm build` → `dist/` 嵌入 |
-| 发布物 | `iptv-proxy` 二进制（arm64/amd64）+ 安装脚本 |
-| 服务单元 | systemd（Alpine 用 OpenRC），`/opt/iptv-proxy` 布局 | 
+| 发布物 | `tv-buddy` 二进制（arm64/amd64）+ 安装脚本 |
+| 服务单元 | systemd（Alpine 用 OpenRC），`/opt/tv-buddy` 布局 | 
 | 版本上报 | `/panel/api/status.version` 输出**本实现版本**（首发 `0.1.0`）；字段名不变 |
 
 ## 9. 阶段范围

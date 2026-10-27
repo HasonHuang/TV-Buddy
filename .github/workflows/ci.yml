@@ -107,7 +107,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
       - name: 校验静态链接
         run: |
-          BIN="target/${{ matrix.target }}/release/iptv-proxy"
+          BIN="target/${{ matrix.target }}/release/tv-buddy"
           file "$BIN"
           # 不用 ldd：静态 musl 二进制在 glibc 宿主上的输出文案随版本变化
           # （"not a dynamic executable" / "statically linked"），跨 runner 不稳。
@@ -139,17 +139,17 @@ jobs:
           STAGE="out/${NAME}"
           mkdir -p "$STAGE"
           # 包内可执行文件名沿用二进制产物名，安装脚本按它查找。
-          install -m 0755 "target/${{ matrix.target }}/release/iptv-proxy" "$STAGE/iptv-proxy"
+          install -m 0755 "target/${{ matrix.target }}/release/tv-buddy" "$STAGE/tv-buddy"
           install -m 0644 packaging/config.toml.example "$STAGE/config.toml.example"
-          install -m 0644 packaging/iptv-proxy.service "$STAGE/iptv-proxy.service"
-          install -m 0644 packaging/iptv-proxy.openrc "$STAGE/iptv-proxy.openrc"
+          install -m 0644 packaging/tv-buddy.service "$STAGE/tv-buddy.service"
+          install -m 0644 packaging/tv-buddy.openrc "$STAGE/tv-buddy.openrc"
           # 把默认发布源换成实际仓库，fork 后不必改脚本（仍可用 --repo 覆盖）。
-          for f in install.sh packaging/iptv-proxy.sh; do
+          for f in install.sh packaging/tv-buddy.sh; do
             out="$STAGE/$(basename "$f")"
-            sed "s|IPTV_PROXY_REPO:-HasonHuang/TV-Buddy|IPTV_PROXY_REPO:-${GITHUB_REPOSITORY}|" "$f" > "$out"
+            sed "s|TV_BUDDY_REPO:-HasonHuang/TV-Buddy|TV_BUDDY_REPO:-${GITHUB_REPOSITORY}|" "$f" > "$out"
             chmod 0755 "$out"
           done
-          grep -q "IPTV_PROXY_REPO:-${GITHUB_REPOSITORY}" "$STAGE/install.sh"
+          grep -q "TV_BUDDY_REPO:-${GITHUB_REPOSITORY}" "$STAGE/install.sh"
           tar -C out -czf "out/${NAME}.tar.gz" "$NAME"
           ( cd out && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" )
           ls -lh out
@@ -159,11 +159,11 @@ jobs:
           NAME="${PRODUCT_SLUG}-${VERSION}-${{ matrix.name }}"
           mkdir -p check
           tar -C check -xzf "out/${NAME}.tar.gz"
-          for f in iptv-proxy config.toml.example iptv-proxy.sh iptv-proxy.service iptv-proxy.openrc install.sh; do
+          for f in tv-buddy config.toml.example tv-buddy.sh tv-buddy.service tv-buddy.openrc install.sh; do
             [ -f "check/${NAME}/${f}" ] || { echo "包内缺少 ${f}" >&2; exit 1; }
           done
           # 包内二进制必须可执行，且与本次目标架构一致。
-          BIN="check/${NAME}/iptv-proxy"
+          BIN="check/${NAME}/tv-buddy"
           [ -x "$BIN" ] || { echo "包内二进制不可执行" >&2; exit 1; }
           file "$BIN"
           case "${{ matrix.name }}" in

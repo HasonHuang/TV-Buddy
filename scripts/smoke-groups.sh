@@ -6,7 +6,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-BIN=${BIN:-target/debug/iptv-proxy}
+BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19930}
 WORK=$(mktemp -d)
 CFG="$WORK/config.toml"

@@ -1,24 +1,24 @@
 #!/bin/sh
-# IPTV Proxy 一键安装脚本。
+# TV Buddy 一键安装脚本。
 #
 # 用法：
 #   直接安装：sudo sh install.sh                  # 默认从 GitHub Release 下载同架构包
 #   指定版本：sudo sh install.sh --version v2026.3.0
 #   发布包目录：sudo ./install.sh                 # 用旁边的已解包文件，不再下载
 #   仓库根目录：sudo ./install.sh --local         # 改用 dist/ 中最新的同架构包
-#   指定安装包：sudo ./install.sh --archive /path/to/iptv-proxy-<version>-<arch>.tar.gz
-#   远程安装包：sudo ./install.sh --archive https://example.com/iptv-proxy.tar.gz
+#   指定安装包：sudo ./install.sh --archive /path/to/tv-buddy-<version>-<arch>.tar.gz
+#   远程安装包：sudo ./install.sh --archive https://example.com/tv-buddy.tar.gz
 #
 # 只支持 Linux amd64/arm64。脚本幂等；已有 config.toml 不覆盖。
 
 set -eu
 
-PREFIX=${PREFIX:-/opt/iptv-proxy}
+PREFIX=${PREFIX:-/opt/tv-buddy}
 ARCHIVE=${ARCHIVE:-}
-CLI_LINK=${CLI_LINK:-/usr/local/bin/iptv-proxy}
-# 默认发布源，可用 --repo 或 IPTV_PROXY_REPO 覆盖。
-GITHUB_REPO=${IPTV_PROXY_REPO:-HasonHuang/TV-Buddy}
-VERSION=${IPTV_PROXY_VERSION:-latest}
+CLI_LINK=${CLI_LINK:-/usr/local/bin/tv-buddy}
+# 默认发布源，可用 --repo 或 TV_BUDDY_REPO 覆盖。
+GITHUB_REPO=${TV_BUDDY_REPO:-HasonHuang/TV-Buddy}
+VERSION=${TV_BUDDY_VERSION:-latest}
 DO_SERVICE=1
 DO_LINK=1
 DO_START=0
@@ -34,22 +34,22 @@ usage() {
 不带 --archive 且当前目录不是发布包时，从 GitHub Release 下载同架构安装包。
 
 选项：
-  --prefix <目录>    安装目录（默认 /opt/iptv-proxy）
+  --prefix <目录>    安装目录（默认 /opt/tv-buddy）
   --archive <路径>   指定 tar.gz 安装包；也接受 http(s) URL
   --version <tag>    从 Release 安装指定版本，如 v2026.3.0（默认取最新）
   --repo <owner/name> Release 所在仓库（默认内置）
   --local            不从 Release 下载，改用本地 dist/ 中的安装包
   --no-service       不注册 systemd/OpenRC 服务
-  --no-link          不创建 iptv-proxy 命令软链
+  --no-link          不创建 tv-buddy 命令软链
   --start            安装后立即启动服务
   -h, --help         显示本帮助
 
 环境变量：
   PREFIX             同 --prefix
   ARCHIVE            同 --archive
-  IPTV_PROXY_VERSION 同 --version
-  IPTV_PROXY_REPO    同 --repo
-  CLI_LINK           命令软链位置（默认 /usr/local/bin/iptv-proxy）
+  TV_BUDDY_VERSION 同 --version
+  TV_BUDDY_REPO    同 --repo
+  CLI_LINK           命令软链位置（默认 /usr/local/bin/tv-buddy）
 EOF
 }
 
@@ -251,17 +251,15 @@ release_url() {
     fi
 
     [ -n "$tag" ] || return 1
-    # 产物名前缀：tv-buddy-*；旧版本用过 iptv-proxy-*，一并试。
-    for prefix in tv-buddy iptv-proxy; do
-        for candidate in "$tag" "v${tag#v}"; do
-            url="https://github.com/$GITHUB_REPO/releases/download/$candidate/${prefix}-${candidate#v}-$arch.tar.gz"
-            if command -v curl >/dev/null 2>&1; then
-                code=$(curl -fsSL -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)
-                [ "$code" = "200" ] || continue
-            fi
-            printf '%s' "$url"
-            return 0
-        done
+    # 产物名：tv-buddy-<version>-<arch>.tar.gz
+    for candidate in "$tag" "v${tag#v}"; do
+        url="https://github.com/$GITHUB_REPO/releases/download/$candidate/tv-buddy-${candidate#v}-$arch.tar.gz"
+        if command -v curl >/dev/null 2>&1; then
+            code=$(curl -fsSL -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)
+            [ "$code" = "200" ] || continue
+        fi
+        printf '%s' "$url"
+        return 0
     done
     return 1
 }
@@ -274,8 +272,8 @@ extract_archive() {
     rm -rf "$EXTRACT_DIR"
     mkdir -p "$EXTRACT_DIR"
     tar -xzf "$archive" -C "$EXTRACT_DIR" || fail "解包失败：$archive"
-    BIN_SRC=$(find "$EXTRACT_DIR" -type f -name iptv-proxy -perm -u+x | head -n 1)
-    [ -n "$BIN_SRC" ] || fail "安装包内没有 iptv-proxy：$archive"
+    BIN_SRC=$(find "$EXTRACT_DIR" -type f -name tv-buddy -perm -u+x | head -n 1)
+    [ -n "$BIN_SRC" ] || fail "安装包内没有 tv-buddy：$archive"
     SRC_DIR=$(dirname "$BIN_SRC")
 }
 
@@ -305,13 +303,13 @@ if [ -n "$ARCHIVE" ]; then
     [ -f "$ARCHIVE" ] || fail "安装包不存在：$ARCHIVE"
     verify_digest "$ARCHIVE"
     extract_archive "$ARCHIVE"
-elif [ -x "$SCRIPT_DIR/iptv-proxy" ] && [ -f "$SCRIPT_DIR/config.toml.example" ]; then
+elif [ -x "$SCRIPT_DIR/tv-buddy" ] && [ -f "$SCRIPT_DIR/config.toml.example" ]; then
     # 已解包的发布目录：包内容就在旁边，直接用，不必再下载。
     SRC_DIR=$SCRIPT_DIR
-    BIN_SRC=$SCRIPT_DIR/iptv-proxy
+    BIN_SRC=$SCRIPT_DIR/tv-buddy
 elif [ "$USE_DIST" = 1 ]; then
     # 显式要求用本地构建产物（仓库根目录的开发流程）。
-    LATEST=$(ls -t "$SCRIPT_DIR"/dist/iptv-proxy-*-"$ARCH".tar.gz 2>/dev/null | head -n 1 || true)
+    LATEST=$(ls -t "$SCRIPT_DIR"/dist/tv-buddy-*-"$ARCH".tar.gz 2>/dev/null | head -n 1 || true)
     [ -n "$LATEST" ] || fail "未找到本地安装包。先运行 scripts/build-release.sh ${ARCH}，或去掉 --local 直接从 Release 安装"
     verify_digest "$LATEST"
     extract_archive "$LATEST"
@@ -330,11 +328,11 @@ else
     ASSET_DIR=$SRC_DIR
 fi
 [ -f "$ASSET_DIR/config.toml.example" ] || fail "缺少 config.toml.example"
-[ -f "$ASSET_DIR/iptv-proxy.sh" ] || fail "缺少 iptv-proxy.sh"
+[ -f "$ASSET_DIR/tv-buddy.sh" ] || fail "缺少 tv-buddy.sh"
 
 install -d "$PREFIX" "$PREFIX/cache"
-install -m 0755 "$BIN_SRC" "$PREFIX/iptv-proxy"
-install -m 0755 "$ASSET_DIR/iptv-proxy.sh" "$PREFIX/iptv-proxy.sh"
+install -m 0755 "$BIN_SRC" "$PREFIX/tv-buddy"
+install -m 0755 "$ASSET_DIR/tv-buddy.sh" "$PREFIX/tv-buddy.sh"
 install -m 0644 "$ASSET_DIR/config.toml.example" "$PREFIX/config.toml.example"
 
 if [ -f "$PREFIX/config.toml" ]; then
@@ -350,7 +348,7 @@ if [ "$DO_LINK" = 1 ]; then
         echo "跳过命令软链：$CLI_LINK 已存在且不是软链"
     elif [ -d "$link_dir" ] || mkdir -p "$link_dir" 2>/dev/null; then
         if [ -w "$link_dir" ] || [ "$(id -u)" -eq 0 ]; then
-            if ln -sf "$PREFIX/iptv-proxy.sh" "$CLI_LINK"; then
+            if ln -sf "$PREFIX/tv-buddy.sh" "$CLI_LINK"; then
                 echo "命令：$CLI_LINK"
             else
                 echo "警告：无法创建命令软链：$CLI_LINK"
@@ -365,28 +363,28 @@ fi
 
 SERVICE_KIND=none
 if [ "$DO_SERVICE" = 1 ]; then
-    if command -v systemctl >/dev/null 2>&1 && [ -f "$ASSET_DIR/iptv-proxy.service" ]; then
-        sed "s|/opt/iptv-proxy|$PREFIX_SED|g" "$ASSET_DIR/iptv-proxy.service" \
-            > /etc/systemd/system/iptv-proxy.service
+    if command -v systemctl >/dev/null 2>&1 && [ -f "$ASSET_DIR/tv-buddy.service" ]; then
+        sed "s|/opt/tv-buddy|$PREFIX_SED|g" "$ASSET_DIR/tv-buddy.service" \
+            > /etc/systemd/system/tv-buddy.service
         systemctl daemon-reload || true
-        systemctl enable iptv-proxy >/dev/null 2>&1 || true
+        systemctl enable tv-buddy >/dev/null 2>&1 || true
         SERVICE_KIND=systemd
-    elif command -v rc-update >/dev/null 2>&1 && [ -f "$ASSET_DIR/iptv-proxy.openrc" ]; then
-        sed "s|/opt/iptv-proxy|$PREFIX_SED|g" "$ASSET_DIR/iptv-proxy.openrc" \
-            > /etc/init.d/iptv-proxy
-        chmod 0755 /etc/init.d/iptv-proxy
-        rc-update add iptv-proxy default >/dev/null 2>&1 || true
+    elif command -v rc-update >/dev/null 2>&1 && [ -f "$ASSET_DIR/tv-buddy.openrc" ]; then
+        sed "s|/opt/tv-buddy|$PREFIX_SED|g" "$ASSET_DIR/tv-buddy.openrc" \
+            > /etc/init.d/tv-buddy
+        chmod 0755 /etc/init.d/tv-buddy
+        rc-update add tv-buddy default >/dev/null 2>&1 || true
         SERVICE_KIND=openrc
     else
-        echo "未发现 systemd/OpenRC；用 $PREFIX/iptv-proxy.sh start 启动"
+        echo "未发现 systemd/OpenRC；用 $PREFIX/tv-buddy.sh start 启动"
     fi
 fi
 
 if [ "$DO_START" = 1 ]; then
     case "$SERVICE_KIND" in
-        systemd) systemctl restart iptv-proxy ;;
-        openrc) rc-service iptv-proxy restart ;;
-        *) "$PREFIX/iptv-proxy.sh" restart ;;
+        systemd) systemctl restart tv-buddy ;;
+        openrc) rc-service tv-buddy restart ;;
+        *) "$PREFIX/tv-buddy.sh" restart ;;
     esac
 fi
 
@@ -394,7 +392,7 @@ echo "安装完成：$PREFIX"
 echo "配置：$PREFIX/config.toml"
 echo "面板：http://<主机>:19899/panel（默认 admin / admin，请及时修改）"
 case "$SERVICE_KIND" in
-    systemd) echo "启动：systemctl start iptv-proxy" ;;
-    openrc) echo "启动：rc-service iptv-proxy start" ;;
-    *) echo "启动：$PREFIX/iptv-proxy.sh start" ;;
+    systemd) echo "启动：systemctl start tv-buddy" ;;
+    openrc) echo "启动：rc-service tv-buddy start" ;;
+    *) echo "启动：$PREFIX/tv-buddy.sh start" ;;
 esac

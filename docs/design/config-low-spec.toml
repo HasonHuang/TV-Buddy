@@ -1,4 +1,4 @@
-# IPTV Proxy 低配置示例：1 vCPU / 128 MB 内存 / 1 GB 磁盘，前置多 CDN
+# TV Buddy 低配置示例：1 vCPU / 128 MB 内存 / 1 GB 磁盘，前置多 CDN
 #
 # 用法：复制为 `config.toml`，改掉 `[[groups]]` 与 `[panel]`，重启服务。
 # 依据：[`06-low-spec-optimization.md`](06-low-spec-optimization.md)。

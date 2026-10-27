@@ -71,7 +71,7 @@ function Login({ onDone }: { onDone: () => void }) {
   return (
     <div className="page">
       <div className="card">
-        <h1>IPTV Proxy</h1>
+        <h1>TV Buddy</h1>
         <h2>管理面板</h2>
         <form onSubmit={submit}>
           <label htmlFor="user">用户名</label>
@@ -134,7 +134,7 @@ function Overview() {
     <div className="card">
       <div className="row between">
         <div>
-          <h1>IPTV Proxy</h1>
+          <h1>TV Buddy</h1>
           <h2>概览</h2>
         </div>
         <div className="row">
@@ -192,7 +192,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <strong>IPTV Proxy</strong>
+          <strong>TV Buddy</strong>
           <span className="muted">管理面板</span>
         </div>
         <nav>

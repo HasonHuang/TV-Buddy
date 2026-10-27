@@ -1,13 +1,13 @@
 [package]
-name = "iptv-proxy"
+name = "tv-buddy"
 version = "0.1.0"
 edition = "2021"
-description = "IPTV Proxy——与目标 v0.8.2 兼容的重实现"
+description = "TV Buddy——自托管 IPTV 代理服务"
 license = "MIT"
 publish = false
 
 [[bin]]
-name = "iptv-proxy"
+name = "tv-buddy"
 path = "src/main.rs"
 
 [profile.release]

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-BIN=${BIN:-target/debug/iptv-proxy}
+BIN=${BIN:-target/debug/tv-buddy}
 MPORT=${MPORT:-19930}
 FPORT=${FPORT:-19931}
 WORK=$(mktemp -d)

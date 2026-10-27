@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+# Alpine/OpenRC 服务单元：随系统启动，崩溃后自动重启。
+# 日志由程序自己写入 /opt/tv-buddy/tv-buddy.log，这里不重复重定向。
+
+name="tv-buddy"
+description="TV Buddy——自托管 IPTV 代理服务"
+
+command="/opt/tv-buddy/tv-buddy"
+command_args="/opt/tv-buddy/config.toml"
+command_background=true
+command_user="root"
+pidfile="/run/${RC_SVCNAME}.pid"
+respawn_delay=3
+respawn_max=0
+
+depend() {
+    need net
+    after firewall
+}

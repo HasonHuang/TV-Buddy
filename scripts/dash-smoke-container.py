@@ -4,7 +4,7 @@
 用 ffmpeg 生成 DASH 源，起本实现与 `python3 -m http.server`，再检查回看清单与切片。
 等价于 `scripts/smoke-dash-timeshift.sh`，供无 `bash`/`curl` 的镜像使用。
 
-用法：python3 dash-smoke-container.py <iptv-proxy 路径>
+用法：python3 dash-smoke-container.py <tv-buddy 路径>
 """
 import os
 import re

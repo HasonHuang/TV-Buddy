@@ -1919,7 +1919,7 @@ fn in_window(programme: &Programme, past: i64, future: i64) -> bool {
 /// 生成 XMLTV 正文。
 pub fn render(channels: &[Channel], programmes: &[Programme]) -> String {
     let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    out.push_str("<tv generator-info-name=\"iptv-proxy\">\n");
+    out.push_str("<tv generator-info-name=\"tv-buddy\">\n");
     for channel in channels {
         out.push_str(&format!("  <channel id=\"{}\">\n", escape(&channel.id)));
         if channel.names.is_empty() {
@@ -2160,7 +2160,7 @@ mod tests {
             raw_children: vec![],
         }];
         let xml = render(&channels, &programmes);
-        assert!(xml.contains("generator-info-name=\"iptv-proxy\""));
+        assert!(xml.contains("generator-info-name=\"tv-buddy\""));
         assert!(xml.contains("<display-name lang=\"zh\">CCTV &amp; 1</display-name>"));
         assert!(xml.contains("<title lang=\"zh\">新闻</title>"));
         // 结构可再解析。
