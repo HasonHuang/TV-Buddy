@@ -1,4 +1,4 @@
-# PROGRESS · IPTV Proxy 逆向与重实现
+# PROGRESS · TV Buddy（IPTV Proxy v0.8.2 兼容重实现）
 
 > 本文件是**进度**与**功能缺口**的权威入口。
 > 历史日志已迁入 [`PROGRESS_bak.md`](PROGRESS_bak.md)。
@@ -39,7 +39,7 @@
 | 项 | 数量 |
 | --- | --- |
 | 路由注册（`src/http.rs`） | 131 |
-| 测试 | 309（222 单元 + 87 契约） |
+| 测试 | 322（234 单元 + 88 契约） |
 | 冒烟脚本（`scripts/smoke-*.sh`） | 26 |
 
 已覆盖的能力：
@@ -122,6 +122,32 @@
 
 质量门：309 项测试通过（222 单元 + 87 契约）。`pnpm build` 通过。
 
+### 3.1.3 P1 完成记录（2026-10-27）
+
+`url_pool_size>1` 与多 `<BaseURL>` 的场景原来只有一处缺陷：池大小没有生效。
+`choose_urls()` 用地址条数当池大小，`4` 个 `<BaseURL>` 配 `url_pool_size=2` 时仍会用满 4 个。
+抓取循环也有问题。每个地址先跑满 `retry_max`（默认 8，退避到 2 秒）才换下一个地址。
+
+改法是三点：
+
+1. `choose_urls()` 把池大小当候选上限。N = min(地址数, `url_pool_size`, 6)。
+   视频固定 `pool[0]`；音频/字幕在 `pool[1..N]` 轮询。
+2. 新增纯函数 `attempt_plan()`。池启用时首轮逐址各试一次，失败立即换址，轮末才退避。
+   总尝试数 = max(`retry_max+1`, 成员数)，不随成员数相乘膨胀。
+3. 视频轨记住最近成功的上游目录前缀，300 秒内优先从该地址起步。
+   看门狗重建时清空。键用目录前缀而不是整条 URL：切片名每个都不同，
+   直接比 URL 永远不相等。
+
+两项配套约束：
+
+- 池启用时首轮单址超时降到 3 秒。黑洞型上游不报错，只会挂满 `segment_timeout_secs`。
+- `url_pool_size<=1` 或单 `<BaseURL>` 时走旧路径，抓取序列逐项不变。
+
+对拍结果：无法对拍。目标在 `pool>=2` 时只拉 MPD 后零切片、入口 503（F-015 §1.2）。
+本实现不复刻该缺陷。语义记为自定，写在 `07` §E。
+
+质量门：322 项测试通过（234 单元 + 88 契约）。
+
 ### 3.2 面板接线（已完成）
 
 原清单由静态检索得出。2026-10-27 全部接线完成，逐项落点如下。
@@ -198,7 +224,7 @@
 | 项 | 结果 |
 | --- | --- |
 | `cargo fmt --check` | 通过 |
-| `cargo test --offline --all-targets` | 309 项通过（222 单元 + 87 契约） |
+| `cargo test --offline --all-targets` | 322 项通过（234 单元 + 88 契约） |
 | `cargo clippy --offline --all-targets` | 0 error，27 条历史 warning |
 | 冒烟脚本 | 26 个全部通过。`smoke-record-dash` 需要 ffmpeg，且要求端口 19970/19971 空闲 |
 | `pnpm build` | 通过（含 `tsc --noEmit`） |
@@ -270,12 +296,22 @@ DASH：
 
 同优先级内，先做有目标证据的项。没有证据的项，先按 `07` §5 出对比方案，再定实现。
 
-### 6.1 优先级 1：反代与 302 转发
+### 6.1 优先级 1：反代与 302 转发（已完成 2026-10-27）
 
-| # | 项 | 现状 | 依据 |
+| # | 项 | 状态 | 依据 |
 | --- | --- | --- | --- |
-| P1-1 | URL 池回退顺序（`url_pool_size > 1`） | 只做顺序回退。目标曾失败并产生零切片，无法对拍 | V-01、F-018 |
-| P1-2 | DASH 多 CDN 故障切换 | 只做顺序回退 | F-015 |
+| P1-1 | URL 池回退顺序（`url_pool_size > 1`） | ✅ 池大小作候选上限，N = min(地址数, 池大小, 6)。视频固定 `pool[0]`；音频/字幕在 `pool[1..N]` 轮询 | V-01、F-015 |
+| P1-2 | DASH 多 CDN 故障切换 | ✅ 池启用时首轮逐址各试一次，失败立即换址；视频记住最近成功的上游地址 300 秒 | F-015 |
+
+两项语义都是自定。目标在 `pool>=2` 时只拉 MPD N 次后零切片、入口 503（F-015 §1.2），
+取用方式不可对拍。本实现不复刻该缺陷，也不把它算作已对齐。
+
+不变量：`url_pool_size<=1` 或单 `<BaseURL>` 时走旧路径，抓取序列逐项不变。
+MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
+
+测试：`pool_caps_to_size`、`pool_caps_audio_ring`、`pool_is_clamped_to_panel_max`、
+`attempt_plan_legacy_matches_old_loop`、`attempt_plan_pool_round_robin`、
+`render_media_caps_entry_urls`、`dash_pool_falls_back_and_remembers_success` 等 13 项。
 
 ### 6.2 优先级 2：必须使用的功能
 

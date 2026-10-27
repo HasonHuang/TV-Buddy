@@ -138,6 +138,8 @@ struct Session {
     rebuilds: u32,
     /// 冷却截止时间。
     cooling_until: Option<Instant>,
+    /// 各视频轨最近成功的上游目录前缀与时间；只在池启用时写入。
+    video_ok: HashMap<String, (String, Instant)>,
 }
 
 /// DASH 会话管理器。
@@ -191,6 +193,7 @@ impl Manager {
                 latest: 0,
                 rebuilds: 0,
                 cooling_until: None,
+                video_ok: HashMap::new(),
             });
     }
 
@@ -219,6 +222,7 @@ impl Manager {
                 latest: 0,
                 rebuilds: 0,
                 cooling_until: None,
+                video_ok: HashMap::new(),
             });
         session.entries.extend(entries);
         session.last = Instant::now();
@@ -287,6 +291,27 @@ impl Manager {
             .and_then(|session| session.entries.get(path).cloned())
     }
 
+    /// 读取一条视频轨的粘性前缀。过期或不存在时返回 `None`。
+    fn sticky_prefix(&self, gid: &str, cid: &str, track: &str) -> Option<String> {
+        let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let (prefix, at) = sessions.get(&Self::key(gid, cid))?.video_ok.get(track)?;
+        sticky_fresh(*at, Instant::now()).then(|| prefix.clone())
+    }
+
+    /// 记录一条视频轨最近成功的上游前缀。
+    fn remember_prefix(&self, gid: &str, cid: &str, track: &str, prefix: &str) {
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(session) = sessions.get_mut(&Self::key(gid, cid)) else {
+            return;
+        };
+        if !session.video_ok.contains_key(track) && session.video_ok.len() >= VIDEO_STICKY_MAX {
+            session.video_ok.clear();
+        }
+        session
+            .video_ok
+            .insert(track.to_string(), (prefix.to_string(), Instant::now()));
+    }
+
     fn ensure_maintenance(self: &Arc<Self>, state: &Arc<AppState>) {
         if self.janitor.swap(true, Ordering::SeqCst) {
             return;
@@ -351,6 +376,8 @@ impl Manager {
                         let stalled_secs = session.progress.elapsed().as_secs();
                         session.rebuilds = session.rebuilds.saturating_add(1);
                         session.entries.clear();
+                        // 重建后从 pool[0] 重新探测，不复用旧的成功地址。
+                        session.video_ok.clear();
                         session.ready = false;
                         session.segment_count = 0;
                         session.progress = now;
@@ -562,33 +589,57 @@ impl Manager {
         let mut last_error = None;
         let dash = state.snapshot().cache.dash.clone();
         let timeout = Duration::from_secs(dash.segment_timeout_secs.clamp(1, 120));
-        let attempts = dash.retry_max.min(32);
-        for url in &entry.urls {
-            for attempt in 0..=attempts {
-                match tokio::time::timeout(
-                    timeout,
-                    crate::http::routes::stream::fetch_bytes(state, url, gid, cid),
-                )
-                .await
-                {
-                    Ok(Ok(bytes)) => {
-                        if let Some(parent) = path.parent() {
-                            let _ = std::fs::create_dir_all(parent);
-                        }
-                        let _ = std::fs::write(&path, &bytes);
-                        self.touch(gid, cid);
-                        return Some(bytes_response(bytes, &entry, &segment_cache));
-                    }
-                    Ok(Err(error)) => {
-                        last_error = Some(error.to_string());
-                    }
-                    Err(_) => {
-                        last_error = Some("segment timeout".to_string());
-                    }
+        // 池启用时首轮用更短的超时。黑洞型上游不报错，只会挂满 8 秒。
+        let probe_timeout = Duration::from_secs(dash.segment_timeout_secs.clamp(1, 3));
+        let pool_on = pool > 1 && entry.urls.len() > 1;
+        // 配置热重载后，已登记的 entry 可能带着旧池大小的地址表。按当前池再截一次。
+        let cap = if pool_on {
+            entry.urls.len().min(pool as usize).min(POOL_MAX)
+        } else {
+            entry.urls.len()
+        };
+        let mut order: Vec<String> = entry.urls[..cap].to_vec();
+        let video = track.starts_with("video");
+        if pool_on && video {
+            if let Some(prefix) = self.sticky_prefix(gid, cid, track) {
+                if let Some(index) = order.iter().position(|url| base_prefix(url) == prefix) {
+                    order[..=index].rotate_right(1);
                 }
-                if attempt < attempts {
-                    tokio::time::sleep(retry_delay(&dash, attempt)).await;
+            }
+        }
+        for plan in attempt_plan(order.len(), pool_on, dash.retry_max) {
+            let url = &order[plan.url];
+            let limit = if pool_on && plan.round == 0 {
+                probe_timeout
+            } else {
+                timeout
+            };
+            match tokio::time::timeout(
+                limit,
+                crate::http::routes::stream::fetch_bytes(state, url, gid, cid),
+            )
+            .await
+            {
+                Ok(Ok(bytes)) => {
+                    if pool_on && video {
+                        self.remember_prefix(gid, cid, track, base_prefix(url));
+                    }
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let _ = std::fs::write(&path, &bytes);
+                    self.touch(gid, cid);
+                    return Some(bytes_response(bytes, &entry, &segment_cache));
                 }
+                Ok(Err(error)) => {
+                    last_error = Some(error.to_string());
+                }
+                Err(_) => {
+                    last_error = Some("segment timeout".to_string());
+                }
+            }
+            if let Some(round) = plan.sleep {
+                tokio::time::sleep(retry_delay(&dash, round as u32)).await;
             }
         }
         warn!(
@@ -831,21 +882,103 @@ fn render_media(
     }
 }
 
+/// 池成员上限。
+///
+/// 目标面板的池大小输入范围是 2–6（F-015）。配置值不校验，这里再钳一次，
+/// 防止异常 MPD 的 `<BaseURL>` 数量把单次请求的尝试次数拉高。
+const POOL_MAX: usize = 6;
+
+/// 生成一个切片的候选地址顺序。
+///
+/// - `urls.len() <= 1` 或 `pool_size <= 1`：池关闭，原样返回。这是兼容路径。
+/// - 否则取前 `len = min(地址数, pool_size, POOL_MAX)` 条作为池。
+///   视频固定从 `pool[0]` 起步；音频/字幕从 `pool[1..len]` 轮询，`pool[0]` 最后兜底。
 fn choose_urls(urls: &[String], kind: &str, index: usize, pool_size: u32) -> Vec<String> {
     if urls.len() <= 1 || pool_size <= 1 {
         return urls.to_vec();
     }
+    // 池大小是成员上限，不是"额外轮询数"。第 len 条及之后的地址不参与回退。
+    // 进入本分支后 urls.len() >= 2 且 pool_size >= 2，所以 len >= 2。
+    let len = urls.len().min(pool_size as usize).min(POOL_MAX);
     // 目标面板自述：视频固定 pool[0]，音频/字幕在 pool[1..] 轮询。
     let start = if kind == "video" {
         0
     } else {
-        1 + index % (urls.len() - 1)
+        1 + index % (len - 1)
     };
-    let mut out = Vec::with_capacity(urls.len());
-    for offset in 0..urls.len() {
-        out.push(urls[(start + offset) % urls.len()].clone());
+    let mut out = Vec::with_capacity(len);
+    for offset in 0..len {
+        out.push(urls[(start + offset) % len].clone());
     }
     out
+}
+
+/// 一次抓取尝试。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Attempt {
+    /// 用第几个候选地址。
+    url: usize,
+    /// 第几轮。
+    round: usize,
+    /// 本次之后是否退避，值为退避序号。
+    sleep: Option<usize>,
+}
+
+/// 生成一次抓取的尝试计划。
+///
+/// - 池关闭：与旧循环逐项等价。每个地址连续用满 `retry_max+1` 次，
+///   最后一次不退避，地址之间不退避。
+/// - 池启用：按成员轮询。首轮每个成员各试一次，失败立即换址，轮末才退避。
+///   总尝试数 = `max(retry_max+1, 成员数)`，不随成员数相乘膨胀。
+fn attempt_plan(url_count: usize, pooled: bool, retry_max: u32) -> Vec<Attempt> {
+    if url_count == 0 {
+        return Vec::new();
+    }
+    let tries = retry_max.min(32) as usize + 1;
+    if !pooled {
+        let mut plan = Vec::with_capacity(url_count * tries);
+        for url in 0..url_count {
+            for attempt in 0..tries {
+                plan.push(Attempt {
+                    url,
+                    round: attempt,
+                    sleep: (attempt + 1 < tries).then_some(attempt),
+                });
+            }
+        }
+        return plan;
+    }
+    let budget = tries.max(url_count);
+    (0..budget)
+        .map(|step| Attempt {
+            url: step % url_count,
+            round: step / url_count,
+            sleep: (step + 1 < budget && (step + 1) % url_count == 0).then_some(step / url_count),
+        })
+        .collect()
+}
+
+/// 取 URL 的目录前缀：去掉最后一段。
+///
+/// 用目录前缀判断"同一个上游"。切片名每个都不同，直接比整条 URL 永远不相等。
+fn base_prefix(url: &str) -> &str {
+    match url.rfind('/') {
+        Some(index) => &url[..=index],
+        None => url,
+    }
+}
+
+/// 视频粘性有效期。超时后回到常规轮询顺序。
+const VIDEO_STICKY_TTL: Duration = Duration::from_secs(300);
+
+/// 粘性记录上限，防止异常 MPD 让会话状态无界增长。
+const VIDEO_STICKY_MAX: usize = 16;
+
+fn sticky_fresh(at: Instant, now: Instant) -> bool {
+    match now.checked_duration_since(at) {
+        Some(age) => age <= VIDEO_STICKY_TTL,
+        None => true,
+    }
 }
 
 fn pick_ext(formats: &[String], index: usize) -> String {
@@ -1114,6 +1247,57 @@ mod tests {
     }
 
     #[test]
+    fn render_media_caps_entry_urls() {
+        let xml = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT4S">
+  <BaseURL>http://cdn-a.example/dash/</BaseURL>
+  <BaseURL>http://cdn-b.example/dash/</BaseURL>
+  <BaseURL>http://cdn-c.example/dash/</BaseURL>
+  <Period>
+    <AdaptationSet contentType="video">
+      <SegmentTemplate timescale="1000" initialization="init.mp4" media="v-$Number$.m4s" startNumber="1">
+        <SegmentTimeline><S d="2000" r="1"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v0" width="640" height="360"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        let presentation = parse_presentation(xml, "http://origin.example/live.mpd").expect("MPD");
+        let stream = &presentation.streams[0];
+        let render = |pool: u32| {
+            render_media(
+                &presentation,
+                stream,
+                MediaOptions {
+                    gid: "g",
+                    cid: "c",
+                    self_base: "http://self",
+                    keep_seconds: 0,
+                    pool_size: pool,
+                    formats: &["jpg".to_string()],
+                    track_index: 0,
+                    start_offset: 0.0,
+                    publish_delay_secs: 0.0,
+                    fetch_extra_segments: 0,
+                },
+            )
+        };
+        // 池上限 2：init 与切片都只留两条候选，视频从 cdn-a 起步。
+        let capped = render(2);
+        assert!(capped
+            .entries
+            .iter()
+            .all(|(_, entry)| entry.urls.len() == 2));
+        assert!(capped.entries[0].1.urls[0].contains("cdn-a"));
+        // 池关闭：三条候选全部保留，与改动前一致。
+        let full = render(1);
+        assert!(full.entries.iter().all(|(_, entry)| entry.urls.len() == 3));
+        // 条目数量与清单正文不受池大小影响。
+        assert_eq!(capped.entries.len(), full.entries.len());
+        assert_eq!(capped.body.lines().count(), full.body.lines().count());
+    }
+
+    #[test]
     fn playlist_min_keeps_target_window() {
         let p = parse_presentation(
             r#"<?xml version="1.0"?>
@@ -1209,9 +1393,226 @@ mod tests {
             "http://b/1".to_string(),
             "http://c/1".to_string(),
         ];
-        assert_eq!(choose_urls(&urls, "video", 1, 3)[0], "http://a/1");
-        assert_eq!(choose_urls(&urls, "audio", 0, 3)[0], "http://b/1");
-        assert_eq!(choose_urls(&urls, "audio", 1, 3)[0], "http://c/1");
+        // 未截断时与旧实现逐项相同：视频 [a,b,c]，音频从 pool[1] 起环展开。
+        assert_eq!(
+            choose_urls(&urls, "video", 1, 3),
+            vec!["http://a/1", "http://b/1", "http://c/1"]
+        );
+        assert_eq!(
+            choose_urls(&urls, "audio", 0, 3),
+            vec!["http://b/1", "http://c/1", "http://a/1"]
+        );
+        assert_eq!(
+            choose_urls(&urls, "audio", 1, 3),
+            vec!["http://c/1", "http://a/1", "http://b/1"]
+        );
+    }
+
+    #[test]
+    fn pool_caps_to_size() {
+        let urls = vec![
+            "http://a/1".to_string(),
+            "http://b/1".to_string(),
+            "http://c/1".to_string(),
+            "http://d/1".to_string(),
+        ];
+        // 池上限 2：只用前两条。
+        assert_eq!(
+            choose_urls(&urls, "video", 0, 2),
+            vec!["http://a/1", "http://b/1"]
+        );
+        assert_eq!(
+            choose_urls(&urls, "video", 7, 2),
+            vec!["http://a/1", "http://b/1"]
+        );
+        assert_eq!(
+            choose_urls(&urls, "audio", 0, 2),
+            vec!["http://b/1", "http://a/1"]
+        );
+        assert_eq!(
+            choose_urls(&urls, "audio", 3, 2),
+            vec!["http://b/1", "http://a/1"]
+        );
+    }
+
+    #[test]
+    fn pool_caps_audio_ring() {
+        let urls = vec![
+            "http://a/1".to_string(),
+            "http://b/1".to_string(),
+            "http://c/1".to_string(),
+            "http://d/1".to_string(),
+            "http://e/1".to_string(),
+        ];
+        assert_eq!(
+            choose_urls(&urls, "video", 0, 3),
+            vec!["http://a/1", "http://b/1", "http://c/1"]
+        );
+        assert_eq!(
+            choose_urls(&urls, "audio", 0, 3),
+            vec!["http://b/1", "http://c/1", "http://a/1"]
+        );
+        assert_eq!(
+            choose_urls(&urls, "audio", 1, 3),
+            vec!["http://c/1", "http://a/1", "http://b/1"]
+        );
+        // 第 4、5 条永不出现。
+        for index in 0..6 {
+            let picked = choose_urls(&urls, "audio", index, 3);
+            assert!(!picked
+                .iter()
+                .any(|url| url.starts_with("http://d") || url.starts_with("http://e")));
+        }
+    }
+
+    #[test]
+    fn pool_is_clamped_to_panel_max() {
+        let urls: Vec<String> = (0..10)
+            .map(|index| format!("http://cdn{index}/1"))
+            .collect();
+        // 配置写 99，有效池仍是 6。
+        let picked = choose_urls(&urls, "video", 0, 99);
+        assert_eq!(picked.len(), POOL_MAX);
+        assert_eq!(picked[0], "http://cdn0/1");
+    }
+
+    #[test]
+    fn pool_larger_than_urls_keeps_all() {
+        let urls = vec!["http://a/1".to_string(), "http://b/1".to_string()];
+        assert_eq!(
+            choose_urls(&urls, "video", 0, 6),
+            vec!["http://a/1", "http://b/1"]
+        );
+        assert_eq!(
+            choose_urls(&urls, "audio", 0, 6),
+            vec!["http://b/1", "http://a/1"]
+        );
+    }
+
+    #[test]
+    fn pool_disabled_returns_all() {
+        let urls = vec![
+            "http://a/1".to_string(),
+            "http://b/1".to_string(),
+            "http://c/1".to_string(),
+            "http://d/1".to_string(),
+        ];
+        for pool in [0, 1] {
+            assert_eq!(choose_urls(&urls, "video", 2, pool), urls);
+            assert_eq!(choose_urls(&urls, "audio", 2, pool), urls);
+        }
+    }
+
+    #[test]
+    fn single_url_ignores_pool() {
+        let urls = vec!["http://a/1".to_string()];
+        assert_eq!(choose_urls(&urls, "video", 0, 6), urls);
+        assert_eq!(choose_urls(&urls, "audio", 5, 6), urls);
+    }
+
+    #[test]
+    fn attempt_plan_legacy_matches_old_loop() {
+        // 旧循环：每个地址连续 3 次，最后一次不退避，地址之间不退避。
+        let plan = attempt_plan(2, false, 2);
+        assert_eq!(
+            plan,
+            vec![
+                Attempt {
+                    url: 0,
+                    round: 0,
+                    sleep: Some(0)
+                },
+                Attempt {
+                    url: 0,
+                    round: 1,
+                    sleep: Some(1)
+                },
+                Attempt {
+                    url: 0,
+                    round: 2,
+                    sleep: None
+                },
+                Attempt {
+                    url: 1,
+                    round: 0,
+                    sleep: Some(0)
+                },
+                Attempt {
+                    url: 1,
+                    round: 1,
+                    sleep: Some(1)
+                },
+                Attempt {
+                    url: 1,
+                    round: 2,
+                    sleep: None
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn attempt_plan_pool_round_robin() {
+        // 成员多于尝试数：每个成员至少试一次，全部不退避。
+        let plan = attempt_plan(3, true, 1);
+        assert_eq!(plan.len(), 3);
+        assert_eq!(
+            plan.iter().map(|item| item.url).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert!(plan.iter().all(|item| item.sleep.is_none()));
+
+        // 默认 retry_max=8：总尝试数 9，只在轮末退避。
+        let plan = attempt_plan(3, true, 8);
+        assert_eq!(plan.len(), 9);
+        assert_eq!(
+            plan.iter().map(|item| item.url).collect::<Vec<_>>(),
+            vec![0, 1, 2, 0, 1, 2, 0, 1, 2]
+        );
+        assert_eq!(
+            plan.iter().map(|item| item.round).collect::<Vec<_>>(),
+            vec![0, 0, 0, 1, 1, 1, 2, 2, 2]
+        );
+        assert_eq!(plan[2].sleep, Some(0));
+        assert_eq!(plan[5].sleep, Some(1));
+        assert_eq!(plan[8].sleep, None);
+
+        // 成员多于预算时不会膨胀。
+        let plan = attempt_plan(6, true, 0);
+        assert_eq!(plan.len(), 6);
+        assert_eq!(
+            plan.iter().map(|item| item.url).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5]
+        );
+        assert!(plan.iter().all(|item| item.sleep.is_none()));
+    }
+
+    #[test]
+    fn attempt_plan_single_member_equals_legacy() {
+        assert_eq!(attempt_plan(1, true, 2), attempt_plan(1, false, 2));
+        assert!(attempt_plan(0, true, 8).is_empty());
+    }
+
+    #[test]
+    fn base_prefix_strips_file_name() {
+        assert_eq!(base_prefix("http://a/dash/s-1.m4s"), "http://a/dash/");
+        assert_eq!(
+            base_prefix("http://a/dash/s-1.m4s?token=x"),
+            "http://a/dash/"
+        );
+        assert_eq!(base_prefix("http://a/"), "http://a/");
+        assert_eq!(base_prefix("plain"), "plain");
+    }
+
+    #[test]
+    fn sticky_fresh_expires() {
+        let now = Instant::now();
+        assert!(sticky_fresh(now, now));
+        assert!(sticky_fresh(now - VIDEO_STICKY_TTL, now));
+        assert!(!sticky_fresh(
+            now - VIDEO_STICKY_TTL - Duration::from_secs(1),
+            now
+        ));
     }
 
     #[test]

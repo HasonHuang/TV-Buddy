@@ -7,7 +7,7 @@
 
 | 项 | 设计 | 依据 |
 | --- | --- | --- |
-| 路径 | 来自启动参数（`iptv-proxy <config.toml>`），默认 `config.toml` | S-ENV-06 |
+| 路径 | 来自启动参数（`tv-buddy <config.toml>`），默认 `config.toml` | S-ENV-06 |
 | 解析 | 严格 TOML：重复键、类型错都报错并退出 | S-EPG-01（F-008 实测） |
 | 默认值 | 缺省键用内置默认补齐；默认值对齐目标 v0.8.2 | S-CFG-04 |
 | 未建模键 | 存 `extra`（`toml::Table`），保存时原样写回 | 设计决策（避免丢第三方配置） |
@@ -94,7 +94,7 @@
 | 切片正文（M2 已实现） | `seg_bytes/<gid>_<cid>_<S>.<ext>`；命中复用；上限由 `[cache.gc]` 控制（§11） | 同上 |
 | DASH 缓存（P4 已实现） | `dash/<gid>/<cid>/<track>/{index.txt,init.<ext>,<序号>_<hash>.<ext>}`；媒体清单按时重取，init/切片命中复用 | `src/dash_hls.rs` |
 | DASH 时间窗 | `[groups].mpd_keep_seconds > 0` 时媒体清单只保留末尾累计时长；`0` 保留全部。`proxy` 模式 MPD 同样裁剪时间线并推进编号 | `src/dash_hls.rs`、`src/http/routes/stream.rs` |
-| DASH URL 池 | 多个 `<BaseURL>` 时首选地址固定给视频；音频/字幕在 `url_pool_size>1` 时轮询其余地址。目标默认 `url_pool_size=1` 实测音视频都只取首选（F-022） | `src/dash_hls.rs` |
+| DASH URL 池 | 多个 `<BaseURL>` 时取前 N 条作候选，N = min(地址数, `url_pool_size`, 6)。视频固定 `pool[0]`；音频/字幕在 `pool[1..N]` 轮询。池启用时逐址快速回退，视频记住最近成功地址 300 秒。`url_pool_size<=1` 或单地址时行为完全不变。目标 `pool>=2` 的取用方式不可观测（F-015），本语义为自定 | `src/dash_hls.rs` |
 | proxy MPD 反代 | `<BaseURL>`（绝对/相对/缺失）统一改为 `/{gid}/{cid}/mpd/{token}/{Base64URL(base)}/`；切片请求解码还原上游地址并校验令牌 | `src/http/routes/stream.rs` |
 | 清单复用（M2 已实现） | 进程内 TTL 5 秒（`TtlCache`） | `src/proxy/mod.rs` |
 | 订阅源缓存（U-07 已实现） | `sub_url/<sha256("sub:{id}:{url}")>.json`：`{key,body,stored_at}`；`subs/status.json` 保存 `channels/last_ok/last_try/error`；重启后按源级 TTL 命中 | `src/source_cache.rs`、F-020 |
@@ -124,7 +124,7 @@
 
 | 项 | 设计 | 依据 |
 | --- | --- | --- |
-| 出口 | 标准输出 + `<安装目录>/iptv-proxy.log` | S-ENV-03 |
+| 出口 | 标准输出 + `<安装目录>/tv-buddy.log` | S-ENV-03 |
 | 级别 | `[server].log_level`（`trace`/`debug`/`info`/`warn`/`error`） | S-CACHE-05 |
 | 截断 | 文件超过 5 MB 截断 | S-CACHE-05 |
 | 格式 | `tracing` 文本，含时间、级别、目标 | 设计决策 |
@@ -132,12 +132,12 @@
 ## 6. 发布布局
 
 ```text
-/opt/iptv-proxy/
-├─ iptv-proxy          静态 musl 二进制
+/opt/tv-buddy/
+├─ tv-buddy            静态 musl 二进制
 ├─ config.toml         首次启动生成默认配置
-├─ iptv-proxy.log
+├─ tv-buddy.log
 ├─ cache/
-└─ iptv-proxy.sh       管理 CLI（无参数打开菜单）
+└─ tv-buddy.sh         管理 CLI（无参数打开菜单）
 ```
 
 | 项 | 实现 | 依据 |
@@ -149,16 +149,16 @@
 | 产物校验 | `scripts/verify-release.sh`：`ldd` 无动态依赖、能启动、`/health` 返回 `ok` | `scripts/verify-release.sh` |
 | 服务 | systemd 单元；Alpine 用 OpenRC | S-ENV-04 |
 
-发布包内容（`dist/iptv-proxy-<version>-<arch>.tar.gz`）：
+发布包内容（`dist/tv-buddy-<version>-<arch>.tar.gz`）：
 
 ```text
-iptv-proxy-<version>-<arch>/
-├─ iptv-proxy            静态 musl 二进制
-├─ config.toml.example   首次安装复制为 config.toml
-├─ iptv-proxy.sh         管理 CLI（菜单、启停、端口、密码、更新、卸载）
-├─ install.sh            安装到 /opt/iptv-proxy，注册服务
-├─ iptv-proxy.service    systemd 单元
-└─ iptv-proxy.openrc     Alpine OpenRC 服务
+tv-buddy-<version>-<arch>/
+├─ tv-buddy            静态 musl 二进制
+├─ config.toml.example 首次安装复制为 config.toml
+├─ tv-buddy.sh         管理 CLI（菜单、启停、端口、密码、更新、卸载）
+├─ install.sh          安装到 /opt/tv-buddy，注册服务
+├─ tv-buddy.service    systemd 单元
+└─ tv-buddy.openrc     Alpine OpenRC 服务
 ```
 
 > 说明：本机访问 `github.com` 的 release 资产与 `static.rust-lang.org` 会被中间设备断开 TLS，
@@ -170,7 +170,7 @@ iptv-proxy-<version>-<arch>/
 | 问题 | 处理 |
 | --- | --- |
 | 是否复刻目标的"面板保存"规范化格式 | 用 `toml::to_string_pretty`；不追求与目标逐字节相同 |
-| CLI `update` 的下载源 | 用 `IPTV_PROXY_{BIN,ARCHIVE,URL}` 覆盖；本仓库未发布 release 资产 |
+| CLI `update` 的下载源 | 用 `TV_BUDDY_{BIN,ARCHIVE,URL}` 覆盖；本仓库未发布 release 资产 |
 | `disk_path` 变更是否允许热重载 | 当前要求重启（与目标一致） |
 
 ## 9. `[share]`

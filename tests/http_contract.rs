@@ -74,6 +74,26 @@ const DASH_MPD: &str = r#"<?xml version="1.0"?>
   </Period>
 </MPD>"#;
 
+/// 伪 DASH 清单：两条相对 BaseURL，第一条固定失败，用于验证 URL 池回退。
+const POOL_MPD: &str = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT4S">
+  <BaseURL>a/</BaseURL>
+  <BaseURL>b/</BaseURL>
+  <Period>
+    <AdaptationSet contentType="video" maxWidth="1280" maxHeight="720">
+      <SegmentTemplate timescale="1000" media="v-$Number$.m4s" startNumber="1">
+        <SegmentTimeline><S d="2000" r="1"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v0" codecs="avc1.4d401f" bandwidth="2500000" width="1280" height="720"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+
+/// URL 池测试：坏上游 A 的命中次数。
+static POOL_A_HITS: AtomicUsize = AtomicUsize::new(0);
+/// URL 池测试：好上游 B 的命中次数。
+static POOL_B_HITS: AtomicUsize = AtomicUsize::new(0);
+
 /// 伪翻译服务：给每条文本加目标语言前缀。
 async fn upstream_translate(axum::Json(body): axum::Json<serde_json::Value>) -> Response {
     let target = body
@@ -211,6 +231,15 @@ async fn upstream_file(
         | "dash/chunk-v0-2.m4s"
         | "dash/chunk-v0-3.m4s"
         | "dash/chunk-v0-4.m4s" => ("video/mp4", b"dash-segment"),
+        "dash/pool/live.mpd" => ("application/dash+xml", POOL_MPD.as_bytes()),
+        "dash/pool/a/v-1.m4s" | "dash/pool/a/v-2.m4s" => {
+            POOL_A_HITS.fetch_add(1, Ordering::SeqCst);
+            return (StatusCode::NOT_FOUND, "not found").into_response();
+        }
+        "dash/pool/b/v-1.m4s" | "dash/pool/b/v-2.m4s" => {
+            POOL_B_HITS.fetch_add(1, Ordering::SeqCst);
+            ("video/mp4", b"pool-segment")
+        }
         "live.ts" => (
             "video/mp2t",
             TS_STREAM.get_or_init(|| ts_stream(8)).as_slice(),
@@ -3202,6 +3231,112 @@ url = "{upstream}/dash/live.mpd"
         .expect("请求 init");
     assert_eq!(init.status(), StatusCode::OK);
     assert_eq!(init.bytes().await.expect("读 init").as_ref(), b"dash-init");
+}
+
+/// DASH URL 池：多个 `<BaseURL>` 时按序回退，并记住成功的地址。
+///
+/// 夹具里 `a/` 固定 404，`b/` 返回字节。`retry_max=2` 让两种模式的差异可观测：
+/// 池启用时 A 只被试 1 次；池关闭时 A 用满 3 次。
+#[tokio::test]
+async fn dash_pool_falls_back_and_remembers_success() {
+    POOL_A_HITS.store(0, Ordering::SeqCst);
+    POOL_B_HITS.store(0, Ordering::SeqCst);
+
+    let pooled = fixture_with_extra(
+        r#"
+[cache.dash]
+retry_max = 2
+retry_initial_ms = 1
+
+[[groups]]
+id = "pool"
+name = "池组"
+mode = "dash"
+access = "open"
+
+[[groups.channels]]
+id = "c1"
+name = "池频道"
+url = "{upstream}/dash/pool/live.mpd"
+url_pool_size = 2
+"#,
+    )
+    .await;
+
+    let media = fetch(&pooled, "/pool/c1/video_720p/index.txt").await;
+    assert_eq!(media.status(), StatusCode::OK);
+    let body = media.text().await.expect("读媒体清单");
+    let segments: Vec<String> = body
+        .lines()
+        .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+        .map(str::to_string)
+        .collect();
+    assert_eq!(segments.len(), 2, "{body}");
+
+    // 第一片：A 失败一次后立即换到 B。
+    let first = pooled
+        .client
+        .get(&segments[0])
+        .send()
+        .await
+        .expect("请求首片");
+    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(
+        first.bytes().await.expect("读首片").as_ref(),
+        b"pool-segment"
+    );
+    assert_eq!(POOL_A_HITS.load(Ordering::SeqCst), 1, "首轮只应试 A 一次");
+    assert_eq!(POOL_B_HITS.load(Ordering::SeqCst), 1);
+
+    // 第二片：粘性把 B 提到首位，A 不再被请求。
+    let second = pooled
+        .client
+        .get(&segments[1])
+        .send()
+        .await
+        .expect("请求次片");
+    assert_eq!(second.status(), StatusCode::OK);
+    assert_eq!(POOL_A_HITS.load(Ordering::SeqCst), 1, "应记住 B");
+    assert_eq!(POOL_B_HITS.load(Ordering::SeqCst), 2);
+
+    // 池关闭：回到旧行为，A 用满 retry_max+1 次再换 B。
+    POOL_A_HITS.store(0, Ordering::SeqCst);
+    POOL_B_HITS.store(0, Ordering::SeqCst);
+    let single = fixture_with_extra(
+        r#"
+[cache.dash]
+retry_max = 2
+retry_initial_ms = 1
+
+[[groups]]
+id = "pool"
+name = "池组"
+mode = "dash"
+access = "open"
+
+[[groups.channels]]
+id = "c1"
+name = "池频道"
+url = "{upstream}/dash/pool/live.mpd"
+"#,
+    )
+    .await;
+    let media = fetch(&single, "/pool/c1/video_720p/index.txt").await;
+    assert_eq!(media.status(), StatusCode::OK);
+    let body = media.text().await.expect("读媒体清单");
+    let first = body
+        .lines()
+        .find(|line| !line.trim().is_empty() && !line.starts_with('#'))
+        .expect("切片地址")
+        .to_string();
+    let response = single.client.get(&first).send().await.expect("请求切片");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        POOL_A_HITS.load(Ordering::SeqCst),
+        3,
+        "池关闭时每个地址用满 retry_max+1 次"
+    );
+    assert_eq!(POOL_B_HITS.load(Ordering::SeqCst), 1);
 }
 
 /// DASH 时移：清单要 `playseek`，切片按轨道录制序号命名。
