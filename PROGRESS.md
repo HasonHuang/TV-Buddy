@@ -285,7 +285,7 @@
 
 仍未接线：无。
 
-### 3.3 已定案差异（11 项：8 项已实现，3 项未实现）
+### 3.3 已定案差异（15 项：9 项已实现或保留，6 项未实现）
 
 下表是**与目标不完全一致、但已定案**的项。可以再做、但排在后面的能力见 §6。
 
@@ -307,6 +307,10 @@
 | 分组「多选」的批量语义 | ✅ | 自定：批量导出（合成 JSON 数组）与批量删除。目标语义未观测。`frontend/src/groups.tsx:409`、`:428` |
 | `traffic_in_bytes` 恒 0 | ✅ | 固定输出 0。复刻目标缺陷，不要"修"。`src/http/routes/panel.rs:134`。S-BUG-01 |
 | `[share].share_token` | ❌ | 未实现。实测 `share_token=false` 时 `/api/share/pull` 载荷里仍有 Token（F-013），所以该键不控制载荷。面板文案「同时分享 token」与实际行为不符，语义未知，不猜 |
+| 缓存容量上限（3 键） | ❌ | 未实现。目标侧 `segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries` 均未观测到生效（S-CACHE-03）。复刻「不生效」才与目标一致；真正的上限由 `[cache.gc]` 与 `[cache.segments]` 提供 |
+| `[subtitle].style.*` 样式注入 | ❌ | 未实现。本实现没有面向播放器的字幕出口，注入样式无处生效 |
+| 播放侧 `compat_mode`、`srt_ua_keywords` | ❌ | 未实现。目标未测出行为（D19），不猜 |
+| DASH 文字轨出口 | ✅ 保留 | 目标夹具里不写 master。本实现输出 `SUBTITLES` 组，是超集，不影响播放 |
 
 > `[cdn]`、`[cache.gc]`、分组 `prefetch` 是本实现新增的配置面。目标 v0.8.2 没有这些键。默认值不改变既有行为。
 
@@ -427,16 +431,16 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | P2-3 | `random_id_enabled`（播放链接随机化） | ✅ 已实现（2026-10-28）。导入 M3U 时忽略 `tvg-id`，新频道取 `r-<8hex>`。目标开启后已有频道与切片前缀不变，所以只影响新导入的频道 | F-010 §4 |
 | P2-4 | `[share].share_token` | ❌ 不做（2026-10-28）。实测 `share_token=false` 时载荷里仍有 Token（F-013），该键不控制 `/api/share/pull` 的内容；面板文案「同时分享 token」与实际行为不符，语义未知 | F-013、S-AUTH-06 |
 | P2-5 | `cache.backend=memory`（内存缓存后端） | ✅ 已实现（2026-10-28）。切片正文留在进程内，不写 `seg_bytes`；按 `memory_max_mb` 做 LRU 淘汰；flush 一并清空 | F-015 |
-| P2-6 | 缓存容量上限（`segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries`） | 不消费。目标同样未观测到生效 | S-CACHE-03、`04` §11.5 |
+| P2-6 | 缓存容量上限（`segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries`） | ❌ 不做（2026-10-28）。目标侧三项上限均未观测到生效（S-CACHE-03），复刻「不生效」才是一致行为。运维上限由 `[cache.gc]` 与 `[cache.segments]` 承担 | S-CACHE-03、`04` §11.5 |
 
 ### 6.3 优先级 3：其他功能
 
 | # | 项 | 现状 | 依据 |
 | --- | --- | --- | --- |
 | P3-1 | DASH 音轨命名对齐 `audio-{语言}` | ✅ 已实现（2026-10-28）。有 `lang` 时用 `audio-{语言}`，缺语言时退回序号；同名加 `-2` 后缀 | F-016 §5.1 |
-| P3-2 | DASH 文字轨出口 | 目标在实测夹具里不写 master。本实现输出 `SUBTITLES` 组 | F-016 §5.1 |
-| P3-3 | `[subtitle].style.*` 样式注入 | 保留键面。运行时不注入 VTT | `05` §4.1 |
-| P3-4 | 播放侧 `compat_mode`、`srt_ua_keywords` | 不实现。目标未测出行为 | D19 |
+| P3-2 | DASH 文字轨出口 | ✅ 定案保留（2026-10-28）。目标在夹具里不写 master，本实现输出 `SUBTITLES` 组：这是超集，播放器不用也不受影响 | F-016 §5.1 |
+| P3-3 | `[subtitle].style.*` 样式注入 | ❌ 不做（2026-10-28）。本实现没有面向播放器的字幕出口：字幕只在面板里上传/管理，注入样式无处生效 | `05` §4.1 |
+| P3-4 | 播放侧 `compat_mode`、`srt_ua_keywords` | ❌ 不做。目标未测出行为（D19），按「不猜」处理 | D19 |
 | P3-5 | U-06 其余 5 种台标效果 | 只有 `breathe` 逐字节一致 | F-011 |
 | P3-6 | 逐屏视觉对拍（验证类） | 13 个一级分区已对齐，逐屏未对拍 | `07` §5、V-10 |
 | P3-7 | `dash-timeshift/status` 的 `hours` 键核对（验证类） | 目标用哪个键未验证 | F-016 §5.1 |
