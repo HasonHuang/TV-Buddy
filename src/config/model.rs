@@ -659,6 +659,9 @@ pub struct AuthCfg {
     pub token_enabled: bool,
     pub token_ttl_hours: u64,
     pub token_failure_url: String,
+    /// 导入 M3U 时忽略 `tvg-id`，每个新频道取随机 id（`r-<8hex>`）。
+    ///
+    /// 目标开启后已有频道与切片前缀不变（F-010 §4），所以它只影响新导入的频道。
     pub random_id_enabled: bool,
     pub ip_guard_enabled: bool,
     /// 每 IP 并发播放会话上限；`0` = 不限。

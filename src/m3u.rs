@@ -177,6 +177,16 @@ fn short_hex() -> String {
     hex::encode(&uuid::Uuid::new_v4().as_bytes()[..3])
 }
 
+/// 随机频道 id：`r-<8hex>`。
+///
+/// 用于 `[auth].random_id_enabled = true` 时的导入：忽略 `tvg-id`，
+/// 每个频道都拿一个新随机 id。目标开启该键后已有频道与切片前缀不变
+/// （F-010 §4），所以它只影响新导入的频道。
+pub fn random_channel_id() -> String {
+    let bytes = uuid::Uuid::new_v4();
+    format!("r-{}", hex::encode(&bytes.as_bytes()[..4]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +235,15 @@ http://up/3.m3u8
         assert_eq!(group_id("News-1"), "News-1");
         assert!(group_id("电视剧").starts_with("g-"));
         assert_eq!(group_id("电视剧").len(), 8);
+    }
+
+    #[test]
+    fn random_channel_id_has_fixed_shape_and_varies() {
+        let first = random_channel_id();
+        assert!(first.starts_with("r-"), "{first}");
+        assert_eq!(first.len(), 10);
+        assert!(first[2..].bytes().all(|b| b.is_ascii_hexdigit()), "{first}");
+        assert_ne!(first, random_channel_id());
     }
 
     #[test]

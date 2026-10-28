@@ -3434,6 +3434,70 @@ url = "{upstream}/live.m3u8"
     assert_eq!(header(&throttled, "retry-after"), "5");
 }
 
+/// 导入一段 M3U（面板接口）。
+async fn import_m3u(fixture: &Fixture, text: &str) {
+    let session = login(fixture).await;
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/groups/import/m3u", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "text": text, "mode": "append" }).to_string())
+        .send()
+        .await
+        .expect("请求导入");
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// 当前配置里的全部频道 id。
+async fn channel_ids(fixture: &Fixture) -> Vec<String> {
+    let session = login(fixture).await;
+    let text = fixture
+        .client
+        .get(format!("{}/panel/api/config", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("请求配置")
+        .text()
+        .await
+        .expect("读配置");
+    let body: serde_json::Value = serde_json::from_str(&text).expect("解析配置");
+    body["groups"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|group| group["channels"].as_array().cloned().unwrap_or_default())
+        .filter_map(|channel| channel["id"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// `[auth].random_id_enabled`：导入 M3U 时忽略 `tvg-id`，新频道拿随机 id。
+///
+/// 目标开启该键后已有频道与切片前缀不变（F-010 §4），所以只影响新导入的频道。
+#[tokio::test]
+async fn random_id_enabled_generates_random_channel_ids() {
+    let text = "#EXTM3U\n\
+#EXTINF:-1 tvg-id=\"cctv1\" group-title=\"随机组\",CCTV1\nhttp://up.example/1.m3u8\n\
+#EXTINF:-1 tvg-id=\"cctv2\" group-title=\"随机组\",CCTV2\nhttp://up.example/2.m3u8\n";
+
+    let plain = fixture_with_extra_and_auth("", "").await;
+    import_m3u(&plain, text).await;
+    let ids = channel_ids(&plain).await;
+    assert!(ids.iter().any(|id| id == "cctv1"), "{ids:?}");
+
+    let random = fixture_with_extra_and_auth("", "random_id_enabled = true\n").await;
+    import_m3u(&random, text).await;
+    let ids = channel_ids(&random).await;
+    assert!(
+        !ids.iter().any(|id| id == "cctv1" || id == "cctv2"),
+        "{ids:?}"
+    );
+    let generated: Vec<&String> = ids.iter().filter(|id| id.starts_with("r-")).collect();
+    assert_eq!(generated.len(), 2, "{ids:?}");
+    assert!(generated.iter().all(|id| id.len() == 10), "{ids:?}");
+}
+
 /// DASH 时移：清单要 `playseek`，切片按轨道录制序号命名。
 #[tokio::test]
 async fn dash_timeshift_serves_recorded_playlist_and_segments() {

@@ -374,7 +374,13 @@ pub async fn import_m3u(
         let draft = &mut drafts[index];
         draft.has_dash |= is_dash;
 
-        let base = m3u::channel_id(entry.tvg_id.as_deref());
+        // `random_id_enabled` 打开时忽略 `tvg-id`，每个新频道拿随机 id。
+        // 目标开启该键后已有频道与切片前缀不变（F-010 §4），所以只影响新导入。
+        let base = if state.snapshot().auth.random_id_enabled {
+            m3u::random_channel_id()
+        } else {
+            m3u::channel_id(entry.tvg_id.as_deref())
+        };
         let mut id = base.clone();
         let mut suffix = 2;
         while draft.channels.iter().any(|channel| channel.id == id) {
