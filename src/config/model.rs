@@ -1142,7 +1142,10 @@ pub struct ShareCfg {
     pub follower_urls: Vec<String>,
     /// 同步周期（秒）。
     pub poll_secs: u64,
-    /// 目标键：订阅地址是否带分享 token。**本实现未消费**，仅回显（同 `[auth].random_id_enabled`）。
+    /// 目标键：面板文案是「同时分享 token」。**本实现未消费**。
+    ///
+    /// 实测：`share_token = false` 时 `/api/share/pull` 载荷里仍有 Token（F-013），
+    /// 所以该键不控制载荷内容。语义未知，见 `PROGRESS.md` §3.3。
     pub share_token: bool,
     #[serde(flatten)]
     pub extra: toml::Table,

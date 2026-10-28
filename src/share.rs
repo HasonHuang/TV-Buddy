@@ -92,6 +92,9 @@ fn cidr_contains(address: IpAddr, base: IpAddr, bits: u8) -> bool {
 }
 
 /// 生成本机载荷。`window` 决定解封回溯范围。
+///
+/// Token 始终分享：目标在 `[share].share_token = false`（默认）时载荷里仍有 Token
+/// （F-013 实测），所以该键不控制载荷内容。见 `PROGRESS.md` §3.3。
 pub fn payload(state: &AppState, window: Duration) -> Payload {
     let (current, old) = state.play_tokens.snapshot();
     Payload {

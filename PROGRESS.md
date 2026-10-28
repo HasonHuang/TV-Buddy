@@ -267,7 +267,7 @@
 
 仍未接线：无。
 
-### 3.3 已定案差异（10 项：8 项已实现，2 项未实现）
+### 3.3 已定案差异（11 项：8 项已实现，3 项未实现）
 
 下表是**与目标不完全一致、但已定案**的项。可以再做、但排在后面的能力见 §6。
 
@@ -288,6 +288,7 @@
 | 素材「未被引用」判定 | ✅ | 自定：配置里没有字符串指向 `/assets/<文件名>`。只标不删。`frontend/src/assets.tsx:257` |
 | 分组「多选」的批量语义 | ✅ | 自定：批量导出（合成 JSON 数组）与批量删除。目标语义未观测。`frontend/src/groups.tsx:409`、`:428` |
 | `traffic_in_bytes` 恒 0 | ✅ | 固定输出 0。复刻目标缺陷，不要"修"。`src/http/routes/panel.rs:134`。S-BUG-01 |
+| `[share].share_token` | ❌ | 未实现。实测 `share_token=false` 时 `/api/share/pull` 载荷里仍有 Token（F-013），所以该键不控制载荷。面板文案「同时分享 token」与实际行为不符，语义未知，不猜 |
 
 > `[cdn]`、`[cache.gc]`、分组 `prefetch` 是本实现新增的配置面。目标 v0.8.2 没有这些键。默认值不改变既有行为。
 
@@ -406,7 +407,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | P2-1 | `[auth].whitelist`、`max_sessions_per_ip`、`session_ttl_secs` | ✅ 已实现（2026-10-28）。会话 = `(IP, 频道)`，超限踢掉最久未用的那路；白名单豁免封禁与会话上限。三项只在 `ip_guard_enabled=true` 时生效，默认行为不变。语义自定 | F-010 |
 | P2-2 | `[auth]` 的 `l1/l2` 限流、违规计数、升级封禁（13 个键） | ✅ 已实现（2026-10-28）。只计播放入口请求；L2 突发、L1 持续；违规衰减后升级封禁；登录锁按阶梯升级。全部在 `ip_guard_enabled=true` 时生效 | F-010 |
 | P2-3 | `random_id_enabled`（播放链接随机化） | ✅ 已实现（2026-10-28）。导入 M3U 时忽略 `tvg-id`，新频道取 `r-<8hex>`。目标开启后已有频道与切片前缀不变，所以只影响新导入的频道 | F-010 §4 |
-| P2-4 | `[share].share_token`（拉取鉴权） | 只回显 | F-016 |
+| P2-4 | `[share].share_token` | ❌ 不做（2026-10-28）。实测 `share_token=false` 时载荷里仍有 Token（F-013），该键不控制 `/api/share/pull` 的内容；面板文案「同时分享 token」与实际行为不符，语义未知 | F-013、S-AUTH-06 |
 | P2-5 | `cache.backend=memory`（内存缓存后端） | 只回显。实际仍落盘 | F-015 |
 | P2-6 | 缓存容量上限（`segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries`） | 不消费。目标同样未观测到生效 | S-CACHE-03、`04` §11.5 |
 
