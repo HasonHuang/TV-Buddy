@@ -1,0 +1,49 @@
+# git-cliff 配置：按 Conventional Commits 生成中文更新日志。
+#
+# 由 .github/workflows/ci.yml 的发布任务调用，也可本地预览：
+#   git cliff --latest --strip header
+#
+# 分组顺序由 group 名称里的 <!-- N --> 前缀控制：模板先 striptags 去掉注释，
+# 再按 group 名称排序渲染。所以编号必须保留。
+# 只收录规范提交（filter_unconventional），未写 type 的提交默认不显示。
+
+[changelog]
+header = ""
+body = """
+## 更新内容
+
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}**：{% endif %}{{ commit.message }} (`{{ commit.id | truncate(length=7, end="") }}`)
+{% endfor %}
+
+{% endfor %}
+"""
+# 不写 footer：对比链接需要 remote 信息，GitHub Release 页面本身已提供 tag 链接。
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+commit_parsers = [
+  # 破坏性提交单独成组，不再重复出现在原分组。放最前面，先于普通 type 匹配。
+  { message = "^[a-zA-Z]+(\\([^)]*\\))?!:", group = "<!-- 0 -->⚠️ 破坏性变更" },
+  { body = "BREAKING[ -]CHANGE:", group = "<!-- 0 -->⚠️ 破坏性变更" },
+  { message = "^feat", group = "<!-- 1 -->✨ 特性" },
+  { message = "^fix", group = "<!-- 2 -->🐛 修复" },
+  { message = "^perf", group = "<!-- 3 -->⚡ 性能" },
+  { message = "^refactor", group = "<!-- 4 -->♻️ 重构" },
+  { message = "^docs?", group = "<!-- 5 -->📚 文档" },
+  { message = "^test", group = "<!-- 6 -->🧪 测试" },
+  { message = "^build|^ci", group = "<!-- 7 -->📦 构建" },
+  { message = "^revert", group = "<!-- 8 -->⏪ 回滚" },
+  # 其余提交（chore/style/未识别类型）不进更新日志。
+  # 这条兜底必须放最后：先命中的解析器优先。
+  { message = ".*", skip = true },
+]
+tag_pattern = "v[0-9].*"
+sort_commits = "oldest"

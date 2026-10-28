@@ -192,6 +192,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          # 更新说明要翻上一个 tag 到本 tag 的提交历史，浅克隆拿不到。
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           pattern: tv-buddy-*
@@ -199,14 +203,24 @@ jobs:
           merge-multiple: true
       - name: 列出产物
         run: ls -lh dist
-      - uses: softprops/action-gh-release@v2
+      # 复用 git-cliff：按 Conventional Commits 与 cliff.toml 的模板生成说明，
+      # 不再自己维护解析脚本。--latest 取最新 tag 到上一 tag 之间的提交。
+      - name: 生成更新说明
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest
+        env:
+          OUTPUT: NOTES.md
+      - uses: softprops/action-gh-release@v3
         with:
           # 标题就用 tag 本身（列表里显示 v2026.x.y）。显式写死是必要的：
           # 该 action 更新已存在的 release 时是 `input_name || existing.name || tag`，
           # 省略 name 会保留旧标题，改不回来。
           name: ${{ github.ref_name }}
           files: dist/*
-          generate_release_notes: true
+          # 用 git-cliff 生成的说明，不再让 GitHub 自动生成。
+          body_path: NOTES.md
           fail_on_unmatched_files: true
           # 带后缀的 tag（如 -beta.1）发布为预发布，不会被 /releases/latest 选中。
           prerelease: ${{ contains(github.ref_name, '-') }}
