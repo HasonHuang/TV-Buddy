@@ -558,9 +558,16 @@ fn spawn_prefetch(
     tokio::spawn(async move {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
         let mut tasks = tokio::task::JoinSet::new();
+        let memory = crate::cache_memory::is_memory(&state.snapshot().cache.backend);
+        let memory_limit = crate::cache_memory::limit_bytes(state.snapshot().cache.memory_max_mb);
         for (suffix, url, _ext) in entries {
             let path = proxy::segment_path(&state.cache_dir, &gid, &cid, &suffix);
-            if path.is_file() {
+            let key = format!("{gid}/{cid}/{suffix}");
+            if memory {
+                if state.memory.get(&key).is_some() {
+                    continue;
+                }
+            } else if path.is_file() {
                 continue;
             }
             let Ok(permit) = semaphore.clone().acquire_owned().await else {
@@ -569,6 +576,8 @@ fn spawn_prefetch(
             let state = state.clone();
             let gid = gid.clone();
             let cid = cid.clone();
+            let key = key.clone();
+            let store = state.memory.clone();
             tasks.spawn(async move {
                 let _permit = permit;
                 let Ok(result) =
@@ -579,10 +588,14 @@ fn spawn_prefetch(
                 let Ok(bytes) = result else {
                     return;
                 };
-                if let Some(parent) = path.parent() {
-                    let _ = tokio::fs::create_dir_all(parent).await;
+                if memory {
+                    store.put(&key, bytes, memory_limit);
+                } else {
+                    if let Some(parent) = path.parent() {
+                        let _ = tokio::fs::create_dir_all(parent).await;
+                    }
+                    let _ = tokio::fs::write(path, bytes).await;
                 }
-                let _ = tokio::fs::write(path, bytes).await;
             });
         }
         while tasks.join_next().await.is_some() {}
@@ -1251,8 +1264,16 @@ async fn segment(state: &Arc<AppState>, gid: &str, cid: &str, name: &str) -> Res
         return redirect_asset(&config, &config.server.error_url);
     };
 
+    let config = state.snapshot();
+    let memory = crate::cache_memory::is_memory(&config.cache.backend);
     let path = proxy::segment_path(&state.cache_dir, gid, cid, &suffix);
-    if let Ok(bytes) = std::fs::read(&path) {
+    let key = format!("{gid}/{cid}/{suffix}");
+    let cached = if memory {
+        state.memory.get(&key)
+    } else {
+        std::fs::read(&path).ok()
+    };
+    if let Some(bytes) = cached {
         state.stats.record_segment(true);
         state.estimate.observe_segment(gid, bytes.len() as u64);
         return segment_response(bytes, &ext, &segment_cache_control(state, false));
@@ -1266,6 +1287,8 @@ async fn segment(state: &Arc<AppState>, gid: &str, cid: &str, name: &str) -> Res
         path,
         ext,
         true,
+        key,
+        memory,
     )
     .await
 }
@@ -1274,6 +1297,7 @@ async fn segment(state: &Arc<AppState>, gid: &str, cid: &str, name: &str) -> Res
 ///
 /// v0.8.2 实测：上游正文中断时，客户端仍收到 `200` 和已收到的部分字节，日志记
 /// `片段下载中断`；只有完整正文才落盘。这里用通道维持背压，并在流结束后写缓存。
+#[allow(clippy::too_many_arguments)]
 async fn stream_segment(
     state: Arc<AppState>,
     gid: String,
@@ -1282,6 +1306,8 @@ async fn stream_segment(
     path: PathBuf,
     ext: String,
     first: bool,
+    key: String,
+    memory: bool,
 ) -> Response {
     let mut request = state.http_for(&gid, &cid).get(&url);
     for (name, value) in channel_headers(&state, &gid, &cid) {
@@ -1313,6 +1339,8 @@ async fn stream_segment(
     let estimate_gid = gid.clone();
     let (tx, mut rx) = mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(8);
     let log_url = url;
+    let store = state.memory.clone();
+    let memory_max_mb = state.snapshot().cache.memory_max_mb;
     tokio::spawn(async move {
         let mut response = response;
         let mut cached = Vec::new();
@@ -1340,11 +1368,19 @@ async fn stream_segment(
                     .estimate
                     .observe_segment(&estimate_gid, cached.len() as u64);
             }
-            if let Some(parent) = path.parent() {
-                let _ = tokio::fs::create_dir_all(parent).await;
-            }
-            if let Err(error) = tokio::fs::write(&path, &cached).await {
-                tracing::warn!(error = %error, "写切片缓存失败");
+            if memory {
+                store.put(
+                    &key,
+                    cached,
+                    crate::cache_memory::limit_bytes(memory_max_mb),
+                );
+            } else {
+                if let Some(parent) = path.parent() {
+                    let _ = tokio::fs::create_dir_all(parent).await;
+                }
+                if let Err(error) = tokio::fs::write(&path, &cached).await {
+                    tracing::warn!(error = %error, "写切片缓存失败");
+                }
             }
         }
     });

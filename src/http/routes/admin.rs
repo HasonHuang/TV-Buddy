@@ -74,7 +74,12 @@ pub async fn cache_flush(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let mut removed = 0u64;
+    // 内存后端：先清进程内的切片字典，再清磁盘目录。
+    let memory_bytes = state.memory.bytes();
+    if memory_bytes > 0 || !state.memory.is_empty() {
+        state.memory.clear();
+    }
+    let mut removed = memory_bytes;
     for name in FLUSH_DIRS {
         removed += dir_usage(&state.cache_dir.join(name)).0;
         let dir = state.cache_dir.join(name);

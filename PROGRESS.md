@@ -42,7 +42,7 @@
 | 项 | 数量 |
 | --- | --- |
 | 路由注册（`src/http.rs`） | 131 |
-| 测试 | 340（249 单元 + 91 契约） |
+| 测试 | 347（255 单元 + 92 契约） |
 | 冒烟脚本（`scripts/smoke-*.sh`） | 26 |
 
 已覆盖的能力：
@@ -234,6 +234,24 @@
 
 质量门：340 项测试通过（249 单元 + 91 契约）。
 
+### 3.1.7 P2-5 完成记录（2026-10-28）
+
+`[cache].backend` 原来只回显，实际仍写磁盘。
+
+新增 `src/cache_memory.rs`。`backend = "memory"` 时：
+
+| 项 | 规则 |
+| --- | --- |
+| 切片正文 | 留在进程内的字典，键为 `gid/cid/suffix`，不写 `seg_bytes` |
+| 上限 | `[cache].memory_max_mb`；`0` 按 512 MB 处理 |
+| 淘汰 | 最近最少使用。单条超过上限时不存 |
+| 清空 | `POST /panel/api/cache/flush` 一并清空，计入返回的释放字节 |
+| 重启 | 全部丢失。这与磁盘后端不同，面板文案已写明 |
+
+不做的事：索引与清单仍按原路径处理。`backend` 只影响切片正文。
+
+质量门：347 项测试通过（255 单元 + 92 契约）。
+
 ### 3.2 面板接线（已完成）
 
 原清单由静态检索得出。2026-10-27 全部接线完成，逐项落点如下。
@@ -311,7 +329,7 @@
 | 项 | 结果 |
 | --- | --- |
 | `cargo fmt --check` | 通过 |
-| `cargo test --offline --all-targets` | 340 项通过（249 单元 + 91 契约） |
+| `cargo test --offline --all-targets` | 347 项通过（255 单元 + 92 契约） |
 | `cargo clippy --offline --all-targets` | 0 error，27 条历史 warning |
 | 冒烟脚本 | 26 个全部通过。`smoke-record-dash` 需要 ffmpeg，且要求端口 19970/19971 空闲 |
 | `pnpm build` | 通过（含 `tsc --noEmit`） |
@@ -408,7 +426,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | P2-2 | `[auth]` 的 `l1/l2` 限流、违规计数、升级封禁（13 个键） | ✅ 已实现（2026-10-28）。只计播放入口请求；L2 突发、L1 持续；违规衰减后升级封禁；登录锁按阶梯升级。全部在 `ip_guard_enabled=true` 时生效 | F-010 |
 | P2-3 | `random_id_enabled`（播放链接随机化） | ✅ 已实现（2026-10-28）。导入 M3U 时忽略 `tvg-id`，新频道取 `r-<8hex>`。目标开启后已有频道与切片前缀不变，所以只影响新导入的频道 | F-010 §4 |
 | P2-4 | `[share].share_token` | ❌ 不做（2026-10-28）。实测 `share_token=false` 时载荷里仍有 Token（F-013），该键不控制 `/api/share/pull` 的内容；面板文案「同时分享 token」与实际行为不符，语义未知 | F-013、S-AUTH-06 |
-| P2-5 | `cache.backend=memory`（内存缓存后端） | 只回显。实际仍落盘 | F-015 |
+| P2-5 | `cache.backend=memory`（内存缓存后端） | ✅ 已实现（2026-10-28）。切片正文留在进程内，不写 `seg_bytes`；按 `memory_max_mb` 做 LRU 淘汰；flush 一并清空 | F-015 |
 | P2-6 | 缓存容量上限（`segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries`） | 不消费。目标同样未观测到生效 | S-CACHE-03、`04` §11.5 |
 
 ### 6.3 优先级 3：其他功能

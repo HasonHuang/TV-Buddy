@@ -42,6 +42,8 @@ pub struct AppState {
     pub http: reqwest::Client,
     /// 切片索引。
     pub segments: SegmentIndex,
+    /// `[cache].backend = "memory"` 时的切片正文字典。
+    pub memory: Arc<crate::cache_memory::MemoryStore>,
     /// 在线清单缓存（TTL 5 秒）。
     pub playlists: TtlCache,
     /// 订阅聚合源缓存（正文 + 状态，跨重启保留）。每个源按有效 `ttl_secs` 判定。
@@ -119,6 +121,7 @@ impl AppState {
                 .build()
                 .unwrap_or_default(),
             segments,
+            memory: Arc::new(crate::cache_memory::MemoryStore::new()),
             playlists: TtlCache::new(Duration::from_secs(5)),
             sources: crate::source_cache::SourceCache::load(&cache_dir, sources_ttl),
             resolver: crate::resolver::Cache::default(),

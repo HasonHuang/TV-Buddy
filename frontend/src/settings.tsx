@@ -704,7 +704,7 @@ export function SettingsPage() {
                   path="cache.backend"
                   options={[
                     { value: 'disk', label: '硬盘（disk）' },
-                    { value: 'memory', label: '内存（memory，仅回显）' },
+                    { value: 'memory', label: '内存（memory，重启清空）' },
                   ]}
                 />
                 <Text label="缓存目录" path="cache.disk_path" hint="相对进程工作目录；改后需重启" />

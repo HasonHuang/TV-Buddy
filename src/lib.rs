@@ -8,6 +8,7 @@ pub mod auth;
 pub mod backup;
 pub mod cache_estimate;
 pub mod cache_gc;
+pub mod cache_memory;
 pub mod config;
 pub mod dash;
 pub mod dash_hls;

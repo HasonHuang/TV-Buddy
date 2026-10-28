@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | `[server]` | `bind`、`not_found_url`、`error_url`、`home_url`、`m3u_header_lines`、`timezone_offset_hours`、`log_level`、`trust_proxy` | 监听、跳转、订阅头行、日志级别 |
 | `[panel]` | `enabled`、`username`、`password_sha256`、`session_ttl` | 面板登录 |
-| `[cache]` | `backend`、`disk_path`、`m3u8/segment_max_entries`、`disk_max_mb`、`disguise.*` | 缓存与伪装 |
+| `[cache]` | `backend`（`disk`/`memory`）、`disk_path`、`m3u8/segment_max_entries`、`disk_max_mb`、`memory_max_mb`、`disguise.*` | 缓存与伪装 |
 | `[cache.prefetch]` | `enabled`、`concurrency`、`timeout`、`prefetch_limit`、`skip_tail`、`mpd_readahead` | 媒体清单刷新后按并发与超时预取切片；`skip_tail` 跳过尾部。分组/频道可用 `[groups.prefetch]` 覆盖（见 §11） |
 | `[cache.segments]` | `global_max`、`per_channel_max`、`retain_count` | 内存切片索引上限；`per_channel_max > 0` 时同时约束磁盘索引条数（`seg_url/*.json`） |
 | `[cache.gc]` | `enabled`、`max_disk_mb`、`max_age_secs`、`interval_secs`、`scan_limit`、`disk_budget_ratio`、`reserve_mb`、`min_mb` | 磁盘回收：切片正文只写不删，靠它兜住可用空间。见 §11 |

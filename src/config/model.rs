@@ -214,6 +214,10 @@ impl Default for CdnCfg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CacheCfg {
+    /// `disk`（默认）或 `memory`。
+    ///
+    /// `memory` 时切片正文留在进程内，不写 `seg_bytes`；进程重启即清空。
+    /// 总量受 [`CacheCfg::memory_max_mb`] 限制。索引与清单仍按原路径处理。
     pub backend: String,
     pub disk_path: String,
     /// 内存清单条数上限。目标同键**未观测到生效**（S-CACHE-03）；本实现保留键面，
