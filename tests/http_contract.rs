@@ -3401,6 +3401,39 @@ url = "{upstream}/live.m3u8"
     assert_eq!(fetch(&exempt, "/sl/a.m3u8").await.status(), StatusCode::OK);
 }
 
+/// 播放入口限流：只在 `[auth].ip_guard_enabled = true` 时生效。
+///
+/// L2 是突发上限，L1 是持续上限；只计入口请求，不计切片。
+#[tokio::test]
+async fn play_rate_limit_only_when_guard_enabled() {
+    let groups = r#"
+[[groups]]
+id = "rl"
+name = "限流组"
+mode = "proxy"
+access = "open"
+
+[[groups.channels]]
+id = "a"
+name = "A"
+url = "{upstream}/live.m3u8"
+"#;
+    let off = fixture_with_extra_and_auth(groups, "").await;
+    for _ in 0..5 {
+        assert_eq!(fetch(&off, "/rl/a.m3u8").await.status(), StatusCode::OK);
+    }
+
+    let on = fixture_with_extra_and_auth(
+        groups,
+        "ip_guard_enabled = true\nl2_window_secs = 30\nl2_limit = 1\nl1_limit = 100\ncooldown_secs = 5\n",
+    )
+    .await;
+    assert_eq!(fetch(&on, "/rl/a.m3u8").await.status(), StatusCode::OK);
+    let throttled = fetch(&on, "/rl/a.m3u8").await;
+    assert_eq!(throttled.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(header(&throttled, "retry-after"), "5");
+}
+
 /// DASH 时移：清单要 `playseek`，切片按轨道录制序号命名。
 #[tokio::test]
 async fn dash_timeshift_serves_recorded_playlist_and_segments() {

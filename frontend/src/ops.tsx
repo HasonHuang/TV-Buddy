@@ -43,17 +43,14 @@ type IpStats = {
  * 后端没有单独的 auth 写接口，所以与设置页同一机制：`GET /panel/api/config`
  * 取整份 → 改 `auth` 子树 → `PUT /panel/api/config` 全量回写（S-CFG-01）。
  *
- * 标注 `未消费` 的键是目标 v0.8.2 也有、但本实现尚未实现的（限流 `l1/l2`、
- * 升级封禁等）；键面保留以便配置文件在本实现与目标之间来回搬，编辑它们不会
- * 改变运行行为——界面上明确写出，避免「配了没反应」。
- *
- * 并发会话、会话超时与白名单已生效，但只在 `ip_guard_enabled` 打开时参与判定。
+ * `[auth]` 的全部键都已生效。并发会话、会话超时、白名单、限流与升级封禁
+ * 只在 `ip_guard_enabled` 打开时参与判定；其余键始终生效。
  */
 type AuthCfg = Record<string, unknown>;
 type FullConfig = { auth?: AuthCfg } & Record<string, unknown>;
 
 /** 数字字段：路径 + 标签 + 单位。 */
-type NumField = { key: string; label: string; hint?: string; unconsumed?: boolean };
+type NumField = { key: string; label: string; hint?: string };
 
 const AUTH_LIMIT: NumField[] = [
   {
@@ -66,15 +63,15 @@ const AUTH_LIMIT: NumField[] = [
     label: '会话超时',
     hint: '秒；该 IP 超过此时长没有播放请求即释放会话。仅在「IP 管控」开启时生效',
   },
-  { key: 'l1_window_secs', label: '一级窗口', hint: '秒', unconsumed: true },
-  { key: 'l1_limit', label: '一级窗口次数', unconsumed: true },
-  { key: 'l2_window_secs', label: '二级窗口', hint: '秒', unconsumed: true },
-  { key: 'l2_limit', label: '二级窗口次数', unconsumed: true },
-  { key: 'cooldown_secs', label: '违规冷却', hint: '秒', unconsumed: true },
-  { key: 'violation_window_secs', label: '违规统计窗口', hint: '秒', unconsumed: true },
-  { key: 'violation_decay_secs', label: '违规衰减', hint: '秒', unconsumed: true },
-  { key: 'ban_threshold', label: '升级封禁的违规次数', unconsumed: true },
-  { key: 'ban_duration_secs', label: '封禁时长', hint: '秒，默认 30 天', unconsumed: true },
+  { key: 'l1_window_secs', label: '一级（持续）窗口', hint: '秒' },
+  { key: 'l1_limit', label: '一级窗口次数', hint: '0 = 关闭该级' },
+  { key: 'l2_window_secs', label: '二级（突发）窗口', hint: '秒' },
+  { key: 'l2_limit', label: '二级窗口次数', hint: '0 = 关闭该级' },
+  { key: 'cooldown_secs', label: '超限冷却', hint: '秒；期间返回 429 + Retry-After' },
+  { key: 'violation_window_secs', label: '违规统计窗口', hint: '秒' },
+  { key: 'violation_decay_secs', label: '违规衰减', hint: '秒；每满一个周期失效一条' },
+  { key: 'ban_threshold', label: '升级封禁的违规次数' },
+  { key: 'ban_duration_secs', label: '违规升级的封禁时长', hint: '秒，默认 30 天' },
 ];
 
 const AUTH_LOCK: NumField[] = [
@@ -83,16 +80,14 @@ const AUTH_LOCK: NumField[] = [
   { key: 'auth_fail_ban_threshold', label: '免费后再失败几次锁定' },
   {
     key: 'auth_fail_ban_duration_secs',
-    label: '首次封禁时长',
-    hint: '秒；目标首次锁实测固定 ≈300s，本实现同',
-    unconsumed: true,
+    label: '第 2 次锁定时长',
+    hint: '秒；第 1 次仍用「锁定秒数」，默认 300',
   },
-  { key: 'auth_fail_ban_repeat_duration_secs', label: '重复封禁时长', hint: '秒', unconsumed: true },
+  { key: 'auth_fail_ban_repeat_duration_secs', label: '第 3 次及以后锁定时长', hint: '秒' },
   {
     key: 'auth_fail_ban_escalate_window_secs',
-    label: '升级为重复封禁的窗口',
-    hint: '秒',
-    unconsumed: true,
+    label: '锁定升级统计窗口',
+    hint: '秒；超出窗口后重新按第 1 次计',
   },
 ];
 
@@ -114,7 +109,6 @@ function NumberField({
     <label className="field">
       <span>
         {field.label}
-        {field.unconsumed && <span className="tag" style={{ marginLeft: 6 }}>未消费</span>}
       </span>
       <input
         type="number"
@@ -251,9 +245,9 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
 
       <h3>限流与会话</h3>
       <p className="muted">
-        前两项（并发会话、会话超时）已生效，但只在「IP 管控」开启时参与判定。
-        带「未消费」的 `l1`/`l2` 键是目标 v0.8.2 也有、本实现尚未实现的行为
-        （触发条件在目标上未复现，见 `PROGRESS.md` §6.2）。
+        限流只计播放入口请求（换台 / 新建播放），不计切片。二级是突发上限，
+        一级是持续上限，任一超限即进入冷却并记一次违规。全部只在「IP 管控」开启时生效。
+        规则是自定的：目标 v0.8.2 的触发条件未复现（见 `PROGRESS.md` §3.1.5）。
       </p>
       <div className="fields">
         {AUTH_LIMIT.map((field) => (

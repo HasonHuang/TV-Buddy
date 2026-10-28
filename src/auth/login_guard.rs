@@ -19,6 +19,8 @@ const CAPACITY: usize = 10_000;
 struct Entry {
     failures: Vec<Instant>,
     locked_until: Option<Instant>,
+    /// 历次锁定的时刻，用于升级阶梯。
+    locks: Vec<Instant>,
 }
 
 /// 按 IP 记录登录失败。
@@ -34,7 +36,7 @@ impl LoginGuard {
 
     /// 登录前检查。达到阈值时立即锁定并返回剩余秒数。
     ///
-    /// 返回值 `None` 表示可以继续校验口令。
+    /// 返回值 `None` 表示可以继续校验口令。锁定时长固定为 `lock`。
     pub fn check(
         &self,
         ip: &str,
@@ -42,6 +44,35 @@ impl LoginGuard {
         free: u64,
         threshold: u64,
         lock: Duration,
+    ) -> Option<u64> {
+        self.check_escalating(
+            ip,
+            window,
+            free,
+            threshold,
+            lock,
+            lock,
+            lock,
+            Duration::ZERO,
+        )
+    }
+
+    /// 登录前检查，锁定时长按阶梯升级。
+    ///
+    /// 同一地址在 `escalate_window` 内重复触发锁定时：
+    /// 第 1 次用 `first`，第 2 次用 `second`，第 3 次及以后用 `repeat`。
+    /// `escalate_window` 为零时每次都按第 1 次处理。
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_escalating(
+        &self,
+        ip: &str,
+        window: Duration,
+        free: u64,
+        threshold: u64,
+        first: Duration,
+        second: Duration,
+        repeat: Duration,
+        escalate_window: Duration,
     ) -> Option<u64> {
         let mut inner = self.lock();
         let entry = inner.entry(ip.to_string()).or_default();
@@ -55,9 +86,22 @@ impl LoginGuard {
         }
         entry.failures.retain(|at| now.duration_since(*at) < window);
         if entry.failures.len() as u64 >= free.saturating_add(threshold) {
-            entry.locked_until = Some(now + lock);
+            let duration = if escalate_window.is_zero() {
+                first
+            } else {
+                entry
+                    .locks
+                    .retain(|at| now.duration_since(*at) < escalate_window);
+                match entry.locks.len() {
+                    0 => first,
+                    1 => second,
+                    _ => repeat,
+                }
+            };
+            entry.locks.push(now);
+            entry.locked_until = Some(now + duration);
             entry.failures.clear();
-            return Some(lock.as_secs().max(1));
+            return Some(duration.as_secs().max(1));
         }
         None
     }

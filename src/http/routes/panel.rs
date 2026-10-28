@@ -47,13 +47,29 @@ pub async fn login(
     let ip = client_ip_with_peer(&headers, Some(peer));
     let window = Duration::from_secs(cfg.auth.auth_fail_window_secs.max(1));
     let lock = Duration::from_secs(cfg.auth.auth_fail_lock_secs.max(1));
-    if let Some(secs) = state.login_guard.check(
-        &ip,
-        window,
-        cfg.auth.auth_fail_free_per_window,
-        cfg.auth.auth_fail_ban_threshold,
-        lock,
-    ) {
+    // 升级阶梯只在「IP 管控」打开时启用。默认关闭时锁定时长仍是固定的
+    // `auth_fail_lock_secs`，与改动前一致。
+    let checked = if cfg.auth.ip_guard_enabled {
+        state.login_guard.check_escalating(
+            &ip,
+            window,
+            cfg.auth.auth_fail_free_per_window,
+            cfg.auth.auth_fail_ban_threshold,
+            lock,
+            Duration::from_secs(cfg.auth.auth_fail_ban_duration_secs.max(1)),
+            Duration::from_secs(cfg.auth.auth_fail_ban_repeat_duration_secs.max(1)),
+            Duration::from_secs(cfg.auth.auth_fail_ban_escalate_window_secs.max(1)),
+        )
+    } else {
+        state.login_guard.check(
+            &ip,
+            window,
+            cfg.auth.auth_fail_free_per_window,
+            cfg.auth.auth_fail_ban_threshold,
+            lock,
+        )
+    };
+    if let Some(secs) = checked {
         return Err(login_locked(secs));
     }
     if !cfg.panel.enabled {

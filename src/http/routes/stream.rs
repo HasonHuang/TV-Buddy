@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 use url::Url;
 
 use crate::{
-    auth::Verdict,
+    auth::{Decision, Verdict},
     config::{model::Group, Config},
     http::ext::client_ip_with_peer,
     proxy,
@@ -82,6 +82,9 @@ pub async fn entry(
     let Some((cid, ext)) = split_entry(&file) else {
         return placeholder(&config);
     };
+    if let Some(response) = rate_limit(&state, &config, &headers, Some(peer)) {
+        return response;
+    }
     if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
         return response;
     }
@@ -1379,6 +1382,50 @@ fn split_entry(file: &str) -> Option<(String, String)> {
         return None;
     }
     Some((cid.to_string(), ext.to_string()))
+}
+
+/// 播放入口限流。返回 `Some` 时应直接回给客户端。
+///
+/// 只计入口请求（换台 / 新建播放），不计切片：切片频率由码率决定，限它等于限画质。
+/// 只在 `[auth].ip_guard_enabled = true` 时生效，默认配置下不改变任何行为。
+fn rate_limit(
+    state: &Arc<AppState>,
+    config: &Config,
+    headers: &HeaderMap,
+    peer: Option<SocketAddr>,
+) -> Option<Response> {
+    if !config.auth.ip_guard_enabled {
+        return None;
+    }
+    let ip = client_ip_with_peer(headers, peer);
+    if crate::auth::whitelisted(&config.auth.whitelist, &ip) {
+        return None;
+    }
+    let limits = crate::auth::Limits {
+        l1_window: Duration::from_secs(config.auth.l1_window_secs.max(1)),
+        l1_limit: config.auth.l1_limit,
+        l2_window: Duration::from_secs(config.auth.l2_window_secs.max(1)),
+        l2_limit: config.auth.l2_limit,
+        cooldown: Duration::from_secs(config.auth.cooldown_secs),
+        violation_window: Duration::from_secs(config.auth.violation_window_secs.max(1)),
+        violation_decay: Duration::from_secs(config.auth.violation_decay_secs),
+        ban_threshold: config.auth.ban_threshold.max(1),
+    };
+    match state.rate_limiter.check(&ip, &limits) {
+        Decision::Allow => None,
+        Decision::Throttle(secs) => {
+            let mut response = (StatusCode::TOO_MANY_REQUESTS, "rate limited").into_response();
+            if let Ok(value) = HeaderValue::from_str(&secs.to_string()) {
+                response.headers_mut().insert(header::RETRY_AFTER, value);
+            }
+            Some(response)
+        }
+        Decision::Ban => {
+            state.ip_guard.ban(&ip, config.auth.ban_duration_secs);
+            state.rate_limiter.reset_violations(&ip);
+            Some((StatusCode::FORBIDDEN, "banned").into_response())
+        }
+    }
 }
 
 /// 播放会话限制。返回 `Some` 时应直接回给客户端。

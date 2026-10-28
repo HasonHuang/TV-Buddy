@@ -686,30 +686,31 @@ pub struct AuthCfg {
     /// 首次锁定秒数。目标首次锁实测固定 ~300s（`auth_fail_ban_duration_secs` 改小也不变），
     /// 所以本实现的锁定就用这个键的默认值 `300`；目标文件里没有这个键名。
     pub auth_fail_lock_secs: u64,
-    // --- 以下键面与目标 v0.8.2 一致，本实现**未消费**（见 PROGRESS §2.3） ---
-    /// 一级限流窗口（秒）。**未消费**：`l1/l2` 触发条件未复现。
+    // --- 限流、违规与升级封禁：语义自定（F-010 未观测到目标行为） ---
+    // 只计播放入口请求，不计切片。全部只在 `ip_guard_enabled` 为真时生效。
+    /// 一级（持续）限流窗口（秒）。
     pub l1_window_secs: u64,
-    /// 一级窗口次数上限。**未消费**。
+    /// 一级窗口次数上限；`0` = 关闭该级。
     pub l1_limit: u64,
-    /// 二级限流窗口（秒）。**未消费**。
+    /// 二级（突发）限流窗口（秒）。
     pub l2_window_secs: u64,
-    /// 二级窗口次数上限。**未消费**。
+    /// 二级窗口次数上限；`0` = 关闭该级。
     pub l2_limit: u64,
-    /// 违规冷却（秒）。**未消费**。
+    /// 超限后的冷却秒数。冷却期内返回 `429` + `Retry-After`。
     pub cooldown_secs: u64,
-    /// 违规统计窗口（秒）。**未消费**。
+    /// 违规统计窗口（秒）。
     pub violation_window_secs: u64,
-    /// 违规衰减（秒）。**未消费**。
+    /// 违规衰减（秒）：每满一个周期，最旧的一条违规失效。
     pub violation_decay_secs: u64,
-    /// 违规多少次升级为封禁。**未消费**。
+    /// 有效违规多少次升级为封禁。
     pub ban_threshold: u64,
-    /// 封禁时长（秒，默认 30 天）。**未消费**：面板封禁走 `POST /security/ip/ban` 的入参。
+    /// 违规升级为封禁时的时长（秒）。面板手动封禁仍用接口入参。
     pub ban_duration_secs: u64,
-    /// 首次登录爆破封禁时长（秒）。**未消费**：首锁固定 300s（见 `auth_fail_lock_secs`）。
+    /// 第 2 次登录锁的时长（秒）。
     pub auth_fail_ban_duration_secs: u64,
-    /// 重复爆破的封禁时长（秒）。**未消费**。
+    /// 第 3 次及以后登录锁的时长（秒）。
     pub auth_fail_ban_repeat_duration_secs: u64,
-    /// 升级为重复封禁的统计窗口（秒）。**未消费**。
+    /// 登录锁升级统计窗口（秒）。超出窗口后重新按第 1 次计。
     pub auth_fail_ban_escalate_window_secs: u64,
     #[serde(flatten)]
     pub extra: toml::Table,

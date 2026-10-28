@@ -76,6 +76,8 @@ pub struct AppState {
     pub ip_guard: crate::auth::IpGuard,
     /// 每 IP 播放会话上限与空闲超时。
     pub play_sessions: crate::auth::SessionGuard,
+    /// 播放入口的两级限流与违规升级。
+    pub rate_limiter: crate::auth::RateLimiter,
     /// 面板登录失败锁。
     pub login_guard: crate::auth::LoginGuard,
     /// 自助解封配额。
@@ -134,6 +136,7 @@ impl AppState {
             health: crate::health::Health::new(),
             ip_guard: crate::auth::IpGuard::new(),
             play_sessions: crate::auth::SessionGuard::new(),
+            rate_limiter: crate::auth::RateLimiter::new(),
             login_guard: crate::auth::LoginGuard::new(),
             unban_quota: crate::auth::UnbanQuota::new(),
             estimate,

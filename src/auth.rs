@@ -6,6 +6,7 @@
 pub mod ip_guard;
 pub mod login_guard;
 pub mod play_token;
+pub mod rate_limit;
 pub mod session;
 pub mod session_guard;
 pub mod unban;
@@ -13,6 +14,7 @@ pub mod unban;
 pub use ip_guard::IpGuard;
 pub use login_guard::LoginGuard;
 pub use play_token::PlayTokenStore;
+pub use rate_limit::{Decision, Limits, RateLimiter};
 pub use session::SessionStore;
 pub use session_guard::{whitelisted, SessionGuard, Verdict};
 pub use unban::UnbanQuota;
