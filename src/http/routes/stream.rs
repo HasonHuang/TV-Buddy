@@ -4,14 +4,15 @@
 
 use std::{
     collections::HashMap,
+    net::SocketAddr,
     path::PathBuf,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
     body::Body,
-    extract::{Path, Query, RawQuery, State},
+    extract::{ConnectInfo, Path, Query, RawQuery, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -21,7 +22,9 @@ use tokio::sync::mpsc;
 use url::Url;
 
 use crate::{
+    auth::Verdict,
     config::{model::Group, Config},
+    http::ext::client_ip_with_peer,
     proxy,
     state::AppState,
 };
@@ -70,6 +73,7 @@ fn segment_cache_control(state: &AppState, first: bool) -> String {
 /// `GET /{gid}/{cid}.m3u8` 与 `/{gid}/{cid}.mpd`。
 pub async fn entry(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path((gid, file)): Path<(String, String)>,
     Query(query): Query<HashMap<String, String>>,
@@ -78,6 +82,9 @@ pub async fn entry(
     let Some((cid, ext)) = split_entry(&file) else {
         return placeholder(&config);
     };
+    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
+        return response;
+    }
     play_entry(&state, &gid, &cid, &ext, &query, &headers).await
 }
 
@@ -338,6 +345,7 @@ fn warming_up() -> Response {
 /// `GET /{gid}/{cid}/*path`：`video/index.txt`、`index.m3u8` 或伪装切片。
 pub async fn wildcard(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path((gid, cid, rest)): Path<(String, String, String)>,
     RawQuery(raw_query): RawQuery,
@@ -345,6 +353,9 @@ pub async fn wildcard(
     let rest = rest.trim_start_matches('/').to_string();
     // 对外基址与分组解析共用一份快照。
     let config = state.snapshot();
+    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
+        return response;
+    }
     if let Some(name) = rest.strip_prefix("timeshift/") {
         return state
             .timeshift
@@ -1368,6 +1379,32 @@ fn split_entry(file: &str) -> Option<(String, String)> {
         return None;
     }
     Some((cid.to_string(), ext.to_string()))
+}
+
+/// 播放会话限制。返回 `Some` 时应直接回给客户端。
+///
+/// 只在 `[auth].ip_guard_enabled = true` 时生效，默认配置下不改变任何行为。
+/// 白名单地址豁免。超限时跳 `limit_url`。
+fn session_limit(
+    state: &Arc<AppState>,
+    config: &Config,
+    headers: &HeaderMap,
+    peer: Option<SocketAddr>,
+    channel: &str,
+) -> Option<Response> {
+    if !config.auth.ip_guard_enabled {
+        return None;
+    }
+    let ip = client_ip_with_peer(headers, peer);
+    if crate::auth::whitelisted(&config.auth.whitelist, &ip) {
+        return None;
+    }
+    let ttl = Duration::from_secs(config.auth.session_ttl_secs.max(1));
+    let max = config.auth.max_sessions_per_ip.max(1) as usize;
+    match state.play_sessions.check(&ip, channel, ttl, max) {
+        Verdict::Allow => None,
+        Verdict::Limit => Some(redirect_asset(config, &config.auth.limit_url)),
+    }
 }
 
 /// Token 仅校验入口；`open` 组免校验（F-007、F-009）。

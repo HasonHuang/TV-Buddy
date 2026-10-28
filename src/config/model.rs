@@ -661,14 +661,21 @@ pub struct AuthCfg {
     pub token_failure_url: String,
     pub random_id_enabled: bool,
     pub ip_guard_enabled: bool,
-    /// 每 IP 并发会话上限。**未消费**：目标未观测到生效。
+    /// 每 IP 并发播放会话上限；`0` = 不限。
+    ///
+    /// 语义自定（F-010 未观测到目标行为）：会话 = `(IP, 频道)`，超出时踢掉最久未用的那路。
+    /// 只在 [`AuthCfg::ip_guard_enabled`] 为真时生效。
     pub max_sessions_per_ip: u32,
-    /// 会话超时（秒）。**未消费**：目标未观测到生效。
+    /// 播放会话空闲超时（秒）。超过该时长没有播放请求即释放会话。
+    ///
+    /// 只在 [`AuthCfg::ip_guard_enabled`] 为真时生效。
     pub session_ttl_secs: u64,
     pub limit_url: String,
     pub ban_url: String,
-    /// 白名单（精确地址 / CIDR / `*`）。**未消费**：豁免语义在目标上未观测到行为，
-    /// 只保留键面与面板编辑入口（同 `random_id_enabled`、`share_token`）。
+    /// 白名单（精确地址 / IPv4 CIDR / `*`）。命中后豁免封禁与并发会话上限。
+    ///
+    /// 只在 [`AuthCfg::ip_guard_enabled`] 为真时生效。语义自定（F-010）：
+    /// 目标键面里有它，但豁免规则在目标上未观测到行为。
     pub whitelist: Vec<String>,
     /// 登录失败统计窗口（秒）。
     pub auth_fail_window_secs: u64,

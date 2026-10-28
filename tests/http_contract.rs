@@ -310,14 +310,20 @@ async fn fixture_with_extra(extra: &str) -> Fixture {
     fixture_with_all(false, extra).await
 }
 
+/// 带额外 TOML 片段与 `[auth]` 键的夹具。
+async fn fixture_with_extra_and_auth(extra: &str, auth_extra: &str) -> Fixture {
+    fixture_with_options(false, extra, true, auth_extra).await
+}
+
 async fn fixture_with_all(epg_enabled: bool, extra_section: &str) -> Fixture {
-    fixture_with_options(epg_enabled, extra_section, true).await
+    fixture_with_options(epg_enabled, extra_section, true, "").await
 }
 
 async fn fixture_with_options(
     epg_enabled: bool,
     extra_section: &str,
     public_viewer_enabled: bool,
+    auth_extra: &str,
 ) -> Fixture {
     let dir = std::env::temp_dir().join(format!("tv-buddy-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("建临时目录");
@@ -357,6 +363,7 @@ error_url = "http://placeholder.test/mistake.mp4"
 [auth]
 token_enabled = true
 token_failure_url = "http://placeholder.test/Failure.mp4"
+{auth_extra}
 
 [cache]
 backend = "disk"
@@ -441,6 +448,7 @@ url = "{upstream}/badseg.m3u8"
 "#,
         dir = dir.display(),
         extra_section = extra_section,
+        auth_extra = auth_extra,
         epg_section = if epg_enabled {
             format!(
                 r#"
@@ -1483,7 +1491,7 @@ async fn epg_api_exposes_channels_programmes_and_search() {
     let response = fetch(&disabled, "/epg/api/channels").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    let hidden = fixture_with_options(true, "", false).await;
+    let hidden = fixture_with_options(true, "", false, "").await;
     let response = fetch(&hidden, "/epg/api/channels").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let body: serde_json::Value =
@@ -3338,6 +3346,59 @@ url = "{upstream}/dash/pool/live.mpd"
         "池关闭时每个地址用满 retry_max+1 次"
     );
     assert_eq!(POOL_B_HITS.load(Ordering::SeqCst), 1);
+}
+
+/// 播放会话上限：只在 `[auth].ip_guard_enabled = true` 时生效。
+///
+/// 语义自定（F-010 未观测到目标行为）：会话 = `(IP, 频道)`。
+/// 超过 `max_sessions_per_ip` 时踢掉最久未用的那个；被踢的频道在
+/// `session_ttl_secs` 内回来会拿到 `limit_url`。
+#[tokio::test]
+async fn play_session_limit_only_when_guard_enabled() {
+    let groups = r#"
+[[groups]]
+id = "sl"
+name = "会话组"
+mode = "proxy"
+access = "open"
+
+[[groups.channels]]
+id = "a"
+name = "A"
+url = "{upstream}/live.m3u8"
+
+[[groups.channels]]
+id = "b"
+name = "B"
+url = "{upstream}/live.m3u8"
+"#;
+    let limit = "https://material.yang-1989.eu.org/v/limit.mp4";
+
+    // 默认：`ip_guard_enabled = false`，两个频道都能播，没有踢人。
+    let off = fixture_with_extra_and_auth(groups, "").await;
+    assert_eq!(fetch(&off, "/sl/a.m3u8").await.status(), StatusCode::OK);
+    assert_eq!(fetch(&off, "/sl/b.m3u8").await.status(), StatusCode::OK);
+    assert_eq!(fetch(&off, "/sl/a.m3u8").await.status(), StatusCode::OK);
+
+    // 打开守卫：第二个频道入，第一个频道被踢。
+    let on = fixture_with_extra_and_auth(groups, "ip_guard_enabled = true\n").await;
+    assert_eq!(fetch(&on, "/sl/a.m3u8").await.status(), StatusCode::OK);
+    assert_eq!(fetch(&on, "/sl/b.m3u8").await.status(), StatusCode::OK);
+    let kicked = fetch(&on, "/sl/a.m3u8").await;
+    assert_eq!(kicked.status(), StatusCode::FOUND);
+    assert_eq!(header(&kicked, "location"), limit);
+    // 当前频道继续放行。
+    assert_eq!(fetch(&on, "/sl/b.m3u8").await.status(), StatusCode::OK);
+
+    // 白名单豁免：同一地址看两个频道都放行。
+    let exempt = fixture_with_extra_and_auth(
+        groups,
+        "ip_guard_enabled = true\nwhitelist = [\"127.0.0.1\"]\n",
+    )
+    .await;
+    assert_eq!(fetch(&exempt, "/sl/a.m3u8").await.status(), StatusCode::OK);
+    assert_eq!(fetch(&exempt, "/sl/b.m3u8").await.status(), StatusCode::OK);
+    assert_eq!(fetch(&exempt, "/sl/a.m3u8").await.status(), StatusCode::OK);
 }
 
 /// DASH 时移：清单要 `playseek`，切片按轨道录制序号命名。

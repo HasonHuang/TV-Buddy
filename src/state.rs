@@ -74,6 +74,8 @@ pub struct AppState {
     pub epg: crate::epg::EpgState,
     /// IP 统计与封禁。
     pub ip_guard: crate::auth::IpGuard,
+    /// 每 IP 播放会话上限与空闲超时。
+    pub play_sessions: crate::auth::SessionGuard,
     /// 面板登录失败锁。
     pub login_guard: crate::auth::LoginGuard,
     /// 自助解封配额。
@@ -131,6 +133,7 @@ impl AppState {
             watchdog: Watchdog::new(),
             health: crate::health::Health::new(),
             ip_guard: crate::auth::IpGuard::new(),
+            play_sessions: crate::auth::SessionGuard::new(),
             login_guard: crate::auth::LoginGuard::new(),
             unban_quota: crate::auth::UnbanQuota::new(),
             estimate,

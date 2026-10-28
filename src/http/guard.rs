@@ -27,7 +27,12 @@ pub async fn ip_guard(
             .map(|info| info.0);
         let ip = client_ip_with_peer(request.headers(), peer);
         state.ip_guard.record_request(&ip);
-        if state.ip_guard.is_banned(&ip) {
+        // 白名单豁免封禁。只在 `ip_guard_enabled` 打开时生效，
+        // 否则默认配置下白名单会改变既有封禁行为。
+        let config = state.snapshot();
+        let exempt =
+            config.auth.ip_guard_enabled && crate::auth::whitelisted(&config.auth.whitelist, &ip);
+        if !exempt && state.ip_guard.is_banned(&ip) {
             return (StatusCode::FORBIDDEN, "banned").into_response();
         }
     }

@@ -46,6 +46,8 @@ type IpStats = {
  * 标注 `未消费` 的键是目标 v0.8.2 也有、但本实现尚未实现的（限流 `l1/l2`、
  * 升级封禁等）；键面保留以便配置文件在本实现与目标之间来回搬，编辑它们不会
  * 改变运行行为——界面上明确写出，避免「配了没反应」。
+ *
+ * 并发会话、会话超时与白名单已生效，但只在 `ip_guard_enabled` 打开时参与判定。
  */
 type AuthCfg = Record<string, unknown>;
 type FullConfig = { auth?: AuthCfg } & Record<string, unknown>;
@@ -57,14 +59,12 @@ const AUTH_LIMIT: NumField[] = [
   {
     key: 'max_sessions_per_ip',
     label: '每 IP 并发会话',
-    hint: '0 = 不限；目标未观测到生效，本实现未消费',
-    unconsumed: true,
+    hint: '每 IP 同时可看的频道数，超出时踢掉最久未用的那路；0 = 不限。仅在「IP 管控」开启时生效',
   },
   {
     key: 'session_ttl_secs',
     label: '会话超时',
-    hint: '秒；目标未观测到生效，本实现未消费',
-    unconsumed: true,
+    hint: '秒；该 IP 超过此时长没有播放请求即释放会话。仅在「IP 管控」开启时生效',
   },
   { key: 'l1_window_secs', label: '一级窗口', hint: '秒', unconsumed: true },
   { key: 'l1_limit', label: '一级窗口次数', unconsumed: true },
@@ -207,13 +207,11 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         </button>
       </div>
 
-      <h3>
-        白名单<span className="tag" style={{ marginLeft: 6 }}>未消费</span>
-      </h3>
+      <h3>白名单</h3>
       <p className="muted">
-        每行一个地址，支持精确 IP、CIDR 与 `*`。目标键面里有它，但白名单是否豁免 IP 管控与封禁
-        在目标上**未观测到行为**，所以本实现只保留键面与编辑入口、不参与判定
-        （同 `random_id_enabled`、`share_token` 的处理，见 `PROGRESS.md` §2.3）。
+        每行一个地址，支持精确 IP、IPv4 CIDR 与 `*`。只在上方「IP 管控」开启时生效：
+        名单内的地址豁免封禁与并发会话上限。目标键面里有它，但豁免语义在目标上未观测到，
+        本实现的规则是自定的（见 `PROGRESS.md` §3.3）。
       </p>
       <textarea
         rows={4}
@@ -253,8 +251,9 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
 
       <h3>限流与会话</h3>
       <p className="muted">
-        带「未消费」的键是本实现尚未实现的行为（限流的触发条件在目标上未复现，
-        见 `PROGRESS.md` §2.3）；保留键面以便配置在两边的文件间来回搬。
+        前两项（并发会话、会话超时）已生效，但只在「IP 管控」开启时参与判定。
+        带「未消费」的 `l1`/`l2` 键是目标 v0.8.2 也有、本实现尚未实现的行为
+        （触发条件在目标上未复现，见 `PROGRESS.md` §6.2）。
       </p>
       <div className="fields">
         {AUTH_LIMIT.map((field) => (

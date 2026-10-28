@@ -99,7 +99,7 @@
 | --- | --- | --- |
 | `dashboard` | 实时指标（下行·回源、上行·出网、进程内存、CPU、整盘内存峰值）；快速操作（清空缓存、热重载、刷新状态、导出全部 M3U）；系统信息含 RSS | ✅ 已对齐（2026-10-27）。`/panel/api/status` 已按目标字段补齐（见 `07` §3.B1/B2），页面直接渲染键值；快速操作四项已在。`traffic_in_bytes` 恒 0，与目标一致 |
 | `groups` | 分组与频道排序（`▲`/`▼`，组名左侧另有拖拽柄）；工具栏 `M3U 导入`/`JSON 导入`/`JSON 覆盖`/`导出全部`/`多选`；频道行状态点与 `异常`/`常驻`/`全轨道` 徽章 | ✅ 已对齐（2026-10-27）。排序、四个导入导出入口、配置型三枚徽章、绿点与 `异常`（来自 `/panel/api/health` 的 `entries`）都在。`多选` 已自定实现：分组复选框 + 批量导出 + 批量删除（目标语义未观测，登记在 `PROGRESS.md` §3.3）。拖拽柄未做（等价功能由上/下移覆盖）。证据：`reference/img/p02-groups.png`；`07` `D-006` |
-| `security` | 白名单、限流 `l1`/`l2`、会话 TTL 与并发、防爆破 | ✅ 已加「访问控制」卡片：读整份配置改 `[auth]` 子树后 `PUT /panel/api/config`（与设置页同机制），四组都在。**未消费的键**（白名单、`max_sessions_per_ip`/`session_ttl_secs`、`l1/l2`、升级封禁）逐项标 `未消费` 并写明不改变运行行为。另加「播放链接审计」卡片显示 `GET /panel/api/link-info` 的 Token 状态、随机 ID 与别名 |
+| `security` | 白名单、限流 `l1`/`l2`、会话 TTL 与并发、防爆破 | ✅ 「访问控制」卡片读整份配置、改 `[auth]` 子树后 `PUT /panel/api/config`（与设置页同机制）。白名单、`max_sessions_per_ip`、`session_ttl_secs` 已生效（2026-10-28，只在「IP 管控」开启时参与判定）。仍标 `未消费` 的只剩 `l1`/`l2` 与升级封禁。另加「播放链接审计」卡片显示 `GET /panel/api/link-info` 的 Token 状态、随机 ID 与别名 |
 | `logs` | 级别过滤 | ✅ 已加级别下拉（全部/TRACE/DEBUG/INFO/WARN/ERROR），前端按行过滤；顺带剥掉环形缓冲里的 ANSI 颜色码（原先直接塞 `<pre>` 会显示成控制符） |
 | `epg` | 翻译设置（`m08` 翻译模型）；采集节奏 | ✅ 已加五张卡：「采集节奏」= cron 输入 + `POST /panel/api/epg/cron-preview`；「EPG 翻译」= 引擎与目标语言 + 测试 + 立即翻译 + 清空缓存；「翻译模型」= `GET /panel/api/epg/translate/models` + `probe`；「采集脚本」= `/epg/scripts` 列表 + 上传/覆盖 + 删除；「匹配报告」= `GET /panel/api/epg/match-report` 原样显示 `text/plain` 表格；「匹配工具」= 建议、源频道浏览、时区预览；「公开查看器频道」= `GET /panel/api/epg/viewer-channels` |
 | `logos` | 动效（`m09`）、转码参数（最大边 / 质量 / 转 WebP） | ✅ 已接：上传前在浏览器里按最长边等比缩放、可选转 WebP（目标同，服务端不转码）；每个台标卡加「动效」→ 6 效果选择 + `POST /panel/api/logo/animate`，生成后显示帧数/尺寸/时长/体积变化；有 `.orig/` 备份的显示「还原」 |
