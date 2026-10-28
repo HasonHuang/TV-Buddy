@@ -42,7 +42,7 @@
 | 项 | 数量 |
 | --- | --- |
 | 路由注册（`src/http.rs`） | 131 |
-| 测试 | 347（255 单元 + 92 契约） |
+| 测试 | 348（256 单元 + 92 契约） |
 | 冒烟脚本（`scripts/smoke-*.sh`） | 26 |
 
 已覆盖的能力：
@@ -84,7 +84,7 @@
 7. 切片扩展名白名单：5 项图片扩展名 + 磁盘原名 `m4s`。init 用 `mp4`。
 8. 旧 `timeshift` 模块删掉 DASH 分支（原用 ffmpeg 转 HLS），避免两条路径重复录制。
 
-对拍结果：同一份动态 MPD 与同一时间窗，目标与本实现逐项比对 18 项，差异 1 项。差异是音轨名，见 §6 P3-1。
+对拍结果：同一份动态 MPD 与同一时间窗，目标与本实现逐项比对 18 项，差异 1 项。差异是音轨名，已于 2026-10-28 收口（P3-1）。
 
 质量门：302 项测试通过（215 单元 + 87 契约）。`smoke-dash-timeshift.sh` 13 项全部通过。
 
@@ -329,7 +329,7 @@
 | 项 | 结果 |
 | --- | --- |
 | `cargo fmt --check` | 通过 |
-| `cargo test --offline --all-targets` | 347 项通过（255 单元 + 92 契约） |
+| `cargo test --offline --all-targets` | 348 项通过（256 单元 + 92 契约） |
 | `cargo clippy --offline --all-targets` | 0 error，27 条历史 warning |
 | 冒烟脚本 | 26 个全部通过。`smoke-record-dash` 需要 ffmpeg，且要求端口 19970/19971 空闲 |
 | `pnpm build` | 通过（含 `tsc --noEmit`） |
@@ -351,7 +351,7 @@ EPG：
 
 DASH：
 
-- 轨道命名：`video_{高}p`、`audio-{n}`、`text-{n}`。目标音轨用 `audio-{语言}`，见 §6 P3-1。
+- 轨道命名：`video_{高}p`、`audio-{语言}`（缺语言时 `audio-{n}`）、`text-{n}`。
 - 媒体清单路径：`/{gid}/{cid}/{track}/index.txt`。
 - 媒体窗口取 `[cache.dash].playlist_min_secs`。分组 `mpd_keep_seconds > 0` 时优先。
 - 直播清单按 `start_time_offset_secs` 输出 `#EXT-X-START:TIME-OFFSET=-…`。
@@ -433,7 +433,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 
 | # | 项 | 现状 | 依据 |
 | --- | --- | --- | --- |
-| P3-1 | DASH 音轨命名对齐 `audio-{语言}` | 本实现统一用 `audio-{序号}` | F-016 §5.1 |
+| P3-1 | DASH 音轨命名对齐 `audio-{语言}` | ✅ 已实现（2026-10-28）。有 `lang` 时用 `audio-{语言}`，缺语言时退回序号；同名加 `-2` 后缀 | F-016 §5.1 |
 | P3-2 | DASH 文字轨出口 | 目标在实测夹具里不写 master。本实现输出 `SUBTITLES` 组 | F-016 §5.1 |
 | P3-3 | `[subtitle].style.*` 样式注入 | 保留键面。运行时不注入 VTT | `05` §4.1 |
 | P3-4 | 播放侧 `compat_mode`、`srt_ua_keywords` | 不实现。目标未测出行为 | D19 |

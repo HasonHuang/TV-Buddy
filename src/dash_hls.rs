@@ -1214,7 +1214,7 @@ mod tests {
         let body = render_master(&presentation(), "g", "c", "http://self");
         assert!(body.contains("#EXT-X-MEDIA:TYPE=AUDIO"));
         assert!(body.contains("video_720p/index.txt"));
-        assert!(body.contains("audio-0/index.txt"));
+        assert!(body.contains("audio-zh/index.txt"), "{body}");
         assert!(body.contains("RESOLUTION=1280x720"));
     }
 

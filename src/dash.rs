@@ -370,7 +370,11 @@ fn name_streams(streams: &mut [Stream]) {
                 None => format!("video-{}", stream.id.trim()),
             },
             "audio" => {
-                let name = format!("audio-{audio}");
+                // 目标按语言命名音轨（`audio-{语言}`）；缺语言时退回序号。
+                let name = match stream.lang.as_deref().and_then(track_lang) {
+                    Some(lang) => format!("audio-{lang}"),
+                    None => format!("audio-{audio}"),
+                };
                 audio += 1;
                 name
             }
@@ -393,6 +397,17 @@ fn name_streams(streams: &mut [Stream]) {
         }
         stream.name = name;
     }
+}
+
+/// 把语言标记压成文件名安全的片段：只留 ASCII 字母数字与 `-`，转小写。
+fn track_lang(value: &str) -> Option<String> {
+    let cleaned: String = value
+        .trim()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    (!cleaned.is_empty()).then_some(cleaned)
 }
 
 fn resolve_all(bases: &[String], reference: &str) -> Vec<String> {
@@ -804,6 +819,42 @@ mod tests {
         assert_eq!(segment.urls.len(), 2);
         assert_eq!(segment.urls[0], "http://cdn-a.example/dash/a-1.m4s");
         assert_eq!(segment.urls[1], "http://cdn-b.example/dash/a-1.m4s");
+    }
+
+    #[test]
+    fn names_audio_tracks_by_language() {
+        let xml = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT2S">
+  <Period>
+    <AdaptationSet contentType="audio" lang="en">
+      <SegmentTemplate timescale="1000" duration="1000" media="a1-$Number$.m4s" startNumber="1"/>
+      <Representation id="a1"/>
+    </AdaptationSet>
+    <AdaptationSet contentType="audio" lang="zh-Hans">
+      <SegmentTemplate timescale="1000" duration="1000" media="a2-$Number$.m4s" startNumber="1"/>
+      <Representation id="a2"/>
+    </AdaptationSet>
+    <AdaptationSet contentType="audio">
+      <SegmentTemplate timescale="1000" duration="1000" media="a3-$Number$.m4s" startNumber="1"/>
+      <Representation id="a3"/>
+    </AdaptationSet>
+    <AdaptationSet contentType="audio" lang="en">
+      <SegmentTemplate timescale="1000" duration="1000" media="a4-$Number$.m4s" startNumber="1"/>
+      <Representation id="a4"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        let presentation = parse_presentation(xml, "http://origin.example/a.mpd").expect("解析");
+        let names: Vec<&str> = presentation
+            .streams
+            .iter()
+            .map(|stream| stream.name.as_str())
+            .collect();
+        // 语言可用时按语言命名；重复语言加序号；缺语言退回计数。
+        assert_eq!(names[0], "audio-en");
+        assert_eq!(names[1], "audio-zh-hans");
+        assert_eq!(names[2], "audio-2");
+        assert_eq!(names[3], "audio-en-2");
     }
 
     #[test]
