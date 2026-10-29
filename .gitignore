@@ -5,6 +5,7 @@
 # 只登记指纹（见 docs/findings/artifact.md）
 /samples/
 
+
 # Rust 构建产物
 /target/
 
@@ -20,3 +21,6 @@ frontend/dist/
 
 .codegraph/
 .opencode/
+
+# 测试
+tests/manual/
