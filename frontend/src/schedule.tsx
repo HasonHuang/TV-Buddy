@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, getToken } from './api';
 import type { Channel, Group } from './groups';
-import { Badge, useToast } from './ui';
+import { Badge, PageHead, useToast } from './ui';
 
 type Task = {
   id: string;
@@ -267,8 +267,9 @@ export function SchedulePage({
     <>
       {view !== 'livestream' && (
         <>
+          <PageHead icon="schedule" title="定时录制" sub="按时间表用 ffmpeg 录制，产物为 MKV" />
           <div className="card">
-            <h1>新建录制任务</h1>
+            <div className="section-title">新建录制任务</div>
             <div className="row">
               <select
                 value={form.group_id}
@@ -371,8 +372,8 @@ export function SchedulePage({
           </div>
 
           <div className="card">
-            <h1>录制任务</h1>
-            <table>
+            <div className="section-title">录制任务</div>
+            <table className="table">
               <thead>
                 <tr>
                   <th>名称</th>
@@ -437,8 +438,9 @@ export function SchedulePage({
       )}
 
       {view !== 'schedule' && (
+        <>
+        <PageHead icon="livestream" title="回看管理" sub="按频道缓冲历史切片，支持时移回看" />
         <div className="card">
-          <h1>直播回看</h1>
           <p className="muted">
             点亮后按频道 `timeshift_hours` 缓冲；回看清单用 `?start&end` 或 `?playseek` 请求入口。
             {timeshift &&
@@ -447,7 +449,7 @@ export function SchedulePage({
                 0,
               )} 条。`}
           </p>
-          <table>
+          <table className="table">
             <thead>
               <tr>
                 <th>分组</th>
@@ -485,6 +487,7 @@ export function SchedulePage({
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {node}

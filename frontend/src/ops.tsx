@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, apiText, getToken } from './api';
+import { Icon } from './icons';
+import { PageHead } from './ui';
 
 type TokenInfo = {
   enabled: boolean;
@@ -398,19 +400,14 @@ export function SecurityPage() {
 
   return (
     <>
+      <PageHead icon="security" title="安全管控" sub="播放 Token、访问控制与限流">
+        <button className="ghost" onClick={() => void load()}>
+          <Icon name="refresh" size={14} />
+          刷新
+        </button>
+        <button onClick={() => void rotate()}>轮换 Token</button>
+      </PageHead>
       <div className="card">
-        <div className="row between">
-          <div>
-            <h1>安全管控</h1>
-            <h2>播放 Token</h2>
-          </div>
-          <div className="row">
-            <button className="ghost" onClick={() => void load()}>
-              刷新
-            </button>
-            <button onClick={() => void rotate()}>轮换 Token</button>
-          </div>
-        </div>
         <dl>
           <dt>校验</dt>
           <dd>{token ? (token.enabled ? '已开启' : '已关闭') : '—'}</dd>
@@ -551,15 +548,12 @@ export function LogsPage() {
   const shown = level === 'all' ? lines : lines.filter((line) => levelOf(line) === level);
 
   return (
-    <div className="card">
-      <div className="row between">
-        <div>
-          <h1>运行日志</h1>
-          <h2>
-            最近 {shown.length} 行
-            {level === 'all' ? '' : `（${level.toUpperCase()}）`}（共 {total} 行）
-          </h2>
-        </div>
+    <>
+      <PageHead
+        icon="logs"
+        title="运行日志"
+        sub={`最近 ${shown.length} 行${level === 'all' ? '' : `（${level.toUpperCase()}）`}（共 ${total} 行）`}
+      >
         <div className="row">
           <select
             value={level}
@@ -578,16 +572,21 @@ export function LogsPage() {
             style={{ width: 80 }}
           />
           <button className="ghost" onClick={() => void load()}>
+            <Icon name="refresh" size={14} />
             刷新
           </button>
         </div>
+      </PageHead>
+      <div className="card">
+        {error && <div className="msg err">{error}</div>}
+        <pre className="log" style={{ marginTop: 0 }}>
+          {shown.map(plain).join('\n')}
+        </pre>
+        {level !== 'all' && shown.length === 0 && (
+          <p className="muted">当前缓冲里没有 {level.toUpperCase()} 级别的行。</p>
+        )}
       </div>
-      {error && <div className="msg err">{error}</div>}
-      <pre className="log">{shown.map(plain).join('\n')}</pre>
-      {level !== 'all' && shown.length === 0 && (
-        <p className="muted">当前缓冲里没有 {level.toUpperCase()} 级别的行。</p>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -652,10 +651,11 @@ export function BackupPage() {
   };
 
   return (
-    <div className="card">
-      <h1>备份与恢复</h1>
-      <h2>导出</h2>
-      <div className="row">
+    <>
+      <PageHead icon="download" title="备份与恢复" sub="导出与回滚配置、脚本与资源" />
+      <div className="card">
+        <div className="section-title">导出</div>
+        <div className="row">
         <select value={scope} onChange={(event) => setScope(event.target.value)}>
           <option value="all">全部</option>
           <option value="epg-scripts">仅 EPG 脚本</option>
@@ -663,19 +663,22 @@ export function BackupPage() {
         </select>
         <button onClick={() => void download()}>下载备份</button>
       </div>
-      <h2 style={{ marginTop: 24 }}>恢复</h2>
-      <p className="muted">
-        恢复会覆盖 `config.toml`，旧文件另存为 `config.toml.bak`。非法内容不会落盘。
-      </p>
-      <input
-        ref={file}
-        type="file"
-        accept=".gz,application/gzip"
-        onChange={(event) => void restore(event.target)}
-      />
-      {message && <div className="msg ok">{message}</div>}
-      {error && <div className="msg err">{error}</div>}
-    </div>
+        <div className="section-title" style={{ marginTop: 20 }}>
+          恢复
+        </div>
+        <p className="muted">
+          恢复会覆盖 `config.toml`，旧文件另存为 `config.toml.bak`。非法内容不会落盘。
+        </p>
+        <input
+          ref={file}
+          type="file"
+          accept=".gz,application/gzip"
+          onChange={(event) => void restore(event.target)}
+        />
+        {message && <div className="msg ok">{message}</div>}
+        {error && <div className="msg err">{error}</div>}
+      </div>
+    </>
   );
 }
 
@@ -1222,27 +1225,26 @@ export function EpgPanelPage() {
 
   return (
     <>
+      <PageHead
+        icon="epg"
+        title="节目指南"
+        sub={status?.enabled ? '已开启' : '已关闭'}
+      >
+        <a className="ghost" href="/epg" target="_blank" rel="noreferrer">
+          浏览页面
+        </a>
+        <button className="ghost" onClick={() => void load()}>
+          <Icon name="refresh" size={14} />
+          刷新状态
+        </button>
+        <button className="ghost" onClick={() => void regenerate()} disabled={busy}>
+          重新生成
+        </button>
+        <button onClick={() => void refresh()} disabled={busy || !status?.enabled}>
+          {busy ? '采集中…' : '立即采集'}
+        </button>
+      </PageHead>
       <div className="card">
-        <div className="row between">
-          <div>
-            <h1>节目指南</h1>
-            <h2>{status?.enabled ? '已开启' : '已关闭'}</h2>
-          </div>
-          <div className="row">
-            <a className="nav-item" href="/epg" target="_blank" rel="noreferrer">
-              浏览页面
-            </a>
-            <button className="ghost" onClick={() => void load()}>
-              刷新状态
-            </button>
-            <button className="ghost" onClick={() => void regenerate()} disabled={busy}>
-              重新生成
-            </button>
-            <button onClick={() => void refresh()} disabled={busy || !status?.enabled}>
-              {busy ? '采集中…' : '立即采集'}
-            </button>
-          </div>
-        </div>
         <dl>
           <dt>源</dt>
           <dd>{status?.sources ?? 0} 个</dd>

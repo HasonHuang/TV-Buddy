@@ -10,6 +10,7 @@
 #   远程安装包：sudo ./install.sh --archive https://example.com/tv-buddy.tar.gz
 #
 # 只支持 Linux amd64/arm64。脚本幂等；已有 config.toml 不覆盖。
+# 装完即启动服务（`--no-start` 可关闭）。
 
 set -eu
 
@@ -21,7 +22,7 @@ GITHUB_REPO=${TV_BUDDY_REPO:-HasonHuang/TV-Buddy}
 VERSION=${TV_BUDDY_VERSION:-latest}
 DO_SERVICE=1
 DO_LINK=1
-DO_START=0
+DO_START=1
 USE_DIST=0
 TMP_DIR=
 DOWNLOADED=
@@ -41,7 +42,8 @@ usage() {
   --local            不从 Release 下载，改用本地 dist/ 中的安装包
   --no-service       不注册 systemd/OpenRC 服务
   --no-link          不创建 tv-buddy 命令软链
-  --start            安装后立即启动服务
+  --no-start         安装后不启动服务（默认会启动）
+  --start            安装后启动服务（默认行为，保留以兼容旧用法）
   -h, --help         显示本帮助
 
 环境变量：
@@ -107,6 +109,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --start)
             DO_START=1
+            shift
+            ;;
+        --no-start)
+            DO_START=0
             shift
             ;;
         -h|--help)
@@ -380,19 +386,37 @@ if [ "$DO_SERVICE" = 1 ]; then
     fi
 fi
 
+# 启动失败不算安装失败：文件已就位，用户可改完配置再启。
+STARTED=0
 if [ "$DO_START" = 1 ]; then
     case "$SERVICE_KIND" in
-        systemd) systemctl restart tv-buddy ;;
-        openrc) rc-service tv-buddy restart ;;
-        *) "$PREFIX/tv-buddy.sh" restart ;;
+        systemd)
+            if systemctl restart tv-buddy; then STARTED=1; else
+                echo "警告：systemctl restart tv-buddy 失败，见 systemctl status tv-buddy"
+            fi
+            ;;
+        openrc)
+            if rc-service tv-buddy restart; then STARTED=1; else
+                echo "警告：rc-service tv-buddy restart 失败，见 /var/log/messages"
+            fi
+            ;;
+        *)
+            if "$PREFIX/tv-buddy.sh" restart; then STARTED=1; else
+                echo "警告：服务启动失败，见 $PREFIX/tv-buddy.log"
+            fi
+            ;;
     esac
 fi
 
 echo "安装完成：$PREFIX"
 echo "配置：$PREFIX/config.toml"
 echo "面板：http://<主机>:19899/panel（默认 admin / admin，请及时修改）"
-case "$SERVICE_KIND" in
-    systemd) echo "启动：systemctl start tv-buddy" ;;
-    openrc) echo "启动：rc-service tv-buddy start" ;;
-    *) echo "启动：$PREFIX/tv-buddy.sh start" ;;
-esac
+if [ "$STARTED" = 1 ]; then
+    echo "状态：服务已启动"
+else
+    case "$SERVICE_KIND" in
+        systemd) echo "启动：systemctl start tv-buddy" ;;
+        openrc) echo "启动：rc-service tv-buddy start" ;;
+        *) echo "启动：$PREFIX/tv-buddy.sh start" ;;
+    esac
+fi

@@ -112,6 +112,9 @@ curl -fsSL https://raw.githubusercontent.com/HasonHuang/TV-Buddy/main/install.sh
 3. 校验同名 `.sha256` 文件。
 4. 解包到 `/opt/tv-buddy`。
 5. 注册 systemd 或 OpenRC 服务。
+6. 启动服务。
+
+装完就能打开面板。加 `--no-start` 可只装不启动。
 
 指定版本或仓库：
 
@@ -141,7 +144,8 @@ sudo ./install.sh
 | 指定归档 | `sudo ./install.sh --archive dist/tv-buddy-<version>-arm64.tar.gz` |
 | 指定 URL | `sudo ./install.sh --archive https://example.com/pkg.tar.gz` |
 | 只装文件，不注册服务 | `./install.sh --prefix "$HOME/tv-buddy" --no-service` |
-| 自定义目录并启动 | `sudo ./install.sh --prefix /srv/tv-buddy --start` |
+| 自定义目录并启动 | `sudo ./install.sh --prefix /srv/tv-buddy` |
+| 只装不启动 | `sudo ./install.sh --no-start` |
 
 `install.sh` 选项：
 
@@ -154,7 +158,8 @@ sudo ./install.sh
 | `--local` | 不从 Release 下载，改用本地 `dist/` 中的包 |
 | `--no-service` | 不注册 systemd/OpenRC 服务 |
 | `--no-link` | 不创建命令软链 |
-| `--start` | 安装后立即启动服务 |
+| `--no-start` | 安装后不启动服务 |
+| `--start` | 安装后启动服务（默认行为，保留以兼容旧用法） |
 | `-h`、`--help` | 显示帮助 |
 
 ### 安装内容

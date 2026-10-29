@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
-import { useToast } from './ui';
+import { PageHead, useToast } from './ui';
 
 type Source = {
   id: string;
@@ -200,15 +200,12 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
 
   return (
     <>
-      <div className="card">
-        <div className="row between">
-          <div>
-            <h1>订阅聚合</h1>
-            <p className="muted">
-              聚合清单：<code>{location.origin}/playlist.m3u</code>
-            </p>
-          </div>
-          <div className="row">
+      <PageHead
+        icon="subs"
+        title="订阅聚合"
+        sub={`聚合清单：${location.origin}/playlist.m3u`}
+      >
+        <div className="row">
             <button
               className="ghost"
               onClick={() =>
@@ -220,8 +217,9 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
               复制地址
             </button>
             <button onClick={() => void save()}>保存</button>
-          </div>
         </div>
+      </PageHead>
+      <div className="card">
         <div className="row">
           <label>
             缓存秒数
@@ -259,7 +257,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
             添加源
           </button>
         </div>
-        <table>
+        <table className="table">
           <thead>
             <tr>
               <th>启用</th>

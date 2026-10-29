@@ -7,7 +7,9 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api } from './api';
+import { Icon } from './icons';
 import { RecommendCard, type Recommend } from './lowcfg';
+import { PageHead } from './ui';
 
 type CacheStats = {
   backend: string;
@@ -98,20 +100,19 @@ export function CachePage() {
 
   return (
     <>
+      <PageHead
+        icon="cache"
+        title="缓存状态"
+        sub={stats ? `${stats.backend} · ${formatBytes(stats.bytes)}` : '读取中…'}
+      >
+        <button className="ghost" onClick={() => void load()}>
+          <Icon name="refresh" size={14} />
+          刷新
+        </button>
+        <button onClick={() => void flush()}>清空缓存</button>
+      </PageHead>
       {stats && <RecommendCard recommend={stats.recommend} />}
       <div className="card">
-        <div className="row between">
-          <div>
-            <h1>缓存状态</h1>
-            <h2>{stats ? `${stats.backend} · ${formatBytes(stats.bytes)}` : '读取中…'}</h2>
-          </div>
-          <div className="row">
-            <button className="ghost" onClick={() => void load()}>
-              刷新
-            </button>
-            <button onClick={() => void flush()}>清空缓存</button>
-          </div>
-        </div>
         <dl>
           <dt>目录</dt>
           <dd className="mono ellipsis">{stats?.disk_path ?? '—'}</dd>
@@ -162,18 +163,16 @@ export function StatsPage() {
   const groups = [...(stats?.groups ?? [])].sort((a, b) => b.requests - a.requests);
 
   return (
-    <div className="card">
-      <div className="row between">
-        <div>
-          <h1>频道热度</h1>
-          <h2>版本 {stats?.version ?? '—'}</h2>
-        </div>
+    <>
+      <PageHead icon="stats" title="频道热度" sub={`版本 ${stats?.version ?? '—'}`}>
         <button className="ghost" onClick={() => void load()}>
+          <Icon name="refresh" size={14} />
           刷新
         </button>
-      </div>
-      <dl>
-        <dt>运行时长</dt>
+      </PageHead>
+      <div className="card">
+        <dl>
+          <dt>运行时长</dt>
         <dd>{stats ? formatUptime(stats.uptime_secs) : '—'}</dd>
         <dt>总请求</dt>
         <dd>{stats?.requests ?? 0}</dd>
@@ -208,8 +207,9 @@ export function StatsPage() {
             </tr>
           )}
         </tbody>
-      </table>
-      {error && <div className="msg err">{error}</div>}
-    </div>
+        </table>
+        {error && <div className="msg err">{error}</div>}
+      </div>
+    </>
   );
 }

@@ -17,11 +17,12 @@ import {
 } from 'react';
 
 import { api } from './api';
+import { Icon } from './icons';
 import { RecommendCard, type Recommend } from './lowcfg';
 import { BackupPage } from './ops';
 import { sha256Hex } from './sha256';
 import { SystemPage } from './system';
-import { useToast } from './ui';
+import { PageHead, useToast } from './ui';
 
 type Cfg = Record<string, unknown>;
 
@@ -590,22 +591,19 @@ export function SettingsPage() {
 
   return (
     <>
-      <div className="card">
-        <div className="row between">
-          <div>
-            <h1>系统设置</h1>
-            <span className="muted">修改后点击保存生效；保存写回整份 config.toml。</span>
-          </div>
-          <div className="row">
-            <button className="ghost" onClick={() => void load()}>
-              重新读取
-            </button>
-            <button disabled={busy === 'save' || !draft} onClick={() => void save()}>
-              {busy === 'save' ? '保存中…' : dirty ? '保存设置 *' : '保存设置'}
-            </button>
-          </div>
-        </div>
-      </div>
+      <PageHead
+        icon="settings"
+        title="系统设置"
+        sub="修改后点击保存生效；保存写回整份 config.toml。"
+      >
+        <button className="ghost" onClick={() => void load()}>
+          <Icon name="refresh" size={14} />
+          重新读取
+        </button>
+        <button disabled={busy === 'save' || !draft} onClick={() => void save()}>
+          {busy === 'save' ? '保存中…' : dirty ? '保存设置 *' : '保存设置'}
+        </button>
+      </PageHead>
 
       {!draft || !value ? (
         <div className="card">

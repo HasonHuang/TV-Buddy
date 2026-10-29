@@ -5,7 +5,7 @@
 > 规范见 [`docs/spec/`](docs/spec/)。发现见 [`docs/findings/`](docs/findings/)。设计见 [`docs/design/`](docs/design/)。
 > 目标版本：**IPTV Proxy v0.8.2**（上游提交 `d302316fb8`）。
 > 写作风格：ASD-STE100 简化技术写作。一句一个意思。主动语态。用简单现在时。
-> 最后更新：2026-10-27。
+> 最后更新：2026-10-29。
 
 ---
 
@@ -320,9 +320,25 @@
 
 | ID | 项 | 当前结论 |
 | --- | --- | --- |
-| V-10 | 面板逐屏视觉与交互 | API 对拍 22/22 差异 0。13 个一级分区已对齐。逐屏视觉对拍未做 |
+| V-10 | 面板逐屏视觉与交互 | API 对拍 22/22 差异 0。13 个一级分区已对齐。2026-10-29 重做皮肤与页头骨架，分组页按 `p02` 复版。逐屏像素对拍仍待做（P3-6） |
 | — | `dash-timeshift/status` 的 `hours` | 本实现对 `dash_timeshift` 频道也返回 `timeshift_hours`。目标用哪个键未验证 |
 | — | U-06 其余 5 种台标效果 | 只有 `breathe` 逐字节一致。其余为近似 |
+
+### 3.5 面板外观与安装行为（2026-10-29）
+
+本节记录一次面向目标版式的外观重做，以及一键安装的默认行为调整。
+
+| 项 | 结论 | 位置 |
+| --- | --- | --- |
+| 配色 | 由深色改浅色。主色青绿 `#0f8f7f`，卡片白底细边，页面底色 `#eef1f5` | `frontend/src/style.css` |
+| 图标 | 自绘 16×16 描边图标集，随文字颜色取色。不引第三方图标库 | `frontend/src/icons.tsx` |
+| 页头 | 全部一级分区改为「图标 + 标题 + 副标题 + 右侧操作」的 `.page-head`，标题移出卡片 | `frontend/src/ui.tsx` |
+| 分组页版式 | 分组头一行放名称、`[id]`、模式徽章、频道数、操作；频道逐行放状态点、名称、上游与本地地址、徽章 | `frontend/src/groups.tsx` |
+| 频道字段 | 弹窗补齐 `logo`、`tvg_id`、`tvg_name`、`resolver_*`、回看、代理与请求头。这些键落在 `Channel.extra`，后端已消费 | `src/playlist.rs:87`、`src/resolver.rs:42` |
+| 分组字段 | 弹窗补齐 `format`、`headers`、`proxy`。`access` 与 `mode` 用中文标签 | `src/config/model.rs:876` |
+| 分组卡拖动把手 | 未做。重排仍用上移/下移按钮，是对外可见的差异 | — |
+| 分组 EPG 地址 | 未做。本实现没有读分组级 `epg_url`（EPG 走 `[[epg.sources]]`），加字段会是无出口的开关 | `src/epg.rs` |
+| 安装后启动 | `install.sh` 默认启动服务；`--no-start` 关闭。启动失败只告警，不判安装失败 | `install.sh` |
 
 ---
 

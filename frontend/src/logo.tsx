@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken } from './api';
+import { PageHead } from './ui';
 import './style.css';
 
 type Logo = {
@@ -284,12 +285,10 @@ export function LogosPage() {
 
   return (
     <>
-      <div className="card">
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1>台标库</h1>
-          {authed && (
-            <label className="tag" style={{ cursor: 'pointer' }}>
-              上传台标
+      <PageHead icon="logo" title="台标库" sub="上传、转码与匹配频道台标">
+        {authed && (
+          <label className="ghost" style={{ cursor: 'pointer', height: 32, paddingTop: 7 }}>
+            上传台标
               <input
                 type="file"
                 accept="image/*"
@@ -298,8 +297,9 @@ export function LogosPage() {
                 onChange={(event) => void upload(event.target.files)}
               />
             </label>
-          )}
-        </div>
+        )}
+      </PageHead>
+      <div className="card">
         <p className="muted">
           共 {logos.length} 个台标。公开地址形如 <code className="mono">/logo/&lt;文件名&gt;</code>。
         </p>

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api } from './api';
-import { Badge, useToast } from './ui';
+import { Icon } from './icons';
+import { Badge, PageHead, useToast } from './ui';
 
 type HealthEntry = {
   checked_at: number;
@@ -127,13 +128,13 @@ export function SystemPage() {
 
   return (
     <>
+      <PageHead icon="overview" title="系统状态" sub="健康摘要、依赖与探测结果">
+        <button className="ghost" onClick={() => void load()}>
+          <Icon name="refresh" size={14} />
+          刷新
+        </button>
+      </PageHead>
       <div className="card">
-        <div className="row between">
-          <h1>系统状态</h1>
-          <button className="ghost" onClick={() => void load()}>
-            刷新
-          </button>
-        </div>
         {health ? (
           <dl>
             <dt>版本</dt>

@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
-import { Badge } from './ui';
+import { Badge, PageHead } from './ui';
 
 type Entry = {
   file: string;
@@ -390,8 +390,9 @@ export function AssetsPage() {
 
   return (
     <>
+      <PageHead icon="assets" title="视频素材" sub="上传、转换与引用本地视频与字幕" />
       <div className="card">
-        <h1>视频素材</h1>
+        <div className="section-title">运行环境</div>
         <dl>
           <dt>ffmpeg</dt>
           <dd>

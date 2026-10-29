@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getToken, setToken, UNAUTHORIZED_EVENT } from './api';
-import { useToast } from './ui';
+import { Icon, type IconName } from './icons';
+import { PageHead, useToast } from './ui';
 import { GroupsPage } from './groups';
 import { EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
@@ -29,20 +30,20 @@ type SectionId =
   | 'assets'
   | 'logs';
 
-const NAV: { id: SectionId; label: string }[] = [
-  { id: 'dashboard', label: '概览' },
-  { id: 'cache', label: '缓存状态' },
-  { id: 'groups', label: '分组管理' },
-  { id: 'settings', label: '系统设置' },
-  { id: 'security', label: '安全管控' },
-  { id: 'stats', label: '频道热度' },
-  { id: 'schedule', label: '定时录制' },
-  { id: 'epg', label: '节目指南' },
-  { id: 'logos', label: '台标管理' },
-  { id: 'subs', label: '订阅聚合' },
-  { id: 'livestream', label: '回看管理' },
-  { id: 'assets', label: '视频素材' },
-  { id: 'logs', label: '运行日志' },
+const NAV: { id: SectionId; label: string; icon: IconName }[] = [
+  { id: 'dashboard', label: '概览', icon: 'overview' },
+  { id: 'cache', label: '缓存状态', icon: 'cache' },
+  { id: 'groups', label: '分组管理', icon: 'groups' },
+  { id: 'settings', label: '系统设置', icon: 'settings' },
+  { id: 'security', label: '安全管控', icon: 'security' },
+  { id: 'stats', label: '频道热度', icon: 'stats' },
+  { id: 'schedule', label: '定时录制', icon: 'schedule' },
+  { id: 'epg', label: '节目指南', icon: 'epg' },
+  { id: 'logos', label: '台标管理', icon: 'logo' },
+  { id: 'subs', label: '订阅聚合', icon: 'subs' },
+  { id: 'livestream', label: '回看管理', icon: 'livestream' },
+  { id: 'assets', label: '视频素材', icon: 'assets' },
+  { id: 'logs', label: '运行日志', icon: 'logs' },
 ];
 
 type Status = Record<string, unknown>;
@@ -69,13 +70,21 @@ function Login({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="page">
-      <div className="card">
-        <h1>TV Buddy</h1>
-        <h2>管理面板</h2>
+    <div className="login-wrap">
+      <div className="login-card">
+        <div className="mark">
+          <Icon name="tv" size={40} />
+        </div>
+        <div className="name">TV Buddy</div>
+        <div className="tagline">Management Console</div>
         <form onSubmit={submit}>
           <label htmlFor="user">用户名</label>
-          <input id="user" value={username} onChange={(e) => setUsername(e.target.value)} />
+          <input
+            id="user"
+            placeholder="用户名"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
           <label htmlFor="pass">密码</label>
           <input
             id="pass"
@@ -83,14 +92,44 @@ function Login({ onDone }: { onDone: () => void }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <div style={{ marginTop: 16 }}>
-            <button type="submit" disabled={busy}>
-              登 录
-            </button>
-          </div>
+          <button type="submit" disabled={busy}>
+            {busy ? '登录中…' : '登 录'}
+          </button>
         </form>
         {error && <div className="msg err">{error}</div>}
       </div>
+    </div>
+  );
+}
+
+/** 字节数转可读文本。 */
+function bytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size >= 100 || index === 0 ? Math.round(size) : size.toFixed(2)} ${units[index]}`;
+}
+
+/** 秒数转「N 小时 M 分钟」。 */
+function uptime(secs: number): string {
+  const total = Math.max(0, Math.floor(secs));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
+  return `${minutes} 分钟`;
+}
+
+/** 单个指标卡。 */
+function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="stat">
+      <div className="k">{label}</div>
+      <div className={`v${tone ? ` ${tone}` : ''}`}>{value}</div>
     </div>
   );
 }
@@ -128,24 +167,54 @@ function Overview() {
     }
   };
 
-  const entries = Object.entries(status ?? {}).filter(([, value]) => typeof value !== 'object');
+  const num = (key: string): number => {
+    const value = status?.[key];
+    return typeof value === 'number' ? value : 0;
+  };
+  const text = (key: string): string => {
+    const value = status?.[key];
+    return value === undefined || value === null ? '—' : String(value);
+  };
+
+  const backend = text('cache_backend');
 
   return (
-    <div className="card">
-      <div className="row between">
-        <div>
-          <h1>TV Buddy</h1>
-          <h2>概览</h2>
+    <>
+      <PageHead icon="overview" title="系统概览" sub="实时运行状态">
+        <span className="badge ok">● 运行 {uptime(num('uptime_secs'))}</span>
+      </PageHead>
+
+      <div className="stats">
+        <Stat label="分组数" value={text('group_count')} tone="accent" />
+        <Stat label="频道数" value={text('channel_count')} tone="accent" />
+        <Stat label="缓存后端" value={backend} tone={backend === 'disk' ? 'danger' : 'accent'} />
+        <Stat label="在线观众" value={text('online_viewers')} tone="accent" />
+        <Stat label="缓存磁盘占用" value={`${text('disk_cache_mb')} MB`} tone="accent" />
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="section-title">实时指标</div>
+        <div className="stats">
+          <Stat label="下行 · 回源" value={bytes(num('traffic_in_bytes'))} />
+          <Stat label="上行 · 出网" value={bytes(num('traffic_out_bytes'))} />
+          <Stat label="进程内存" value={`${text('mem_rss_mb')} MB`} />
+          <Stat label="CPU 占用" value={`${text('cpu_seconds')} 秒`} />
+          <Stat
+            label="整盘内存峰值"
+            value={`${bytes(num('whole_file_peak'))} / ${bytes(num('whole_file_budget'))}`}
+          />
         </div>
+      </div>
+
+      <div className="card">
+        <div className="section-title">快速操作</div>
         <div className="row">
-          <button className="ghost" disabled={busy !== ''} onClick={() => void load()}>
-            刷新状态
-          </button>
           <button
             className="ghost"
             disabled={busy !== ''}
             onClick={() => void action('flush', '/cache/flush', '本地缓存已清空')}
           >
+            <Icon name="trash" size={14} />
             {busy === 'flush' ? '清理中…' : '清空缓存'}
           </button>
           <button
@@ -153,27 +222,55 @@ function Overview() {
             disabled={busy !== ''}
             onClick={() => void action('reload', '/reload', '配置已热重载')}
           >
+            <Icon name="refresh" size={14} />
             {busy === 'reload' ? '重载中…' : '热重载配置'}
           </button>
+          <button className="ghost" disabled={busy !== ''} onClick={() => void load()}>
+            <Icon name="refresh" size={14} />
+            刷新状态
+          </button>
           <a className="ghost" href="/playlist.m3u" target="_blank" rel="noreferrer">
+            <Icon name="download" size={14} />
             导出全部 M3U
           </a>
         </div>
       </div>
-      <dl>
-        {entries.map(([key, value]) => (
-          <div key={key} style={{ display: 'contents' }}>
-            <dt>{key}</dt>
-            <dd>{String(value)}</dd>
+
+      <div className="card">
+        <div className="section-title">系统信息</div>
+        <dl>
+          <div style={{ display: 'contents' }}>
+            <dt>版本</dt>
+            <dd>{text('version')}</dd>
           </div>
-        ))}
-      </dl>
+          <div style={{ display: 'contents' }}>
+            <dt>运行时长</dt>
+            <dd>{uptime(num('uptime_secs'))}</dd>
+          </div>
+          <div style={{ display: 'contents' }}>
+            <dt>缓存后端</dt>
+            <dd>{backend}</dd>
+          </div>
+          <div style={{ display: 'contents' }}>
+            <dt>进程内存（RSS）</dt>
+            <dd>{text('mem_rss_mb')} MB</dd>
+          </div>
+          <div style={{ display: 'contents' }}>
+            <dt>缓存磁盘占用</dt>
+            <dd>{text('disk_cache_mb')} MB</dd>
+          </div>
+          <div style={{ display: 'contents' }}>
+            <dt>监听地址</dt>
+            <dd className="mono">{text('bind')}</dd>
+          </div>
+        </dl>
+      </div>
+
       {error && <div className="msg err">{error}</div>}
       {node}
-    </div>
+    </>
   );
 }
-
 
 function Shell({ onLogout }: { onLogout: () => void }) {
   const [section, setSection] = useState<SectionId>('dashboard');
@@ -192,8 +289,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <strong>TV Buddy</strong>
-          <span className="muted">管理面板</span>
+          <Icon name="tv" size={24} className="brand-mark" />
+          <div className="brand-text">
+            <strong>TV Buddy</strong>
+            <span>管理面板</span>
+          </div>
         </div>
         <nav>
           {NAV.map((item) => (
@@ -202,12 +302,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               className={`nav-item${section === item.id ? ' active' : ''}`}
               onClick={() => setSection(item.id)}
             >
+              <Icon name={item.icon} size={15} />
               {item.label}
             </button>
           ))}
         </nav>
         <div className="sidebar-foot">
           <button className="ghost" onClick={() => void logout()}>
+            <Icon name="close" size={13} />
             退出登录
           </button>
         </div>
