@@ -218,8 +218,9 @@ needle '/groups/import/m3u' 'M3U 导入端点'
 needle '/groups/import/force' 'JSON 覆盖端点'
 needle '/groups/export' '导出全部端点'
 needle 'groups.json' '导出全部文件名'
-# 上下移按钮的箭头在产物里是字面量（非字符串转义）。
-check "前端含上移箭头" "yes" "$(printf '%s' "$JS" | grep -c '▲' >/dev/null && echo yes || echo no)"
+# 上移/下移按钮改用 SVG 图标，产物里没有 ▲ 字面量。改查按钮标题。
+needle '上移分组' '分组上移按钮'
+needle '拖动排序' '分组拖动把手'
 needle 'selected_tracks' '全轨道徽章'
 
 if [ "$fail" = "0" ]; then

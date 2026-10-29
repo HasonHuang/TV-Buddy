@@ -1200,6 +1200,18 @@ pre.log {
   color: var(--text3);
   cursor: grab;
   flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.group-head .grip:active {
+  cursor: grabbing;
+}
+
+/* 拖动经过时的落点提示。 */
+.group-card.dragover {
+  outline: 2px dashed var(--accent-line);
+  outline-offset: -2px;
 }
 
 /* 拖放上传区。 */

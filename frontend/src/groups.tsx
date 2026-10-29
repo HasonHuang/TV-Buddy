@@ -336,6 +336,10 @@ export function GroupsPage() {
   const [selected, setSelected] = useState<string[]>([]);
   /** 已折叠的分组 id。只影响本页显示，不写回配置。 */
   const [collapsed, setCollapsed] = useState<string[]>([]);
+  /** 正在拖动的分组 id。为空表示没有拖动。 */
+  const [dragging, setDragging] = useState('');
+  /** 拖动经过的分组 id。用于画落点。 */
+  const [dropTarget, setDropTarget] = useState('');
   /** 解析脚本列表；打开频道弹窗时按需加载。 */
   const [scripts, setScripts] = useState<string[]>([]);
 
@@ -473,6 +477,16 @@ export function GroupsPage() {
       if (target < 0 || target >= list.length) return false;
       const [moved] = list.splice(index, 1);
       list.splice(target, 0, moved);
+      return true;
+    });
+
+  /** 拖动排序：把 `from` 处的分组移动到 `to` 处。 */
+  const moveGroupTo = (from: number, to: number) =>
+    reorder((list) => {
+      if (from === to || from < 0 || to < 0) return false;
+      if (from >= list.length || to >= list.length) return false;
+      const [moved] = list.splice(from, 1);
+      list.splice(to, 0, moved);
       return true;
     });
 
@@ -784,8 +798,43 @@ export function GroupsPage() {
         const groupIndex = groups.indexOf(group);
         const isCollapsed = collapsed.includes(group.id);
         return (
-          <div className="card flush group-card" key={group.id}>
+          <div
+            className={`card flush group-card${dropTarget === group.id && dragging !== group.id ? ' dragover' : ''}`}
+            key={group.id}
+            onDragOver={(event) => {
+              if (dragging === '') return;
+              event.preventDefault();
+              if (dropTarget !== group.id) setDropTarget(group.id);
+            }}
+            onDragLeave={() => {
+              if (dropTarget === group.id) setDropTarget('');
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              const from = groups.findIndex((item) => item.id === dragging);
+              if (from >= 0) void moveGroupTo(from, groupIndex);
+              setDragging('');
+              setDropTarget('');
+            }}
+          >
             <div className="group-head">
+              <span
+                className="grip"
+                draggable
+                title="拖动排序"
+                onDragStart={(event) => {
+                  setDragging(group.id);
+                  event.dataTransfer.effectAllowed = 'move';
+                  // Firefox 需要写入数据才会开始拖动。
+                  event.dataTransfer.setData('text/plain', group.id);
+                }}
+                onDragEnd={() => {
+                  setDragging('');
+                  setDropTarget('');
+                }}
+              >
+                <Icon name="grip" size={14} />
+              </span>
               {multi && (
                 <input
                   type="checkbox"
