@@ -340,6 +340,27 @@
 | 分组 EPG 地址 | 未做。本实现没有读分组级 `epg_url`（EPG 走 `[[epg.sources]]`），加字段会是无出口的开关 | `src/epg.rs` |
 | 安装后启动 | `install.sh` 默认启动服务；`--no-start` 关闭。启动失败只告警，不判安装失败 | `install.sh` |
 
+### 3.6 手工验收测试（2026-10-29）
+
+新增 `docs/tests/`，存放**由项目负责人手工执行**的验收测试。共 6 份文档与 1 份索引。
+
+| 文档 | 覆盖 | 对应进度项 |
+| --- | --- | --- |
+| `01-install-and-start.md` | 一键安装、服务注册与启动、面板可达、CLI | — |
+| `02-panel-acceptance.md` | 13 个分区的元素存在性、顺序与尺寸 | P3-6、V-10 |
+| `03-playback-modes.md` | 六种模式端到端播放、DASH 轨道、回看 | — |
+| `04-security.md` | 会话上限、两级限流、违规封禁、白名单、登录锁、Token、随机 id | P2-1、P2-2、P2-3 |
+| `05-low-spec-acceptance.md` | S4 磁盘回收与 S6 低配 24 小时 | E2、S4、S6 |
+| `06-cdn-console.md` | T0 五处配置与命中验证 | E1、T0 |
+
+约束：
+
+- 判据只用「通过 / 不通过 / 未验证」三种取值。
+- 记录落在 `docs/tests/runs/<日期>.md`。
+- 文档内所有命令、端点与配置键都按源码核对过。01 与 02 的关键路径在本机独立实例上实跑过。
+
+不覆盖的内容：目标侧的像素比对、浏览器兼容性、真实付费上游。
+
 ---
 
 ## 4. 质量门
@@ -465,8 +486,8 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 
 | # | 项 | 说明 |
 | --- | --- | --- |
-| E1 | T0 CDN 面板配置 | 按 `06` §2 配五处 |
-| E2 | 真机验收 | 在目标 VPS 上跑 S4/S6 |
+| E1 | T0 CDN 面板配置 | 按 [`docs/tests/06-cdn-console.md`](docs/tests/06-cdn-console.md) 执行 |
+| E2 | 真机验收 | 按 [`docs/tests/05-low-spec-acceptance.md`](docs/tests/05-low-spec-acceptance.md) 跑 S4/S6 |
 
 ### 6.5 每项完成后的固定动作
 
@@ -495,6 +516,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | 低配置示例 | [`docs/design/config-low-spec.toml`](docs/design/config-low-spec.toml) |
 | 架构 | [`docs/design/02-architecture.md`](docs/design/02-architecture.md) |
 | 面板字段清单 | [`docs/design/05-frontend.md`](docs/design/05-frontend.md) |
+| 手工验收测试 | [`docs/tests/README.md`](docs/tests/README.md) |
 | 发现索引 | [`docs/findings/README.md`](docs/findings/README.md) |
 | 历史进度 | [`PROGRESS_bak.md`](PROGRESS_bak.md) |
 
