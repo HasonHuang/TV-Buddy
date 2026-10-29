@@ -155,6 +155,8 @@ export function LogosPage() {
   const [opts, setOpts] = useState<UploadOpts>({ maxEdge: '512', quality: '80', webp: true });
   const [animating, setAnimating] = useState<{ file: string; effect: string } | null>(null);
   const [animReport, setAnimReport] = useState<AnimateReport | null>(null);
+  /** 批量操作进行中。为真时禁用批量与上传入口。 */
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const response = await fetch('/logo/api/list');
@@ -240,6 +242,71 @@ export function LogosPage() {
     }
   }
 
+  /**
+   * 批量动效：给所有静态 `.webp` 台标生成动画。
+   * 串行调用，避免同时压满 CPU。原图先备份到 `.orig/`。
+   */
+  async function animateAll() {
+    const targets = logos.filter((item) => item.ext === 'webp' && item.animated !== true);
+    if (targets.length === 0) {
+      setMessage('没有需要生成动效的台标：只处理 .webp，且跳过已有动效的');
+      return;
+    }
+    if (!window.confirm(`给 ${targets.length} 个台标生成动效？原图会备份到 .orig/。`)) {
+      return;
+    }
+    setBusy(true);
+    let done = 0;
+    const failed: string[] = [];
+    for (const item of targets) {
+      try {
+        await api('POST', '/logo/animate', {
+          file: item.file,
+          effect: EFFECTS[0].value,
+          quality: opts.quality,
+        });
+        done += 1;
+      } catch (error) {
+        failed.push(`${item.file}: ${(error as Error).message}`);
+      }
+      setMessage(`动效生成中：${done + failed.length}/${targets.length}`);
+    }
+    setBusy(false);
+    setMessage(
+      `动效完成 ${done} 个${failed.length > 0 ? `，失败 ${failed.length} 个（${failed.join('；')}）` : ''}`,
+    );
+    await load();
+  }
+
+  /** 批量还原：用 `.orig/` 备份覆盖所有带备份的台标。 */
+  async function restoreAll() {
+    const targets = logos.filter((item) => item.has_original === true);
+    if (targets.length === 0) {
+      setMessage('没有可还原的台标');
+      return;
+    }
+    if (!window.confirm(`还原 ${targets.length} 个台标的静态原图？`)) {
+      return;
+    }
+    setBusy(true);
+    let done = 0;
+    const failed: string[] = [];
+    for (const item of targets) {
+      try {
+        await api('POST', '/logo/restore', { file: item.file });
+        done += 1;
+      } catch (error) {
+        failed.push(`${item.file}: ${(error as Error).message}`);
+      }
+      setMessage(`还原中：${done + failed.length}/${targets.length}`);
+    }
+    setBusy(false);
+    setMessage(
+      `还原完成 ${done} 个${failed.length > 0 ? `，失败 ${failed.length} 个（${failed.join('；')}）` : ''}`,
+    );
+    await load();
+  }
+
   async function rename(file: string, current: string) {
     const name = window.prompt('新名称（扩展名不变）', current);
     if (!name) {
@@ -287,8 +354,15 @@ export function LogosPage() {
     <>
       <PageHead icon="logo" title="台标库" sub="上传、转码与匹配频道台标">
         {authed && (
-          <label className="ghost" style={{ cursor: 'pointer', height: 32, paddingTop: 7 }}>
-            上传台标
+          <>
+            <button className="ghost" disabled={busy} onClick={() => void animateAll()}>
+              一键全部动态化
+            </button>
+            <button className="ghost" disabled={busy} onClick={() => void restoreAll()}>
+              全部还原静态
+            </button>
+            <label className="ghost" style={{ cursor: 'pointer', height: 32, paddingTop: 7 }}>
+              上传台标
               <input
                 type="file"
                 accept="image/*"
@@ -297,12 +371,25 @@ export function LogosPage() {
                 onChange={(event) => void upload(event.target.files)}
               />
             </label>
+          </>
         )}
       </PageHead>
       <div className="card">
         <p className="muted">
           共 {logos.length} 个台标。公开地址形如 <code className="mono">/logo/&lt;文件名&gt;</code>。
         </p>
+        {authed && (
+          <div
+            className="dropzone"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              void upload(event.dataTransfer.files);
+            }}
+          >
+            把图片拖到这里，或点页头「上传台标」。支持多选与 png / jpg / webp / bmp / avif。
+          </div>
+        )}
         {authed && (
           <div className="row">
             <label>

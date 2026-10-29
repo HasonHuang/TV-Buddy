@@ -1202,6 +1202,31 @@ pre.log {
   flex: none;
 }
 
+/* 拖放上传区。 */
+.dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--text2);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* 折叠箭头：展开时向下，折叠时转向右。 */
+.group-head .chev .icon {
+  transition: transform 0.15s ease;
+}
+
+.group-head .chev .icon.folded {
+  transform: rotate(-90deg);
+}
+
 .group-head .folder {
   color: var(--text2);
   flex: none;

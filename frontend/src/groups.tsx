@@ -334,6 +334,8 @@ export function GroupsPage() {
   /** 多选：批量删除与批量导出。 */
   const [multi, setMulti] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  /** 已折叠的分组 id。只影响本页显示，不写回配置。 */
+  const [collapsed, setCollapsed] = useState<string[]>([]);
   /** 解析脚本列表；打开频道弹窗时按需加载。 */
   const [scripts, setScripts] = useState<string[]>([]);
 
@@ -573,6 +575,13 @@ export function GroupsPage() {
     );
   };
 
+  /** 折叠或展开一个分组的频道列表。 */
+  const toggleCollapsed = (gid: string) => {
+    setCollapsed((current) =>
+      current.includes(gid) ? current.filter((item) => item !== gid) : [...current, gid],
+    );
+  };
+
   /** 批量导出：逐个 `GET /groups/{gid}/export`，合成一个 JSON 数组。 */
   const exportSelected = async () => {
     try {
@@ -773,6 +782,7 @@ export function GroupsPage() {
         const listUrl = `${location.origin}/${group.id}/playlist.m3u`;
         // 排序按 `groups` 的绝对下标；搜索过滤时也不会错位。
         const groupIndex = groups.indexOf(group);
+        const isCollapsed = collapsed.includes(group.id);
         return (
           <div className="card flush group-card" key={group.id}>
             <div className="group-head">
@@ -840,10 +850,18 @@ export function GroupsPage() {
                 >
                   <Icon name="link" size={13} />
                 </button>
+                <button
+                  className="icon-btn chev"
+                  title={isCollapsed ? '展开分组' : '折叠分组'}
+                  onClick={() => toggleCollapsed(group.id)}
+                >
+                  <Icon name="down" size={13} className={isCollapsed ? 'folded' : ''} />
+                </button>
               </div>
             </div>
 
-            {channels.map((channel, channelIndex) => {
+            {!isCollapsed &&
+              channels.map((channel, channelIndex) => {
               const state = health[`${group.id}/${channel.id}`];
               const logo = text(channel, 'logo') || text(channel, 'tvg_logo');
               const tvgId = text(channel, 'tvg_id');
