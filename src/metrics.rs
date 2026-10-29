@@ -9,7 +9,7 @@
 //! - 磁盘占用按目录遍历，结果缓存 30 秒。
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     fs,
     path::Path,
     sync::{
@@ -39,7 +39,8 @@ struct CachedDisk {
 #[derive(Default)]
 pub struct Metrics {
     out_bytes: AtomicU64,
-    viewers: Mutex<VecDeque<(i64, String)>>,
+    /// 在线记录：(时间, 观众键, 频道键)。频道键形如 `gid/cid`。
+    viewers: Mutex<VecDeque<(i64, String, String)>>,
     disk: Mutex<Option<CachedDisk>>,
 }
 
@@ -57,13 +58,13 @@ impl Metrics {
         self.out_bytes.load(Ordering::Relaxed)
     }
 
-    /// 记一次在线观看。只保留窗口内的记录。
-    pub fn viewer(&self, token: &str) {
+    /// 记一次在线观看，并关联频道键（`gid/cid`）。只保留窗口内的记录。
+    pub fn viewer(&self, token: &str, channel: &str) {
         let now = crate::schedule::now_epoch();
         let mut viewers = self.viewers.lock().unwrap_or_else(|e| e.into_inner());
-        viewers.push_back((now, token.to_string()));
+        viewers.push_back((now, token.to_string(), channel.to_string()));
         // 保留 1 小时，足够覆盖任何窗口；过旧记录在这里裁掉。
-        while let Some((ts, _)) = viewers.front() {
+        while let Some((ts, _, _)) = viewers.front() {
             if now - *ts > 3600 {
                 viewers.pop_front();
             } else {
@@ -72,19 +73,46 @@ impl Metrics {
         }
     }
 
-    /// 窗口内的不同 Token 数。
+    /// 窗口内的不同观众数。
     pub fn online(&self, window_secs: u64) -> usize {
         let now = crate::schedule::now_epoch();
         let window = window_secs.max(1) as i64;
         let viewers = self.viewers.lock().unwrap_or_else(|e| e.into_inner());
         let mut seen: Vec<&str> = viewers
             .iter()
-            .filter(|(ts, _)| now - *ts <= window)
-            .map(|(_, token)| token.as_str())
+            .filter(|(ts, _, _)| now - *ts <= window)
+            .map(|(_, token, _)| token.as_str())
             .collect();
         seen.sort_unstable();
         seen.dedup();
         seen.len()
+    }
+
+    /// 窗口内每频道的不同观众数，按人数降序、频道键升序排列。
+    ///
+    /// 只含有人的频道。人数为 0 的频道不出现。
+    pub fn online_by_channel(&self, window_secs: u64) -> Vec<(String, usize)> {
+        let now = crate::schedule::now_epoch();
+        let window = window_secs.max(1) as i64;
+        let viewers = self.viewers.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map: HashMap<&str, Vec<&str>> = HashMap::new();
+        for (ts, token, channel) in viewers.iter() {
+            if now - *ts <= window {
+                map.entry(channel.as_str())
+                    .or_default()
+                    .push(token.as_str());
+            }
+        }
+        let mut out: Vec<(String, usize)> = map
+            .into_iter()
+            .map(|(channel, mut tokens)| {
+                tokens.sort_unstable();
+                tokens.dedup();
+                (channel.to_string(), tokens.len())
+            })
+            .collect();
+        out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        out
     }
 
     /// 磁盘占用（MB）。`cache_dir` 为缓存根，录制目录在其下。
@@ -208,9 +236,9 @@ mod tests {
     #[test]
     fn online_counts_distinct_tokens_in_window() {
         let metrics = Metrics::new();
-        metrics.viewer("a");
-        metrics.viewer("a");
-        metrics.viewer("b");
+        metrics.viewer("a", "g1/c1");
+        metrics.viewer("a", "g1/c1");
+        metrics.viewer("b", "g1/c1");
         assert_eq!(metrics.online(90), 2);
         // 窗口为 0 按 1 秒算，仍然计入刚写入的记录。
         assert_eq!(metrics.online(0), 2);
@@ -219,7 +247,7 @@ mod tests {
     #[test]
     fn expired_viewers_fall_out_of_window() {
         let metrics = Metrics::new();
-        metrics.viewer("old");
+        metrics.viewer("old", "g1/c1");
         {
             let mut viewers = metrics.viewers.lock().unwrap();
             if let Some(front) = viewers.front_mut() {
@@ -228,6 +256,20 @@ mod tests {
         }
         assert_eq!(metrics.online(90), 0);
         assert_eq!(metrics.online(3600), 1);
+    }
+
+    #[test]
+    fn online_by_channel_groups_and_sorts() {
+        let metrics = Metrics::new();
+        metrics.viewer("a", "g1/c1");
+        metrics.viewer("a", "g1/c1");
+        metrics.viewer("b", "g1/c1");
+        metrics.viewer("c", "g2/d1");
+        let rows = metrics.online_by_channel(90);
+        assert_eq!(
+            rows,
+            vec![("g1/c1".to_string(), 2), ("g2/d1".to_string(), 1)]
+        );
     }
 
     #[test]

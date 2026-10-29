@@ -19,6 +19,8 @@ pub struct Stats {
     segment_hits: AtomicU64,
     upstream_failures: AtomicU64,
     per_group: Mutex<HashMap<String, u64>>,
+    /// 频道累计请求，键形如 `gid/cid`。
+    per_channel: Mutex<HashMap<String, u64>>,
 }
 
 /// 指标快照。
@@ -41,6 +43,25 @@ impl Stats {
         }
         let mut groups = self.per_group.lock().unwrap_or_else(|e| e.into_inner());
         *groups.entry(gid.to_string()).or_insert(0) += 1;
+    }
+
+    /// 记一次频道请求。`key` 形如 `gid/cid`。
+    pub fn record_channel(&self, key: &str) {
+        if key.is_empty() {
+            return;
+        }
+        let mut channels = self.per_channel.lock().unwrap_or_else(|e| e.into_inner());
+        *channels.entry(key.to_string()).or_insert(0) += 1;
+    }
+
+    /// 某频道的累计请求数。未记录过的频道返回 0。
+    pub fn channel_requests(&self, key: &str) -> u64 {
+        self.per_channel
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn record_playlist(&self) {

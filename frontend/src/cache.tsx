@@ -29,7 +29,13 @@ type Stats = {
   segment_hits: number;
   upstream_failures: number;
   online_window_secs: number;
+  /** 窗口内不同观众数。 */
+  online_viewers?: number;
+  /** 窗口内有人观看的频道数。 */
+  active_channels?: number;
   groups: { id: string; requests: number }[];
+  /** 频道排行：只含窗口内有人观看的频道，按在线人数降序。 */
+  channels?: { gid: string; cid: string; name: string; online: number; requests: number }[];
 };
 
 function formatBytes(bytes: number): string {
@@ -170,22 +176,73 @@ export function StatsPage() {
           刷新
         </button>
       </PageHead>
+      <div className="stats">
+        <div className="stat">
+          <div className="k">当前在线</div>
+          <div className="v">{stats?.online_viewers ?? 0}</div>
+          <div className="hint">近 {stats?.online_window_secs ?? 0} 秒去重观众合计</div>
+        </div>
+        <div className="stat">
+          <div className="k">活跃频道</div>
+          <div className="v">{stats?.active_channels ?? 0}</div>
+          <div className="hint">有人在线观看的频道数</div>
+        </div>
+        <div className="stat">
+          <div className="k">累计清单请求</div>
+          <div className="v">{stats?.playlists ?? 0}</div>
+          <div className="hint">自启动以来全频道合计</div>
+        </div>
+      </div>
       <div className="card">
+        <div className="section-title">热门频道排行</div>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>频道</th>
+              <th className="right">在线</th>
+              <th className="right">累计请求</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(stats?.channels ?? []).map((channel, index) => (
+              <tr key={`${channel.gid}/${channel.cid}`}>
+                <td className="muted">{index + 1}</td>
+                <td>
+                  {channel.name || channel.cid}
+                  <span className="muted mono"> · {channel.gid}/{channel.cid}</span>
+                </td>
+                <td className="right">{channel.online}</td>
+                <td className="right">{channel.requests}</td>
+              </tr>
+            ))}
+            {(stats?.channels ?? []).length === 0 && (
+              <tr>
+                <td colSpan={4} className="muted">
+                  窗口内没有在线观众。
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="card">
+        <div className="section-title">运行统计</div>
         <dl>
           <dt>运行时长</dt>
-        <dd>{stats ? formatUptime(stats.uptime_secs) : '—'}</dd>
-        <dt>总请求</dt>
-        <dd>{stats?.requests ?? 0}</dd>
-        <dt>订阅请求</dt>
-        <dd>{stats?.playlists ?? 0}</dd>
-        <dt>切片请求</dt>
-        <dd>{stats?.segments ?? 0}</dd>
-        <dt>切片命中</dt>
-        <dd>{stats?.segment_hits ?? 0}</dd>
-        <dt>上游失败</dt>
-        <dd>{stats?.upstream_failures ?? 0}</dd>
-      </dl>
-      <table className="table">
+          <dd>{stats ? formatUptime(stats.uptime_secs) : '—'}</dd>
+          <dt>总请求</dt>
+          <dd>{stats?.requests ?? 0}</dd>
+          <dt>订阅请求</dt>
+          <dd>{stats?.playlists ?? 0}</dd>
+          <dt>切片请求</dt>
+          <dd>{stats?.segments ?? 0}</dd>
+          <dt>切片命中</dt>
+          <dd>{stats?.segment_hits ?? 0}</dd>
+          <dt>上游失败</dt>
+          <dd>{stats?.upstream_failures ?? 0}</dd>
+        </dl>
+        <table className="table">
         <thead>
           <tr>
             <th>分组</th>

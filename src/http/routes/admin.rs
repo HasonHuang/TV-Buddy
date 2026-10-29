@@ -112,6 +112,29 @@ pub async fn cache_flush(
 pub async fn stats(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let snapshot = state.stats.snapshot();
     let config = state.snapshot();
+    // 频道排行：只列窗口内有人观看的频道，按人数降序。
+    let per_channel = state
+        .metrics
+        .online_by_channel(config.stats.online_window_secs);
+    let channels: Vec<Value> = per_channel
+        .iter()
+        .map(|(key, online)| {
+            let (gid, cid) = key.split_once('/').unwrap_or((key.as_str(), ""));
+            let name = config
+                .group(gid)
+                .and_then(|group| group.channels.iter().find(|item| item.id == cid))
+                .map(|item| item.name.clone())
+                .unwrap_or_default();
+            json!({
+                "gid": gid,
+                "cid": cid,
+                "name": name,
+                "online": online,
+                "requests": state.stats.channel_requests(key),
+            })
+        })
+        .collect();
+    let active_channels = channels.len();
     Json(json!({
         "version": state.version(),
         "uptime_secs": state.uptime_secs(),
@@ -121,6 +144,9 @@ pub async fn stats(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) 
         "segment_hits": snapshot.segment_hits,
         "upstream_failures": snapshot.upstream_failures,
         "online_window_secs": config.stats.online_window_secs,
+        "online_viewers": state.metrics.online(config.stats.online_window_secs),
+        "active_channels": active_channels,
+        "channels": channels,
         "groups": snapshot
             .groups
             .iter()
@@ -155,6 +181,9 @@ pub async fn count_request(
 ) -> axum::response::Response {
     let gid = group_of(request.uri().path()).unwrap_or_default();
     state.stats.record_request(&gid);
+    if let Some(key) = channel_of(request.uri().path()) {
+        state.stats.record_channel(&key);
+    }
     let response = next.run(request).await;
     count_out(state, response)
 }
@@ -189,4 +218,16 @@ fn group_of(path: &str) -> Option<String> {
         return None;
     }
     Some(first.to_string())
+}
+
+/// 取路径前两段作为频道键 `gid/cid`。非频道路径返回 `None`。
+fn channel_of(path: &str) -> Option<String> {
+    let gid = group_of(path)?;
+    let mut parts = path.trim_start_matches('/').splitn(3, '/');
+    parts.next()?;
+    let cid = parts.next()?;
+    if cid.is_empty() || cid.contains('.') {
+        return None;
+    }
+    Some(format!("{gid}/{cid}"))
 }

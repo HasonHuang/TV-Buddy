@@ -121,9 +121,10 @@ async fn play_entry(
     // 在线观众：目标是「窗口内带播放 Token 的不同客户端 IP 数」（2026-10-26 实测：
     // 同 IP 重复播放不增；换 `X-Forwarded-For` 增 1；Token 关闭时恒 0）。
     if config.auth.token_enabled && query.get("token").is_some_and(|value| !value.is_empty()) {
-        state
-            .metrics
-            .viewer(&crate::http::ext::client_ip_with_peer(headers, None));
+        state.metrics.viewer(
+            &crate::http::ext::client_ip_with_peer(headers, None),
+            &format!("{gid}/{cid}"),
+        );
     }
     // 上游解析脚本：每次播放前算地址（S-RES-01）。
     let resolved = match crate::resolver::resolve(state, gid, cid, channel).await {

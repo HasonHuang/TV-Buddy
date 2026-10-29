@@ -725,6 +725,67 @@ pub async fn convert(
     })))
 }
 
+/// 配置里 5 个占位跳转 URL 的清单。
+///
+/// 这些地址常指向 MP4。部分播放器不显示 MP4，所以要能逐个转成本地 HLS。
+const PLACEHOLDER_KEYS: [(&str, &str); 5] = [
+    ("server.not_found_url", "404 跳转（频道不存在）"),
+    ("server.error_url", "上游错误跳转"),
+    ("auth.token_failure_url", "Token 失效跳转"),
+    ("auth.limit_url", "IP 限流跳转"),
+    ("auth.ban_url", "IP 封禁跳转"),
+];
+
+/// `GET /panel/api/assets/candidates`——列出配置里可转 HLS 的占位 URL。
+pub async fn candidates(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    let config = state.snapshot();
+    let map = asset_map(&config);
+    let urls: [&str; 5] = [
+        &config.server.not_found_url,
+        &config.server.error_url,
+        &config.auth.token_failure_url,
+        &config.auth.limit_url,
+        &config.auth.ban_url,
+    ];
+    let items: Vec<Value> = PLACEHOLDER_KEYS
+        .iter()
+        .zip(urls)
+        .map(|((key, label), url)| {
+            let local = map.get(url).cloned().unwrap_or_default();
+            json!({
+                "key": key,
+                "label": label,
+                "url": url,
+                "local_path": local,
+                "converted": !local.is_empty(),
+            })
+        })
+        .collect();
+    Json(json!({ "items": items }))
+}
+
+/// 读取 `[assets].map`：上游 URL → 本地路径。
+fn asset_map(config: &crate::config::model::Config) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let Some(table) = config.extra.get("assets").and_then(toml::Value::as_table) else {
+        return out;
+    };
+    let Some(map) = table.get("map").and_then(toml::Value::as_table) else {
+        return out;
+    };
+    for (url, local) in map {
+        if let Some(local) = local.as_str() {
+            if !local.is_empty() {
+                out.insert(url.clone(), local.to_string());
+            }
+        }
+    }
+    out
+}
+
 async fn run_ffmpeg(
     input: &FsPath,
     playlist: &FsPath,

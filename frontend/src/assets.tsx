@@ -378,6 +378,114 @@ function ConvertCard({ ready }: { ready: boolean }) {
   );
 }
 
+/** 配置里一个占位跳转 URL（`GET /panel/api/assets/candidates`）。 */
+type Candidate = {
+  key: string;
+  label: string;
+  url: string;
+  local_path: string;
+  converted: boolean;
+};
+
+/**
+ * 配置中的占位视频 URL。
+ *
+ * 目标的 5 个占位键常指向 MP4。部分播放器不显示 MP4，
+ * 所以提供逐项与一键转本地 HLS。转换只写 `[assets].map`，不改配置里的跳转键。
+ */
+function CandidatesCard({ ready }: { ready: boolean }) {
+  const [items, setItems] = useState<Candidate[]>([]);
+  const [running, setRunning] = useState('');
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const body = await api<{ items?: Candidate[] }>('GET', '/assets/candidates');
+      setItems(body.items ?? []);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const convert = async (url: string) => {
+    setRunning(url);
+    setError('');
+    try {
+      await api('POST', '/assets/convert', { url });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunning('');
+    }
+  };
+
+  /** 一键转换：逐个串行，跳过已转换的。 */
+  const convertAll = async () => {
+    const pending = items.filter((item) => !item.converted && item.url !== '');
+    for (const item of pending) {
+      await convert(item.url);
+    }
+  };
+
+  const pending = items.filter((item) => !item.converted && item.url !== '');
+  const busy = running !== '';
+
+  return (
+    <div className="card">
+      <div className="row between">
+        <h2>配置中的占位视频 URL</h2>
+        <button disabled={!ready || busy || pending.length === 0} onClick={() => void convertAll()}>
+          一键转换（{pending.length}）
+        </button>
+      </div>
+      <p className="muted">
+        这些地址常指向 MP4。部分播放器不显示 MP4，转成本地 HLS 后可见。转换结果写入{' '}
+        <code className="mono">[assets].map</code>，不改动配置里的跳转键。
+      </p>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>用途</th>
+            <th>地址</th>
+            <th className="right">状态</th>
+            <th className="right">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.key}>
+              <td>{item.label}</td>
+              <td className="mono" style={{ wordBreak: 'break-all' }}>
+                {item.url === '' ? '（未设置）' : item.url}
+              </td>
+              <td className="right">
+                {item.converted ? <Badge tone="ok">已转换</Badge> : <Badge tone="muted">未转换</Badge>}
+              </td>
+              <td className="right">
+                <button
+                  disabled={!ready || busy || item.url === ''}
+                  onClick={() => void convert(item.url)}
+                >
+                  {running === item.url ? '转换中…' : item.converted ? '重新转换' : '转换为 HLS'}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {items.length === 0 && <p className="muted">未读取到占位 URL。</p>}
+      {!ready && <div className="msg err">未检测到 ffmpeg，无法转换。</div>}
+      {error && <div className="msg err">{error}</div>}
+    </div>
+  );
+}
+
 /** 素材页：视频、字幕与 ffmpeg 状态。 */
 export function AssetsPage() {
   const [ffmpeg, setFfmpeg] = useState<{ installed: boolean; version: string | null } | null>(null);
@@ -402,6 +510,7 @@ export function AssetsPage() {
           </dd>
         </dl>
       </div>
+      <CandidatesCard ready={Boolean(ffmpeg?.installed)} />
       <Library kind="assets" accept="video/*" ffmpegReady={Boolean(ffmpeg?.installed)} />
       <ConvertCard ready={Boolean(ffmpeg?.installed)} />
       <Library kind="subtitle" accept=".srt,.ass,.ssa,.vtt" ffmpegReady={true} />

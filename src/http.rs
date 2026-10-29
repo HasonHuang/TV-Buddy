@@ -149,6 +149,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/panel/api/assets/list", get(routes::media::list))
         .route("/panel/api/assets/convert", post(routes::media::convert))
+        .route(
+            "/panel/api/assets/candidates",
+            get(routes::media::candidates),
+        )
         .route("/panel/api/assets/upload", post(routes::media::upload))
         .route("/panel/api/assets/remove", post(routes::media::remove))
         .route("/panel/api/assets/raw/:file", get(routes::media::raw))
