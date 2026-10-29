@@ -321,7 +321,7 @@
 | ID | 项 | 当前结论 |
 | --- | --- | --- |
 | V-10 | 面板逐屏视觉与交互 | API 对拍 22/22 差异 0。2026-10-29 完成逐屏对拍（P3-6）。页头骨架、侧栏、13 个分区可达性一致。版式栅格与 4 项功能入口不一致，见 §3.7 与 [`docs/tests/runs/2026-10-29.md`](docs/tests/runs/2026-10-29.md) |
-| — | `dash-timeshift/status` 的 `hours` | 本实现对 `dash_timeshift` 频道也返回 `timeshift_hours`。目标用哪个键未验证 |
+| — | `dash-timeshift/status` 的 `hours` | 本实现统一返回 `hours`。值按频道类型取 `dash_timeshift_hours` 或 `timeshift_hours`。目标的键名未验证（P3-7）。方案见 [`08-open-decisions.md`](docs/design/08-open-decisions.md) §3 |
 | — | U-06 其余 5 种台标效果 | 只有 `breathe` 逐字节一致。其余为近似 |
 
 ### 3.5 面板外观与安装行为（2026-10-29）
@@ -495,9 +495,9 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | P3-2 | DASH 文字轨出口 | ✅ 定案保留（2026-10-28）。目标在夹具里不写 master，本实现输出 `SUBTITLES` 组：这是超集，播放器不用也不受影响 | F-016 §5.1 |
 | P3-3 | `[subtitle].style.*` 样式注入 | ❌ 不做（2026-10-28）。本实现没有面向播放器的字幕出口：字幕只在面板里上传/管理，注入样式无处生效 | `05` §4.1 |
 | P3-4 | 播放侧 `compat_mode`、`srt_ua_keywords` | ❌ 不做。目标未测出行为（D19），按「不猜」处理 | D19 |
-| P3-5 | U-06 其余 5 种台标效果 | ⏳ 缺目标逐帧证据。`breathe` 的增亮曲线 `[0,2,3,4,5,5,4,3,2,0]` 已逐字节对齐；其余 5 种的像素公式未解，当前是近似。取证方法：用目标容器对同一张源图生成 6 种效果，逐帧比对亮暗剖面 | F-011 |
+| P3-5 | U-06 其余 5 种台标效果 | ⏳ 缺目标逐帧证据（对比方案见 [`08`](docs/design/08-open-decisions.md) §2，建议保持近似）。`breathe` 的增亮曲线 `[0,2,3,4,5,5,4,3,2,0]` 已逐字节对齐；其余 5 种的像素公式未解，当前是近似。取证方法：用目标容器对同一张源图生成 6 种效果，逐帧比对亮暗剖面 | F-011 |
 | P3-6 | 逐屏视觉对拍（验证类） | ✅ 已完成（2026-10-29）。13 个分区加登录页按 1440×1000 截图，与 `reference/img/` 并排比对。页头骨架与侧栏一致；发现 4 项功能缺口（VG-1 至 VG-4）与若干版式差异。见 §3.7 与 `docs/tests/runs/2026-10-29.md` | `07` §5、V-10 |
-| P3-7 | `dash-timeshift/status` 的 `hours` 键核对（验证类） | ⏳ 无代码缺口。需要目标环境确认 `dash_timeshift_hours` 还是 `timeshift_hours` | F-016 §5.1 |
+| P3-7 | `dash-timeshift/status` 的 `hours` 键核对（验证类） | ⏳ 无代码缺口。需要目标环境确认键名（对比方案见 [`08`](docs/design/08-open-decisions.md) §3，建议保持 `hours`） | F-016 §5.1 |
 
 ### 6.4 外部依赖（需要你参与）
 
@@ -527,6 +527,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | 目标规范 | [`docs/spec/08-target-spec.md`](docs/spec/08-target-spec.md) |
 | 验证矩阵 | [`docs/spec/07-baseline-and-verification.md`](docs/spec/07-baseline-and-verification.md) |
 | 全量覆盖对比与规划 | [`docs/design/07-coverage-and-plan.md`](docs/design/07-coverage-and-plan.md) |
+| 未决项对比方案 | [`docs/design/08-open-decisions.md`](docs/design/08-open-decisions.md) |
 | HTTP 契约 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) |
 | 配置与存储 | [`docs/design/04-config-and-storage.md`](docs/design/04-config-and-storage.md) |
 | 低配置优化 | [`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md) |
