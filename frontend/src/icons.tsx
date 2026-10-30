@@ -39,7 +39,8 @@ export type IconName =
   | 'grip'
   | 'play'
   | 'image'
-  | 'file';
+  | 'file'
+  | 'users';
 
 const PATHS: Record<IconName, ReactNode> = {
   overview: <path d="M2.2 13.4V8.4M6.2 13.4V5.2M10.2 13.4V9.6M14 13.4V3.2" />,
@@ -132,6 +133,15 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M10.5 5.5V3.9a1.4 1.4 0 0 0-1.4-1.4H3.9a1.4 1.4 0 0 0-1.4 1.4v5.2a1.4 1.4 0 0 0 1.4 1.4h1.6" />
     </>
   ),
+  users: (
+    <>
+      <circle cx="6" cy="5.6" r="2.2" />
+      <path d="M2.3 13.2c0-2.1 1.6-3.4 3.7-3.4s3.7 1.3 3.7 3.4" />
+      <circle cx="11.5" cy="6.5" r="1.7" />
+      <path d="M10.7 9.7c2 0 3.3 1.2 3.3 3.1" />
+    </>
+  ),
+
   more: (
     <>
       <circle cx="3.4" cy="8" r="1.05" fill="currentColor" stroke="none" />

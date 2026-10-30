@@ -6,6 +6,8 @@
 //
 // 用法：node scripts/panel-shots.js <输出目录> [基址]
 // 默认基址 http://127.0.0.1:19898。
+// 账号取自环境变量 PANEL_USER / PANEL_PASS，默认 admin/admin。
+// 首次安装的随机口令在 <cache>/admin_initial_credentials.txt。
 
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -51,8 +53,8 @@ const SECTIONS = [
   await page.screenshot({ path: path.join(OUT, 'p00-login.png') });
   report.viewport = await page.evaluate(() => [innerWidth, innerHeight, devicePixelRatio]);
 
-  await page.fill('#user', 'admin');
-  await page.fill('#pass', 'admin');
+  await page.fill('#user', process.env.PANEL_USER || 'admin');
+  await page.fill('#pass', process.env.PANEL_PASS || 'admin');
   await page.click('button[type=submit]');
   await page.waitForSelector('.sidebar .nav-item', { timeout: 15000 });
   await page.waitForTimeout(800);

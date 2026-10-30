@@ -10,6 +10,7 @@ import { CachePage, StatsPage } from './cache';
 import { AssetsPage } from './assets';
 import { SettingsPage } from './settings';
 import { LogosPage } from './logo';
+import { UsersPage } from './users';
 import { PlaylistPage } from './playlist';
 import { LivestreamPage, SchedulePage } from './schedule';
 import './style.css';
@@ -21,6 +22,7 @@ type SectionId =
   | 'groups'
   | 'settings'
   | 'security'
+  | 'users'
   | 'stats'
   | 'schedule'
   | 'epg'
@@ -36,6 +38,7 @@ const NAV: { id: SectionId; label: string; icon: IconName }[] = [
   { id: 'groups', label: '分组管理', icon: 'groups' },
   { id: 'settings', label: '系统设置', icon: 'settings' },
   { id: 'security', label: '安全管控', icon: 'security' },
+  { id: 'users', label: '用户与设备', icon: 'users' },
   { id: 'stats', label: '频道热度', icon: 'stats' },
   { id: 'schedule', label: '定时录制', icon: 'schedule' },
   { id: 'epg', label: '节目指南', icon: 'epg' },
@@ -368,6 +371,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         {section === 'groups' && <GroupsPage />}
         {section === 'settings' && <SettingsPage />}
         {section === 'security' && <SecurityPage />}
+        {section === 'users' && <UsersPage />}
         {section === 'stats' && <StatsPage />}
         {section === 'schedule' && <SchedulePage view="schedule" />}
         {section === 'epg' && <EpgPanelPage />}
