@@ -337,10 +337,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <button
               key={item.id}
               className={`nav-item${section === item.id ? ' active' : ''}`}
+              title={item.label}
               onClick={() => setSection(item.id)}
             >
               <Icon name={item.icon} size={15} />
-              {item.label}
+              <span className="nav-label">{item.label}</span>
             </button>
           ))}
         </nav>
@@ -357,7 +358,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <div className="sidebar-foot">
           <button className="ghost" onClick={() => void logout()}>
             <Icon name="close" size={13} />
-            退出登录
+            <span className="nav-label">退出登录</span>
           </button>
         </div>
       </aside>

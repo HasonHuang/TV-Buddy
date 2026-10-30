@@ -165,7 +165,10 @@ export function SystemPage() {
           <dt>ffmpeg</dt>
           <dd>
             {ffmpeg?.installed ? (
-              <Badge tone="ok">已安装 {ffmpeg.version ?? ''}</Badge>
+              <>
+                <Badge tone="ok">已安装</Badge>
+                {ffmpeg.version ? <span className="muted mono version"> {ffmpeg.version}</span> : null}
+              </>
             ) : (
               <Badge tone="warn">未安装（录制只能保留 TS）</Badge>
             )}

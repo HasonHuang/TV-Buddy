@@ -614,7 +614,8 @@ export function SettingsPage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
+              // `min(380px, 100%)` 让窄屏时列宽跟着容器收缩，不撑出横向滚动条。
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(380px, 100%), 1fr))',
               gap: 12,
               alignItems: 'start',
             }}

@@ -1587,3 +1587,186 @@ pre code {
 .card > .row:last-child {
   margin-bottom: 0;
 }
+
+/* --- 小屏适配 --- */
+
+/* ≤1080 px：侧栏收成图标栏。 */
+@media (max-width: 1080px) {
+  .shell {
+    grid-template-columns: 64px 1fr;
+  }
+
+  .sidebar {
+    align-items: center;
+    padding: 12px 8px 10px;
+  }
+
+  .brand {
+    justify-content: center;
+    padding: 4px 0 12px;
+    width: 100%;
+  }
+
+  .brand-text,
+  .nav-label,
+  .sidebar-meta {
+    display: none;
+  }
+
+  .nav-item {
+    justify-content: center;
+    padding: 9px 0;
+    width: 46px;
+  }
+
+  .sidebar-foot button {
+    width: 46px;
+    padding: 0;
+  }
+}
+
+/* ≤720 px：侧栏变顶部横向导航，内容占满宽度。 */
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(6px);
+    /* flex 子项的 min-width 默认 auto，会被导航内容撑开。 */
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .brand {
+    flex: none;
+    width: auto;
+    padding: 0 6px 0 0;
+    border-bottom: 0;
+  }
+
+  .sidebar nav {
+    flex-direction: row;
+    gap: 2px;
+    padding: 0;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .sidebar nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-item {
+    flex: none;
+    width: auto;
+    padding: 7px 9px;
+  }
+
+  .nav-label {
+    display: inline;
+  }
+
+  .sidebar-meta,
+  .sidebar-foot .nav-label {
+    display: none;
+  }
+
+  .sidebar-foot {
+    flex: none;
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .sidebar-foot button {
+    width: 34px;
+    padding: 0;
+  }
+
+  .content {
+    padding: 16px 14px 40px;
+  }
+
+  .page-head {
+    flex-wrap: wrap;
+  }
+
+  .page-head .actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  .ch-row {
+    flex-wrap: wrap;
+  }
+
+  .ch-ops {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  dl {
+    grid-template-columns: 104px 1fr;
+  }
+
+  /* 网格与弹性子项默认 min-width: auto，会被长内容撑开。 */
+  dl > *,
+  .fields > *,
+  .stats > *,
+  .row > * {
+    min-width: 0;
+  }
+
+  .card {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /* 长文本徽章允许换行，不撑破卡片。 */
+  .badge,
+  .tag {
+    white-space: normal;
+    max-width: 100%;
+    word-break: break-word;
+  }
+
+  .modal-overlay {
+    padding: 24px 12px;
+  }
+
+  /* 宽表格横向滚动，不给页面撑出横向滚动条。 */
+  .table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .app-foot {
+    flex-wrap: wrap;
+    margin-top: 20px;
+  }
+}
+
+/* ffmpeg 版本号这类长文本：允许换行。 */
+.version {
+  word-break: break-word;
+}
