@@ -195,7 +195,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         <div>
           <h2>访问控制</h2>
           <p className="muted">
-            写 `[auth]` 段：改完点保存，整份配置原子替换（与设置页同一机制）。
+            写 <code className="mono">[auth]</code> 段：改完点保存，整份配置原子替换（与设置页同一机制）。
           </p>
         </div>
         <button disabled={saving} onClick={() => void save()}>
@@ -205,9 +205,10 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
 
       <h3>白名单</h3>
       <p className="muted">
-        每行一个地址，支持精确 IP、IPv4 CIDR 与 `*`。只在上方「IP 管控」开启时生效：
-        名单内的地址豁免封禁与并发会话上限。目标键面里有它，但豁免语义在目标上未观测到，
-        本实现的规则是自定的（见 `PROGRESS.md` §3.3）。
+        每行一个地址，支持精确 IP、IPv4 CIDR 与 <code className="mono">*</code>。
+        只在上方「IP 管控」开启时生效：名单内的地址豁免封禁与并发会话上限。
+        目标键面里有它，但豁免语义在目标上未观测到，本实现的规则是自定的（见{' '}
+        <code className="mono">PROGRESS.md</code> §3.3）。
       </p>
       <textarea
         rows={4}
@@ -249,7 +250,8 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
       <p className="muted">
         限流只计播放入口请求（换台 / 新建播放），不计切片。二级是突发上限，
         一级是持续上限，任一超限即进入冷却并记一次违规。全部只在「IP 管控」开启时生效。
-        规则是自定的：目标 v0.8.2 的触发条件未复现（见 `PROGRESS.md` §3.1.5）。
+        规则是自定的：目标 v0.8.2 的触发条件未复现（见{' '}
+        <code className="mono">PROGRESS.md</code> §3.1.5）。
       </p>
       <div className="fields">
         {AUTH_LIMIT.map((field) => (
@@ -280,7 +282,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
 
       <h3>登录防爆破</h3>
       <p className="muted">
-        窗口内累计失败达到「免费次数 + 阈值」后，该 IP 的 `/panel/api/login` 返回 `429`；
+        窗口内累计失败达到「免费次数 + 阈值」后，该 IP 的 <code className="mono">/panel/api/login</code> 返回 <code className="mono">429</code>；
         锁不波及已有的 Bearer 会话。首次锁定时长固定 ≈300s（与目标观测一致）。
       </p>
       <div className="fields">
@@ -408,6 +410,7 @@ export function SecurityPage() {
         <button onClick={() => void rotate()}>轮换 Token</button>
       </PageHead>
       <div className="card">
+        <h2>播放 Token</h2>
         <dl>
           <dt>校验</dt>
           <dd>{token ? (token.enabled ? '已开启' : '已关闭') : '—'}</dd>
@@ -580,7 +583,15 @@ export function LogsPage() {
       <div className="card">
         {error && <div className="msg err">{error}</div>}
         <pre className="log" style={{ marginTop: 0 }}>
-          {shown.map(plain).join('\n')}
+          {shown.map((line, index) => {
+            const lv = levelOf(line);
+            return (
+              <span key={index} className={lv === '' ? undefined : `lv-${lv}`}>
+                {plain(line)}
+                {'\n'}
+              </span>
+            );
+          })}
         </pre>
         {level !== 'all' && shown.length === 0 && (
           <p className="muted">当前缓冲里没有 {level.toUpperCase()} 级别的行。</p>
@@ -667,7 +678,7 @@ export function BackupPage() {
           恢复
         </div>
         <p className="muted">
-          恢复会覆盖 `config.toml`，旧文件另存为 `config.toml.bak`。非法内容不会落盘。
+          恢复会覆盖 <code className="mono">config.toml</code>，旧文件另存为 <code className="mono">config.toml.bak</code>。非法内容不会落盘。
         </p>
         <input
           ref={file}
@@ -875,8 +886,8 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
         <div>
           <h2>EPG 翻译</h2>
           <p className="muted">
-            引擎负责把节目名/简介翻成目标语言，译文按 `lang` 写进 XMLTV。
-            本实现只实现 MTranServer 的 HTTP 批量接口（`/translate/batch`，失败回退单条）。
+            引擎负责把节目名/简介翻成目标语言，译文按 <code className="mono">lang</code> 写进 XMLTV。
+            本实现只实现 MTranServer 的 HTTP 批量接口（<code className="mono">/translate/batch</code>，失败回退单条）。
           </p>
         </div>
         <div className="row">
@@ -1049,7 +1060,7 @@ function EpgCronCard({ onChanged }: { onChanged: () => void }) {
       // `[epg]` 段（含源列表）在启动时读取，改 cron 也不会立刻换调度；界面上写明。
       await api('PUT', '/config', { ...config, epg: { ...epg, cron: expr.trim() } });
       setSaved(expr.trim());
-      setNote('采集节奏已保存；`[epg]` 段需重启后重新排程');
+      setNote('采集节奏已保存；[epg] 段需重启后重新排程');
       onChanged();
     } catch (err) {
       setError(errorText(err));
@@ -1062,8 +1073,10 @@ function EpgCronCard({ onChanged }: { onChanged: () => void }) {
     <div className="card">
       <h2>采集节奏</h2>
       <p className="muted">
-        cron 表达式（5 段：分 时 日 月 周），按 `[server].timezone_offset_hours` 解释。
-        默认 `0 */4 * * *`。`[epg]` 段在启动时读取，改动需重启才生效。
+        cron 表达式（5 段：分 时 日 月 周），按{' '}
+        <code className="mono">[server].timezone_offset_hours</code> 解释。默认{' '}
+        <code className="mono">0 */4 * * *</code>。<code className="mono">[epg]</code>{' '}
+        段在启动时读取，改动需重启才生效。
       </p>
       <div className="row">
         <input
@@ -1245,6 +1258,7 @@ export function EpgPanelPage() {
         </button>
       </PageHead>
       <div className="card">
+        <h2>EPG 状态</h2>
         <dl>
           <dt>源</dt>
           <dd>{status?.sources ?? 0} 个</dd>

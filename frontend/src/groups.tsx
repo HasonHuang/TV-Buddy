@@ -248,7 +248,7 @@ function NetworkBlock({
           />
         </Field>
       </div>
-      <Field label="请求头" hint="每行一条，格式 `名称: 值`。留空表示不加。">
+      <Field label="请求头" hint="每行一条，格式为「名称: 值」。留空表示不加。">
         <textarea
           rows={3}
           placeholder="User-Agent: VLC/3.0"

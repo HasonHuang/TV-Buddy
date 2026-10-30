@@ -258,7 +258,7 @@ export function SystemPage() {
       <div className="card">
         <h2>频道探测</h2>
         {health?.enabled === false ? (
-          <p className="muted">未启用（`[health].enabled = false`）。</p>
+          <p className="muted">未启用（<code className="mono">[health].enabled = false</code>）。</p>
         ) : (
           <dl>
             {Object.entries(health?.entries ?? {}).map(([key, entry]) => (

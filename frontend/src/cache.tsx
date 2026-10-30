@@ -119,6 +119,7 @@ export function CachePage() {
       </PageHead>
       {stats && <RecommendCard recommend={stats.recommend} />}
       <div className="card">
+        <h2>缓存目录</h2>
         <dl>
           <dt>目录</dt>
           <dd className="mono ellipsis">{stats?.disk_path ?? '—'}</dd>
@@ -178,17 +179,26 @@ export function StatsPage() {
       </PageHead>
       <div className="stats">
         <div className="stat">
-          <div className="k">当前在线</div>
+          <div className="k">
+            <Icon name="overview" size={13} />
+            当前在线
+          </div>
           <div className="v">{stats?.online_viewers ?? 0}</div>
           <div className="hint">近 {stats?.online_window_secs ?? 0} 秒去重观众合计</div>
         </div>
         <div className="stat">
-          <div className="k">活跃频道</div>
+          <div className="k">
+            <Icon name="livestream" size={13} />
+            活跃频道
+          </div>
           <div className="v">{stats?.active_channels ?? 0}</div>
           <div className="hint">有人在线观看的频道数</div>
         </div>
         <div className="stat">
-          <div className="k">累计清单请求</div>
+          <div className="k">
+            <Icon name="cache" size={13} />
+            累计清单请求
+          </div>
           <div className="v">{stats?.playlists ?? 0}</div>
           <div className="hint">自启动以来全频道合计</div>
         </div>

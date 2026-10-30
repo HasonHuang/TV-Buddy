@@ -270,7 +270,7 @@ export function SchedulePage({
           <PageHead icon="schedule" title="定时录制" sub="按时间表用 ffmpeg 录制，产物为 MKV" />
           <div className="card">
             <div className="section-title">新建录制任务</div>
-            <div className="row">
+            <div className="row form-row">
               <select
                 value={form.group_id}
                 onChange={(event) =>
@@ -301,7 +301,7 @@ export function SchedulePage({
                 onChange={(event) => setForm({ ...form, name: event.target.value })}
               />
             </div>
-            <div className="row">
+            <div className="row form-row">
               <input
                 type="datetime-local"
                 value={form.start_time}
@@ -442,7 +442,7 @@ export function SchedulePage({
         <PageHead icon="livestream" title="回看管理" sub="按频道缓冲历史切片，支持时移回看" />
         <div className="card">
           <p className="muted">
-            点亮后按频道 `timeshift_hours` 缓冲；回看清单用 `?start&end` 或 `?playseek` 请求入口。
+            点亮后按频道 <code className="mono">timeshift_hours</code> 缓冲；回看清单用 <code className="mono">?start&end</code> 或 <code className="mono">?playseek</code> 请求入口。
             {timeshift &&
               ` 已点亮 ${timeshift.channels.length} 个频道，已缓冲切片 ${timeshift.channels.reduce(
                 (sum, channel) => sum + channel.segments,

@@ -414,7 +414,7 @@ export function LogosPage() {
                 onChange={(event) => setOpts({ ...opts, quality: event.target.value })}
               />
             </label>
-            <label>
+            <label className="check">
               <input
                 type="checkbox"
                 checked={opts.webp}

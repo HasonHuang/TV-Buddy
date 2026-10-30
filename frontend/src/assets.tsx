@@ -255,7 +255,7 @@ function Library({
       {kind === 'assets' && (
         <p className="muted">
           未被引用的素材 {unused.length} 个（共 {files.length} 个）。判定标准：配置里没有任何地址指向
-          `/assets/&lt;文件名&gt;`（本实现自定，目标未观测）。
+          <code className="mono">/assets/&lt;文件名&gt;</code>（本实现自定，目标未观测）。
         </p>
       )}
       <table className="table">
@@ -350,7 +350,8 @@ function ConvertCard({ ready }: { ready: boolean }) {
     <div className="card">
       <h2>远程转换</h2>
       <p className="muted">
-        用 ffmpeg 把上游地址转成本地 HLS，并写入 `[assets].map`。需要 ffmpeg。
+        用 ffmpeg 把上游地址转成本地 HLS，并写入{' '}
+        <code className="mono">[assets].map</code>。需要 ffmpeg。
       </p>
       <div className="row">
         <input

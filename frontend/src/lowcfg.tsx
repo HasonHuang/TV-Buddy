@@ -120,7 +120,7 @@ export function RecommendCard({ recommend }: { recommend: Recommend }) {
       </dl>
       <p className="muted">
         把 TTL 填进 CDN 面板的「强制 TTL」规则；切片路径用规则 B 缓存，清单与
-        `/panel*`、`/health` 走 BYPASS。
+        <code className="mono">/panel*</code>、<code className="mono">/health</code> 走 BYPASS。
       </p>
     </div>
   );

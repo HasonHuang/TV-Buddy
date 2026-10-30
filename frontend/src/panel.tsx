@@ -124,11 +124,24 @@ function uptime(secs: number): string {
   return `${minutes} 分钟`;
 }
 
-/** 单个指标卡。 */
-function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+/** 单个指标卡。`icon` 显示在标签左侧。 */
+function Stat({
+  label,
+  value,
+  tone,
+  icon,
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+  icon?: IconName;
+}) {
   return (
     <div className="stat">
-      <div className="k">{label}</div>
+      <div className="k">
+        {icon && <Icon name={icon} size={13} />}
+        {label}
+      </div>
       <div className={`v${tone ? ` ${tone}` : ''}`}>{value}</div>
     </div>
   );
@@ -185,23 +198,34 @@ function Overview() {
       </PageHead>
 
       <div className="stats">
-        <Stat label="分组数" value={text('group_count')} tone="accent" />
-        <Stat label="频道数" value={text('channel_count')} tone="accent" />
-        <Stat label="缓存后端" value={backend} tone={backend === 'disk' ? 'danger' : 'accent'} />
-        <Stat label="在线观众" value={text('online_viewers')} tone="accent" />
-        <Stat label="缓存磁盘占用" value={`${text('disk_cache_mb')} MB`} tone="accent" />
+        <Stat label="分组数" value={text('group_count')} tone="accent" icon="groups" />
+        <Stat label="频道数" value={text('channel_count')} tone="accent" icon="livestream" />
+        <Stat
+          label="缓存后端"
+          value={backend}
+          tone={backend === 'disk' ? 'danger' : 'accent'}
+          icon="cache"
+        />
+        <Stat label="在线观众" value={text('online_viewers')} tone="accent" icon="stats" />
+        <Stat
+          label="缓存磁盘占用"
+          value={`${text('disk_cache_mb')} MB`}
+          tone="accent"
+          icon="file"
+        />
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card">
         <div className="section-title">实时指标</div>
         <div className="stats">
-          <Stat label="下行 · 回源" value={bytes(num('traffic_in_bytes'))} />
-          <Stat label="上行 · 出网" value={bytes(num('traffic_out_bytes'))} />
-          <Stat label="进程内存" value={`${text('mem_rss_mb')} MB`} />
-          <Stat label="CPU 占用" value={`${text('cpu_seconds')} 秒`} />
+          <Stat label="下行 · 回源" value={bytes(num('traffic_in_bytes'))} icon="download" />
+          <Stat label="上行 · 出网" value={bytes(num('traffic_out_bytes'))} icon="upload" />
+          <Stat label="进程内存" value={`${text('mem_rss_mb')} MB`} icon="cache" />
+          <Stat label="CPU 占用" value={`${text('cpu_seconds')} 秒`} icon="stats" />
           <Stat
             label="整盘内存峰值"
             value={`${bytes(num('whole_file_peak'))} / ${bytes(num('whole_file_budget'))}`}
+            icon="file"
           />
         </div>
       </div>
@@ -274,6 +298,19 @@ function Overview() {
 
 function Shell({ onLogout }: { onLogout: () => void }) {
   const [section, setSection] = useState<SectionId>('dashboard');
+  /** 侧栏与页脚用的版本与运行时长。 */
+  const [meta, setMeta] = useState<{ version: string; uptime: number } | null>(null);
+
+  useEffect(() => {
+    void api<{ version?: string; uptime_secs?: number }>('GET', '/status')
+      .then((body) =>
+        setMeta({
+          version: String(body.version ?? '—'),
+          uptime: Number(body.uptime_secs ?? 0),
+        }),
+      )
+      .catch(() => setMeta(null));
+  }, []);
 
   const logout = async () => {
     try {
@@ -307,6 +344,16 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             </button>
           ))}
         </nav>
+        <div className="sidebar-meta">
+          <div className="kv">
+            <span>版本</span>
+            <span className="v">{meta ? `v${meta.version}` : '—'}</span>
+          </div>
+          <div className="kv">
+            <span>已运行</span>
+            <span className="v">{meta ? uptime(meta.uptime) : '—'}</span>
+          </div>
+        </div>
         <div className="sidebar-foot">
           <button className="ghost" onClick={() => void logout()}>
             <Icon name="close" size={13} />
@@ -328,6 +375,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         {section === 'livestream' && <LivestreamPage />}
         {section === 'assets' && <AssetsPage />}
         {section === 'logs' && <LogsPage />}
+        <footer className="app-foot">
+          <Icon name="tv" size={13} />
+          <span>TV Buddy</span>
+          <span className="dot-sep">·</span>
+          <span>IPTV 代理与管理面板</span>
+          <span className="spacer" />
+          <span className="mono">{meta ? `v${meta.version}` : ''}</span>
+        </footer>
       </main>
     </div>
   );

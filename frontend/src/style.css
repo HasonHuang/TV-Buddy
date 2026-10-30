@@ -3,6 +3,9 @@
  * 视觉基准：`docs/design/reference/img/`（目标 IPTV Proxy v0.8.2 截图）。
  * 只有**布局与观感**对齐；组件、图标与样式全部为本实现自研。
  *
+ * 视觉语言取 shadcn/ui 的做法：中性灰阶打底、1 px 细边框、小阴影、
+ * 单一强调色、统一的焦点环与圆角。强调色换成品牌青绿，其余保持中性。
+ *
  * 结构约定：
  * - `.shell` = 左侧栏 224 px + 主内容区；
  * - `.page-head` 是每个分区顶部的标题行；
@@ -12,38 +15,45 @@
 :root {
   color-scheme: light;
 
-  /* 底色与分隔线 */
-  --bg: #eef1f5;
+  /* 中性灰阶（zinc） */
+  --bg: #fafafa;
   --panel: #ffffff;
-  --panel-2: #f7f9fb;
-  --line: #e4e8ee;
-  --line-strong: #d5dbe4;
+  --panel-2: #f4f4f5;
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
 
   /* 文字 */
-  --text: #222a37;
-  --text2: #64707f;
-  --text3: #98a1ae;
+  --text: #18181b;
+  --text2: #71717a;
+  --text3: #a1a1aa;
 
-  /* 主色（青绿） */
+  /* 强调色（品牌青绿） */
   --accent: #0f8f7f;
   --accent-dark: #0b7568;
-  --accent-weak: #e6f4f1;
-  --accent-line: #b9e0d9;
+  --accent-weak: #e8f5f3;
+  --accent-line: #b6e0d9;
 
   /* 语义色 */
-  --danger: #e03131;
-  --danger-dark: #c92a2a;
-  --danger-weak: #fdecec;
-  --ok: #12925a;
-  --ok-weak: #e6f6ee;
-  --warn: #b3700a;
-  --warn-weak: #fdf3e3;
-  --info: #2f6fd0;
-  --info-weak: #eaf1fc;
+  --danger: #dc2626;
+  --danger-dark: #b91c1c;
+  --danger-weak: #fef2f2;
+  --ok: #16a34a;
+  --ok-weak: #f0fdf4;
+  --warn: #ca8a04;
+  --warn-weak: #fefce8;
+  --info: #2563eb;
+  --info-weak: #eff6ff;
 
+  /* 圆角与阴影：卡片 10 px，控件 8 px。 */
   --radius: 10px;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
-  --shadow-lg: 0 16px 44px rgba(16, 24, 40, 0.16);
+  --radius-sm: 8px;
+  --ring: rgba(15, 143, 127, 0.28);
+
+  --shadow: 0 1px 2px rgba(24, 24, 27, 0.05);
+  --shadow-lg: 0 20px 48px rgba(24, 24, 27, 0.14);
+
+  /* 过渡时长：全站统一。 */
+  --ease: 0.14s ease;
 }
 
 * {
@@ -56,6 +66,36 @@ body {
   color: var(--text);
   font: 13.5px/1.6 system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 键盘焦点：统一用柔和的主色环。鼠标点击不显示。 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 细滚动条，与中性灰阶一致。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text3);
+  background-clip: content-box;
 }
 
 /* --- 基本排版 --- */
@@ -314,7 +354,7 @@ a {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 14px 16px;
+  padding: 16px 18px;
   margin-bottom: 12px;
 }
 
@@ -333,7 +373,8 @@ a {
 
 .row.between {
   justify-content: space-between;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .row.between > .row {
@@ -387,18 +428,21 @@ input,
 textarea,
 select {
   width: 100%;
-  background: var(--panel-2);
+  background: var(--panel);
   border: 1px solid var(--line-strong);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   color: var(--text);
   padding: 7px 10px;
   font: inherit;
   font-size: 13px;
+  transition:
+    border-color var(--ease),
+    box-shadow var(--ease);
 }
 
 input,
 select {
-  height: 32px;
+  height: 34px;
 }
 
 input::placeholder,
@@ -411,8 +455,7 @@ textarea:focus,
 select:focus {
   outline: none;
   border-color: var(--accent);
-  background: #fff;
-  box-shadow: 0 0 0 3px var(--accent-weak);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 input:disabled,
@@ -493,21 +536,29 @@ button {
   gap: 6px;
   background: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   color: #fff;
-  padding: 0 13px;
-  height: 32px;
+  padding: 0 14px;
+  height: 34px;
   font: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
   text-decoration: none;
+  transition:
+    background var(--ease),
+    border-color var(--ease),
+    box-shadow var(--ease);
 }
 
 button:hover:not(:disabled) {
   background: var(--accent-dark);
   border-color: var(--accent-dark);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0.5px);
 }
 
 button:disabled {
@@ -556,7 +607,7 @@ label.ghost {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -579,8 +630,8 @@ a.ghost:hover {
 }
 
 a.chip {
-  height: 26px;
-  padding: 0 9px;
+  height: 28px;
+  padding: 0 10px;
   font-size: 12px;
   font-weight: 500;
   background: var(--panel);
@@ -597,10 +648,10 @@ a.chip:hover {
 .table button,
 .compact button,
 a.compact {
-  height: 26px;
-  padding: 0 9px;
+  height: 28px;
+  padding: 0 10px;
   font-size: 12px;
-  border-radius: 6px;
+  border-radius: 7px;
 }
 
 /* 只有图标的方按钮。 */
@@ -610,7 +661,7 @@ a.compact {
   justify-content: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   color: var(--text2);
   width: 24px;
   height: 24px;
@@ -653,9 +704,9 @@ a.compact {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
   border: 1px solid var(--line-strong);
   background: var(--panel);
   color: var(--text);
@@ -705,13 +756,13 @@ a.compact {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border-radius: 999px;
-  padding: 1px 8px;
+  border-radius: 6px;
+  padding: 1px 7px;
   font-size: 11px;
   line-height: 17px;
-  font-weight: 600;
-  border: 1px solid var(--line-strong);
-  background: var(--panel-2);
+  font-weight: 500;
+  border: 1px solid var(--line);
+  background: var(--panel);
   color: var(--text2);
   white-space: nowrap;
 }
@@ -723,19 +774,19 @@ a.compact {
 }
 
 .badge.warn {
-  border-color: #f2dcb4;
+  border-color: #fde68a;
   background: var(--warn-weak);
   color: var(--warn);
 }
 
 .badge.info {
-  border-color: #cfe0f9;
+  border-color: #bfdbfe;
   background: var(--info-weak);
   color: var(--info);
 }
 
 .badge.danger {
-  border-color: #f6cccc;
+  border-color: #fecaca;
   background: var(--danger-weak);
   color: var(--danger);
 }
@@ -792,17 +843,25 @@ a.compact {
 .table th {
   text-align: left;
   color: var(--text2);
-  font-weight: 600;
+  font-weight: 500;
   font-size: 12px;
-  background: var(--panel-2);
   border-bottom: 1px solid var(--line);
-  padding: 7px 10px;
+  padding: 8px 10px;
+  white-space: nowrap;
 }
 
 .table td {
   border-bottom: 1px solid var(--line);
   padding: 9px 10px;
   vertical-align: middle;
+}
+
+.table tbody tr {
+  transition: background var(--ease);
+}
+
+.table tbody tr:hover {
+  background: var(--panel-2);
 }
 
 .table tr:last-child td {
@@ -1045,19 +1104,39 @@ details.block[open] > summary {
   border-left-color: var(--danger);
 }
 
+/* 日志区：深色终端底。级别着色见 `.log-line`。 */
 pre.log {
   margin: 10px 0 0;
+  min-height: 42vh;
   max-height: 60vh;
   overflow: auto;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--text2);
+  padding: 12px 14px;
+  border: 1px solid #27272a;
+  border-radius: var(--radius-sm);
+  background: #18181b;
+  color: #d4d4d8;
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+pre.log .lv-info {
+  color: #5eead4;
+}
+
+pre.log .lv-warn {
+  color: #fcd34d;
+}
+
+pre.log .lv-error {
+  color: #fca5a5;
+}
+
+pre.log .lv-debug,
+pre.log .lv-trace {
+  color: #71717a;
 }
 
 /* --- 低配置设置与推荐值 --- */
@@ -1093,6 +1172,7 @@ pre.log {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
+  margin-bottom: 12px;
 }
 
 .stat {
@@ -1131,6 +1211,15 @@ pre.log {
   align-items: center;
   justify-content: center;
   padding: 24px;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(circle at 50% 38%, rgba(15, 143, 127, 0.06), transparent 42%),
+    linear-gradient(to right, rgba(24, 24, 27, 0.028) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(24, 24, 27, 0.028) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    32px 32px,
+    32px 32px;
 }
 
 .login-card {
@@ -1139,8 +1228,10 @@ pre.log {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 14px;
-  box-shadow: 0 18px 40px rgba(16, 24, 40, 0.12);
-  padding: 30px 30px 26px;
+  box-shadow:
+    0 1px 2px rgba(24, 24, 27, 0.06),
+    0 18px 40px rgba(24, 24, 27, 0.1);
+  padding: 32px 30px 26px;
   text-align: center;
 }
 
@@ -1346,6 +1437,11 @@ pre.log {
   margin-right: 5px;
 }
 
+.ch-url .badge {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .ch-badges {
   display: flex;
   gap: 5px;
@@ -1365,4 +1461,129 @@ pre.log {
   padding: 14px 12px;
   color: var(--text3);
   font-size: 12.5px;
+}
+
+/* --- 侧栏底部信息 --- */
+
+.sidebar-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px 10px;
+  margin-top: auto;
+  color: var(--text3);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.sidebar-meta .kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sidebar-meta .v {
+  color: var(--text2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* --- 页面页脚 --- */
+
+.app-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  color: var(--text3);
+  font-size: 11.5px;
+}
+
+.app-foot .icon {
+  color: var(--text3);
+}
+
+.app-foot .spacer {
+  flex: 1;
+}
+
+.dot-sep {
+  color: var(--line-strong);
+}
+
+/* --- 指标卡：图标与数值同排 --- */
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: border-color var(--ease);
+}
+
+.stat:hover {
+  border-color: var(--line-strong);
+}
+
+.stat .k {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stat .k .icon {
+  color: var(--text3);
+}
+
+.stat:hover .k .icon {
+  color: var(--accent);
+}
+
+.stat .hint {
+  margin-top: 2px;
+}
+
+/* --- 导航项过渡 --- */
+
+.nav-item {
+  transition:
+    background var(--ease),
+    color var(--ease);
+}
+
+/* --- 行内代码（界面文案里的配置键） --- */
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+pre code {
+  border: 0;
+  padding: 0;
+  background: none;
+  white-space: pre;
+}
+
+/* --- 表单行：控件按内容宽度排，按钮保持自然宽度 --- */
+
+.form-row > input,
+.form-row > select {
+  flex: 1 1 190px;
+  width: auto;
+  min-width: 0;
+}
+
+.card > .row {
+  margin-bottom: 10px;
+}
+
+.card > .row:last-child {
+  margin-bottom: 0;
 }

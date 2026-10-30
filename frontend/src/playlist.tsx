@@ -220,6 +220,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
         </div>
       </PageHead>
       <div className="card">
+        <h2>聚合设置</h2>
         <div className="row">
           <label>
             缓存秒数
@@ -344,7 +345,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
       <div className="card">
         <h2>源规则</h2>
         <p className="muted">
-          分组映射每行 `原分组=目标分组`；include/exclude 每行一条，支持 `group:` 与 `id:` 前缀。
+          分组映射每行 <code className="mono">原分组=目标分组</code>；include/exclude 每行一条，支持 <code className="mono">group:</code> 与 <code className="mono">id:</code> 前缀。
         </p>
         {cfg.sources.map((source, index) => (
           <details key={source.id || index} style={{ marginTop: 12 }}>
