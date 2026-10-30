@@ -36,6 +36,8 @@ pub struct AppState {
     pub config: ArcSwap<Config>,
     /// 面板会话（内存，重启失效）。
     pub sessions: SessionStore,
+    /// 用户、角色与访问令牌（SQLite，跨重启保留）。
+    pub users: crate::users::UserStore,
     /// 播放 Token（内存，重启失效）。
     pub play_tokens: PlayTokenStore,
     /// 上游请求客户端。
@@ -97,9 +99,14 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(config_path: PathBuf, config: Config, logs: Arc<RingBuffer>) -> Self {
+    pub fn new(
+        config_path: PathBuf,
+        config: Config,
+        logs: Arc<RingBuffer>,
+    ) -> anyhow::Result<Self> {
         let ttl = Duration::from_secs(config.panel.session_ttl.max(60));
         let cache_dir = PathBuf::from(&config.cache.disk_path);
+        let users = crate::users::UserStore::open(&cache_dir.join("users.db"))?;
         let offset_hours = config.server.timezone_offset_hours as i64;
         ensure_cache_dirs(&cache_dir);
         let segments = SegmentIndex::new();
@@ -110,10 +117,11 @@ impl AppState {
         let sources_ttl = Duration::from_secs(config.cache.ttl.sub_url_secs.max(1));
         let estimate = crate::cache_estimate::Estimator::load_or_default(&cache_dir);
         estimate.set_auto_tune(config.cdn.auto_tune);
-        Self {
+        Ok(Self {
             config_path,
             config: ArcSwap::from_pointee(config),
             sessions: SessionStore::new(ttl),
+            users,
             play_tokens: PlayTokenStore::new(),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(UPSTREAM_TIMEOUT_SECS))
@@ -147,7 +155,7 @@ impl AppState {
             logs,
             started: Instant::now(),
             write_lock: Mutex::new(()),
-        }
+        })
     }
 
     /// 取当前配置快照。

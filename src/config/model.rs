@@ -143,13 +143,13 @@ impl Default for ServerCfg {
 }
 
 /// `[panel]`。
+///
+/// 账号不再存在这里。用户、角色与令牌在 `<cache>/users.db`，
+/// 见 `docs/design/09-users-and-devices.md`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PanelCfg {
     pub enabled: bool,
-    pub username: String,
-    /// 口令的 SHA-256 十六进制。默认口令 `admin`。
-    pub password_sha256: String,
     pub session_ttl: u64,
     #[serde(flatten)]
     pub extra: toml::Table,
@@ -159,10 +159,6 @@ impl Default for PanelCfg {
     fn default() -> Self {
         Self {
             enabled: true,
-            username: "admin".into(),
-            // sha256("admin")
-            password_sha256: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
-                .into(),
             session_ttl: 86400,
             extra: toml::Table::new(),
         }

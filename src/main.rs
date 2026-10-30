@@ -23,7 +23,23 @@ async fn main() -> anyhow::Result<()> {
     logging::init(&cfg.server.log_level, log_path.as_deref(), logs.clone());
 
     let bind = cfg.server.bind.clone();
-    let state = Arc::new(state::AppState::new(config_path, cfg, logs));
+    let state = Arc::new(state::AppState::new(config_path, cfg, logs)?);
+    // 首次安装：建管理员，并把初始口令写进 `<cache>/admin_initial_credentials.txt`。
+    match tv_buddy::users::ensure_initial_admin(&state.users) {
+        Ok(Some((user, password))) => {
+            let path = state.cache_dir.join("admin_initial_credentials.txt");
+            if let Err(error) = tv_buddy::users::write_credentials_file(&path, &user, &password) {
+                tracing::error!(%error, "写入初始凭据失败");
+            }
+            tracing::warn!(
+                user = %user,
+                path = %path.display(),
+                "首次安装：已创建管理员账号，口令见该文件"
+            );
+        }
+        Ok(None) => {}
+        Err(error) => tracing::error!(%error, "初始化管理员失败"),
+    }
     reload::spawn(state.clone());
     epg::spawn(state.clone());
     tv_buddy::share::spawn(state.clone());

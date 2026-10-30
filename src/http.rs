@@ -40,6 +40,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/subs/groups", post(routes::subs::groups))
         .route("/subs/preview", post(routes::subs::preview))
         .route("/playlist.m3u", get(routes::play::total_playlist))
+        // 用户订阅入口。令牌见 `<cache>/users.db` 的 access_tokens 表。
+        .route("/sub/:token/playlist.m3u", get(routes::sub::playlist))
         .route("/:gid/playlist.m3u", get(routes::play::group_playlist))
         // 面板接口：未知路径固定 404 JSON，先于播放通配路由匹配。
         .route("/panel/api/*rest", any(routes::panel::api_missing))
@@ -60,6 +62,32 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/assets/*path", get(routes::media::served))
         // 面板接口（需要会话）
         .route("/panel/api/login", post(routes::panel::login))
+        // 用户与设备（对齐 mpd-hls 的 /users）
+        .route(
+            "/panel/api/users",
+            get(routes::users::list).post(routes::users::create),
+        )
+        .route(
+            "/panel/api/users/channel-options",
+            get(routes::users::channel_options),
+        )
+        .route(
+            "/panel/api/users/:id",
+            put(routes::users::update).delete(routes::users::remove),
+        )
+        .route(
+            "/panel/api/users/:id/password",
+            put(routes::users::set_password),
+        )
+        .route(
+            "/panel/api/users/:id/tokens",
+            get(routes::users::list_tokens).post(routes::users::create_token),
+        )
+        .route(
+            "/panel/api/users/:id/tokens/:token",
+            put(routes::users::update_token).delete(routes::users::revoke_token),
+        )
+        .route("/panel/api/me", get(routes::users::me))
         .route("/panel/api/logout", post(routes::panel::logout))
         .route("/panel/api/status", get(routes::panel::status))
         .route("/panel/api/health", get(routes::dash::health))

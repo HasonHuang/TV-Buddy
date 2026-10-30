@@ -76,19 +76,44 @@ pub async fn login(
         return Err(ApiError::Forbidden("面板未启用".into()));
     }
 
-    let user_ok = req.username.trim() == cfg.panel.username;
-    let pass_ok = config::sha256_hex(&req.password) == cfg.panel.password_sha256;
-    if !(user_ok && pass_ok) {
+    // 账号来自 `users.db`。口令用 argon2id 校验。
+    let Some(user) = state.users.find_by_username(req.username.trim()) else {
+        state.login_guard.failure(&ip, window);
+        return Err(ApiError::Unauthorized(
+            json!({ "error": "用户名或密码错误" }),
+        ));
+    };
+    let verdict = crate::users::password::verify_any(&req.password, &user.password_hash);
+    if verdict == crate::users::password::Verdict::Fail {
         state.login_guard.failure(&ip, window);
         return Err(ApiError::Unauthorized(
             json!({ "error": "用户名或密码错误" }),
         ));
     }
+    if !user.web_ui_access && !user.role.is_admin() {
+        return Err(ApiError::Forbidden("该账号不允许登录面板".into()));
+    }
+    // 旧 `sha256:` 散列在首次登录时升级成 argon2id。
+    if verdict == crate::users::password::Verdict::OkNeedsRehash {
+        if let Ok(hash) = crate::users::password::hash(&req.password) {
+            let mut next = user.clone();
+            next.password_hash = hash;
+            if let Err(error) = state.users.update_user(next) {
+                tracing::warn!(%error, "口令散列升级失败");
+            }
+        }
+    }
 
     state.login_guard.success(&ip);
-    let token = state.sessions.issue();
-    tracing::info!(user = %cfg.panel.username, "面板登录成功");
-    Ok(Json(json!({ "token": token })))
+    let token = state
+        .sessions
+        .issue(&user.id, &user.username, user.role.is_admin());
+    tracing::info!(user = %user.username, "面板登录成功");
+    Ok(Json(json!({
+        "token": token,
+        "username": user.username,
+        "role": user.role.as_str(),
+    })))
 }
 
 /// 构造登录锁定的 `429` 响应。

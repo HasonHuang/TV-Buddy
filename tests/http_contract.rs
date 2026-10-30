@@ -482,11 +482,10 @@ url = "{upstream}/epg.xml"
     std::fs::write(&config_path, toml).expect("写配置");
     let cfg = config::load(&config_path).expect("加载配置");
 
-    let state = Arc::new(AppState::new(
-        config_path,
-        cfg,
-        Arc::new(RingBuffer::default()),
-    ));
+    let state =
+        Arc::new(AppState::new(config_path, cfg, Arc::new(RingBuffer::default())).expect("建状态"));
+    // 契约测试固定用 admin/admin 登录。
+    tv_buddy::users::ensure_admin(&state.users, "admin").expect("初始管理员");
     let base = serve(http::router(state.clone())).await;
 
     let client = Client::builder()
@@ -496,21 +495,16 @@ url = "{upstream}/epg.xml"
         .expect("建客户端");
     wait_ready(&client, &base).await;
 
-    let body = client
-        .get(format!("{base}/playlist.m3u"))
-        .send()
-        .await
-        .expect("取订阅")
-        .text()
-        .await
-        .expect("读订阅");
-    let token = body
-        .split("token=")
-        .nth(1)
-        .and_then(|rest| rest.split(|c: char| !c.is_ascii_hexdigit()).next())
-        .filter(|value| value.len() == 48)
-        .expect("订阅应含 48 位 Token")
-        .to_string();
+    // 预热：一次 `/playlist.m3u` 请求会抓取聚合源并写状态。
+    let _ = client.get(format!("{base}/playlist.m3u")).send().await;
+
+    // 播放令牌来自用户设备令牌，直接建一个，供测试拼地址。
+    let admin = state.users.find_by_username("admin").expect("初始管理员");
+    let token = state
+        .users
+        .create_token(&admin.id, tv_buddy::users::Purpose::Device, None, None)
+        .expect("建测试令牌")
+        .token;
 
     Fixture {
         dir,
@@ -670,7 +664,9 @@ async fn health_and_total_playlist() {
         "EPG 关闭时不注入 x-tvg-url"
     );
     // 归档组不导出；公开、开放、透传组导出。
-    assert!(body.contains("/pg/c1.m3u8?token="));
+    assert!(body.contains("/pg/c1.m3u8"));
+    // 全局播放令牌已废弃：公开清单不再带 token。
+    assert!(!body.contains("?token="));
     // 直通组在订阅里直接给上游地址。
     assert!(body.contains(&format!("{}/live.m3u8", fixture.upstream)));
     assert!(!body.contains("/pt/"));
@@ -1613,7 +1609,8 @@ async fn group_import_adds_skips_and_overwrites() {
         .text()
         .await
         .expect("读正文");
-    assert!(playlist.contains("/imp/c1.m3u8?token="));
+    assert!(playlist.contains("/imp/c1.m3u8"));
+    assert!(!playlist.contains("?token="));
 
     // 重复导入 → 跳过。
     let response = post("/panel/api/groups/import", &body).await.expect("请求");
@@ -2290,7 +2287,8 @@ async fn security_token_rotation_and_ip_ban() {
         .text()
         .await
         .expect("读正文");
-    assert!(playlist.contains(&second));
+    // 全局令牌已废弃：轮换只影响 `/security/token` 的返回值，不再进清单。
+    assert!(!playlist.contains(&second));
 
     // 统计：带转发头的公开请求会被记账。
     let response = fixture
@@ -5290,11 +5288,10 @@ async fn fixture_from_toml(toml: &str) -> Fixture {
     let config_path = dir.join("config.toml");
     std::fs::write(&config_path, body).expect("写配置");
     let cfg = config::load(&config_path).expect("加载配置");
-    let state = Arc::new(AppState::new(
-        config_path,
-        cfg,
-        Arc::new(RingBuffer::default()),
-    ));
+    let state =
+        Arc::new(AppState::new(config_path, cfg, Arc::new(RingBuffer::default())).expect("建状态"));
+    // 契约测试固定用 admin/admin 登录。
+    tv_buddy::users::ensure_admin(&state.users, "admin").expect("初始管理员");
     let base = serve(http::router(state.clone())).await;
     let client = Client::builder()
         .redirect(Policy::none())

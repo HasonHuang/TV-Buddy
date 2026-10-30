@@ -16,4 +16,6 @@ pub mod schedule;
 pub mod security;
 pub mod share;
 pub mod stream;
+pub mod sub;
 pub mod subs;
+pub mod users;

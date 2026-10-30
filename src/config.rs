@@ -41,9 +41,6 @@ pub fn validate(config: &Config) -> anyhow::Result<()> {
     if config.server.bind.trim().is_empty() {
         bail!("server.bind 不能为空");
     }
-    if config.panel.enabled && config.panel.password_sha256.trim().is_empty() {
-        bail!("panel.password_sha256 不能为空");
-    }
     let mut seen = std::collections::HashSet::new();
     for group in &config.groups {
         if group.id.trim().is_empty() {

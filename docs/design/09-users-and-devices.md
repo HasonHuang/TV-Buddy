@@ -239,3 +239,37 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 1. 口令散列是否从 SHA-256 换到 argon2id。换则旧口令要按第一次登录时重算一次。
 2. 现有全局 `[auth].token` 保留还是废弃。保留则两套并存，废弃要写迁移说明。
 3. 迁移后 `[panel].username` / `password_sha256` 是否保留为兜底登录。
+
+## 9. 实现进度
+
+### 9.1 已完成（2026-10-30）
+
+| 层 | 落点 | 状态 |
+| --- | --- | --- |
+| 数据层 | `src/users/{model,password,store}.rs` | SQLite，表结构与 §2 一致 |
+| 口令 | argon2id。旧 `sha256:<hex>` 首次登录自动升级 | 完成 |
+| 首次安装 | 无用户时建 `admin`，随机 16 位口令写入 `<cache>/admin_initial_credentials.txt`（0600） | 完成 |
+| 登录 | `POST /panel/api/login` 查 `users.db`，会话绑定用户 | 完成 |
+| 用户 API | `/panel/api/users` 全套，含 `channel-options`、`password` | 完成 |
+| 令牌 API | `/panel/api/users/:id/tokens` 全套 | 完成 |
+| 当前用户 | `GET /panel/api/me` | 完成 |
+| 订阅入口 | `/sub/:token/playlist.m3u`，按可见范围过滤 | 完成 |
+| 播放鉴权 | `?token=` 改为查 `access_tokens`，并校验用户可见该频道 | 完成 |
+
+### 9.2 待办
+
+| # | 项 | 说明 |
+| --- | --- | --- |
+| 1 | 废弃全局播放令牌 | `/panel/api/security/token` 与 `PlayTokenStore` 仍在。面板「安全管控」的 Token 卡片要改成指向用户与设备 |
+| 2 | 面板「用户与设备」分区 | 第 14 个分区。表格列与弹窗按 §4 |
+| 3 | EPG 用户隔离 | `/sub/:token/epg.xml(.gz)` 未实现。当前订阅头仍指向全局 `/epg.xml.gz` |
+| 4 | 配置键清理 | `[panel].username` / `password_sha256` 已从结构体删除，旧值落进 `extra`。需要一次性删除并落盘 |
+| 5 | 冒烟与脚本 | `smoke-security.sh` 仍测全局令牌。`packaging/tv-buddy.sh` 读写 `panel username` |
+
+### 9.3 行为变化
+
+公开订阅 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 不再带 `?token=`。
+`[auth].token_enabled=true` 时，这些地址直接播放会被拒。
+可用的播放地址只能从 `/sub/:token/playlist.m3u` 获取。
+
+原因是全局令牌已废弃，令牌必须绑定用户与可见范围。

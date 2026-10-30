@@ -23,7 +23,10 @@ use url::Url;
 
 use crate::{
     auth::{Decision, Verdict},
-    config::{model::Group, Config},
+    config::{
+        model::{Channel, Group},
+        Config,
+    },
     http::ext::client_ip_with_peer,
     proxy,
     state::AppState,
@@ -115,7 +118,7 @@ async fn play_entry(
     let Some(channel) = group.channels.iter().find(|channel| channel.id == cid) else {
         return unknown_endpoint(state, &config, query);
     };
-    if !token_ok(state, &config, group, query) {
+    if !token_ok(state, &config, group, channel, query) {
         return redirect_asset(&config, &config.auth.token_failure_url);
     }
     // 在线观众：目标是「窗口内带播放 Token 的不同客户端 IP 数」（2026-10-26 实测：
@@ -1492,19 +1495,35 @@ fn session_limit(
 }
 
 /// Token 仅校验入口；`open` 组免校验（F-007、F-009）。
+/// 播放令牌校验。
+///
+/// 令牌来自 `users.db` 的 `access_tokens`，属于某个用户。
+/// 校验两件事：令牌有效，且该用户可见这个频道
+/// （`docs/design/09-users-and-devices.md` §5）。
 fn token_ok(
     state: &AppState,
     config: &Config,
     group: &Group,
+    channel: &Channel,
     query: &HashMap<String, String>,
 ) -> bool {
     if !config.auth.token_enabled || group.access == "open" {
         return true;
     }
-    query
-        .get("token")
-        .map(|token| state.play_tokens.verify(token))
-        .unwrap_or(false)
+    let Some(token) = query.get("token").filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let Some(access) = state.users.find_token(token) else {
+        return false;
+    };
+    let Some(user) = state.users.find_user(&access.user_id) else {
+        return false;
+    };
+    if !user.can_see_channel(&group.id, &channel.id) {
+        return false;
+    }
+    state.users.touch_token(token);
+    true
 }
 
 /// 未知分组/频道：Token 合法（或未启用 Token）→ 占位视频；否则 → Token 失效视频。
@@ -1516,8 +1535,7 @@ fn unknown_endpoint(
     let verified = !config.auth.token_enabled
         || query
             .get("token")
-            .map(|token| state.play_tokens.verify(token))
-            .unwrap_or(false);
+            .is_some_and(|token| state.users.find_token(token).is_some());
     if verified {
         placeholder(config)
     } else {

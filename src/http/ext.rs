@@ -45,6 +45,50 @@ impl FromRequestParts<Arc<AppState>> for PanelAuth {
     }
 }
 
+/// 已认证的面板请求，带身份信息。
+///
+/// 需要区分角色的接口用它。只要「已登录」的接口继续用 [`PanelAuth`]。
+pub struct PanelUser {
+    pub token: String,
+    pub user_id: String,
+    pub is_admin: bool,
+}
+
+#[async_trait::async_trait]
+impl FromRequestParts<Arc<AppState>> for PanelUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let token = parts
+            .headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .map(|value| value.trim().to_string())
+            .or_else(|| {
+                parts
+                    .headers
+                    .get("x-token")
+                    .and_then(|value| value.to_str().ok())
+                    .map(|value| value.trim().to_string())
+            })
+            .filter(|token| !token.is_empty())
+            .ok_or_else(ApiError::need_login)?;
+
+        match state.sessions.lookup(&token) {
+            Some(info) => Ok(PanelUser {
+                token,
+                user_id: info.user_id,
+                is_admin: info.is_admin,
+            }),
+            None => Err(ApiError::need_login()),
+        }
+    }
+}
+
 /// 客户端地址：取 `X-Forwarded-For` 末项，其次 `X-Real-IP`，最后 TCP 对端。
 ///
 /// 目标把代理追加到 XFF 末尾，并以末项作为调用方地址（F-010 §3.1）。

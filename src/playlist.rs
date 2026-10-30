@@ -29,6 +29,34 @@ impl PlaylistError {
     }
 }
 
+/// 渲染某个用户的订阅。
+///
+/// 范围按用户的可见分组与频道过滤。管理员等同全部。
+/// `token` 是该用户自己的访问令牌，会附到播放地址上。
+pub fn render_user(config: &Config, user: &crate::users::User, base: &str, token: &str) -> String {
+    let mut body = header(config, base);
+    for group in &config.groups {
+        if !user.can_see_group(&group.id) {
+            continue;
+        }
+        for channel in &group.channels {
+            if !user.can_see_channel(&group.id, &channel.id) {
+                continue;
+            }
+            push_entry(&mut body, group, channel, base, Some(token));
+        }
+    }
+    body
+}
+
+/// 某个用户可见的分组 id 集合。管理员返回 `None`，表示不限。
+pub fn visible_group_ids(user: &crate::users::User) -> Option<HashSet<String>> {
+    if user.role.is_admin() {
+        return None;
+    }
+    Some(user.allowed_group_ids.iter().cloned().collect())
+}
+
 /// 渲染总订阅：只含 `access = "public"` 的分组（F-009）。
 pub fn render_total(config: &Config, base: &str, token: Option<&str>) -> String {
     let mut body = header(config, base);

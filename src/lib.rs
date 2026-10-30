@@ -35,4 +35,5 @@ pub mod subs;
 pub mod subtitle;
 pub mod timeshift;
 pub mod translate;
+pub mod users;
 pub mod watchdog;
