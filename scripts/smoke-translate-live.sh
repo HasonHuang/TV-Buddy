@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # 真实 MTranServer 联调：字幕翻译、自检、EPG 探测。
 # 需要外网，默认使用 https://translate.ipacel.cc/translate。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

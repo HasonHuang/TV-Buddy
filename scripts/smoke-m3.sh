@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # M3 冒烟测试：直连模式（redirect / rewrite / passthrough）与 remux / dash 就绪语义。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -62,6 +65,10 @@ head -c 2048 /dev/urandom > "$WORK/up/seg1.ts"
 head -c 2048 /dev/urandom > "$WORK/up/dash-1.m4s"
 
 cat > "$CFG" <<EOF
+# 健康探测会在启动后抓上游，干扰「不抓上游」计数。测试里关掉。
+[health]
+enabled = false
+
 [server]
 bind = "127.0.0.1:$PORT"
 log_level = "warn"
@@ -255,7 +262,12 @@ check "开启 Token 200" "200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" \
     -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
     --data-binary "@$WORK/put.json")"
-PLAYTOKEN=$(curl -s "$B/playlist.m3u" | grep -oE 'token=[0-9a-f]{48}' | head -n1 | cut -d= -f2)
+# 播放令牌来自 users.db 的设备令牌，公开清单不再下发。
+ADMIN_ID=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/users" |
+  python3 -c 'import sys,json;print(json.load(sys.stdin)["users"][0]["id"])')
+PLAYTOKEN=$(curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+  -d '{}' "$B/panel/api/users/$ADMIN_ID/tokens" |
+  python3 -c 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
 check "直连无 Token 302" "302" "$(status "$B/rd/c1.m3u8")"
 check "直连无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/rd/c1.m3u8")"
 check "直连带 Token 302 上游" "http://127.0.0.1:$UP/direct.m3u8" "$(location "$B/rd/c1.m3u8?token=$PLAYTOKEN")"

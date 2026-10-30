@@ -2241,7 +2241,8 @@ async fn link_info_matches_target_shape() {
     assert_eq!(body["random_id_enabled"], false);
     assert_eq!(body["token_enabled"], true);
     assert_eq!(body["use_alias"], false);
-    assert_eq!(body["token"].as_str().expect("token").len(), 48);
+    // 全局播放令牌已废弃：字段保留，值恒为空（docs/design/09-users-and-devices.md §9.2）。
+    assert_eq!(body["token"], "");
 
     let response = fetch(&fixture, "/panel/api/link-info").await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -2260,16 +2261,9 @@ async fn security_token_rotation_and_ip_ban() {
             .send()
     };
 
-    // Token 查看。
+    // 全局播放令牌已废弃：两个端点都不存在。
     let response = panel("/panel/api/security/token").await.expect("请求");
-    assert_eq!(response.status(), StatusCode::OK);
-    let body: serde_json::Value =
-        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
-    assert_eq!(body["enabled"], true);
-    let first = body["current"].as_str().expect("token").to_string();
-    assert_eq!(first.len(), 48);
-
-    // 轮换：订阅地址改用新 Token。
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let response = fixture
         .client
         .post(format!("{}/panel/api/security/token/rotate", fixture.base))
@@ -2277,18 +2271,7 @@ async fn security_token_rotation_and_ip_ban() {
         .send()
         .await
         .expect("请求");
-    assert_eq!(response.status(), StatusCode::OK);
-    let body: serde_json::Value =
-        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
-    let second = body["token"].as_str().expect("token").to_string();
-    assert_ne!(first, second);
-    let playlist = fetch(&fixture, "/playlist.m3u")
-        .await
-        .text()
-        .await
-        .expect("读正文");
-    // 全局令牌已废弃：轮换只影响 `/security/token` 的返回值，不再进清单。
-    assert!(!playlist.contains(&second));
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     // 统计：带转发头的公开请求会被记账。
     let response = fixture
@@ -2998,7 +2981,8 @@ poll_secs = 5
     assert_eq!(response.status(), StatusCode::OK);
     let payload: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
-    assert_eq!(payload["token"].as_str().map(str::len), Some(48));
+    // 令牌不再跨实例同步。
+    assert!(payload["token"].is_null());
     assert!(payload["bans"].is_array());
     assert!(payload["unbans"].is_array());
 
@@ -3046,7 +3030,8 @@ poll_secs = 5
         .send()
         .await
         .expect("请求");
-    assert_eq!(response.status(), StatusCode::CONFLICT);
+    // 端点已随全局令牌一起移除。
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

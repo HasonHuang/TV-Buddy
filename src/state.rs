@@ -12,7 +12,7 @@ use std::{
 use arc_swap::ArcSwap;
 
 use crate::{
-    auth::{PlayTokenStore, SessionStore},
+    auth::SessionStore,
     config::Config,
     logging::RingBuffer,
     proxy::{segments, AddressCache, SegmentIndex, TtlCache},
@@ -38,8 +38,6 @@ pub struct AppState {
     pub sessions: SessionStore,
     /// 用户、角色与访问令牌（SQLite，跨重启保留）。
     pub users: crate::users::UserStore,
-    /// 播放 Token（内存，重启失效）。
-    pub play_tokens: PlayTokenStore,
     /// 上游请求客户端。
     pub http: reqwest::Client,
     /// 切片索引。
@@ -122,7 +120,6 @@ impl AppState {
             config: ArcSwap::from_pointee(config),
             sessions: SessionStore::new(ttl),
             users,
-            play_tokens: PlayTokenStore::new(),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(UPSTREAM_TIMEOUT_SECS))
                 .user_agent(DEFAULT_USER_AGENT)

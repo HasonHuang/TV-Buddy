@@ -10,21 +10,6 @@ import { api, apiText, getToken } from './api';
 import { Icon } from './icons';
 import { PageHead } from './ui';
 
-type TokenInfo = {
-  enabled: boolean;
-  ttl_hours: number;
-  /** 目标字段：明文 Token。 */
-  current_value?: string;
-  status?: {
-    current?: { remaining_secs: number; valid: boolean; value: string };
-    old?: { remaining_secs: number; valid: boolean; value: string } | null;
-    ttl_hours: number;
-  };
-  /** 本实现附加字段（旧字段）。 */
-  current: string;
-  old: string | null;
-};
-
 type IpEntry = {
   ip: string;
   requests: number;
@@ -306,9 +291,8 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 安全管控：播放 Token 与 IP 封禁。 */
+/** 安全管控：访问控制、IP 统计与封禁。 */
 export function SecurityPage() {
-  const [token, setToken] = useState<TokenInfo | null>(null);
   const [stats, setStats] = useState<IpStats | null>(null);
   const [ip, setIp] = useState('');
   const [seconds, setSeconds] = useState('3600');
@@ -317,12 +301,7 @@ export function SecurityPage() {
 
   const load = useCallback(async () => {
     try {
-      const [nextToken, nextStats] = await Promise.all([
-        api<TokenInfo>('GET', '/security/token'),
-        api<IpStats>('GET', '/security/ip/stats'),
-      ]);
-      setToken(nextToken);
-      setStats(nextStats);
+      setStats(await api<IpStats>('GET', '/security/ip/stats'));
       setError('');
     } catch (err) {
       setError(errorText(err));
@@ -332,18 +311,6 @@ export function SecurityPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  const rotate = async () => {
-    setMessage('');
-    setError('');
-    try {
-      await api('POST', '/security/token/rotate');
-      setMessage('Token 已轮换，旧值保留 1 小时宽限');
-      await load();
-    } catch (err) {
-      setError(errorText(err));
-    }
-  };
 
   const ban = async () => {
     setMessage('');
@@ -402,31 +369,18 @@ export function SecurityPage() {
 
   return (
     <>
-      <PageHead icon="security" title="安全管控" sub="播放 Token、访问控制与限流">
+      <PageHead icon="security" title="安全管控" sub="访问控制、IP 封禁与限流">
         <button className="ghost" onClick={() => void load()}>
           <Icon name="refresh" size={14} />
           刷新
         </button>
-        <button onClick={() => void rotate()}>轮换 Token</button>
       </PageHead>
       <div className="card">
-        <h2>播放 Token</h2>
-        <dl>
-          <dt>校验</dt>
-          <dd>{token ? (token.enabled ? '已开启' : '已关闭') : '—'}</dd>
-          <dt>有效期</dt>
-          <dd>{token ? `${token.ttl_hours} 小时` : '—'}</dd>
-          <dt>当前值</dt>
-          <dd className="mono ellipsis">{token?.current_value || token?.current || '—'}</dd>
-          <dt>剩余</dt>
-          <dd>
-            {token?.status?.current
-              ? `${Math.max(0, token.status.current.remaining_secs)} 秒`
-              : '—'}
-          </dd>
-          <dt>旧值（宽限）</dt>
-          <dd className="mono ellipsis">{token?.status?.old?.value ?? token?.old ?? '—'}</dd>
-        </dl>
+        <h2>播放令牌</h2>
+        <p className="muted">
+          令牌按用户与设备下发，在「用户与设备」分区管理。
+          每个设备一条订阅地址，播放链接只用该设备的令牌。
+        </p>
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}
       </div>

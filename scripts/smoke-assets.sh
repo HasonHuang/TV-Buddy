@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # 素材冒烟：ffmpeg 检测、视频与字幕上传/列表/下载/删除、解析脚本。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

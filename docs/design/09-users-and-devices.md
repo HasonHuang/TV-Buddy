@@ -255,16 +255,18 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 当前用户 | `GET /panel/api/me` | 完成 |
 | 订阅入口 | `/sub/:token/playlist.m3u`，按可见范围过滤 | 完成 |
 | 播放鉴权 | `?token=` 改为查 `access_tokens`，并校验用户可见该频道 | 完成 |
+| 废弃全局令牌 | 删除 `/security/token` 与 `rotate`、`PlayTokenStore`、分享里的令牌同步。共享载荷与 link-info 的 token 字段恒为空 | 完成 |
 | 面板分区 | 第 14 个分区「用户与设备」。列表 + 新建/编辑弹窗 + 设备令牌弹窗 | 完成 |
 
 ### 9.2 待办
 
 | # | 项 | 说明 |
 | --- | --- | --- |
-| 1 | 废弃全局播放令牌 | `/panel/api/security/token` 与 `PlayTokenStore` 仍在。面板「安全管控」的 Token 卡片要改成指向用户与设备 |
-| 3 | EPG 用户隔离 | `/sub/:token/epg.xml(.gz)` 未实现。当前订阅头仍指向全局 `/epg.xml.gz` |
-| 4 | 配置键清理 | `[panel].username` / `password_sha256` 已从结构体删除，旧值落进 `extra`。需要一次性删除并落盘 |
-| 5 | 冒烟与脚本 | `smoke-security.sh` 仍测全局令牌。`packaging/tv-buddy.sh` 读写 `panel username` |
+| 1 | EPG 用户隔离 | `/sub/:token/epg.xml(.gz)` 未实现。当前订阅头仍指向全局 `/epg.xml.gz` |
+| 2 | 旧配置键清理 | `[panel].username` / `password_sha256` 已从结构体删除，旧值落进 `extra`。需要一次性删除并落盘 |
+| 3 | 管理 CLI | `packaging/tv-buddy.sh` 仍读写 `panel username` / `password_sha256`。要改成提示或直接操作 `users.db` |
+| 4 | 旧口令迁移 | 老配置里 `password_sha256` 的值没有自动建成用户。需要一次性迁移逻辑 |
+| 5 | Docker 集成冒烟 | `smoke-dash-timeshift-docker.sh` 在容器内起服务后清单请求无响应。待查 |
 
 ### 9.3 行为变化
 

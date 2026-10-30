@@ -20,7 +20,6 @@ import { api } from './api';
 import { Icon } from './icons';
 import { RecommendCard, type Recommend } from './lowcfg';
 import { BackupPage } from './ops';
-import { sha256Hex } from './sha256';
 import { SystemPage } from './system';
 import { PageHead, useToast } from './ui';
 
@@ -456,7 +455,6 @@ const SUBTITLE_LANGS = [
 export function SettingsPage() {
   const [draft, setDraft] = useState<Cfg | null>(null);
   const [recommend, setRecommend] = useState<Recommend | null>(null);
-  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState('');
   const [dirty, setDirty] = useState(false);
   const { node, ok, err } = useToast();
@@ -465,7 +463,6 @@ export function SettingsPage() {
     try {
       const next = await api<Cfg>('GET', '/config');
       setDraft(next);
-      setPassword('');
       setDirty(false);
       try {
         const stats = await api<{ recommend: Recommend }>('GET', '/cache/stats');
@@ -496,13 +493,9 @@ export function SettingsPage() {
     if (!draft) return;
     setBusy('save');
     try {
-      const next =
-        password.trim() === ''
-          ? draft
-          : setPath(draft, 'panel.password_sha256', sha256Hex(password));
+      const next = draft;
       await api('PUT', '/config', next);
       setDraft(next);
-      setPassword('');
       setDirty(false);
       ok('设置已保存');
       try {
@@ -643,18 +636,11 @@ export function SettingsPage() {
               />
             </Card>
 
-            <Card title="面板认证" note="面板登录口令">
-              <Text label="用户名" path="panel.username" />
-              <div className="field">
-                <label>新密码</label>
-                <input
-                  type="password"
-                  value={password}
-                  placeholder="留空不修改"
-                  onChange={(event) => setPassword(event.target.value)}
-                />
-                <div className="hint">留空不修改；填写后在浏览器里算 SHA-256 再写入配置</div>
-              </div>
+            <Card title="面板认证" note="账号在「用户与设备」分区管理">
+              <p className="muted">
+                面板账号、角色与设备令牌存在 <code className="mono">users.db</code>，
+                不再写进配置文件。请到「用户与设备」分区新建用户或重置密码。
+              </p>
             </Card>
 
             <Card title="切片伪装" note="把切片伪装成图片，降低被举报风险">

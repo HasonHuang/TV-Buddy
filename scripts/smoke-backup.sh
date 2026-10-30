@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # 备份/恢复冒烟：导出 gzip、改动配置、恢复、拒绝非法内容。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

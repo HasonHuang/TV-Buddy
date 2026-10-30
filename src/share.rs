@@ -96,10 +96,11 @@ fn cidr_contains(address: IpAddr, base: IpAddr, bits: u8) -> bool {
 /// Token 始终分享：目标在 `[share].share_token = false`（默认）时载荷里仍有 Token
 /// （F-013 实测），所以该键不控制载荷内容。见 `PROGRESS.md` §3.3。
 pub fn payload(state: &AppState, window: Duration) -> Payload {
-    let (current, old) = state.play_tokens.snapshot();
+    // 全局播放令牌已废弃（`docs/design/09-users-and-devices.md` §9.2）。
+    // 令牌改为每用户每设备，跨实例同步没有意义，所以载荷里恒为空。
     Payload {
-        token: Some(current),
-        token_old: old,
+        token: None,
+        token_old: None,
         bans: state.ip_guard.banned_ips(),
         unbans: state.ip_guard.recent_unbans(window),
     }
@@ -108,17 +109,8 @@ pub fn payload(state: &AppState, window: Duration) -> Payload {
 /// 应用对端载荷。`adopt_token` 为假时忽略 Token（master 角色）。
 pub fn apply(state: &AppState, payload: &Payload, adopt_token: bool) -> Applied {
     let mut applied = Applied::default();
-    if adopt_token {
-        if let Some(token) = payload.token.as_ref().filter(|value| !value.is_empty()) {
-            if state
-                .play_tokens
-                .adopt(token.clone(), payload.token_old.clone())
-            {
-                applied.token_changed = true;
-                info!("【共享】采用主机 Token");
-            }
-        }
-    }
+    // `adopt_token` 保留参数位，令牌不再跨实例同步。
+    let _ = adopt_token;
     for ip in &payload.bans {
         if ip.trim().is_empty() {
             continue;
@@ -163,7 +155,7 @@ pub fn spawn(state: Arc<AppState>) {
     tokio::spawn(async move {
         let role = state.snapshot().share.role.to_ascii_lowercase();
         if role == "follower" {
-            info!("【共享】本机为 follower，token 由主机接管，已禁用本地轮换");
+            info!("【共享】本机为 follower，只接收封禁列表");
         }
         let interval = state.snapshot().share.poll_secs.max(5);
         info!(

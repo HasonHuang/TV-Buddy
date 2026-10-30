@@ -3,6 +3,9 @@
 #
 # 排序机制与目标一致：前端改数组顺序 → `PUT /panel/api/config` 全量保存，
 # 播放列表按数组顺序输出，所以断言直接看 `playlist.m3u` 的先后。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

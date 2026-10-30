@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # M1 冒烟测试：分组/频道 CRUD、订阅导出、access 过滤、播放 Token。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -186,16 +189,9 @@ json.dump(cfg, open("'"$WORK"'/put.json", "w"))
 check "开启 Token 200" "200" \
   "$(code -X PUT "${A[@]}" --data-binary "@$WORK/put.json" "$B/panel/api/config")"
 curl -s -o "$WORK/body" "$B/pub/playlist.m3u"
-# 只取播放条目行：首行的 `x-tvg-url` 也是 http:// 开头，不能直接抓第一个 http。
-check "Token 随订阅下发" "48" \
-  "$(python3 -c '
-import re
-entry = next(
-    line for line in open("'"$WORK"'/body").read().splitlines()
-    if "/pub/" in line and line.startswith("http")
-)
-print(len(entry.split("token=")[1]) if "token=" in entry else 0)
-')"
+# 全局播放令牌已废弃：公开订阅不再带 `?token=`。
+# 可用地址只能从 `/sub/<设备令牌>/playlist.m3u` 获取。
+check "订阅不再下发 Token" "0" "$(grep -c 'token=' "$WORK/body" || true)"
 check "开放组不带 Token" "0" "$(curl -s "$B/op/playlist.m3u" | grep -c 'token=' || true)"
 check "直通组不带 Token" "0" "$(curl -s "$B/playlist.m3u" | grep -c 'example.invalid/live.m3u8?token' || true)"
 

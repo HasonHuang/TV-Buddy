@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # 安全面冒烟：Token 查看/轮换、IP 统计、封禁与解封。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -46,14 +49,10 @@ TOKEN=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json'
   -d '{"username":"admin","password":"admin"}' | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
 AUTH="Authorization: Bearer $TOKEN"
 
-curl -s -H "$AUTH" "$B/panel/api/security/token" > "$WORK/token.json"
-check "Token 长度 48" "48" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["current"]))' "$WORK/token.json")"
-FIRST=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["current"])' "$WORK/token.json")
-
-curl -s -X POST -H "$AUTH" "$B/panel/api/security/token/rotate" > "$WORK/rotate.json"
-SECOND=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["token"])' "$WORK/rotate.json")
-check "轮换换新值" "1" "$([ "$FIRST" != "$SECOND" ] && echo 1 || echo 0)"
-check "订阅含新 Token" "1" "$(curl -s "$B/playlist.m3u" | grep -c "$SECOND" || true)"
+# 全局播放令牌已废弃：两个端点都应为 404。
+check "Token 端点已移除" "404" "$(curl -s -o /dev/null -w '%{http_code}' -H "$AUTH" "$B/panel/api/security/token")"
+check "轮换端点已移除" "404" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AUTH" "$B/panel/api/security/token/rotate")"
+check "公开清单不含令牌" "0" "$(curl -s "$B/playlist.m3u" | grep -c 'token=' || true)"
 
 check "公开请求 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/health")"
 check "封禁 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AUTH" -H 'content-type: application/json' \

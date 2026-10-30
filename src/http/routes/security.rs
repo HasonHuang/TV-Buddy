@@ -27,11 +27,8 @@ pub async fn link_info(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState
         .cloned()
         .unwrap_or_default();
     let use_alias = !aliases.is_empty();
-    let token = if config.auth.token_enabled {
-        state.play_tokens.current()
-    } else {
-        String::new()
-    };
+    // 全局播放令牌已废弃（`docs/design/09-users-and-devices.md` §9.2）。
+    let token = String::new();
     Json(json!({
         "aliases": aliases,
         "random_id_enabled": config.auth.random_id_enabled,
@@ -39,77 +36,6 @@ pub async fn link_info(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState
         "token_enabled": config.auth.token_enabled,
         "use_alias": use_alias,
     }))
-}
-
-/// `GET /panel/api/security/token`——当前 Token 与宽限期内的旧 Token。
-///
-/// 目标形状（F-021 §2）：`{current_value, enabled, status{current,old,ttl_hours}, ttl_hours}`。
-/// `status.<x>.value` 是掩码（前 4 + `****` + 后 4）。`current`/`old` 是本实现附加字段。
-pub async fn token(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
-    let config = state.snapshot();
-    let (current, old) = state.play_tokens.snapshot();
-    let (current_remaining, old_remaining) =
-        state.play_tokens.remaining(config.auth.token_ttl_hours);
-    let enabled = config.auth.token_enabled;
-    let mask = |value: &str| -> String {
-        if value.len() > 8 {
-            format!("{}****{}", &value[..4], &value[value.len() - 4..])
-        } else {
-            value.to_string()
-        }
-    };
-    let current_value = if enabled {
-        current.clone()
-    } else {
-        String::new()
-    };
-    let status_current = json!({
-        "remaining_secs": current_remaining,
-        "valid": enabled,
-        "value": if enabled { mask(&current) } else { String::new() },
-    });
-    let status_old = match (&old, enabled) {
-        (Some(value), true) => json!({
-            "remaining_secs": old_remaining.unwrap_or(0),
-            "valid": old_remaining.unwrap_or(0) > 0,
-            "value": mask(value),
-        }),
-        _ => Value::Null,
-    };
-    Json(json!({
-        "current_value": current_value,
-        "enabled": enabled,
-        "status": {
-            "current": status_current,
-            "old": status_old,
-            "ttl_hours": config.auth.token_ttl_hours,
-        },
-        "ttl_hours": config.auth.token_ttl_hours,
-        // 本实现附加字段（旧面板调用方）。
-        "current": current,
-        "old": old,
-    }))
-}
-
-/// `POST /panel/api/security/token/rotate`——换新 Token；旧值保留 1 小时宽限。
-///
-/// follower 的 Token 由主机接管，禁止本地轮换（F-013 §2）。
-pub async fn token_rotate(
-    PanelAuth(_): PanelAuth,
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Value>, ApiError> {
-    let config = state.snapshot();
-    if config.share.enabled && config.share.role.eq_ignore_ascii_case("follower") {
-        return Err(ApiError::conflict("token 由主机接管"));
-    }
-    let token = state.play_tokens.rotate();
-    // 目标字段是 `new_token` 与 `expires_in_hours`（F-021 §2）；`token` 保留给旧调用方。
-    Ok(Json(json!({
-        "ok": true,
-        "new_token": token,
-        "expires_in_hours": config.auth.token_ttl_hours,
-        "token": token,
-    })))
 }
 
 /// `GET /panel/api/security/ip/stats`。

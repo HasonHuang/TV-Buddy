@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # 录制任务与直播开关冒烟。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

@@ -410,7 +410,8 @@ fi
 
 echo "安装完成：$PREFIX"
 echo "配置：$PREFIX/config.toml"
-echo "面板：http://<主机>:19899/panel（默认 admin / admin，请及时修改）"
+echo "面板：http://<主机>:19899/panel（账号 admin；初始口令见下）"
+echo "初始口令：$PREFIX/cache/admin_initial_credentials.txt（首次启动后生成，权限 600）"
 if [ "$STARTED" = 1 ]; then
     echo "状态：服务已启动"
 else

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # M2 冒烟测试：入口清单 → 媒体清单 → 伪装切片 → 缓存窗口与占位跳转。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -248,8 +251,13 @@ check "开启 Token 200" "200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" \
     -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
     --data-binary "@$WORK/put.json")"
-PLAYTOKEN=$(curl -s "$B/playlist.m3u" | grep -oE 'token=[0-9a-f]{48}' | head -n1 | cut -d= -f2)
-check "Token 长度" "48" "${#PLAYTOKEN}"
+# 播放令牌来自 users.db 的设备令牌；公开清单不再下发。
+ADMIN_ID=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/users" |
+  python3 -c 'import sys,json;print(json.load(sys.stdin)["users"][0]["id"])')
+PLAYTOKEN=$(curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+  -d '{}' "$B/panel/api/users/$ADMIN_ID/tokens" |
+  python3 -c 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
+check "设备令牌长度" "12" "${#PLAYTOKEN}"
 check "无 Token 入口 302" "302" "$(status "$B/p1/c1.m3u8")"
 check "无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/p1/c1.m3u8")"
 check "带 Token 入口 200" "200" "$(status "$B/p1/c1.m3u8?token=$PLAYTOKEN")"

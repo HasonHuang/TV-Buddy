@@ -2,6 +2,9 @@
 # 指标面冒烟：`/status` 字段、`online_viewers` 语义、`/cache/stats`、`/health` 条目。
 #
 # 目标契约见 `docs/findings/dynamic/11-security-and-metrics.md` §6.1。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -88,7 +91,10 @@ check "whole_file_budget 512MB" "536870912" "$(printf '%s' "$STATUS" | py 'impor
 check "entry_exts 按分组" "1" "$(printf '%s' "$STATUS" | py 'import sys,json;print(1 if json.load(sys.stdin)["entry_exts"].get("mx")==".m3u8" else 0)')"
 check "初始在线观众 0" "0" "$(printf '%s' "$STATUS" | py 'import sys,json;print(json.load(sys.stdin)["online_viewers"])')"
 
-TK=$(curl -s -H "$AUTH" "$B/panel/api/security/token" | py 'import sys,json;d=json.load(sys.stdin);print(d.get("current_value") or d.get("current") or "")')
+# 播放令牌来自 users.db 的设备令牌。
+ADMIN_ID=$(curl -s -H "$AUTH" "$B/panel/api/users" | py 'import sys,json;print(json.load(sys.stdin)["users"][0]["id"])')
+TK=$(curl -s -X POST -H "$AUTH" -H 'content-type: application/json' -d '{"label":"smoke"}' \
+  "$B/panel/api/users/$ADMIN_ID/tokens" | py 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
 curl -s -o /dev/null "$B/mx/c1.m3u8?token=$TK"
 check "播放后在线观众 1" "1" "$(curl -s -H "$AUTH" "$B/panel/api/status" | py 'import sys,json;print(json.load(sys.stdin)["online_viewers"])')"
 curl -s -o /dev/null "$B/mx/c1.m3u8?token=$TK"

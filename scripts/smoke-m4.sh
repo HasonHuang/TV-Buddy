@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # M4 冒烟测试：热重载、看门狗冷却、缓存状态与清空、运行指标、运行日志。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

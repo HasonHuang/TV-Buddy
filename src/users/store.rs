@@ -475,14 +475,18 @@ pub fn ensure_admin(store: &UserStore, password: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// 首次安装时创建管理员，口令随机生成。
+/// 首次安装时创建管理员。
 ///
-/// 返回新建的口令明文。已有用户时返回 `None`。
+/// 口令默认随机 16 位。环境变量 `TV_BUDDY_INITIAL_PASSWORD` 可覆盖，
+/// 供冒烟脚本与自动化测试使用。返回新建的口令明文；已有用户时返回 `None`。
 pub fn ensure_initial_admin(store: &UserStore) -> Result<Option<(String, String)>> {
     if store.user_count() > 0 {
         return Ok(None);
     }
-    let password = super::password::random_password(16);
+    let password = std::env::var("TV_BUDDY_INITIAL_PASSWORD")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| super::password::random_password(16));
     ensure_admin(store, &password)?;
     Ok(Some((INITIAL_ADMIN.to_string(), password)))
 }

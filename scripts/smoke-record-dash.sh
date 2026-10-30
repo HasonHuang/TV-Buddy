@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # DASH 录制冒烟：动态 MPD → 轨道切片 → ffmpeg 并轨 → MKV 可下载。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

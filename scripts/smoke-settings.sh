@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# 系统设置页冒烟：整份配置往返、字段路径存在性、U-10 生效、口令哈希契约、前端资源已内嵌。
+# 系统设置页冒烟：整份配置往返、字段路径存在性、U-10 生效、口令契约、前端资源已内嵌。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -95,8 +98,8 @@ server.timezone_offset_hours number
 server.catchup_tpl string
 server.log_level string
 server.m3u_header_lines array
-panel.username string
-panel.password_sha256 string
+panel.enabled bool
+panel.session_ttl number
 cache.disguise.enabled bool
 cache.disguise.formats array
 health.interval_secs number
@@ -196,17 +199,16 @@ STATS=$(curl -s -H "$AUTH" "$B/panel/api/cache/stats")
 check "推荐值来源 manual" "True" "$(echo "$STATS" | python3 -c 'import json,sys;print(json.load(sys.stdin)["recommend"]["disk_manual"])')"
 check "推荐上限 = 33" "33" "$(echo "$STATS" | python3 -c 'import json,sys;print(json.load(sys.stdin)["recommend"]["disk_cap_mb"])')"
 
-# 4) 口令：客户端算出的 SHA-256 必须能被登录接受（设置页「新密码」靠这条）。
-NEW=$(python3 -c 'import hashlib;print(hashlib.sha256(b"newpass-123").hexdigest())')
-python3 - "$WORK/c.json" "$WORK/d.json" "$NEW" <<'PY'
-import json,sys
-cfg=json.load(open(sys.argv[1]))
-cfg['panel']['password_sha256']=sys.argv[3]
-json.dump(cfg,open(sys.argv[2],'w'),ensure_ascii=False)
-PY
-check "改口令 200" "200" "$(putcfg "$WORK/d.json")"
+# 4) 口令：账号在 users.db，改密走 `PUT /users/:id/password`。
+ADMIN_ID=$(curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/users" |
+  python3 -c 'import json,sys;print(json.load(sys.stdin)["users"][0]["id"])')
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"password":"newpass-123"}' "$B/panel/api/users/$ADMIN_ID/password")
+check "改密 200" "200" "$CODE"
 check "新口令可登录" "yes" "$([ -n "$(login newpass-123)" ] && echo yes || echo no)"
 check "旧口令被拒" "no" "$([ -n "$(login admin)" ] && echo yes || echo no)"
+check "配置里不再有旧口令键" "0" "$(grep -c 'password_sha256' "$WORK/c.json" || true)"
 
 # 5) 面板资源已内嵌：新设置页的字符串出现在下发的前端包里。
 #
@@ -215,7 +217,6 @@ ASSET=$(curl -s "$B/panel" | grep -oE '/__assets/assets/panel-[A-Za-z0-9_.-]+\.j
 check "面板 HTML 引用入口 js" "yes" "$([ -n "$ASSET" ] && echo yes || echo no)"
 BUNDLE=$(curl -s "$B$ASSET")
 for needle in \
-  'panel.password_sha256' \
   'cache.disguise.formats' \
   'cache.prefetch.mpd_readahead' \
   'cache.gc.disk_budget_ratio' \
