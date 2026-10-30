@@ -553,7 +553,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 
 | # | 项 | 说明 |
 | --- | --- | --- |
-| F-1 | 用户与设备管理 | 新增「用户 → N 个设备 → 每设备一条独立订阅地址」的数据模型。参考 docker `mpd-hls`（管理端口 `9100`）。与现有 `[auth]` 的每 IP 并发上限是两套东西：前者按用户/设备计，后者按 IP 计。开始前要先定：存储位置、设备标识、订阅地址的鉴权（与现有 `token` 的关系）、面板入口 |
+| F-1 | 用户与设备管理 | 调研已完成（2026-10-30），见 [`09-users-and-devices.md`](docs/design/09-users-and-devices.md)。数据模型、API、面板结构、权限语义已按 mpd-hls 摸清。存储建议 SQLite（`rusqlite` bundled，已实测两个 musl 架构可静态构建）。待定案 3 点见该文档 §8 |
 
 ---
 
@@ -565,6 +565,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | 验证矩阵 | [`docs/spec/07-baseline-and-verification.md`](docs/spec/07-baseline-and-verification.md) |
 | 全量覆盖对比与规划 | [`docs/design/07-coverage-and-plan.md`](docs/design/07-coverage-and-plan.md) |
 | 未决项对比方案 | [`docs/design/08-open-decisions.md`](docs/design/08-open-decisions.md) |
+| F-1 用户与设备调研 | [`docs/design/09-users-and-devices.md`](docs/design/09-users-and-devices.md) |
 | HTTP 契约 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) |
 | 配置与存储 | [`docs/design/04-config-and-storage.md`](docs/design/04-config-and-storage.md) |
 | 低配置优化 | [`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md) |
