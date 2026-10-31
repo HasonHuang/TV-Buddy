@@ -250,7 +250,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | --- | --- | --- |
 | 数据层 | `src/users/{model,password,store}.rs` | SQLite，表结构与 §2 一致 |
 | 口令 | argon2id。不支持旧散列格式 | 完成 |
-| 首次安装 | 无用户时建 `admin`，随机 16 位口令写入 `<cache>/admin_initial_credentials.txt`（0600） | 完成 |
+| 首次安装 | 无用户时建 `admin`，随机 16 位口令写入 `<安装目录>/cache/admin_initial_credentials.txt`（0600）。路径跟随数据库文件，与 `cache.disk_path` 无关 | 完成 |
 | 登录 | `POST /panel/api/login` 查 `users` 表，会话绑定用户 | 完成 |
 | 用户 API | `/panel/api/users` 全套，含 `channel-options`、`password` | 完成 |
 | 令牌 API | `/panel/api/users/:id/tokens` 全套 | 完成 |

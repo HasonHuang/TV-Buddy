@@ -24,6 +24,8 @@ BASE_DIR=$(resolve_self "$0")
 BIN="$BASE_DIR/tv-buddy"
 # 配置、用户与令牌都在这个 SQLite 文件里。
 DB="$BASE_DIR/tv-buddy.db"
+# 初始口令文件固定在安装目录的 cache/ 下，与 `cache.disk_path` 无关。
+CREDENTIALS_FILE="$BASE_DIR/cache/admin_initial_credentials.txt"
 LOG_FILE="$BASE_DIR/tv-buddy.log"
 PID_FILE="$BASE_DIR/tv-buddy.pid"
 SERVICE_NAME=tv-buddy
@@ -295,7 +297,8 @@ show_url() {
         *:*) host="[$host]" ;;
     esac
     printf '面板地址：http://%s:%s/panel\n' "$host" "$port"
-    printf '账号：在面板「用户与设备」管理；初始口令见 admin_initial_credentials.txt\n'
+    printf '账号：%s\n' "$DEFAULT_USER"
+    printf '初始口令：%s\n' "$CREDENTIALS_FILE"
 }
 
 # ---- 二进制更新 ----

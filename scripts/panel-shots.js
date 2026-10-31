@@ -7,7 +7,7 @@
 // 用法：node scripts/panel-shots.js <输出目录> [基址]
 // 默认基址 http://127.0.0.1:19898。
 // 账号取自环境变量 PANEL_USER / PANEL_PASS，默认 admin/admin。
-// 首次安装的随机口令在 <cache>/admin_initial_credentials.txt。
+// 首次安装的随机口令在 /opt/tv-buddy/cache/admin_initial_credentials.txt。
 
 const { chromium } = require('playwright');
 const fs = require('fs');

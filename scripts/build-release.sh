@@ -17,6 +17,13 @@ mkdir -p "$OUT"
 
 [ -f frontend/dist/index.html ] || { echo "缺少 frontend/dist，先跑 scripts/build-frontend.sh"; exit 1; }
 
+# `cache.disk_path` 默认是相对路径 `./cache`，服务单元必须设工作目录。
+# 漏设时缓存与初始口令文件落到 `/cache`，`<prefix>/cache` 是空的。
+grep -q '^WorkingDirectory=' packaging/tv-buddy.service ||
+  { echo "tv-buddy.service 缺少 WorkingDirectory"; exit 1; }
+grep -q '^directory=' packaging/tv-buddy.openrc ||
+  { echo "tv-buddy.openrc 缺少 directory"; exit 1; }
+
 package() { # 参数：架构（amd64/arm64）
   local arch=$1 platform=$1 target_dir
   case "$arch" in

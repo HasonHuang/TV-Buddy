@@ -62,7 +62,7 @@ sha256sum /opt/tv-buddy/tv-buddy
 <64 位十六进制>  /opt/tv-buddy/tv-buddy
 ```
 
-程序不认 `--version`。它把第一个参数当配置路径（`src/main.rs:14-17`）。版本号从 `/panel/api/status` 的 `version` 字段取，见 3.9。
+程序不认 `--version`。它把第一个参数当配置路径（`src/main.rs:18-20`）。版本号从 `/panel/api/status` 的 `version` 字段取，见 3.9。
 
 ### 3.2 建立目录
 
@@ -372,7 +372,7 @@ sudo /opt/tv-buddy/tv-buddy config get groups --db /etc/tv-buddy/tv-buddy.db \
 
 预期：输出 `9`。
 
-夹具用 `--force` 覆盖配置。账号 `admin` 与口令由首次启动生成，见 `cache/admin_initial_credentials.txt`。服务只监听 `127.0.0.1`，不对外暴露。
+夹具用 `--force` 覆盖配置。账号 `admin` 与口令由首次启动生成，见 `/opt/tv-buddy/cache/admin_initial_credentials.txt`。服务只监听 `127.0.0.1`，不对外暴露。
 
 ### 3.8 启动上游夹具
 

@@ -43,7 +43,7 @@
 | 项 | 数量 |
 | --- | --- |
 | 路由注册（`src/http.rs`） | 140 |
-| 测试 | 381（285 单元 + 96 契约） |
+| 测试 | 384（287 单元 + 97 契约） |
 | 冒烟脚本（`scripts/smoke-*.sh`） | 27 |
 
 已覆盖的能力：
@@ -506,6 +506,30 @@ VG-3 与 VG-4 带后端改动。`src/stats.rs` 加频道维度计数，`src/metr
 不过期，供「我的订阅」页与分组页复制播放地址。
 
 **令牌维护**：启动时清理过期令牌；每 60 秒把 `last_seen_at_ms` 落盘。
+
+---
+
+## 5.2 初始口令文件（v2026.7.1）
+
+路径固定在数据库所在目录的 `cache/` 下：
+
+```text
+/opt/tv-buddy/cache/admin_initial_credentials.txt
+```
+
+三点约束：
+
+| 项 | 规则 |
+| --- | --- |
+| 起点 | 数据库路径先转绝对路径（`src/main.rs:24`），再取父目录拼 `cache/admin_initial_credentials.txt` |
+| 无关项 | 与工作目录、`cache.disk_path`、启动方式都无关 |
+| 生成条件 | 仅首次启动、`users` 表为空时写。库里有账号就不再生成 |
+
+`v2026.7` 之前的缺陷：`cache.disk_path` 默认 `./cache` 是相对路径，OpenRC 单元没设
+`directory`，进程工作目录是 `/`，凭据与全部缓存落到 `/cache`，而 `<prefix>/cache` 是空的。
+OpenRC 单元已补 `directory="/opt/tv-buddy"`，`scripts/build-release.sh` 加了构建期断言。
+
+`tv-buddy url` 现在打印凭据文件的绝对路径；启动日志与首次安装日志里的 `path=` 也是绝对路径。
 
 ---
 

@@ -97,7 +97,17 @@ fi
 "$CLI" port "$NEW_PORT" >/dev/null
 [ "$(cfgval server.bind)" = "[::]:$NEW_PORT" ] || fail "端口未写入数据库：$(cfgval server.bind)"
 "$CLI" status | grep -q '运行中' || fail "改端口后未运行"
-"$CLI" url | grep -q ":$NEW_PORT/panel" || fail "url 端口不对"
+# 只取一次输出。`grep -q` 会提前关闭管道，令 printf 得到 SIGPIPE，与 pipefail 冲突。
+url_out=$("$CLI" url)
+case "$url_out" in
+    *":$NEW_PORT/panel"*) ;;
+    *) fail "url 端口不对：$url_out" ;;
+esac
+# 初始口令文件按 `cache.disk_path` 解析；默认相对路径要拼成绝对路径。
+case "$url_out" in
+    *"初始口令：$WORK/cache/admin_initial_credentials.txt"*) ;;
+    *) fail "url 未给出凭据文件绝对路径：$url_out" ;;
+esac
 login_ok "$NEW_PORT" admin || fail "改端口后无法登录"
 
 "$CLI" pass cli-pass >/dev/null

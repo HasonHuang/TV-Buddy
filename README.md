@@ -165,13 +165,16 @@ sudo ./install.sh
 
 ### 安装内容
 
+默认装到 `/opt/tv-buddy`：
+
 ```text
-<prefix>/
-  tv-buddy            # 服务二进制
-  tv-buddy.db         # 配置 + 用户 + 令牌（首次启动生成，权限 600）
-  cache/              # 切片与录制缓存
-  tv-buddy.sh         # 管理脚本
-/usr/local/bin/tv-buddy     # 命令软链，可用 --no-link 跳过
+/opt/tv-buddy/
+  tv-buddy                            # 服务二进制
+  tv-buddy.db                         # 配置 + 用户 + 令牌（首次启动生成，权限 600）
+  tv-buddy.log                        # 运行日志
+  cache/                              # 缓存，含 admin_initial_credentials.txt
+  tv-buddy.sh                         # 管理脚本
+/usr/local/bin/tv-buddy               # 命令软链，可用 --no-link 跳过
 ```
 
 服务单元按系统自动选择 systemd 或 OpenRC。
@@ -183,7 +186,7 @@ sudo ./install.sh
 安装完成后执行：
 
 ```bash
-sudo tv-buddy url     # 打印面板地址与账号
+sudo tv-buddy url     # 打印面板地址与初始口令文件的绝对路径
 sudo tv-buddy start   # 启动服务（未加 --start 时）
 ```
 
@@ -193,8 +196,26 @@ sudo tv-buddy start   # 启动服务（未加 --start 时）
 http://<host>:19899/panel
 ```
 
-首次启动生成账号 `admin`，口令随机，写在 `<cache>/admin_initial_credentials.txt`（权限 600）。
-也可以用环境变量 `TV_BUDDY_INITIAL_PASSWORD` 指定。
+首次启动生成账号 `admin`，口令随机，写在：
+
+```text
+/opt/tv-buddy/cache/admin_initial_credentials.txt
+```
+
+这个位置是固定的，与启动方式、工作目录、缓存配置都无关。装了别的目录时，
+`sudo tv-buddy url` 会打印实际路径。
+
+查看口令：
+
+```bash
+sudo cat /opt/tv-buddy/cache/admin_initial_credentials.txt
+```
+
+文件只有首次启动生成一次，两行，权限 600。想直接指定口令，安装时给环境变量：
+
+```bash
+TV_BUDDY_INITIAL_PASSWORD='你的口令' sudo -E sh install.sh
+```
 
 > **先改口令。** 执行 `sudo tv-buddy pass '新口令' admin`。改后旧会话立即失效。
 

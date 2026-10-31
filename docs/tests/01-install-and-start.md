@@ -86,7 +86,7 @@ echo "exit=$?"
 安装完成：/opt/tv-buddy
 数据：/opt/tv-buddy/tv-buddy.db
 初始口令：/opt/tv-buddy/cache/admin_initial_credentials.txt
-面板：http://<主机>:19899/panel（默认 admin / admin，请及时修改）
+面板：http://<主机>:19899/panel（账号 admin；初始口令见下）
 状态：服务已启动
 exit=0
 ```
@@ -94,6 +94,7 @@ exit=0
 说明：
 
 - `<version>` 是 tag 去掉前缀 `v`。资产名由工作流生成：`tv-buddy-<version>-<arch>.tar.gz`（`.github/workflows/ci.yml:137-138`）。
+- `初始口令：` 行按 `$PREFIX/cache/` 拼接（`install.sh:433`）。程序写入的路径固定是「数据库所在目录 + `/cache/admin_initial_credentials.txt`」（`src/main.rs:106-117`），数据库路径又是 `$PREFIX/tv-buddy.db`，两者一致。改过 `cache.disk_path` 不影响该文件。
 - `下载：` 行的 URL 可能来自 Release 资产列表，也可能由 tag 拼接（`install.sh:212-270`）。仓库只有预发布版本时，脚本先打印 `未找到正式版，改用最新 Release：<asset>`（`install.sh:253`）。
 - `校验通过：pkg.tar.gz` 打印的是临时文件名，不是 Release 资产名（`install.sh:172`、`install.sh:293`、`install.sh:326`）。Release 缺少同名 `.sha256` 时不打印该行（`install.sh:160`、`install.sh:294-298`）。
 - 输出 `状态：服务已启动` 表示重启命令返回 0（`install.sh:394`、`install.sh:399`、`install.sh:404`、`install.sh:414-415`）。
@@ -233,9 +234,9 @@ grep -a -n 'tv-buddy 启动' /opt/tv-buddy/tv-buddy.log | tail -n 1
 
 预期：
 
-- `tv-buddy url` 输出两行：`面板地址：http://<host>:19899/panel` 与 `账号：admin`（`packaging/tv-buddy.sh:369-385`）。绑定位为 `[::]` 时自动探测本机 IP。
+- `tv-buddy url` 输出三行：`面板地址：http://<host>:19899/panel`、`账号：admin`、`初始口令：/opt/tv-buddy/cache/admin_initial_credentials.txt`。绑定位为 `[::]` 时自动探测本机 IP。
 - `tv-buddy status` 退出码 `0`（`packaging/tv-buddy.sh:649-663`）。
-- 日志中出现启动记录 `tv-buddy 启动`（`src/main.rs:39-43`）。
+- 日志中出现启动记录 `tv-buddy 启动`（`src/main.rs:90-97`）。
 
 注意：
 
@@ -283,7 +284,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/health
 | 12 | 面板页面 | `/panel` 返回 `200`，字节数大于 0 | 非 200 或空正文 |
 | 13 | 默认账号 | 登录返回 `200` 且正文含 `token` | 401 或 429 |
 | 14 | 错误口令 | 返回 `401`，正文为 `{"error":"用户名或密码错误"}` | 返回 200 或其他正文 |
-| 15 | CLI 地址 | `tv-buddy url` 输出两行，端口为 19899 | 行数不符或端口不符 |
+| 15 | CLI 地址 | `tv-buddy url` 输出三行，端口为 19899，末行是凭据文件绝对路径 | 行数不符、端口不符，或末行不是绝对路径 |
 | 16 | CLI 状态 | `tv-buddy status` 退出码为 `0` | 非 0 |
 | 17 | 日志文件 | `/opt/tv-buddy/tv-buddy.log` 存在，且含 `tv-buddy 启动` | 文件缺失或不含该行 |
 | 18 | 重启 | `restart=0`，重启后 `/health` 返回 `200` | 非 0 或健康检查失败 |
@@ -385,17 +386,19 @@ cat /opt/tv-buddy/tv-buddy.pid 2>/dev/null || echo "无 PID 文件"
 | 安装打印 `警告：服务启动失败，见 /opt/tv-buddy/tv-buddy.log` | 日志末尾 | `/tmp/tv-buddy.log` |
 | 服务反复重启 | `journalctl` 里是否有 `打开数据库失败` | `/tmp/tv-journal.txt`、`/tmp/tv-buddy.db` |
 | `/health` 连接失败 | 进程是否存活、端口是否被占 | `/tmp/tv-listen.txt`、`/tmp/tv-journal.txt` |
-| `/health` 返回 200 但登录 401 | 账号是否为 `admin`；口令是否取自凭据文件 | `/tmp/tv-buddy.db`、`cache/admin_initial_credentials.txt` |
+| `/health` 返回 200 但登录 401 | 账号是否为 `admin`；口令是否取自凭据文件 | `/tmp/tv-buddy.db`、`/opt/tv-buddy/cache/admin_initial_credentials.txt` |
+| 凭据文件不存在 | 是否 `curl` 报错前就启动过服务（文件只在首次启动、库内无用户时生成）。库内已有用户时不再重建 | `ls -l /opt/tv-buddy/cache/`、`/opt/tv-buddy/tv-buddy.log` 中含 `admin_initial_credentials` 的行。日志里 `path=` 是实际写入位置 |
 | 登录返回 429 | 失败次数是否超限 | `/tmp/tv-journal.txt` |
 
 补充规则：
 
-- 配置读不到时，进程带上下文 `读取配置失败: <path>` 退出（`src/main.rs:19-20`）。
-- 端口绑不上时，进程带上下文 `监听失败: <bind>` 退出（`src/main.rs:36-38`）。
+- 库打不开时，进程带上下文 `打开数据库失败: <path>` 退出（`src/db.rs:32-33`）。
+- 库里的配置记录解析失败时，进程带上下文 `配置记录解析失败` 退出（`src/config/store.rs:39`）。
+- 端口绑不上时，进程带上下文 `监听失败: <bind>` 退出（`src/main.rs:86-88`）。
 - 配置存于 SQLite（`tv-buddy.db`）。库打不开或 JSON 解析失败时直接报错。
-- 校验会拦：`server.bind` 为空、`panel.enabled=true` 且 `panel.password_sha256` 为空、分组 id 为空或重复、频道 id 重复（`src/config.rs:40-62`）。
+- 校验会拦：`server.bind` 为空、分组 id 为空或重复、频道 id 重复（`src/config.rs`）。
 - 缺少 sha256 工具时，安装脚本打印 `未找到 sha256 工具，跳过校验` 并继续（`install.sh:168-169`）。这不是安装失败，但要记录。
-- systemd 下 `Restart=on-failure` 与 `RestartSec=3` 会让坏配置进入每 3 秒重启的循环（`packaging/tv-buddy.service:11-12`）。`is-active` 在该期间可能短暂为 active。以 `journalctl` 中的 `读取配置失败` 与 `/health` 结果为准。
+- systemd 下 `Restart=on-failure` 与 `RestartSec=3` 会让坏配置进入每 3 秒重启的循环（`packaging/tv-buddy.service:11-12`）。`is-active` 在该期间可能短暂为 active。以 `journalctl` 中的 `打开数据库失败` 或 `配置记录解析失败` 与 `/health` 结果为准。
 - OpenRC 下 `tv-buddy log` 先读 `/opt/tv-buddy/tv-buddy.log`。只有该文件缺失时才回退到 `/var/log/tv-buddy.log`（`packaging/tv-buddy.sh:670-681`）。程序实际写 `/opt/tv-buddy/tv-buddy.log`（`src/logging.rs:166-173`）。正常安装下回退分支不执行。收集时两份日志都取。
 - PID 文件模式下，`start` 只等进程存活，最多 10 秒（`packaging/tv-buddy.sh:185-190`）。`start` 成功不等于 HTTP 已就绪。以 `/health` 结果为准。
 - 上报时附上 `/tmp/install-debug.log`。该文件由下面命令生成：

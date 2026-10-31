@@ -82,7 +82,7 @@
 ## 3. 存储布局
 
 ```text
-<disk_path>/                     （默认 ./cache）
+<disk_path>/                     （默认 ./cache，相对路径按进程工作目录解析）
 ├─ m3u8/          入口与媒体清单缓存
 ├─ seg_url/       上游切片地址缓存
 ├─ seg_bytes/     切片正文缓存
@@ -102,9 +102,14 @@
 └─ subtitles/.translate/ 字幕翻译缓存
 ```
 
+初始口令文件不在 `<disk_path>` 下。它在数据库所在目录的 `cache/`，即默认安装的
+`/opt/tv-buddy/cache/admin_initial_credentials.txt`。
+
 | 项 | 设计 | 依据 |
 | --- | --- | --- |
 | 目录创建 | 仅启动时创建 | F-006 |
+| `disk_path` 相对路径 | 按进程的工作目录解析。三个启动入口都会设工作目录：systemd 单元 `WorkingDirectory`、OpenRC 单元 `directory`、PID 文件模式在 `daemon_start` 里 `cd "$BASE_DIR"`。漏设时缓存落到 `/cache` | 2026-10-31 缺陷修复 |
+| 初始口令路径 | 固定取「数据库路径的父目录 + `/cache/admin_initial_credentials.txt`」。启动时先把数据库路径转成绝对路径，因此与工作目录、`cache.disk_path` 都无关 | 2026-10-31 缺陷修复 |
 | 缓存键 | 清单：`{gid}_{cid}__{sha256(url)[..8]}`；切片：`sha256(上游绝对 URL)` | 内部实现，非兼容契约 |
 | 切片伪装 | `<S>` = 同一 sha256 前 32 hex | S-DIS-04 |
 | 切片索引（M2 已实现） | `seg_url/<sha256("{gid}/{cid}")[..16]>.json`：`<S>` → `{url, ext}`；内存 + 磁盘两级 | `src/proxy/segments.rs` |
