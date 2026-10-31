@@ -45,11 +45,14 @@
 
 | 方法 | 路径 | 鉴权 | 响应 | 阶段 | 依据 |
 | --- | --- | --- | --- | --- | --- |
-| GET | `/playlist.m3u` | 无 | `200` M3U | M1 | S-EP-02 |
+| GET | `/playlist.m3u` | 无 | `404` 文本，指路 `/sub/<令牌>/playlist.m3u` | v2026.7 | 设计决策（订阅只从用户令牌进入） |
 | GET | `/subs/status` | 无 | `200` JSON 源列表 | ✅ P3 | S-GAP-07 |
 | POST | `/subs/groups` | 无 | `200` JSON 分组；非 http(s) → `400`；抓取失败 → `502` | ✅ P3 | S-GAP-07 |
 | POST | `/subs/preview` | 无 | `200` JSON 预检 | ✅ P3 | S-GAP-07 |
-| GET | `/{gid}/playlist.m3u` | 无 | `200` M3U / `404`（归档组） | M1 | S-EP-02、F-009 |
+| GET | `/{gid}/playlist.m3u` | 无 | `404` 文本，同上 | v2026.7 | 设计决策 |
+| GET | `/sub/:token/playlist.m3u` | 令牌 | `200` M3U；令牌无效或过期 → `404` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/sub/:token/epg.xml` | 令牌 | `200` XMLTV，只含该用户可见频道；令牌无效 → `404`；EPG 关 → `404` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/sub/:token/epg.xml.gz` | 令牌 | 同上，`application/gzip` | ✅ v2026.7 | F-1 §3.3 |
 | GET | `/{gid}/{cid}.{ext}` | 按 token 开关 | `200` 清单 / `302` 占位 | M2 | S-EP-03 |
 | GET | `/{gid}/{cid}/index.m3u8` | 同上 | 同上（兼容旧路径） | M2 | F-012 §3 |
 | GET | `/{gid}/{cid}/video/index.txt` | 无 | `200` `text/plain` 媒体清单（仅主清单上游）；否则 `302 error_url` | M2 | F-004、F-018 |
@@ -164,20 +167,26 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 
 ## 5. 订阅契约
 
+订阅只有一个入口：`/sub/:token/playlist.m3u`。令牌即身份，范围由用户决定。
+全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 返回 `404` 文本，指路用户订阅。
+
 ### 5.1 响应头
 
 | 路径 | 头 |
 | --- | --- |
-| `/playlist.m3u` | `content-type: application/x-mpegurl; charset=utf-8`、`content-disposition: attachment; filename="playlist.m3u"` |
-| `/{gid}/playlist.m3u` | 同上，`filename="<gid>.m3u"` |
+| `/sub/:token/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="playlist.m3u"` |
+| `/sub/:token/epg.xml` | `content-type: application/xml; charset=utf-8` |
+| `/sub/:token/epg.xml.gz` | `content-type: application/gzip` |
+| `/playlist.m3u`、`/{gid}/playlist.m3u` | `404` + `text/plain` 提示 |
 
 ### 5.2 正文形状
 
 ```text
-#EXTM3U x-tvg-url="http://<host>/epg.xml.gz"      ← EPG 开启才有
+#EXTM3U x-tvg-url="http://<host>/sub/<token>/epg.xml.gz"   ← EPG 开启才有
 <server.m3u_header_lines 逐行原文>
 #EXTINF:-1 tvg-id="<tvg_id||id>" tvg-name="<tvg_name||name>" tvg-logo="<logo>" group-title="<分组显示名>",<频道名>
-http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
+http://<host>/<gid>/<cid>.<ext>[?token=<该用户的令牌>]
+<聚合源条目，原样保留上游地址>                              ← merge_position 决定位置
 ```
 
 | 项 | 规则 | 依据 |
@@ -185,23 +194,31 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | `tvg-id` | 缺省用频道 id | S-MODEL-04 |
 | `tvg-name` | 缺省用频道名 | S-MODEL-04 |
 | `group-title` | 分组**显示名** | F-013 §3 |
-| Token 附加 | `token_enabled` 且 `access != open` 时附加 | S-URL-04、F-009 |
+| Token 附加 | 总是附加该用户自己的令牌，`open` 组除外 | S-URL-04、F-009 |
+| `x-tvg-url` | 指向该用户自己的 `/sub/<token>/epg.xml.gz` | F-1 §3.3 |
 | `m3u_header_lines` | 追加在 `#EXTM3U` 后；热重载生效 | S-URL-07 |
+| 范围 | 只含 `allowed_group_ids` 与 `allowed_channel_ids` 允许的频道 | F-1 §5 |
 
 ### 5.3 `access` 矩阵
 
-| access | 总订阅 | 分组订阅 | 直播入口 | EPG |
-| --- | --- | --- | --- | --- |
-| `public` | ✅ 含 | ✅ | 按 Token 开关 | ✅ |
-| `hidden` | ❌ | ✅ `200` | ✅ | ✅ |
-| `archived` | ❌ | ❌ `404` | ❌ `302` 占位 | ✅ 仍含 |
-| `open` | ❌ | ✅（条目无 token） | ✅ 免 Token | ✅ |
+`access` 在用户订阅里只影响两件事：归档组停播，开放组免令牌。
+其余可见性由用户授权决定，不再看 `public` / `hidden`。
 
-> `open` 同时**排除出总订阅**——与 `hidden` 同规则（F-009）。
+| access | 用户订阅 | 直播入口 | 每用户 EPG |
+| --- | --- | --- | --- |
+| `public` | 授权即含 | 按 Token 开关 | ✅ |
+| `hidden` | 授权即含 | 按 Token 开关 | ✅ |
+| `archived` | ❌ 一律排除 | ❌ `302` 占位 | ❌ 排除 |
+| `open` | 授权即含，条目无令牌 | ✅ 免 Token | ✅ |
 
-### 5.4 订阅聚合（P1 已实现）
+> `public` 与 `hidden` 的区别只剩「是否出现在旧版全局订阅里」。全局订阅已停用，两者行为一致。
 
-`GET /playlist.m3u` 可合并外部 M3U 源（F-013 §5）。分组订阅不聚合。
+### 5.4 订阅聚合
+
+聚合源条目追加到**每个用户**的订阅（F-013 §5）。`/panel/api/playlist` 管配置。
+
+> 外部源条目不属于任何本地分组，无法映射到 `allowed_group_ids`，所以对所有用户一视同仁。
+> 这是已确认的取舍。
 
 | 配置 | 含义 |
 | --- | --- |
@@ -429,7 +446,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 备份恢复 | `GET /panel/api/backup`、`POST /panel/api/restore`（浏览器内下载/上传） | ✅ |
 | 素材 | `/panel/api/{assets,subtitle}/*`、`/panel/api/assets/ffmpeg-status` | ✅ |
 | 录制与回看 | `/panel/api/schedule*`、`/panel/api/livestream*`、`GET /panel/api/dash-timeshift/status` | ✅ |
-| 订阅聚合 | `GET/PUT /panel/api/playlist`（源、过滤、缓存与合并位置）；清单 `GET /playlist.m3u` | ✅ |
+| 订阅聚合 | `GET/PUT /panel/api/playlist`（源、过滤、缓存与合并位置）；条目追加到 `/sub/<令牌>/playlist.m3u` | ✅ |
 | 系统状态 | `GET /panel/api/health`、`/assets/ffmpeg-status`、`/resolver/scripts`、`/dash-timeshift/status` | ✅ |
 | 台标 | 独立页 `/logo`（`/logo/api/*`） | ✅ |
 | 其它（系统设置） | 概览页已支持 `GET/PUT /panel/api/config` 全量编辑 | ✅ |

@@ -45,6 +45,52 @@ pub struct EpgState {
     pub extras: Mutex<Vec<Extra>>,
     /// 最近一次匹配报告。
     pub match_rows: Mutex<Vec<MatchRow>>,
+    /// 已生成节目单的解析结果，按文件 mtime 与长度失效。
+    pub generated: Mutex<Option<Generated>>,
+}
+
+/// 缓存的解析结果。
+pub struct Generated {
+    modified: Option<SystemTime>,
+    len: u64,
+    data: Arc<DocumentData>,
+}
+
+/// 读已生成的节目单，带进程内缓存。
+///
+/// 每请求重新解析几 MB XML 太贵。文件没变就复用上次的解析结果。
+/// 缓存键是 `(mtime, 长度)`：EPG 刷新是小时级，同秒同大小重写的概率可以忽略。
+pub fn load_generated_cached(state: &AppState) -> Option<Arc<DocumentData>> {
+    let config = state.snapshot();
+    let path = output_file(&config);
+    let meta = fs::metadata(&path).ok()?;
+    let modified = meta.modified().ok();
+    let len = meta.len();
+
+    if let Some(cached) = state
+        .epg
+        .generated
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .as_ref()
+    {
+        if cached.modified == modified && cached.len == len {
+            return Some(cached.data.clone());
+        }
+    }
+
+    let body = fs::read_to_string(&path).ok()?;
+    let data = Arc::new(parse(&body).ok()?);
+    *state
+        .epg
+        .generated
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(Generated {
+        modified,
+        len,
+        data: data.clone(),
+    });
+    Some(data)
 }
 
 /// 额外频道（`POST /panel/api/epg/extra`）。
@@ -790,32 +836,43 @@ fn channel_targets(config: &Config) -> Vec<Target> {
     let mut targets = Vec::new();
     for group in &config.groups {
         for channel in &group.channels {
-            let tvg_id = ["tvg_id", "tvg-id", "epg_id"]
-                .iter()
-                .find_map(|key| {
-                    channel
-                        .extra
-                        .get(*key)
-                        .and_then(|value| value.as_str())
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                })
-                .map(str::to_string);
-            let out_id = tvg_id
-                .clone()
-                .unwrap_or_else(|| channel.id.clone())
-                .to_ascii_lowercase();
+            let tvg_id = tvg_id_of(channel);
             targets.push(Target {
                 gid: group.id.clone(),
                 cid: channel.id.clone(),
                 name: channel.name.clone(),
-                out_id,
+                out_id: channel_out_id(channel),
                 tvg_id: tvg_id.map(|value| value.to_lowercase()),
                 normalized: normalize_name(&channel.name),
             });
         }
     }
     targets
+}
+
+/// 频道在节目单里的输出 id。
+///
+/// 有 `tvg_id`（或 `tvg-id` / `epg_id`）时用它，否则用频道 id。两者都转小写。
+/// 面板「我的订阅」与 `/sub/:token/epg.xml` 都用这个规则对齐频道。
+pub fn channel_out_id(channel: &crate::config::model::Channel) -> String {
+    tvg_id_of(channel)
+        .unwrap_or_else(|| channel.id.clone())
+        .to_ascii_lowercase()
+}
+
+/// 频道上配置的 `tvg_id`，去空白；空串按未配置。
+fn tvg_id_of(channel: &crate::config::model::Channel) -> Option<String> {
+    ["tvg_id", "tvg-id", "epg_id"]
+        .iter()
+        .find_map(|key| {
+            channel
+                .extra
+                .get(*key)
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .map(str::to_string)
 }
 
 fn normalize_name(value: &str) -> String {
@@ -1768,25 +1825,27 @@ pub struct DocumentData {
 }
 
 impl DocumentData {
-    /// 只保留能匹配到本服务频道的内容。
-    #[cfg(test)]
-    fn matched(self, keys: &HashSet<String>) -> Self {
+    /// 只保留给定频道 id 的频道与节目。
+    ///
+    /// 判定是「id 命中」或「任一显示名命中」。`epg.xml` 的频道 id 就是
+    /// [`channel_out_id`] 的结果，所以按 id 过滤即可。
+    pub fn retain_channels(self, ids: &HashSet<String>) -> Self {
         let channels: Vec<Channel> = self
             .channels
             .into_iter()
             .filter(|channel| {
-                keys.contains(channel.id.trim())
+                ids.contains(channel.id.trim())
                     || channel
                         .names
                         .iter()
-                        .any(|(_, name)| keys.contains(name.trim()))
+                        .any(|(_, name)| ids.contains(name.trim()))
             })
             .collect();
-        let ids: HashSet<String> = channels.iter().map(|c| c.id.clone()).collect();
+        let kept: HashSet<String> = channels.iter().map(|c| c.id.clone()).collect();
         let programmes = self
             .programmes
             .into_iter()
-            .filter(|programme| ids.contains(programme.channel.trim()))
+            .filter(|programme| kept.contains(programme.channel.trim()))
             .collect();
         Self {
             channels,
@@ -2070,10 +2129,44 @@ mod tests {
         let data = parse(SAMPLE).expect("应解析成功");
         let mut keys = HashSet::new();
         keys.insert("CCTV-1".to_string());
-        let matched = data.matched(&keys);
+        let matched = data.retain_channels(&keys);
         assert_eq!(matched.channels.len(), 1);
         assert_eq!(matched.channels[0].id, "cctv1");
         assert_eq!(matched.programmes.len(), 1);
+    }
+
+    #[test]
+    fn retain_channels_filters_by_id() {
+        let data = parse(SAMPLE).expect("应解析成功");
+        let keys: HashSet<String> = ["cctv1".to_string()].into_iter().collect();
+        let matched = data.retain_channels(&keys);
+        assert_eq!(matched.channels.len(), 1);
+        assert!(matched.programmes.iter().all(|p| p.channel == "cctv1"));
+    }
+
+    #[test]
+    fn retain_channels_keeps_nothing_when_empty() {
+        let data = parse(SAMPLE).expect("应解析成功");
+        let matched = data.retain_channels(&HashSet::new());
+        assert!(matched.channels.is_empty());
+        assert!(matched.programmes.is_empty());
+    }
+
+    #[test]
+    fn channel_out_id_prefers_tvg_id_and_lowercases() {
+        let mut channel = crate::config::model::Channel {
+            id: "C1".into(),
+            ..crate::config::model::Channel::default()
+        };
+        assert_eq!(channel_out_id(&channel), "c1", "无 tvg_id 时用小写频道 id");
+        channel
+            .extra
+            .insert("tvg_id".into(), serde_json::json!("CCTV-1"));
+        assert_eq!(channel_out_id(&channel), "cctv-1");
+        channel
+            .extra
+            .insert("tvg_id".into(), serde_json::json!("   "));
+        assert_eq!(channel_out_id(&channel), "c1", "空 tvg_id 按未配置");
     }
 
     #[test]

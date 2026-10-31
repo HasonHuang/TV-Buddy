@@ -48,6 +48,8 @@ impl FromRequestParts<Arc<AppState>> for PanelAuth {
 /// 已认证的面板请求，带身份信息。
 ///
 /// 需要区分角色的接口用它。只要「已登录」的接口继续用 [`PanelAuth`]。
+///
+/// 角色每次请求从 `users` 表重读，不信任登录时的快照。这样降级管理员立即生效。
 pub struct PanelUser {
     pub token: String,
     pub user_id: String,
@@ -78,15 +80,36 @@ impl FromRequestParts<Arc<AppState>> for PanelUser {
             .filter(|token| !token.is_empty())
             .ok_or_else(ApiError::need_login)?;
 
-        match state.sessions.lookup(&token) {
-            Some(info) => Ok(PanelUser {
-                token,
-                user_id: info.user_id,
-                is_admin: info.is_admin,
-            }),
-            None => Err(ApiError::need_login()),
-        }
+        let info = state
+            .sessions
+            .lookup(&token)
+            .ok_or_else(ApiError::need_login)?;
+        // 用户可能已被删除；此时会话应当作废。
+        let user = state
+            .users
+            .find_user(&info.user_id)
+            .ok_or_else(ApiError::need_login)?;
+        Ok(PanelUser {
+            token,
+            user_id: user.id,
+            is_admin: user.role.is_admin(),
+        })
     }
+}
+
+/// 由请求推导外部基地址。
+///
+/// 订阅、EPG 与播放地址都拼在它后面，所以必须尊重反向代理的头。
+pub(crate) fn base_url(headers: &axum::http::HeaderMap) -> String {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1:19899");
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("http");
+    format!("{scheme}://{host}")
 }
 
 /// 客户端地址：取 `X-Forwarded-For` 末项，其次 `X-Real-IP`，最后 TCP 对端。

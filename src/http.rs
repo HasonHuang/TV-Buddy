@@ -39,10 +39,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/subs/status", get(routes::subs::status))
         .route("/subs/groups", post(routes::subs::groups))
         .route("/subs/preview", post(routes::subs::preview))
-        .route("/playlist.m3u", get(routes::play::total_playlist))
-        // 用户订阅入口。令牌见 `<cache>/users.db` 的 access_tokens 表。
+        // 全局订阅已停用。保留路由是为了给出明确原因，而不是落进播放通配路由。
+        .route("/playlist.m3u", get(routes::sub::gone))
+        .route("/:gid/playlist.m3u", get(routes::sub::gone))
+        // 用户订阅入口。令牌见 `tv-buddy.db` 的 access_tokens 表。
         .route("/sub/:token/playlist.m3u", get(routes::sub::playlist))
-        .route("/:gid/playlist.m3u", get(routes::play::group_playlist))
+        .route("/sub/:token/epg.xml", get(routes::sub::epg))
+        .route("/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
         // 面板接口：未知路径固定 404 JSON，先于播放通配路由匹配。
         .route("/panel/api/*rest", any(routes::panel::api_missing))
         // 播放链路（M2）
@@ -360,6 +363,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             guard::feature_gate,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            guard::admin_gate,
         ))
         .with_state(state)
         .layer(tower_http::cors::CorsLayer::permissive())

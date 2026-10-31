@@ -380,21 +380,64 @@ pub async fn revoke_token(
 }
 
 /// `GET /panel/api/me`——当前登录者与自己的订阅地址。
+///
+/// 普通用户也能调。返回的 `groups` 只含该用户可见的分组与频道，
+/// 供面板「我的订阅」页直接渲染，不需要额外的管理权限。
 pub async fn me(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let Some(user) = state.users.find_user(&actor.user_id) else {
         return Err(ApiError::need_login());
     };
-    let tokens = state.users.list_tokens(&user.id);
-    let first = tokens
+    let token = ensure_web_token(&state, &user)?;
+    let config = state.snapshot();
+    let base = crate::http::ext::base_url(&headers);
+    let groups: Vec<Value> = crate::playlist::user_view(&config, &user, &base, &token)
         .iter()
-        .find(|token| token.purpose == Purpose::Device)
-        .or_else(|| tokens.first());
+        .map(|group| {
+            json!({
+                "id": group.id,
+                "name": group.name,
+                "channels": group.channels.iter().map(|channel| json!({
+                    "id": channel.id,
+                    "name": channel.name,
+                    "url": channel.url,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
     Ok(Json(json!({
         "user": user_view(&user),
-        "playlist_link": first.map(|token| format!("/sub/{}/playlist.m3u", token.token)),
-        "epg_link": first.map(|token| format!("/sub/{}/epg.xml", token.token)),
+        "token": token,
+        "playlist_link": format!("/sub/{token}/playlist.m3u"),
+        "epg_link": format!("/sub/{token}/epg.xml"),
+        "groups": groups,
     })))
+}
+
+/// 面板内使用的播放令牌。
+///
+/// 每个用户一个，`Purpose::WebUiLinks`，不过期。没有就建一个。
+/// 这样面板里的播放地址与订阅地址始终有效，不需要用户手工建设备令牌。
+fn ensure_web_token(state: &AppState, user: &User) -> Result<String, ApiError> {
+    if let Some(existing) = state
+        .users
+        .list_tokens(&user.id)
+        .into_iter()
+        .find(|token| token.purpose == Purpose::WebUiLinks)
+    {
+        return Ok(existing.token);
+    }
+    state
+        .users
+        .create_token(
+            &user.id,
+            Purpose::WebUiLinks,
+            Some("面板链接".to_string()),
+            None,
+        )
+        .map(|token| token.token)
+        .map_err(|error| ApiError::internal(format!("签发面板令牌失败: {error}")))
 }

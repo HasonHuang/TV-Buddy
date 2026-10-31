@@ -62,12 +62,12 @@ AUTH="Authorization: Bearer $TOKEN"
 # 全局播放令牌已废弃：两个端点都应为 404。
 check "Token 端点已移除" "404" "$(curl -s -o /dev/null -w '%{http_code}' -H "$AUTH" "$B/panel/api/security/token")"
 check "轮换端点已移除" "404" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AUTH" "$B/panel/api/security/token/rotate")"
-check "公开清单不含令牌" "0" "$(curl -s "$B/playlist.m3u" | grep -c 'token=' || true)"
+check "全局订阅已停用" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/playlist.m3u")"
 
 check "公开请求 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/health")"
 check "封禁 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AUTH" -H 'content-type: application/json' \
   -d '{"ip":"7.7.7.7","seconds":60}' "$B/panel/api/security/ip/ban")"
-check "封禁后 403" "403" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/playlist.m3u")"
+check "封禁后 403" "403" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/health")"
 check "面板不受封禁" "401" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/panel/api/status")"
 
 curl -s -H "$AUTH" "$B/panel/api/security/ip/stats" > "$WORK/stats.json"
@@ -75,7 +75,7 @@ check "统计含封禁项" "1" "$(python3 -c 'import json,sys;d=json.load(open(s
 
 check "解封 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AUTH" -H 'content-type: application/json' \
   -d '{"ip":"7.7.7.7"}' "$B/panel/api/security/ip/unban")"
-check "解封后 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/playlist.m3u")"
+check "解封后 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/health")"
 
 # 批量解封。
 for ip in 8.8.8.8 9.9.9.9; do

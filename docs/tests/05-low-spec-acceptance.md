@@ -458,18 +458,25 @@ sudo systemctl restart tv-buddy
 date -Is
 ```
 
-重启会换播放 Token（Token 在内存里，见 `src/auth/play_token.rs:1-5`）。所以先重启，再取播放地址。
+订阅只从用户令牌进入。先登录面板，再从 `/panel/api/me` 取面板令牌。
 
 步骤 3：取播放入口地址：
 
 ```bash
-GID=<分组 id>
-curl -s "http://127.0.0.1:19899/$GID/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1
+TOK=$(curl -s -X POST http://127.0.0.1:19899/panel/api/login \
+  -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"<口令>"}' \
+  | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+PTOK=$(curl -s -H "Authorization: Bearer $TOK" \
+  http://127.0.0.1:19899/panel/api/me \
+  | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+curl -s "http://127.0.0.1:19899/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1
 ```
 
-预期：`http://127.0.0.1:19899/<分组 id>/<频道 id>.m3u8?token=<48 位十六进制>`。
+预期：`http://127.0.0.1:19899/<分组 id>/<频道 id>.m3u8?token=<12 位令牌>`。
 
-订阅会自动带播放 Token（`src/http/routes/play.rs:103-106`）。`access = "open"` 的分组不带 Token，且免校验。
+订阅会自动带该用户自己的令牌（`src/playlist.rs` 的 `entry_url`）。
+`access = "open"` 的分组不带令牌，且免校验。
 
 步骤 4：写负载脚本：
 
@@ -477,7 +484,7 @@ curl -s "http://127.0.0.1:19899/$GID/playlist.m3u" | grep -v '^#' | grep -v '^$'
 sudo tee /root/s6-load.sh >/dev/null <<'EOF'
 #!/bin/sh
 GID=main
-ENTRY=$(curl -s "http://127.0.0.1:19899/$GID/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1)
+ENTRY=$(curl -s "http://127.0.0.1:19899/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1)
 echo "ENTRY=$ENTRY" > /root/s6-load.log
 while :; do
   curl -s --max-time 20 "$ENTRY" -o /tmp/s6-pl.m3u8

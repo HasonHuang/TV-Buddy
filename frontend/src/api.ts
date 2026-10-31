@@ -1,6 +1,7 @@
 /** 面板接口客户端。 */
 
 const TOKEN_KEY = 'tv_buddy_token';
+const ROLE_KEY = 'tv_buddy_role';
 
 export function getToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? '';
@@ -10,8 +11,19 @@ export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
 }
 
+/** 登录时记下的角色。只用来决定侧栏显示，权限由服务端判定。 */
+export function getRole(): 'admin' | 'user' | null {
+  const value = localStorage.getItem(ROLE_KEY);
+  return value === 'admin' || value === 'user' ? value : null;
+}
+
+export function setRole(role: 'admin' | 'user'): void {
+  localStorage.setItem(ROLE_KEY, role);
+}
+
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(ROLE_KEY);
 }
 
 /** 带状态码的接口错误。 */

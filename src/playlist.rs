@@ -2,6 +2,9 @@
 //!
 //! 契约见 [`docs/design/03-http-contract.md`](../docs/design/03-http-contract.md) §5。
 //! 证据：F-004、F-009、S-URL-02/04/07。
+//!
+//! 只有一种订阅：`/sub/:token/playlist.m3u`。令牌即身份，范围由用户决定。
+//! 全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用。
 
 use std::collections::HashSet;
 
@@ -13,30 +16,16 @@ use crate::{
     subs::GroupRules,
 };
 
-/// 渲染失败的原因。
-#[derive(Debug, PartialEq, Eq)]
-pub enum PlaylistError {
-    /// 分组已归档（`access = "archived"`）：分组订阅返回 404（F-009）。
-    GroupArchived,
-}
-
-impl PlaylistError {
-    /// 客户端可见的错误串。
-    pub fn message(&self) -> &'static str {
-        match self {
-            PlaylistError::GroupArchived => "Group archived",
-        }
-    }
-}
-
 /// 渲染某个用户的订阅。
 ///
 /// 范围按用户的可见分组与频道过滤。管理员等同全部。
+/// 归档组（`access = "archived"`）一律跳过：归档表示停播。
 /// `token` 是该用户自己的访问令牌，会附到播放地址上。
 pub fn render_user(config: &Config, user: &crate::users::User, base: &str, token: &str) -> String {
-    let mut body = header(config, base);
+    let epg_path = format!("/sub/{token}/epg.xml.gz");
+    let mut body = header(config, base, &epg_path);
     for group in &config.groups {
-        if !user.can_see_group(&group.id) {
+        if group.access == "archived" || !user.can_see_group(&group.id) {
             continue;
         }
         for channel in &group.channels {
@@ -49,51 +38,74 @@ pub fn render_user(config: &Config, user: &crate::users::User, base: &str, token
     body
 }
 
-/// 某个用户可见的分组 id 集合。管理员返回 `None`，表示不限。
-pub fn visible_group_ids(user: &crate::users::User) -> Option<HashSet<String>> {
-    if user.role.is_admin() {
-        return None;
-    }
-    Some(user.allowed_group_ids.iter().cloned().collect())
+/// 一个用户可见的频道，供面板「我的订阅」页展示。
+#[derive(Debug, Clone)]
+pub struct UserChannel {
+    pub id: String,
+    pub name: String,
+    /// 播放地址。`passthrough` 组直接给上游地址。
+    pub url: String,
 }
 
-/// 渲染总订阅：只含 `access = "public"` 的分组（F-009）。
-pub fn render_total(config: &Config, base: &str, token: Option<&str>) -> String {
-    let mut body = header(config, base);
+/// 一个用户可见的分组。
+#[derive(Debug, Clone)]
+pub struct UserGroup {
+    pub id: String,
+    pub name: String,
+    pub channels: Vec<UserChannel>,
+}
+
+/// 面板「我的订阅」用的可见范围。
+///
+/// 与 [`render_user`] 共用同一套判定（归档组跳过、分组可见、频道可见、
+/// `open` 组不带令牌、`passthrough` 给上游地址），避免两处规则漂移。
+pub fn user_view(
+    config: &Config,
+    user: &crate::users::User,
+    base: &str,
+    token: &str,
+) -> Vec<UserGroup> {
+    let mut groups = Vec::new();
     for group in &config.groups {
-        if group.access != "public" {
+        if group.access == "archived" || !user.can_see_group(&group.id) {
             continue;
         }
+        let mut channels = Vec::new();
         for channel in &group.channels {
-            push_entry(&mut body, group, channel, base, token);
+            if !user.can_see_channel(&group.id, &channel.id) {
+                continue;
+            }
+            channels.push(UserChannel {
+                id: channel.id.clone(),
+                name: channel.name.clone(),
+                url: entry_url(group, channel, base, token),
+            });
         }
+        if channels.is_empty() {
+            continue;
+        }
+        groups.push(UserGroup {
+            id: group.id.clone(),
+            name: if group.name.is_empty() {
+                group.id.clone()
+            } else {
+                group.name.clone()
+            },
+            channels,
+        });
     }
-    body
-}
-
-/// 渲染分组订阅。归档组报错（F-009）。
-pub fn render_group(
-    config: &Config,
-    group: &Group,
-    base: &str,
-    token: Option<&str>,
-) -> Result<String, PlaylistError> {
-    if group.access == "archived" {
-        return Err(PlaylistError::GroupArchived);
-    }
-    let mut body = header(config, base);
-    for channel in &group.channels {
-        push_entry(&mut body, group, channel, base, token);
-    }
-    Ok(body)
+    groups
 }
 
 /// `#EXTM3U`、EPG 发现头与自定义头行（S-URL-07、S-EPG-01）。
-fn header(config: &Config, base: &str) -> String {
+///
+/// `epg_path` 是该用户自己的 EPG 地址，不带主机部分。
+fn header(config: &Config, base: &str, epg_path: &str) -> String {
     let mut body = if config.epg.enabled {
         format!(
-            "#EXTM3U x-tvg-url=\"{}/epg.xml.gz\"\n",
-            base.trim_end_matches('/')
+            "#EXTM3U x-tvg-url=\"{}{}\"\n",
+            base.trim_end_matches('/'),
+            epg_path
         )
     } else {
         String::from("#EXTM3U\n")
@@ -103,6 +115,29 @@ fn header(config: &Config, base: &str) -> String {
         body.push('\n');
     }
     body
+}
+
+/// 一个频道的播放地址。
+///
+/// `passthrough` 直接给上游原始地址，且不套 Token（S-URL-02、S-MODE-11）。
+/// `open` 组免 Token，地址不带参数（F-009）。
+pub fn entry_url(group: &Group, channel: &Channel, base: &str, token: &str) -> String {
+    if group.mode == "passthrough" {
+        return channel.url.clone();
+    }
+    let ext = if group.format == "mpd" { "mpd" } else { "m3u8" };
+    let url = format!(
+        "{}/{}/{}.{}",
+        base.trim_end_matches('/'),
+        group.id,
+        channel.id,
+        ext
+    );
+    if group.access == "open" {
+        url
+    } else {
+        format!("{url}?token={token}")
+    }
 }
 
 fn push_entry(
@@ -128,32 +163,19 @@ fn push_entry(
         tvg_id, tvg_name, logo, group_title, channel.name
     ));
 
-    // Passthrough 直接给上游原始地址，且不套 Token（S-URL-02、S-MODE-11）。
-    if group.mode == "passthrough" {
-        body.push_str(&channel.url);
-        body.push('\n');
-        return;
-    }
-
-    let ext = if group.format == "mpd" { "mpd" } else { "m3u8" };
-    let url = format!(
-        "{}/{}/{}.{}",
-        base.trim_end_matches('/'),
-        group.id,
-        channel.id,
-        ext
-    );
-
-    // `open` 组免 Token，条目不带参数（F-009）。
     match token {
-        Some(value) if group.access != "open" => {
-            body.push_str(&format!("{url}?token={value}\n"));
-        }
-        _ => {
-            body.push_str(&url);
-            body.push('\n');
-        }
+        Some(value) => body.push_str(&entry_url(group, channel, base, value)),
+        // 无令牌调用只用于内部渲染，按「不带参数」处理。
+        None if group.mode == "passthrough" => body.push_str(&channel.url),
+        None => body.push_str(&format!(
+            "{}/{}/{}.{}",
+            base.trim_end_matches('/'),
+            group.id,
+            channel.id,
+            if group.format == "mpd" { "mpd" } else { "m3u8" }
+        )),
     }
+    body.push('\n');
 }
 
 /// 读取频道上的未建模字符串字段（`tvg_id`、`tvg_name`、`logo`）。
@@ -170,6 +192,7 @@ fn string_field(channel: &Channel, key: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::config::model::Config;
+    use crate::users::{Role, User};
 
     fn config_with(groups: Vec<Group>) -> Config {
         Config {
@@ -194,57 +217,85 @@ mod tests {
         }
     }
 
+    /// 能看见全部分组的管理员。
+    fn admin() -> User {
+        User {
+            id: "u1".into(),
+            username: "admin".into(),
+            role: Role::Admin,
+            password_hash: String::new(),
+            allowed_group_ids: Vec::new(),
+            channel_filter_enabled: false,
+            allowed_channel_ids: Vec::new(),
+            web_ui_access: true,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        }
+    }
+
+    /// 只看得见给定分组的普通用户。
+    fn plain(groups: &[&str]) -> User {
+        User {
+            role: Role::User,
+            allowed_group_ids: groups.iter().map(|id| id.to_string()).collect(),
+            ..admin()
+        }
+    }
+
     #[test]
-    fn total_keeps_only_public() {
+    fn archived_group_is_skipped() {
         let config = config_with(vec![
             group("g1", "public", "proxy"),
-            group("g2", "hidden", "proxy"),
-            group("g3", "open", "proxy"),
             group("g4", "archived", "proxy"),
         ]);
-        let body = render_total(&config, "http://host", Some("tok"));
+        let body = render_user(&config, &admin(), "http://host", "tok");
         assert!(body.contains("http://host/g1/c1.m3u8?token=tok"));
+        assert!(!body.contains("/g4/"), "归档组停播，不进订阅");
+    }
+
+    #[test]
+    fn user_only_sees_allowed_groups() {
+        let config = config_with(vec![
+            group("g1", "public", "proxy"),
+            group("g2", "public", "proxy"),
+        ]);
+        let body = render_user(&config, &plain(&["g1"]), "http://host", "tok");
+        assert!(body.contains("/g1/"));
         assert!(!body.contains("/g2/"));
-        assert!(!body.contains("/g3/"), "open 组不进总订阅");
-        assert!(!body.contains("/g4/"), "archived 组不进总订阅");
     }
 
     #[test]
     fn open_group_entry_has_no_token() {
         let config = config_with(vec![group("g3", "open", "proxy")]);
-        let body = render_group(&config, &config.groups[0], "http://host", Some("tok")).unwrap();
+        let body = render_user(&config, &admin(), "http://host", "tok");
         assert!(body.contains("http://host/g3/c1.m3u8\n"));
         assert!(!body.contains("token="));
     }
 
     #[test]
-    fn archived_group_is_rejected() {
-        let config = config_with(vec![group("g4", "archived", "proxy")]);
-        let error = render_group(&config, &config.groups[0], "http://host", None).unwrap_err();
-        assert_eq!(error, PlaylistError::GroupArchived);
-    }
-
-    #[test]
     fn passthrough_uses_upstream_url() {
         let config = config_with(vec![group("g5", "public", "passthrough")]);
-        let body = render_group(&config, &config.groups[0], "http://host", Some("tok")).unwrap();
+        let body = render_user(&config, &admin(), "http://host", "tok");
         assert!(body.contains("http://upstream/x.m3u8"));
         assert!(!body.contains("/g5/c1"));
     }
 
     #[test]
-    fn epg_header_is_emitted_when_enabled() {
+    fn epg_header_points_at_own_subscription() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.epg.enabled = true;
-        let body = render_total(&config, "http://host/", None);
+        let body = render_user(&config, &admin(), "http://host/", "tok");
         let first = body.lines().next().unwrap();
-        assert_eq!(first, "#EXTM3U x-tvg-url=\"http://host/epg.xml.gz\"");
+        assert_eq!(
+            first,
+            "#EXTM3U x-tvg-url=\"http://host/sub/tok/epg.xml.gz\""
+        );
     }
 
     #[test]
     fn epg_header_is_absent_when_disabled() {
         let config = config_with(vec![group("g1", "public", "proxy")]);
-        let body = render_total(&config, "http://host", None);
+        let body = render_user(&config, &admin(), "http://host", "tok");
         let first = body.lines().next().unwrap();
         assert_eq!(first, "#EXTM3U");
     }
@@ -253,7 +304,7 @@ mod tests {
     fn header_lines_are_emitted() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.server.m3u_header_lines = vec!["#EXTVLCOPT:http-user-agent=Rea/1.0".into()];
-        let body = render_total(&config, "http://host", None);
+        let body = render_user(&config, &admin(), "http://host", "tok");
         let first = body.lines().nth(1).unwrap();
         assert_eq!(first, "#EXTVLCOPT:http-user-agent=Rea/1.0");
     }
@@ -262,8 +313,31 @@ mod tests {
     fn mpd_format_uses_mpd_ext() {
         let mut config = config_with(vec![group("g6", "public", "dash")]);
         config.groups[0].format = "mpd".into();
-        let body = render_total(&config, "http://host", None);
-        assert!(body.contains("http://host/g6/c1.mpd"));
+        let body = render_user(&config, &admin(), "http://host", "tok");
+        assert!(body.contains("http://host/g6/c1.mpd?token=tok"));
+    }
+
+    #[test]
+    fn user_view_matches_playlist_scope() {
+        let config = config_with(vec![
+            group("g1", "public", "proxy"),
+            group("g2", "public", "proxy"),
+            group("g4", "archived", "proxy"),
+        ]);
+        let groups = user_view(&config, &plain(&["g1", "g2"]), "http://host", "tok");
+        assert_eq!(groups.len(), 2, "归档组不进视图");
+        assert_eq!(groups[0].id, "g1");
+        assert_eq!(
+            groups[0].channels[0].url,
+            "http://host/g1/c1.m3u8?token=tok"
+        );
+    }
+
+    #[test]
+    fn user_view_skips_empty_groups() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.groups[0].channels.clear();
+        assert!(user_view(&config, &admin(), "http://host", "tok").is_empty());
     }
 }
 

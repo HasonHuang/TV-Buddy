@@ -119,9 +119,13 @@ T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 A=(-H "Authorization: Bearer $T" -H 'Content-Type: application/json')
+# 订阅只从用户令牌进入。令牌从 `/panel/api/me` 取。
+PTOK=$(curl -s "${A[@]}" "$B/panel/api/me" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
+SUB="$B/sub/$PTOK/playlist.m3u"
 
 # --- 重载：管理 CLI 改库，面板接口生效 ---
-check "重载前 2 条" "2" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
+check "重载前 2 条" "2" "$(curl -s "$SUB" | grep -c '^#EXTINF')"
 python3 - <<PY
 import json
 path = "$CFG"
@@ -142,14 +146,14 @@ cfg["groups"].append({
 json.dump(cfg, open(path, "w", encoding="utf-8"), ensure_ascii=False)
 PY
 "$BIN" config import "$CFG" --db "$DB" --force >/dev/null || exit 1
-check "改库后未生效" "2" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
+check "改库后未生效" "2" "$(curl -s "$SUB" | grep -c '^#EXTINF')"
 check "重载接口 200" "200" "$(code -X POST "${A[@]}" "$B/panel/api/reload")"
 for _ in $(seq 1 50); do
   [ "$(status "$B/hot/h1.m3u8")" = "200" ] && break
   sleep 0.2
 done
 check "重载新组可播" "200" "$(status "$B/hot/h1.m3u8")"
-check "重载后 3 条" "3" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
+check "重载后 3 条" "3" "$(curl -s "$SUB" | grep -c '^#EXTINF')"
 check "重载已记日志" "1" "$(grep -c '配置已重载' "$WORK/tv-buddy.log")"
 
 # 坏配置：导入失败，库与快照都不变
@@ -159,7 +163,7 @@ if "$BIN" config import "$CFG.bad" --db "$DB" --force >/dev/null 2>&1; then
 else
   check "坏配置被拒" "拒绝" "拒绝"
 fi
-check "坏配置保留旧快照" "3" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
+check "坏配置保留旧快照" "3" "$(curl -s "$SUB" | grep -c '^#EXTINF')"
 
 # --- 看门狗 ---
 for _ in $(seq 1 6); do

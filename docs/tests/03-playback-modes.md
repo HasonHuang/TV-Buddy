@@ -654,7 +654,7 @@ curl -s -o /dev/null -D /tmp/pt.h -w '%{http_code}\n' http://127.0.0.1:19899/pt/
 loc /tmp/pt.h
 after=$(grep -c 'GET /master.m3u8' /tmp/upstream.log || true)
 echo "$before $after"
-curl -s http://127.0.0.1:19899/pt/playlist.m3u
+curl -s "http://127.0.0.1:19899/sub/$PTOK/playlist.m3u" | grep -A1 '直通'
 ```
 
 预期输出：
@@ -668,7 +668,7 @@ http://127.0.0.1:18080/master.m3u8
 http://127.0.0.1:18080/master.m3u8
 ```
 
-订阅条目不能包含 `/pt/c1`，也不能包含 `token=`。入口见 `src/http/routes/stream.rs:151-154`。订阅条目见 `src/playlist.rs:103-107`。
+订阅条目不能包含 `/pt/c1`，也不能包含 `token=`。入口见 `src/http/routes/stream.rs`。订阅条目见 `src/playlist.rs` 的 `entry_url`。
 
 ### 3.19 remux：预热、就绪与切片
 
@@ -860,25 +860,39 @@ Upstream Error
 
 ### 3.24 订阅形状
 
+订阅只从用户令牌进入。先从面板取令牌，再取订阅：
+
 ```
-curl -s http://127.0.0.1:19899/playlist.m3u
-curl -s http://127.0.0.1:19899/pg/playlist.m3u
-curl -s http://127.0.0.1:19899/pt/playlist.m3u
+TOK=$(curl -s -X POST http://127.0.0.1:19899/panel/api/login \
+  -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"<口令>"}' \
+  | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+PTOK=$(curl -s -H "Authorization: Bearer $TOK" \
+  http://127.0.0.1:19899/panel/api/me \
+  | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+curl -s "http://127.0.0.1:19899/sub/$PTOK/playlist.m3u"
 ```
 
-预期一：总订阅只有一行 `#EXTM3U`。本配置没有 `access = "public"` 的分组。见 `src/playlist.rs:32-61`。
+预期一：全局订阅已停用。
 
-预期二：`pg` 分组订阅包含本服务入口。执行结果包含：
+```
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/playlist.m3u
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/pg/playlist.m3u
+```
+
+两次都是 `404`。见 `src/http/routes/sub.rs` 的 `gone`。
+
+预期二：用户订阅包含本服务入口。执行结果包含：
 
 ```
 #EXTM3U
 #EXTINF:-1 tvg-id="c1" tvg-name="HLS 媒体清单" tvg-logo="" group-title="proxy 媒体",HLS 媒体清单
-http://127.0.0.1:19899/pg/c1.m3u8
+http://127.0.0.1:19899/pg/c1.m3u8?token=<PTOK>
 ```
 
-预期三：`pt` 分组订阅包含上游原始地址，见 3.18。
+预期三：透传组条目直接给上游原始地址，且不带令牌，见 3.18。
 
-入口扩展名规则见 `src/playlist.rs:110-117`。Token 规则见 `src/playlist.rs:119-128`。
+入口扩展名规则见 `src/playlist.rs` 的 `entry_url`。
 
 ### 3.25 播放器观察（不计入判定）
 

@@ -279,8 +279,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq -r
 /share*
 /health
 /metrics
-/playlist.m3u
-/*/playlist.m3u
+/sub/*
 /*/*.m3u8
 /*/*.mpd
 /*/*/index.m3u8
@@ -491,10 +490,10 @@ curl -sS -o /dev/null -D - -H "Authorization: Bearer $ADMIN" "$CDN/panel/api/sta
 订阅清单：
 
 ```bash
-curl -sS -o /dev/null -D - "$CDN/playlist.m3u" | sed -n '1,25p'
+curl -sS -o /dev/null -D - "$CDN/sub/<令牌>/playlist.m3u" | sed -n '1,25p'
 ```
 
-预期：`200`。缓存状态 `BYPASS`。源站不给 `Cache-Control`（`src/http/routes/play.rs:123-136`），所以可能没有该头。
+预期：`200`。缓存状态 `BYPASS`。源站不给 `Cache-Control`，所以可能没有该头。
 
 面板静态资源：
 

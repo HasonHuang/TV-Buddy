@@ -25,7 +25,8 @@
 │                                                                      │
 │  HTTP（axum Router）                                                  │
 │   ├─ 公开面   /health /unban /logo /epg /unban/whoami /__assets       │
-│   ├─ 播放面   /playlist.m3u /{gid}/playlist.m3u /{gid}/{cid}.{ext}    │
+│   ├─ 订阅面   /sub/<令牌>/{playlist.m3u,epg.xml[.gz]}                 │
+│   ├─ 播放面   /{gid}/{cid}.{ext}                                     │
 │   │            切片 …/<P>_<S>.<ext>、timeshift、dash-timeshift        │
 │   └─ 面板面   /panel（静态） + /panel/api/*（Bearer 或 X-Token）      │
 │                                                                      │
@@ -56,7 +57,7 @@
 | `proxy` | 模式分发、上游请求、清单改写 | 不管缓存落盘细节 |
 | `cache` | 条目读写、TTL、容量、flush | 不改写正文 |
 | `disguise` | 切片 ID 生成与校验、扩展名映射 | 不改写载荷字节（S-DIS-02） |
-| `playlist` | 订阅生成、聚合、Token 附加 | 不发起上游请求（聚合除外） |
+| `playlist` | 用户订阅生成、聚合、Token 附加、可见范围 | 不发起上游请求（聚合除外） |
 | `epg` / `logo` / `record` / `share` | 独立增值能力 | 不阻塞播放链路 |
 
 ## 4. 模块清单
@@ -83,7 +84,7 @@
 | `cache::disk` | 落盘、TTL、索引、统计 | `DiskCache` | S-CACHE-01/02 |
 | `cache::flush` | 清理（保留 `dash/`） | `flush` | S-CACHE-06 |
 | `disguise` | `<P>_<S>.<ext>` 生成与校验、类型映射 | `SegmentId`、`verify` | S-DIS-12/13/17 |
-| `playlist::build` | 总/分组订阅、Token、头行、access 过滤 | `render_playlist` | S-URL-03/04/07、S-AUTH-05 |
+| `playlist` | 用户订阅、Token、头行、可见范围过滤 | `render_user`、`user_view` | S-URL-03/04/07、F-1 §5 |
 | `watchdog` | dash/remux 就绪、失败计数、冷却 | `ChannelHealth` | F-005（30s / 5 次 / 3600s） |
 | `metrics` | 面板指标（内存、CPU、在线、流量） | `Snapshot` | S-OPS-01 |
 

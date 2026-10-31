@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { api, copyText } from './api';
+import { api } from './api';
 import { PageHead, useToast } from './ui';
 
 type Source = {
@@ -203,19 +203,9 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
       <PageHead
         icon="subs"
         title="订阅聚合"
-        sub={`聚合清单：${location.origin}/playlist.m3u`}
+        sub="聚合条目追加到每个用户的订阅（/sub/<令牌>/playlist.m3u）"
       >
         <div className="row">
-            <button
-              className="ghost"
-              onClick={() =>
-                void copyText(`${location.origin}/playlist.m3u`).then((done) =>
-                  done ? ok('已复制聚合地址') : err('复制失败'),
-                )
-              }
-            >
-              复制地址
-            </button>
             <button onClick={() => void save()}>保存</button>
         </div>
       </PageHead>

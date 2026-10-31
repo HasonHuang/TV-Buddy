@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # 订阅聚合冒烟：远端源合并、过滤与位置。
+# 首次安装的初始口令固定为 admin，供脚本登录。
+export TV_BUDDY_INITIAL_PASSWORD=admin
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -85,13 +88,21 @@ done
 
 fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
-body=$(curl -s "$B/playlist.m3u")
+# 聚合条目只出现在用户订阅里。令牌从 `/panel/api/me` 取。
+T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
+PTOK=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/me" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
+SUB="$B/sub/$PTOK/playlist.m3u"
+body=$(curl -s "$SUB")
 
 check "含远端频道" "1" "$(printf '%s' "$body" | grep -c '远端频道' || true)"
 check "含本地频道" "1" "$(printf '%s' "$body" | grep -c '本地频道' || true)"
 check "排除项不出现" "0" "$(printf '%s' "$body" | grep -c '跳过频道' || true)"
 check "全局排除不出现" "0" "$(printf '%s' "$body" | grep -c '全局排除' || true)"
-check "聚合在顶部" "1" "$(python3 - "$B/playlist.m3u" <<'PY'
+check "全局订阅已停用" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/playlist.m3u")"
+check "聚合在顶部" "1" "$(python3 - "$SUB" <<'PY'
 import sys, urllib.request
 body = urllib.request.urlopen(sys.argv[1]).read().decode()
 print(1 if body.find('远端频道') < body.find('本地频道') else 0)

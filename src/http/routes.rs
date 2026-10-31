@@ -9,7 +9,6 @@ pub mod groups;
 pub mod logo;
 pub mod media;
 pub mod panel;
-pub mod play;
 pub mod playlist;
 pub mod public;
 pub mod schedule;

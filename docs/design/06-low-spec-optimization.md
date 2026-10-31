@@ -77,8 +77,8 @@ L2（内存滚动预热）取消。它只把 L1 的数据再存一份进内存�
 
 **规则 A：不缓存**（放在最前）
 
-`/panel*`、`/epg*`、`/subs/*`、`/api/*`、`/unban*`、`/share*`、`/health`、`/metrics`、
-`/playlist.m3u`、`/*/playlist.m3u`、`/*/*.m3u8`、`/*/*.mpd`、`/*/*/index.m3u8`、`/*/*/index.txt`、
+`/panel*`、`/epg*`、`/subs/*`、`/sub/*`、`/api/*`、`/unban*`、`/share*`、`/health`、`/metrics`、
+`/*/*.m3u8`、`/*/*.mpd`、`/*/*/index.m3u8`、`/*/*/index.txt`、
 `/*/*/video/*`、`/*/*/mpd/*`
 
 **规则 B：缓存**（放在后面）

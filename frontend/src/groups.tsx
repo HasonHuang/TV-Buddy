@@ -74,6 +74,17 @@ function entryUrl(group: Group, channel: Channel): string {
   return `${location.origin}/${group.id}/${channel.id}.${entryExt(group)}`;
 }
 
+/**
+ * 播放地址。`open` 组免令牌，其余组附上当前账号的播放令牌。
+ *
+ * 与订阅里的地址同规则（`src/playlist.rs::entry_url`）。
+ */
+function playUrl(group: Group, channel: Channel, token: string): string {
+  const url = entryUrl(group, channel);
+  if (group.access === 'open' || token === '') return url;
+  return `${url}?token=${token}`;
+}
+
 /** 读频道配置里的字符串字段；空串按未设置处理。 */
 function text(channel: Channel, key: string): string {
   const value = channel[key];
@@ -342,6 +353,14 @@ export function GroupsPage() {
   const [dropTarget, setDropTarget] = useState('');
   /** 解析脚本列表；打开频道弹窗时按需加载。 */
   const [scripts, setScripts] = useState<string[]>([]);
+  /** 当前账号的播放令牌。复制播放地址时附上，否则在开启令牌时是死链。 */
+  const [playToken, setPlayToken] = useState('');
+
+  useEffect(() => {
+    void api<{ token?: string }>('GET', '/me')
+      .then((body) => setPlayToken(body.token ?? ''))
+      .catch(() => setPlayToken(''));
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -793,7 +812,6 @@ export function GroupsPage() {
 
       {visible.map((group) => {
         const channels = group.channels ?? [];
-        const listUrl = `${location.origin}/${group.id}/playlist.m3u`;
         // 排序按 `groups` 的绝对下标；搜索过滤时也不会错位。
         const groupIndex = groups.indexOf(group);
         const isCollapsed = collapsed.includes(group.id);
@@ -884,20 +902,10 @@ export function GroupsPage() {
                 >
                   删除
                 </button>
-                <button className="chip primary" onClick={() => openChannel(group.id)}>
+                <button
+                  className="chip primary" onClick={() => openChannel(group.id)}>
                   <Icon name="plus" size={13} />
                   频道
-                </button>
-                <a className="chip" href={listUrl} target="_blank" rel="noreferrer" title="打开该分组的 M3U">
-                  <Icon name="download" size={13} />
-                  M3U
-                </a>
-                <button
-                  className="chip icon-only"
-                  title="复制订阅地址"
-                  onClick={() => void copy(listUrl, '订阅地址')}
-                >
-                  <Icon name="link" size={13} />
                 </button>
                 <button
                   className="icon-btn chev"
@@ -916,7 +924,9 @@ export function GroupsPage() {
               const tvgId = text(channel, 'tvg_id');
               const allTracks = group.mode === 'dash' && (channel.selected_tracks ?? []).length === 0;
               const local =
-                group.mode === 'passthrough' ? channel.url : entryUrl(group, channel);
+                group.mode === 'passthrough'
+                  ? channel.url
+                  : playUrl(group, channel, playToken);
               return (
                 <div className="ch-row" key={channel.id}>
                   <span

@@ -200,12 +200,15 @@ http://<host>:19899/panel
 
 接下来在面板里加分组与频道，配置只在面板里改。
 
-订阅地址形如：
+订阅地址只有一个入口，在面板「我的订阅」页复制：
 
 ```text
-http://<host>:19899/playlist.m3u          # 全部公开分组
-http://<host>:19899/<gid>/playlist.m3u   # 单个分组
+http://<host>:19899/sub/<令牌>/playlist.m3u   # 该用户的订阅
+http://<host>:19899/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 ```
+
+每个用户在「用户与设备」里单独授权分组与频道，令牌在同一个弹窗里管理。
+全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用，返回 `404`。
 
 ---
 
@@ -361,8 +364,8 @@ CDN 不下发 `X-Forwarded-Proto` 时，在 `cdn` 里加 `"public_base": "https:
 
 ```text
 规则 A：不缓存（放最前）
-  /panel*  /epg*  /subs/*  /api/*  /unban*  /share*  /health  /metrics
-  /playlist.m3u  /*/playlist.m3u  /*/*.m3u8  /*/*.mpd
+  /panel*  /epg*  /subs/*  /sub/*  /api/*  /unban*  /share*  /health  /metrics
+  /*/*.m3u8  /*/*.mpd
   /*/*/index.m3u8  /*/*/index.txt  /*/*/video/*  /*/*/mpd/*
 
 规则 B：缓存（放其后）
@@ -561,12 +564,13 @@ ls scripts/smoke-*.sh
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/health` | 健康检查，返回 `ok` |
-| `GET` | `/playlist.m3u` | 总订阅，只含 `access = "public"` 的组 |
-| `GET` | `/{gid}/playlist.m3u` | 分组订阅 |
+| `GET` | `/sub/<令牌>/playlist.m3u` | 用户订阅，只含该用户可见频道 |
+| `GET` | `/sub/<令牌>/epg.xml[.gz]` | 用户节目单 |
 | `GET` | `/{gid}/{cid}.m3u8`（或 `.mpd`） | 入口清单 |
 | `GET` | `/{gid}/{cid}/video/index.txt` | 媒体清单 |
-| `GET` | `/epg.xml[.gz]` | 节目单 |
+| `GET` | `/epg.xml[.gz]` | 全局节目单 |
 | `POST` | `/panel/api/login` | 面板登录 |
+| `GET` | `/panel/api/me` | 当前账号、订阅地址与可见频道 |
 | `GET` | `/panel/api/health` | 本机健康摘要 |
 
 <details>

@@ -39,6 +39,72 @@ pub async fn ip_guard(
     next.run(request).await
 }
 
+/// 管理员校验：非管理员访问管理接口时返回 `403`。
+///
+/// 只有「我的订阅」相关的几个端点对普通用户开放：
+/// `login`、`logout`、`me`、`my/*`。
+///
+/// 未登录的请求放行，让处理器给出 `401`。这样错误语义不变。
+pub async fn admin_gate(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    if !needs_admin(path) {
+        return next.run(request).await;
+    }
+    let token = session_token(request.headers());
+    let Some(token) = token else {
+        return next.run(request).await;
+    };
+    let Some(info) = state.sessions.lookup(&token) else {
+        return next.run(request).await;
+    };
+    // 角色从库里重读，不信任登录快照：降级管理员立即失去权限。
+    let admin = state
+        .users
+        .find_user(&info.user_id)
+        .is_some_and(|user| user.role.is_admin());
+    if admin {
+        return next.run(request).await;
+    }
+    (
+        StatusCode::FORBIDDEN,
+        axum::Json(serde_json::json!({ "error": "需要管理员权限" })),
+    )
+        .into_response()
+}
+
+/// 该路径是否只允许管理员。
+fn needs_admin(path: &str) -> bool {
+    if !path.starts_with("/panel/api") {
+        return false;
+    }
+    const OPEN: [&str; 3] = ["/panel/api/login", "/panel/api/logout", "/panel/api/me"];
+    if OPEN.contains(&path) {
+        return false;
+    }
+    // 「我的订阅」相关接口对普通用户开放。
+    !path.starts_with("/panel/api/my")
+}
+
+/// 取会话令牌。与 [`crate::http::ext::PanelAuth`] 同一套头。
+fn session_token(headers: &axum::http::HeaderMap) -> Option<String> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(|value| value.trim().to_string())
+        .or_else(|| {
+            headers
+                .get("x-token")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.trim().to_string())
+        })
+        .filter(|token| !token.is_empty())
+}
+
 /// 功能开关：关掉的功能，其面板接口返回 `403`。
 ///
 /// 语义与部署规格无关。高配与低配行为一致：
@@ -116,6 +182,19 @@ mod tests {
         assert_eq!(feature_of("/panel/api/login", &config), None, "登录不受限");
         assert_eq!(feature_of("/panel/api/config", &config), None, "配置可恢复");
         assert_eq!(feature_of("/panel/api/me", &config), None);
+    }
+
+    #[test]
+    fn admin_gate_maps_paths() {
+        assert!(needs_admin("/panel/api/config"), "配置只给管理员");
+        assert!(needs_admin("/panel/api/groups"), "分组只给管理员");
+        assert!(needs_admin("/panel/api/users"), "用户管理只给管理员");
+        assert!(!needs_admin("/panel/api/login"));
+        assert!(!needs_admin("/panel/api/logout"));
+        assert!(!needs_admin("/panel/api/me"));
+        assert!(!needs_admin("/panel/api/my/channels"));
+        assert!(!needs_admin("/health"), "非面板路径不管");
+        assert!(!needs_admin("/sub/abc/playlist.m3u"));
     }
 
     #[test]

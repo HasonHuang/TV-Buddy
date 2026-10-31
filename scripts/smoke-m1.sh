@@ -180,27 +180,28 @@ check "删频道 200" "200" \
 check "删组 200" "200" "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new1")"
 check "再删组 404" "404" "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new1")"
 
-# --- 总订阅 ---
-check "总订阅 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$B/playlist.m3u")"
-check "总订阅类型" "application/x-mpegurl; charset=utf-8" \
-  "$(curl -s -o "$WORK/body" -w '%{content_type}' "$B/playlist.m3u")"
-# `[epg].enabled = true` 时首行带 `x-tvg-url`（S-EPG-01），不是裸 `#EXTM3U`。
-check "总订阅首行带 EPG 头" "#EXTM3U x-tvg-url=\"http://127.0.0.1:$PORT/epg.xml.gz\"" \
-  "$(head -n1 "$WORK/body")"
-check "总订阅头行" "#EXTVLCOPT:http-user-agent=ReaTest/1.0" "$(sed -n '2p' "$WORK/body")"
-check "总订阅含公开组" "1" "$(grep -c "http://127.0.0.1:$PORT/pub/c1.m3u8" "$WORK/body")"
-check "总订阅含直通组" "1" "$(grep -c 'http://example.invalid/live.m3u8' "$WORK/body")"
-check "总订阅排隐藏组" "0" "$(grep -c '/hid/' "$WORK/body")"
-check "总订阅排开放组" "0" "$(grep -c '/op/' "$WORK/body")"
-check "总订阅排归档组" "0" "$(grep -c '/arc/' "$WORK/body")"
-check "总订阅条目数" "2" "$(grep -c '^#EXTINF' "$WORK/body")"
+# --- 用户订阅 ---
+# 订阅只有一个入口：`/sub/<令牌>/playlist.m3u`。令牌从 `/panel/api/me` 取。
+PTOK=$(curl -s "${A[@]}" "$B/panel/api/me" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
+SUB="$B/sub/$PTOK/playlist.m3u"
 
-# --- 分组订阅 ---
-check "分组订阅 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$B/pub/playlist.m3u")"
-check "分组订阅 EXTINF" "1" "$(grep -c '^#EXTINF:-1 tvg-id="c1"' "$WORK/body")"
-check "归档组订阅 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/arc/playlist.m3u")"
-check "开放组订阅 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$B/op/playlist.m3u")"
-check "缺组订阅 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/ghost/playlist.m3u")"
+check "全局订阅已停用" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/playlist.m3u")"
+check "全局分组订阅已停用" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/pub/playlist.m3u")"
+check "用户订阅 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$SUB")"
+check "用户订阅类型" "application/vnd.apple.mpegurl; charset=utf-8" \
+  "$(curl -s -o "$WORK/body" -w '%{content_type}' "$SUB")"
+# `[epg].enabled = true` 时首行带该用户自己的 `x-tvg-url`（S-EPG-01）。
+check "用户订阅首行带 EPG 头" \
+  "#EXTM3U x-tvg-url=\"http://127.0.0.1:$PORT/sub/$PTOK/epg.xml.gz\"" \
+  "$(head -n1 "$WORK/body")"
+check "用户订阅头行" "#EXTVLCOPT:http-user-agent=ReaTest/1.0" "$(sed -n '2p' "$WORK/body")"
+check "含公开组" "1" "$(grep -c "http://127.0.0.1:$PORT/pub/c1.m3u8?token=$PTOK" "$WORK/body")"
+check "含隐藏组" "1" "$(grep -c "http://127.0.0.1:$PORT/hid/c2.m3u8?token=$PTOK" "$WORK/body")"
+check "含直通组" "1" "$(grep -c 'http://example.invalid/live.m3u8' "$WORK/body")"
+check "开放组不带 Token" "0" "$(grep -c '/op/c3.m3u8?token=' "$WORK/body" || true)"
+check "排归档组" "0" "$(grep -c '/arc/' "$WORK/body")"
+check "条目数" "4" "$(grep -c '^#EXTINF' "$WORK/body")"
 
 # --- 播放 Token ---
 curl -s "${A[@]}" "$B/panel/api/config" > "$WORK/cfg.json"
@@ -212,12 +213,12 @@ json.dump(cfg, open("'"$WORK"'/put.json", "w"))
 '
 check "开启 Token 200" "200" \
   "$(code -X PUT "${A[@]}" --data-binary "@$WORK/put.json" "$B/panel/api/config")"
-curl -s -o "$WORK/body" "$B/pub/playlist.m3u"
-# 全局播放令牌已废弃：公开订阅不再带 `?token=`。
-# 可用地址只能从 `/sub/<设备令牌>/playlist.m3u` 获取。
-check "订阅不再下发 Token" "0" "$(grep -c 'token=' "$WORK/body" || true)"
-check "开放组不带 Token" "0" "$(curl -s "$B/op/playlist.m3u" | grep -c 'token=' || true)"
-check "直通组不带 Token" "0" "$(curl -s "$B/playlist.m3u" | grep -c 'example.invalid/live.m3u8?token' || true)"
+curl -s -o "$WORK/body" "$SUB"
+check "订阅下发令牌" "2" "$(grep -c "?token=$PTOK" "$WORK/body" || true)"
+check "开放组不带 Token" "0" "$(grep -c '/op/c3.m3u8?token=' "$WORK/body" || true)"
+check "直通组不带 Token" "0" "$(grep -c 'example.invalid/live.m3u8?token' "$WORK/body" || true)"
+check "坏令牌 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/nope/playlist.m3u")"
+check "坏令牌 EPG 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/nope/epg.xml")"
 
 # --- 未建模段保留 ---
 check "未建模段保留" "* * * * *" "$("$BIN" config get epg.cron --db "$DB")"

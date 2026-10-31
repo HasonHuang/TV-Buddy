@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { api, clearToken, getToken, setToken, UNAUTHORIZED_EVENT } from './api';
+import { api, clearToken, getRole, getToken, setRole, setToken, UNAUTHORIZED_EVENT } from './api';
 import { Icon, type IconName } from './icons';
 import { PageHead, useToast } from './ui';
 import { GroupsPage } from './groups';
@@ -13,10 +13,12 @@ import { LogosPage } from './logo';
 import { UsersPage } from './users';
 import { PlaylistPage } from './playlist';
 import { LivestreamPage, SchedulePage } from './schedule';
+import { MySubsPage } from './my';
 import './style.css';
 
 /** 侧栏分区；顺序按目标面板。 */
 type SectionId =
+  | 'my'
   | 'dashboard'
   | 'cache'
   | 'groups'
@@ -32,22 +34,24 @@ type SectionId =
   | 'assets'
   | 'logs';
 
-/** `feature` 指向 `[features]` 的开关名。没有则该分区始终显示。 */
-const NAV: { id: SectionId; label: string; icon: IconName; feature?: string }[] = [
-  { id: 'dashboard', label: '概览', icon: 'overview' },
-  { id: 'cache', label: '缓存状态', icon: 'cache' },
-  { id: 'groups', label: '分组管理', icon: 'groups' },
-  { id: 'settings', label: '系统设置', icon: 'settings' },
-  { id: 'security', label: '安全管控', icon: 'security' },
-  { feature: 'users', id: 'users', label: '用户与设备', icon: 'users' },
-  { feature: 'stats', id: 'stats', label: '频道热度', icon: 'stats' },
-  { feature: 'recording', id: 'schedule', label: '定时录制', icon: 'schedule' },
-  { feature: 'epg', id: 'epg', label: '节目指南', icon: 'epg' },
-  { feature: 'logo', id: 'logos', label: '台标管理', icon: 'logo' },
-  { feature: 'playlist', id: 'subs', label: '订阅聚合', icon: 'subs' },
-  { feature: 'livestream', id: 'livestream', label: '回看管理', icon: 'livestream' },
-  { feature: 'assets', id: 'assets', label: '视频素材', icon: 'assets' },
-  { id: 'logs', label: '运行日志', icon: 'logs' },
+/** `feature` 指向 `[features]` 的开关名。没有则该分区始终显示。
+ *  `adminOnly` 的分区只给管理员；普通用户只看到「我的订阅」。 */
+const NAV: { id: SectionId; label: string; icon: IconName; feature?: string; adminOnly?: boolean }[] = [
+  { id: 'my', label: '我的订阅', icon: 'subs' },
+  { id: 'dashboard', label: '概览', icon: 'overview', adminOnly: true },
+  { id: 'cache', label: '缓存状态', icon: 'cache', adminOnly: true },
+  { id: 'groups', label: '分组管理', icon: 'groups', adminOnly: true },
+  { id: 'settings', label: '系统设置', icon: 'settings', adminOnly: true },
+  { id: 'security', label: '安全管控', icon: 'security', adminOnly: true },
+  { feature: 'users', id: 'users', label: '用户与设备', icon: 'users', adminOnly: true },
+  { feature: 'stats', id: 'stats', label: '频道热度', icon: 'stats', adminOnly: true },
+  { feature: 'recording', id: 'schedule', label: '定时录制', icon: 'schedule', adminOnly: true },
+  { feature: 'epg', id: 'epg', label: '节目指南', icon: 'epg', adminOnly: true },
+  { feature: 'logo', id: 'logos', label: '台标管理', icon: 'logo', adminOnly: true },
+  { feature: 'playlist', id: 'subs', label: '订阅聚合', icon: 'subs', adminOnly: true },
+  { feature: 'livestream', id: 'livestream', label: '回看管理', icon: 'livestream', adminOnly: true },
+  { feature: 'assets', id: 'assets', label: '视频素材', icon: 'assets', adminOnly: true },
+  { id: 'logs', label: '运行日志', icon: 'logs', adminOnly: true },
 ];
 
 type Status = Record<string, unknown>;
@@ -63,8 +67,12 @@ function Login({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError('');
     try {
-      const data = await api<{ token: string }>('POST', '/login', { username, password });
+      const data = await api<{ token: string; role?: string }>('POST', '/login', {
+        username,
+        password,
+      });
       setToken(data.token);
+      setRole(data.role === 'admin' ? 'admin' : 'user');
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -257,10 +265,13 @@ function Overview() {
             <Icon name="refresh" size={14} />
             刷新状态
           </button>
-          <a className="ghost" href="/playlist.m3u" target="_blank" rel="noreferrer">
+          <button
+            className="ghost"
+            onClick={() => window.dispatchEvent(new CustomEvent('tv-buddy:goto-my'))}
+          >
             <Icon name="download" size={14} />
-            导出全部 M3U
-          </a>
+            我的订阅地址
+          </button>
         </div>
       </div>
 
@@ -306,8 +317,22 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const [meta, setMeta] = useState<{ version: string; uptime: number } | null>(null);
   /** `[features]` 的开关键。为 `false` 的分区不显示入口。 */
   const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
+  /** 当前账号是否为管理员。服务端每次请求都会复核，这里只决定显示。 */
+  const [isAdmin, setIsAdmin] = useState(getRole() === 'admin');
 
   useEffect(() => {
+    void api<{ user?: { role?: string } }>('GET', '/me')
+      .then((body) => {
+        const role = body.user?.role === 'admin' ? 'admin' : 'user';
+        setRole(role);
+        setIsAdmin(role === 'admin');
+      })
+      .catch(() => setIsAdmin(false));
+  }, []);
+
+  useEffect(() => {
+    // 普通用户没有 `/status` 权限，跳过。
+    if (!isAdmin) return;
     void api<{
       version?: string;
       uptime_secs?: number;
@@ -321,6 +346,12 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         setFeatures(body.features ?? {});
       })
       .catch(() => setMeta(null));
+  }, [isAdmin]);
+
+  useEffect(() => {
+    const gotoMy = () => setSection('my');
+    window.addEventListener('tv-buddy:goto-my', gotoMy);
+    return () => window.removeEventListener('tv-buddy:goto-my', gotoMy);
   }, []);
 
   const logout = async () => {
@@ -333,9 +364,13 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     onLogout();
   };
 
-  // 关掉的分区不显示入口；当前停在隐藏分区时回退到概览。
-  const visibleNav = NAV.filter((item) => !item.feature || features?.[item.feature] !== false);
-  const active = visibleNav.some((item) => item.id === section) ? section : 'dashboard';
+  // 普通用户只有「我的订阅」。关掉的功能分区也不显示入口。
+  const visibleNav = NAV.filter((item) => {
+    if (item.adminOnly && !isAdmin) return false;
+    return !item.feature || features?.[item.feature] !== false;
+  });
+  const fallback: SectionId = isAdmin ? 'dashboard' : 'my';
+  const active = visibleNav.some((item) => item.id === section) ? section : fallback;
 
   return (
     <div className="shell">
@@ -360,16 +395,18 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             </button>
           ))}
         </nav>
-        <div className="sidebar-meta">
-          <div className="kv">
-            <span>版本</span>
-            <span className="v">{meta ? `v${meta.version}` : '—'}</span>
+        {isAdmin && (
+          <div className="sidebar-meta">
+            <div className="kv">
+              <span>版本</span>
+              <span className="v">{meta ? `v${meta.version}` : '—'}</span>
+            </div>
+            <div className="kv">
+              <span>已运行</span>
+              <span className="v">{meta ? uptime(meta.uptime) : '—'}</span>
+            </div>
           </div>
-          <div className="kv">
-            <span>已运行</span>
-            <span className="v">{meta ? uptime(meta.uptime) : '—'}</span>
-          </div>
-        </div>
+        )}
         <div className="sidebar-foot">
           <button className="ghost" onClick={() => void logout()}>
             <Icon name="close" size={13} />
@@ -378,6 +415,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         </div>
       </aside>
       <main className="content">
+        {active === 'my' && <MySubsPage />}
         {active === 'dashboard' && <Overview />}
         {active === 'cache' && <CachePage />}
         {active === 'groups' && <GroupsPage />}

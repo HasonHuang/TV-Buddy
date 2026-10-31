@@ -169,8 +169,10 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 口令散列 | argon2id | SHA-256 十六进制 |
 | 会话 | 内存 + 会话表 | 内存 `SessionStore` |
 | 设备令牌 | 12 位短串，带用途与有效期 | 只有全局 `[auth].token` |
-| 订阅入口 | `/sub/:token/playlist.m3u` | `/playlist.m3u`，可带全局 token |
-| 可见范围 | 分组 + 频道两级 | 只有分组 `access` 字段 |
+| 订阅入口 | `/sub/:token/playlist.m3u` | 同左，按用户可见范围过滤 |
+| 每用户 EPG | `/sub/:token/epg.xml(.gz)` | 同左 |
+| 面板分权 | 管理员 / 普通用户两级 | 同左：普通用户只见「我的订阅」 |
+| 可见范围 | 分组 + 频道两级 | 同左 |
 | 存储 | SQLite | 单库 `tv-buddy.db` |
 
 ## 7. SQLite 评估
@@ -257,19 +259,31 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 播放鉴权 | `?token=` 改为查 `access_tokens`，并校验用户可见该频道 | 完成 |
 | 废弃全局令牌 | 删除 `/security/token` 与 `rotate`、`PlayTokenStore`、分享里的令牌同步。共享载荷与 link-info 的 token 字段恒为空 | 完成 |
 | 面板分区 | 第 14 个分区「用户与设备」。列表 + 新建/编辑弹窗 + 设备令牌弹窗 | 完成 |
+| 禁止全局订阅 | `/playlist.m3u` 与 `/{gid}/playlist.m3u` 返回 `404` 文本 | 完成（`v2026.7`） |
+| 每用户 EPG | `/sub/:token/epg.xml(.gz)`；订阅头改指自己；`epg::load_generated_cached` 缓存解析结果 | 完成（`v2026.7`） |
+| 面板分权 | `guard::admin_gate`；`PanelUser` 每次请求重读角色 | 完成（`v2026.7`） |
+| 「我的订阅」页 | 普通用户登录后的唯一分区；订阅地址、EPG 地址、可见频道 | 完成（`v2026.7`） |
+| 令牌维护 | 启动清理过期令牌；每 60 秒把 `last_seen_at_ms` 落盘 | 完成（`v2026.7`） |
 
 ### 9.2 待办
 
 | # | 项 | 说明 |
 | --- | --- | --- |
-| 1 | EPG 用户隔离 | `/sub/:token/epg.xml(.gz)` 未实现。当前订阅头仍指向全局 `/epg.xml.gz` |
+| 1 | ~~EPG 用户隔离~~ | 完成（`v2026.7`）：`/sub/:token/epg.xml(.gz)` 已实现，订阅头改指自己 |
+| 2 | 面板分权 | 完成（`v2026.7`）：`guard::admin_gate` 拦非管理员的 `/panel/api/*`；普通用户只见「我的订阅」 |
 | 3 | 管理 CLI | 完成：改为调用 `tv-buddy passwd` 写入 `users` 表，不再读 `panel username` / `password_sha256` |
 | 5 | Docker 集成冒烟 | `smoke-dash-timeshift-docker.sh` 在容器内起服务后清单请求无响应。待查 |
+| 6 | 切片级鉴权 | 切片、DASH、回看路径不校验令牌。撤销令牌只挡住入口，已开始的会话仍能拉切片 |
 
 ### 9.3 行为变化
 
-公开订阅 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 不再带 `?token=`。
-`[auth].token_enabled=true` 时，这些地址直接播放会被拒。
-可用的播放地址只能从 `/sub/:token/playlist.m3u` 获取。
+**订阅只有一个入口**：`/sub/:token/playlist.m3u`。
+全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 返回 `404` 文本，指路用户订阅。
 
-原因是全局令牌已废弃，令牌必须绑定用户与可见范围。
+**EPG 跟随令牌**：`/sub/:token/epg.xml(.gz)` 只含该用户可见频道的节目。
+公开 `/epg.xml[.gz]` 仍在，供面板与旧客户端使用。
+
+**面板按角色分权**：普通用户只看到「我的订阅」页（订阅地址、EPG 地址、授权频道）。
+其余 `/panel/api/*` 返回 `403`。角色每次请求从库重读，降级立即生效。
+
+**归档组停播**：`access = "archived"` 的分组不出现在任何订阅与每用户 EPG 里。

@@ -69,6 +69,14 @@ async fn main() -> anyhow::Result<()> {
     tv_buddy::timeshift::warm(&state);
     state.dash_timeshift.warm(&state);
     tv_buddy::health::spawn(state.clone());
+    // 启动时清掉过期令牌，避免表越积越大。
+    match state.users.purge_expired() {
+        Ok(0) => {}
+        Ok(count) => tracing::info!(count, "已清理过期访问令牌"),
+        Err(error) => tracing::warn!(%error, "清理过期令牌失败"),
+    }
+    // `last_seen_at_ms` 只在内存累计，定期落盘。
+    spawn_token_flush(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
@@ -85,4 +93,20 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
     Ok(())
+}
+
+/// 每 60 秒把 `last_seen_at_ms` 的改动落盘。
+///
+/// 令牌每次被使用都只改内存并置脏位；没有这个循环，「最近使用」永远是空。
+fn spawn_token_flush(state: std::sync::Arc<state::AppState>) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            if let Err(error) = state.users.flush_if_dirty() {
+                tracing::warn!(%error, "写入令牌使用时间失败");
+            }
+        }
+    });
 }

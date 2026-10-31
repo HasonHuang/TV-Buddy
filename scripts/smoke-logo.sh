@@ -98,7 +98,10 @@ APPLY=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/apply"
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"gid":"g1","cid":"c1","file":"cctv1.png"}')
 check "应用台标 200" "200" "$APPLY"
-check "订阅含台标" "1" "$(curl -s "$B/playlist.m3u" | grep -c 'tvg-logo="/logo/cctv1.png"' || true)"
+PTOK=$(curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/me" \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
+check "订阅含台标" "1" \
+  "$(curl -s "$B/sub/$PTOK/playlist.m3u" | grep -c 'tvg-logo="/logo/cctv1.png"' || true)"
 
 # 匹配报告：hunan.png 未使用。
 curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/logo/match-report" > "$WORK/report.json"

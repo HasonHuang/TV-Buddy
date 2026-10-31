@@ -255,9 +255,24 @@ struct Fixture {
     dir: PathBuf,
     base: String,
     upstream: String,
+    /// 管理员的设备令牌。订阅与播放都用它。
     token: String,
+    /// 受限普通用户的设备令牌。只授权 `pg` 组。
+    user_token: String,
     client: Client,
     state: Arc<AppState>,
+}
+
+impl Fixture {
+    /// 用户订阅路径（不含主机），供 [`fetch`] 使用。
+    fn sub(&self, token: &str, rest: &str) -> String {
+        format!("/sub/{token}/{rest}")
+    }
+
+    /// 用户订阅完整地址，供 `client.get` 使用。
+    fn sub_url(&self, token: &str, rest: &str) -> String {
+        format!("{}{}", self.base, self.sub(token, rest))
+    }
 }
 
 impl Drop for Fixture {
@@ -519,9 +534,6 @@ async fn fixture_with_options(
         .expect("建客户端");
     wait_ready(&client, &base).await;
 
-    // 预热：一次 `/playlist.m3u` 请求会抓取聚合源并写状态。
-    let _ = client.get(format!("{base}/playlist.m3u")).send().await;
-
     // 播放令牌来自用户设备令牌，直接建一个，供测试拼地址。
     let admin = state.users.find_by_username("admin").expect("初始管理员");
     let token = state
@@ -530,11 +542,40 @@ async fn fixture_with_options(
         .expect("建测试令牌")
         .token;
 
+    // 预热：一次用户订阅请求会抓取聚合源并写状态。
+    let _ = client
+        .get(format!("{base}/sub/{token}/playlist.m3u"))
+        .send()
+        .await;
+
+    // 受限普通用户：只授权 `pg` 组，供可见范围与权限测试。
+    let user_token = {
+        let mut user = tv_buddy::users::User {
+            id: String::new(),
+            username: "viewer".into(),
+            role: tv_buddy::users::Role::User,
+            password_hash: tv_buddy::users::password::hash("viewer").expect("散列"),
+            allowed_group_ids: vec!["pg".into()],
+            channel_filter_enabled: false,
+            allowed_channel_ids: Vec::new(),
+            web_ui_access: true,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        };
+        user = state.users.create_user(user).expect("建普通用户");
+        state
+            .users
+            .create_token(&user.id, tv_buddy::users::Purpose::Device, None, None)
+            .expect("建普通用户令牌")
+            .token
+    };
+
     Fixture {
         dir,
         base,
         upstream,
         token,
+        user_token,
         client,
         state,
     }
@@ -664,22 +705,22 @@ fn assert_disguised(fixture: &Fixture, url: &str) {
 }
 
 #[tokio::test]
-async fn health_and_total_playlist() {
+async fn health_and_user_playlist() {
     let fixture = fixture().await;
 
     let response = fetch(&fixture, "/health").await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.text().await.expect("读正文"), "ok");
 
-    let response = fetch(&fixture, "/playlist.m3u").await;
+    let response = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u")).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         header(&response, "content-type"),
-        "application/x-mpegurl; charset=utf-8"
+        "application/vnd.apple.mpegurl; charset=utf-8"
     );
     assert_eq!(
         header(&response, "content-disposition"),
-        "attachment; filename=\"playlist.m3u\""
+        "inline; filename=\"playlist.m3u\""
     );
     let body = response.text().await.expect("读正文");
     assert_eq!(
@@ -687,14 +728,111 @@ async fn health_and_total_playlist() {
         Some("#EXTM3U"),
         "EPG 关闭时不注入 x-tvg-url"
     );
-    // 归档组不导出；公开、开放、透传组导出。
-    assert!(body.contains("/pg/c1.m3u8"));
-    // 全局播放令牌已废弃：公开清单不再带 token。
-    assert!(!body.contains("?token="));
+    // 归档组停播，不进订阅；其余组都进。
+    assert!(body.contains(&format!("/pg/c1.m3u8?token={}", fixture.token)));
+    assert!(body.contains(&format!("/op/c1.m3u8\n")), "open 组不带令牌");
     // 直通组在订阅里直接给上游地址。
     assert!(body.contains(&format!("{}/live.m3u8", fixture.upstream)));
     assert!(!body.contains("/pt/"));
+    assert!(!body.contains("/ar/"), "归档组不进订阅");
+}
+
+#[tokio::test]
+async fn global_playlist_is_gone() {
+    let fixture = fixture().await;
+    for path in ["/playlist.m3u", "/pg/playlist.m3u"] {
+        let response = fetch(&fixture, path).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        let body = response.text().await.expect("读正文");
+        assert!(body.contains("/sub/"), "应指路到用户订阅：{body}");
+    }
+}
+
+#[tokio::test]
+async fn sub_playlist_filters_by_user_scope() {
+    let fixture = fixture().await;
+
+    let body = fetch(&fixture, &fixture.sub(&fixture.user_token, "playlist.m3u"))
+        .await
+        .text()
+        .await
+        .expect("读正文");
+    assert!(body.contains(&format!("/pg/c1.m3u8?token={}", fixture.user_token)));
+    assert!(!body.contains("/pm/"), "未授权的分组不出现");
+    assert!(!body.contains("/op/"));
     assert!(!body.contains("/ar/"));
+
+    let admin_body = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u"))
+        .await
+        .text()
+        .await
+        .expect("读正文");
+    assert!(admin_body.contains("/pm/"), "管理员看全部");
+    assert!(admin_body.len() > body.len());
+}
+
+#[tokio::test]
+async fn sub_routes_404_on_bad_token() {
+    let fixture = fixture().await;
+    for path in [
+        "/sub/nope/playlist.m3u",
+        "/sub/nope/epg.xml",
+        "/sub/nope/epg.xml.gz",
+    ] {
+        let response = fetch(&fixture, path).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn non_admin_is_forbidden_on_admin_api() {
+    let fixture = fixture().await;
+    let login = fixture
+        .client
+        .post(format!("{}/panel/api/login", fixture.base))
+        .header("content-type", "application/json")
+        .body(r#"{"username":"viewer","password":"viewer"}"#)
+        .send()
+        .await
+        .expect("登录");
+    assert_eq!(login.status(), StatusCode::OK);
+    let session =
+        serde_json::from_str::<serde_json::Value>(&login.text().await.expect("读登录结果"))
+            .expect("解析登录结果")["token"]
+            .as_str()
+            .expect("取会话")
+            .to_string();
+
+    let call = |method: &'static str, path: &'static str| {
+        let client = fixture.client.clone();
+        let base = fixture.base.clone();
+        let session = session.clone();
+        async move {
+            client
+                .request(
+                    reqwest::Method::from_bytes(method.as_bytes()).expect("方法"),
+                    format!("{base}{path}"),
+                )
+                .bearer_auth(session)
+                .send()
+                .await
+                .expect("请求")
+        }
+    };
+
+    assert_eq!(
+        call("GET", "/panel/api/config").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call("GET", "/panel/api/users").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call("GET", "/panel/api/groups/export").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(call("GET", "/panel/api/me").await.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -907,7 +1045,11 @@ async fn archived_entry_redirects_to_not_found() {
     );
 
     let response = fetch(&fixture, "/ar/playlist.m3u").await;
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "全局分组订阅已停用"
+    );
 }
 
 #[tokio::test]
@@ -977,16 +1119,65 @@ async fn epg_enabled_serves_xmltv_and_filters() {
     assert_eq!(response.status(), StatusCode::OK);
     assert!(header(&response, "content-type").starts_with("text/html"));
 
-    // EPG 开启时，订阅首行注入公开节目单地址。
-    let response = fetch(&fixture, "/playlist.m3u").await;
+    // EPG 开启时，订阅首行注入该用户自己的节目单地址。
+    let response = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u")).await;
     assert_eq!(response.status(), StatusCode::OK);
     let playlist = response.text().await.expect("读订阅");
-    let expected = format!("#EXTM3U x-tvg-url=\"{}/epg.xml.gz\"", fixture.base);
+    let expected = format!(
+        "#EXTM3U x-tvg-url=\"{}/sub/{}/epg.xml.gz\"",
+        fixture.base, fixture.token
+    );
     assert_eq!(playlist.lines().next(), Some(expected.as_str()));
 
     // 面板接口需要会话。
     let response = fetch(&fixture, "/panel/api/epg/status").await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn sub_epg_is_scoped_to_user() {
+    let fixture = fixture_with(true).await;
+    epg::refresh(&fixture.state).await.expect("采集应成功");
+
+    // 管理员：全量。
+    let response = fetch(&fixture, &fixture.sub(&fixture.token, "epg.xml")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        header(&response, "content-type"),
+        "application/xml; charset=utf-8"
+    );
+    let body = response.text().await.expect("读正文");
+    assert!(body.contains("<channel id=\"c1\">"));
+    assert!(body.contains("<programme start="));
+
+    // gzip 版本可解压。
+    let response = fetch(&fixture, &fixture.sub(&fixture.token, "epg.xml.gz")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header(&response, "content-type"), "application/gzip");
+    let bytes = response.bytes().await.expect("读字节");
+    assert_eq!(&bytes[..2], &[0x1f, 0x8b], "应为 gzip 魔数");
+
+    // 频道过滤把所有频道挡掉 → 空节目单，而不是报错。
+    let user = fixture
+        .state
+        .users
+        .find_by_username("viewer")
+        .expect("普通用户");
+    let mut narrowed = user.clone();
+    narrowed.channel_filter_enabled = true;
+    narrowed.allowed_channel_ids = vec!["pg/nothing".into()];
+    fixture
+        .state
+        .users
+        .update_user(narrowed)
+        .expect("收紧可见频道");
+
+    let response = fetch(&fixture, &fixture.sub(&fixture.user_token, "epg.xml")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("读正文");
+    assert!(body.contains("<tv generator-info-name=\"tv-buddy\">"));
+    assert!(!body.contains("<channel id="), "不该下发不可见频道：{body}");
+    assert!(!body.contains("<programme"), "不该下发不可见频道节目");
 }
 
 #[tokio::test]
@@ -1628,13 +1819,14 @@ async fn group_import_adds_skips_and_overwrites() {
     assert_eq!(result["imported"], 1);
     assert_eq!(result["skipped"], 0);
 
-    let playlist = fetch(&fixture, "/playlist.m3u")
+    let playlist = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u"))
         .await
         .text()
         .await
         .expect("读正文");
     assert!(playlist.contains("/imp/c1.m3u8"));
-    assert!(!playlist.contains("?token="));
+    // 用户订阅给的是该用户自己的令牌，不再是匿名地址。
+    assert!(playlist.contains(&format!("?token={}", fixture.token)));
 
     // 重复导入 → 跳过。
     let response = post("/panel/api/groups/import", &body).await.expect("请求");
@@ -1652,7 +1844,7 @@ async fn group_import_adds_skips_and_overwrites() {
     let result: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     assert_eq!(result["imported"], 1);
-    let playlist = fetch(&fixture, "/playlist.m3u")
+    let playlist = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u"))
         .await
         .text()
         .await
@@ -2199,7 +2391,7 @@ async fn self_service_unban_respects_quota() {
     assert_eq!(body["msg"], "本月自助解封次数已用完（每月最多3次）");
     let response = fixture
         .client
-        .get(format!("{}/playlist.m3u", fixture.base))
+        .get(fixture.sub_url(&fixture.token, "playlist.m3u"))
         .header("x-forwarded-for", "8.8.8.8")
         .send()
         .await
@@ -2300,7 +2492,7 @@ async fn security_token_rotation_and_ip_ban() {
     // 统计：带转发头的公开请求会被记账。
     let response = fixture
         .client
-        .get(format!("{}/playlist.m3u", fixture.base))
+        .get(fixture.sub_url(&fixture.token, "playlist.m3u"))
         .header("x-forwarded-for", "7.7.7.7")
         .send()
         .await
@@ -2320,7 +2512,7 @@ async fn security_token_rotation_and_ip_ban() {
     assert_eq!(response.status(), StatusCode::OK);
     let response = fixture
         .client
-        .get(format!("{}/playlist.m3u", fixture.base))
+        .get(fixture.sub_url(&fixture.token, "playlist.m3u"))
         .header("x-forwarded-for", "7.7.7.7")
         .send()
         .await
@@ -2364,7 +2556,7 @@ async fn security_token_rotation_and_ip_ban() {
     assert_eq!(response.status(), StatusCode::OK);
     let response = fixture
         .client
-        .get(format!("{}/playlist.m3u", fixture.base))
+        .get(fixture.sub_url(&fixture.token, "playlist.m3u"))
         .header("x-forwarded-for", "7.7.7.7")
         .send()
         .await
@@ -2376,7 +2568,7 @@ async fn security_token_rotation_and_ip_ban() {
 async fn playlist_aggregates_sources_with_filters() {
     let extra = r#"{"playlist":{"merge_ttl_secs":60,"merge_position":"top","global_exclude":["id:excluded"],"sources":[{"id":"s1","name":"远端源","url":"{upstream}/extra.m3u8","enabled":true,"ttl_secs":60,"group_mode":"map","group_map":{"远端组":"映射组"},"unlisted_groups":"keep","exclude":["id:skip"]}]}}"#;
     let fixture = fixture_with_extra(extra).await;
-    let body = fetch(&fixture, "/playlist.m3u")
+    let body = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u"))
         .await
         .text()
         .await
@@ -2399,7 +2591,7 @@ async fn playlist_aggregates_sources_with_filters() {
 async fn playlist_dedups_urls_across_sources() {
     let extra = r#"{"playlist":{"sources":[{"id":"s1","name":"源一","url":"{upstream}/extra.m3u8","enabled":true,"unlisted_groups":"keep"},{"id":"s2","name":"源二","url":"{upstream}/extra.m3u8","enabled":true,"unlisted_groups":"keep"}]}}"#;
     let fixture = fixture_with_extra(extra).await;
-    let body = fetch(&fixture, "/playlist.m3u")
+    let body = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u"))
         .await
         .text()
         .await
@@ -2426,7 +2618,7 @@ async fn playlist_dedups_urls_across_sources() {
 async fn playlist_source_failure_does_not_break_subscription() {
     let extra = r#"{"playlist":{"sources":[{"id":"bad","name":"坏源","url":"http://127.0.0.1:9/none.m3u8","enabled":true}]}}"#;
     let fixture = fixture_with_extra(extra).await;
-    let response = fetch(&fixture, "/playlist.m3u").await;
+    let response = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u")).await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.expect("读正文");
     assert!(body.contains("媒体清单频道"));
@@ -2485,7 +2677,7 @@ async fn subs_status_lists_configured_sources() {
     assert!(sources[0]["last_try"].as_u64().unwrap_or(0) > 0);
     assert!(sources[0]["error"].is_null());
 
-    fetch(&fixture, "/playlist.m3u").await;
+    fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u")).await;
     let body: serde_json::Value = serde_json::from_str(
         &fetch(&fixture, "/subs/status")
             .await
@@ -2687,7 +2879,7 @@ async fn logo_rename_apply_and_match_report() {
     .await
     .expect("应用");
     assert_eq!(response.status(), StatusCode::OK);
-    let playlist = fetch(&fixture, "/playlist.m3u")
+    let playlist = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u"))
         .await
         .text()
         .await
@@ -4971,6 +5163,7 @@ async fn fixture_from_json(body: &str) -> Fixture {
         base,
         upstream: String::new(),
         token: String::new(),
+        user_token: String::new(),
         client,
         state,
     }

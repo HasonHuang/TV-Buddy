@@ -131,8 +131,10 @@ check "分组顺序已改" "ga,gc,gb" \
 check "排序落盘" "ga,gc,gb" \
   "$("$BIN" config get groups --db "$DB" | python3 -c 'import json,sys;print(",".join(g["id"] for g in json.load(sys.stdin)))')"
 
-# 订阅顺序跟着走：EXTINF 的先后就是数组顺序。
-curl -s "$B/playlist.m3u" > "$WORK/pl.m3u"
+# 订阅顺序跟着走：EXTINF 的先后就是数组顺序。订阅只从用户令牌进入。
+PTOK=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/me" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
+curl -s "$B/sub/$PTOK/playlist.m3u" > "$WORK/pl.m3u"
 check "订阅顺序随排序" "ga,gc,gb" \
   "$(python3 - "$WORK/pl.m3u" <<'PY'
 import re, sys
