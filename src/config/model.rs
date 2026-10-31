@@ -24,6 +24,8 @@ pub struct Config {
     pub subtitle: SubtitleCfg,
     pub health: HealthCfg,
     pub stats: StatsCfg,
+    /// `[features]`——面板功能入口开关。只影响侧栏入口，不拦截接口。
+    pub features: FeaturesCfg,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<Group>,
     /// 未建模的段与键。
@@ -137,6 +139,50 @@ impl Default for ServerCfg {
             log_level: "info".into(),
             trust_proxy: Vec::new(),
             low_resource_mode: false,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// `[features]`——面板功能入口开关。
+///
+/// 关掉某项后，侧栏不再显示该分区的入口。接口与后台任务不受影响：
+/// 这是界面减负，不是权限控制。核心分区（概览、缓存、分组、设置、安全、日志）
+/// 没有开关，始终显示。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FeaturesCfg {
+    /// 定时录制。
+    pub recording: bool,
+    /// 回看管理。
+    pub livestream: bool,
+    /// 台标管理。
+    pub logo: bool,
+    /// 订阅聚合。
+    pub playlist: bool,
+    /// 视频素材。
+    pub assets: bool,
+    /// 用户与设备。
+    pub users: bool,
+    /// 节目指南。
+    pub epg: bool,
+    /// 频道热度。
+    pub stats: bool,
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for FeaturesCfg {
+    fn default() -> Self {
+        Self {
+            recording: true,
+            livestream: true,
+            logo: true,
+            playlist: true,
+            assets: true,
+            users: true,
+            epg: true,
+            stats: true,
             extra: toml::Table::new(),
         }
     }

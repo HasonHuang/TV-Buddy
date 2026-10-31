@@ -636,6 +636,25 @@ export function SettingsPage() {
               />
             </Card>
 
+            <Card
+              title="功能入口"
+              note="关闭后侧栏不再显示该分区；已有播放链路不受影响"
+            >
+              <div className="fields">
+                <BoolPick label="定时录制" path="features.recording" />
+                <BoolPick label="回看管理" path="features.livestream" />
+                <BoolPick label="台标管理" path="features.logo" />
+                <BoolPick label="订阅聚合" path="features.playlist" />
+                <BoolPick label="视频素材" path="features.assets" />
+                <BoolPick label="用户与设备" path="features.users" />
+                <BoolPick label="节目指南" path="features.epg" />
+                <BoolPick label="频道热度" path="features.stats" />
+              </div>
+              <p className="muted">
+                概览、缓存状态、分组管理、系统设置、安全管控与运行日志始终显示。
+              </p>
+            </Card>
+
             <Card title="面板认证" note="账号在「用户与设备」分区管理">
               <p className="muted">
                 面板账号、角色与设备令牌存在 <code className="mono">users.db</code>，

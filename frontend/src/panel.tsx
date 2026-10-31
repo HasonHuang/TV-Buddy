@@ -32,20 +32,21 @@ type SectionId =
   | 'assets'
   | 'logs';
 
-const NAV: { id: SectionId; label: string; icon: IconName }[] = [
+/** `feature` 指向 `[features]` 的开关名。没有则该分区始终显示。 */
+const NAV: { id: SectionId; label: string; icon: IconName; feature?: string }[] = [
   { id: 'dashboard', label: '概览', icon: 'overview' },
   { id: 'cache', label: '缓存状态', icon: 'cache' },
   { id: 'groups', label: '分组管理', icon: 'groups' },
   { id: 'settings', label: '系统设置', icon: 'settings' },
   { id: 'security', label: '安全管控', icon: 'security' },
-  { id: 'users', label: '用户与设备', icon: 'users' },
-  { id: 'stats', label: '频道热度', icon: 'stats' },
-  { id: 'schedule', label: '定时录制', icon: 'schedule' },
-  { id: 'epg', label: '节目指南', icon: 'epg' },
-  { id: 'logos', label: '台标管理', icon: 'logo' },
-  { id: 'subs', label: '订阅聚合', icon: 'subs' },
-  { id: 'livestream', label: '回看管理', icon: 'livestream' },
-  { id: 'assets', label: '视频素材', icon: 'assets' },
+  { feature: 'users', id: 'users', label: '用户与设备', icon: 'users' },
+  { feature: 'stats', id: 'stats', label: '频道热度', icon: 'stats' },
+  { feature: 'recording', id: 'schedule', label: '定时录制', icon: 'schedule' },
+  { feature: 'epg', id: 'epg', label: '节目指南', icon: 'epg' },
+  { feature: 'logo', id: 'logos', label: '台标管理', icon: 'logo' },
+  { feature: 'playlist', id: 'subs', label: '订阅聚合', icon: 'subs' },
+  { feature: 'livestream', id: 'livestream', label: '回看管理', icon: 'livestream' },
+  { feature: 'assets', id: 'assets', label: '视频素材', icon: 'assets' },
   { id: 'logs', label: '运行日志', icon: 'logs' },
 ];
 
@@ -303,15 +304,22 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const [section, setSection] = useState<SectionId>('dashboard');
   /** 侧栏与页脚用的版本与运行时长。 */
   const [meta, setMeta] = useState<{ version: string; uptime: number } | null>(null);
+  /** `[features]` 的开关键。为 `false` 的分区不显示入口。 */
+  const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
 
   useEffect(() => {
-    void api<{ version?: string; uptime_secs?: number }>('GET', '/status')
-      .then((body) =>
+    void api<{
+      version?: string;
+      uptime_secs?: number;
+      features?: Record<string, boolean>;
+    }>('GET', '/status')
+      .then((body) => {
         setMeta({
           version: String(body.version ?? '—'),
           uptime: Number(body.uptime_secs ?? 0),
-        }),
-      )
+        });
+        setFeatures(body.features ?? {});
+      })
       .catch(() => setMeta(null));
   }, []);
 
@@ -325,6 +333,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     onLogout();
   };
 
+  // 关掉的分区不显示入口；当前停在隐藏分区时回退到概览。
+  const visibleNav = NAV.filter((item) => !item.feature || features?.[item.feature] !== false);
+  const active = visibleNav.some((item) => item.id === section) ? section : 'dashboard';
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -336,10 +348,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
         <nav>
-          {NAV.map((item) => (
+          {visibleNav.map((item) => (
             <button
               key={item.id}
-              className={`nav-item${section === item.id ? ' active' : ''}`}
+              className={`nav-item${active === item.id ? ' active' : ''}`}
               title={item.label}
               onClick={() => setSection(item.id)}
             >
@@ -366,20 +378,20 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         </div>
       </aside>
       <main className="content">
-        {section === 'dashboard' && <Overview />}
-        {section === 'cache' && <CachePage />}
-        {section === 'groups' && <GroupsPage />}
-        {section === 'settings' && <SettingsPage />}
-        {section === 'security' && <SecurityPage />}
-        {section === 'users' && <UsersPage />}
-        {section === 'stats' && <StatsPage />}
-        {section === 'schedule' && <SchedulePage view="schedule" />}
-        {section === 'epg' && <EpgPanelPage />}
-        {section === 'logos' && <LogosPage />}
-        {section === 'subs' && <PlaylistPage />}
-        {section === 'livestream' && <LivestreamPage />}
-        {section === 'assets' && <AssetsPage />}
-        {section === 'logs' && <LogsPage />}
+        {active === 'dashboard' && <Overview />}
+        {active === 'cache' && <CachePage />}
+        {active === 'groups' && <GroupsPage />}
+        {active === 'settings' && <SettingsPage />}
+        {active === 'security' && <SecurityPage />}
+        {active === 'users' && <UsersPage />}
+        {active === 'stats' && <StatsPage />}
+        {active === 'schedule' && <SchedulePage view="schedule" />}
+        {active === 'epg' && <EpgPanelPage />}
+        {active === 'logos' && <LogosPage />}
+        {active === 'subs' && <PlaylistPage />}
+        {active === 'livestream' && <LivestreamPage />}
+        {active === 'assets' && <AssetsPage />}
+        {active === 'logs' && <LogsPage />}
         <footer className="app-foot">
           <Icon name="tv" size={13} />
           <span>TV Buddy</span>

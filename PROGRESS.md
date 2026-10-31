@@ -415,6 +415,33 @@ VG-3 与 VG-4 带后端改动。`src/stats.rs` 加频道维度计数，`src/metr
 
 参考截图里的页脚 `© 2026 YanG · GitHub` 与品牌名属目标派生内容。按数据纪律不复制。
 
+### 3.9 面板功能入口开关（2026-10-31）
+
+新增 `[features]` 配置段，控制侧栏显示哪些分区。
+
+| 开关 | 控制的分区 |
+| --- | --- |
+| `recording` | 定时录制 |
+| `livestream` | 回看管理 |
+| `logo` | 台标管理 |
+| `playlist` | 订阅聚合 |
+| `assets` | 视频素材 |
+| `users` | 用户与设备 |
+| `epg` | 节目指南 |
+| `stats` | 频道热度 |
+
+概览、缓存状态、分组管理、系统设置、安全管控、运行日志没有开关，始终显示。
+
+语义约束：
+
+- 只影响侧栏入口。接口与后台任务不受影响。
+- 关闭某分区时，若当前停留其上，前端回退到概览。
+- 配置在 `/panel/api/status` 的 `features` 字段返回。
+
+面板位置：系统设置 → 功能入口。
+
+低配与高配的参数差异见 [`docs/design/10-low-vs-high-spec.md`](docs/design/10-low-vs-high-spec.md)。
+
 ---
 
 ## 4. 质量门
@@ -566,6 +593,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | 全量覆盖对比与规划 | [`docs/design/07-coverage-and-plan.md`](docs/design/07-coverage-and-plan.md) |
 | 未决项对比方案 | [`docs/design/08-open-decisions.md`](docs/design/08-open-decisions.md) |
 | F-1 用户与设备调研 | [`docs/design/09-users-and-devices.md`](docs/design/09-users-and-devices.md) |
+| 低配与高配参数差异 | [`docs/design/10-low-vs-high-spec.md`](docs/design/10-low-vs-high-spec.md) |
 | HTTP 契约 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) |
 | 配置与存储 | [`docs/design/04-config-and-storage.md`](docs/design/04-config-and-storage.md) |
 | 低配置优化 | [`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md) |

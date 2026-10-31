@@ -184,6 +184,28 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
         "whole_file_fallbacks": 0,
         "entry_exts": entry_exts,
         "cpu_cores": crate::metrics::cpu_cores(),
+        // 面板功能入口开关。侧栏按它渲染（`[features]` 段）。
+        "features": {
+            "recording": cfg.features.recording,
+            "livestream": cfg.features.livestream,
+            "logo": cfg.features.logo,
+            "playlist": cfg.features.playlist,
+            "assets": cfg.features.assets,
+            "users": cfg.features.users,
+            "epg": cfg.features.epg,
+            "stats": cfg.features.stats,
+        },
+        // 面板功能入口开关。侧栏按它渲染。
+        "features": {
+            "recording": cfg.features.recording,
+            "livestream": cfg.features.livestream,
+            "logo": cfg.features.logo,
+            "playlist": cfg.features.playlist,
+            "assets": cfg.features.assets,
+            "users": cfg.features.users,
+            "epg": cfg.features.epg,
+            "stats": cfg.features.stats,
+        },
         // 以下为本实现附加字段，目标没有。便于本地面板排障。
         "name": "tv-buddy",
         "bind": cfg.server.bind,
