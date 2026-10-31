@@ -8,7 +8,7 @@ PORT=${PORT:-19923}
 UP=${UP:-19924}
 WORK=$(mktemp -d)
 mkdir -p "$WORK/up"
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 
 cat > "$WORK/up/extra.m3u8" <<M3U
@@ -29,38 +29,52 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
-cat > "$CFG" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
+cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  },
+  "groups": [
+    {
+      "id": "g1",
+      "name": "本地组",
+      "mode": "proxy",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "本地频道",
+          "url": "http://127.0.0.1:9/none.m3u8"
+        }
+      ]
+    }
+  ],
+  "playlist": {
+    "merge_ttl_secs": 60,
+    "merge_position": "top",
+    "global_exclude": [
+      "id:excluded"
+    ],
+    "sources": [
+      {
+        "id": "s1",
+        "name": "远端源",
+        "url": "http://127.0.0.1:$UP/extra.m3u8",
+        "enabled": true,
+        "unlisted_groups": "keep",
+        "exclude": [
+          "id:skip"
+        ]
+      }
+    ]
+  }
+}
+JSON
 
-[cache]
-disk_path = "$WORK/cache"
-
-[[groups]]
-id = "g1"
-name = "本地组"
-mode = "proxy"
-[[groups.channels]]
-id = "c1"
-name = "本地频道"
-url = "http://127.0.0.1:9/none.m3u8"
-
-[playlist]
-merge_ttl_secs = 60
-merge_position = "top"
-global_exclude = ["id:excluded"]
-
-[[playlist.sources]]
-id = "s1"
-name = "远端源"
-url = "http://127.0.0.1:$UP/extra.m3u8"
-enabled = true
-unlisted_groups = "keep"
-exclude = ["id:skip"]
-TOML
-
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 B="http://127.0.0.1:$PORT"

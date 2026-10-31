@@ -9,19 +9,22 @@ cd "$(dirname "$0")/.."
 BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19925}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 
-cat > "$CFG" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
+cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  }
+}
+JSON
 
-[cache]
-disk_path = "$WORK/cache"
-TOML
-
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT

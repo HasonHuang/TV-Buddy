@@ -42,57 +42,34 @@ open(sys.argv[1], "w", encoding="utf-8").write(xml)
 PY
 
 {
-    cat <<EOF
-[server]
-bind = "127.0.0.1:$PORT"
-
-[cache]
-disk_path = "$WORK/cache"
-
-[epg]
-enabled = true
-keep_days = 3
-future_days = 1
-keep_yesterday = false
-
-[[epg.sources]]
-id = "s1"
-name = "本地源"
-kind = "xml"
-url = "http://127.0.0.1:$UP/epg.xml"
-
-[epg.translate]
-enabled = true
-url = "$URL"
-target = "zh-cn"
-source = "auto"
-EOF
-    if [ -n "$TOKEN" ]; then
-        printf 'mtran_token = "%s"\n' "$TOKEN"
-    fi
-    cat <<EOF
-
-[[groups]]
-id = "g1"
-name = "分组"
-mode = "proxy"
-access = "public"
-
-[[groups.channels]]
-id = "c1"
-name = "测试频道"
-url = "http://127.0.0.1:9/live.m3u8"
-
-[subtitle.translate]
-enabled = true
-url = "$URL"
-target = "zh-cn"
-source = "auto"
-EOF
-    if [ -n "$TOKEN" ]; then
-        printf 'token = "%s"\n' "$TOKEN"
-    fi
-} >"$WORK/config.toml"
+    printf '%s\n' '{'
+    printf '  "server": { "bind": "127.0.0.1:%s" },\n' "$PORT"
+    printf '  "cache": { "disk_path": "%s/cache" },\n' "$WORK"
+    printf '%s\n' '  "epg": {'
+    printf '%s\n' '    "enabled": true, "keep_days": 3, "future_days": 1, "keep_yesterday": false,'
+    printf '%s\n' '    "sources": ['
+    printf '%s\n' '      { "id": "s1", "name": "本地源", "kind": "xml",'
+    printf '        "url": "http://127.0.0.1:%s/epg.xml" }\n' "$UP"
+    printf '%s\n' '    ],'
+    printf '%s\n' '    "translate": {'
+    printf '%s\n' '      "enabled": true, "target": "zh-cn", "source": "auto",'
+    printf '      "url": "%s"' "$URL"
+    [ -n "$TOKEN" ] && printf ', "mtran_token": "%s"' "$TOKEN"
+    printf '\n    }\n  },\n'
+    printf '%s\n' '  "subtitle": {'
+    printf '%s\n' '    "translate": {'
+    printf '%s\n' '      "enabled": true, "target": "zh-cn", "source": "auto",'
+    printf '      "url": "%s"' "$URL"
+    [ -n "$TOKEN" ] && printf ', "token": "%s"' "$TOKEN"
+    printf '\n    }\n  },\n'
+    printf '%s\n' '  "groups": ['
+    printf '%s\n' '    { "id": "g1", "name": "分组", "mode": "proxy", "access": "public",'
+    printf '%s\n' '      "channels": ['
+    printf '%s\n' '        { "id": "c1", "name": "测试频道", "url": "http://127.0.0.1:9/live.m3u8" }'
+    printf '%s\n' '      ] }'
+    printf '%s\n' '  ]'
+    printf '%s\n' '}'
+} >"$WORK/config.json"
 
 cleanup() {
     if [ -f "$WORK/pid" ]; then
@@ -112,7 +89,7 @@ for _ in $(seq 1 50); do
     sleep 0.1
 done
 
-"$BIN" import-config "$WORK/config.toml" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
+"$BIN" config import "$WORK/config.json" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
 (
     cd "$WORK" || exit 1
     exec "$BIN" tv-buddy.db >server.log 2>&1

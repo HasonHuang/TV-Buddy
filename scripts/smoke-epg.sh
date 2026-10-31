@@ -10,7 +10,7 @@ BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19916}
 UP=${UP:-19917}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 mkdir -p "$WORK/up"
 
@@ -35,36 +35,46 @@ xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 open(sys.argv[1], "w", encoding="utf-8").write(xml)
 PY
 
-cat > "$CFG" <<EOF
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
-
-[cache]
-disk_path = "$WORK/cache"
-
-[epg]
-enabled = true
-keep_days = 3
-future_days = 1
-keep_yesterday = false
-
-[[epg.sources]]
-id = "s1"
-name = "本地源"
-kind = "xml"
-url = "http://127.0.0.1:$UP/epg.xml"
-
-[[groups]]
-id = "g1"
-name = "分组"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "测试频道"
-url = "http://127.0.0.1:$UP/live.m3u8"
-EOF
+cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  },
+  "epg": {
+    "enabled": true,
+    "keep_days": 3,
+    "future_days": 1,
+    "keep_yesterday": false,
+    "sources": [
+      {
+        "id": "s1",
+        "name": "本地源",
+        "kind": "xml",
+        "url": "http://127.0.0.1:$UP/epg.xml"
+      }
+    ]
+  },
+  "groups": [
+    {
+      "id": "g1",
+      "name": "分组",
+      "mode": "proxy",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "测试频道",
+          "url": "http://127.0.0.1:$UP/live.m3u8"
+        }
+      ]
+    }
+  ]
+}
+JSON
 
 python3 -m http.server "$UP" --directory "$WORK/up" >"$WORK/up.log" 2>&1 &
 UP_PID=$!
@@ -73,7 +83,7 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT

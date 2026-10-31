@@ -74,7 +74,7 @@
 ## 4. 播放契约（proxy）
 
 > 状态：**已实现，并经对拍确认**（`src/http/routes/stream.rs`、`src/proxy/`）。
-> 验证：`scripts/smoke-m2.sh`、`scripts/compare-p0.sh`（22 项全一致，见 `reconciliation-report.md`）。
+> 验证：`scripts/smoke-m2.sh`、`scripts/compare-p0.sh`（22 项全一致）。
 
 代理链路按**上游清单类型**分两支（F-018）：
 
@@ -390,7 +390,6 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | 恢复步骤 | 解包 → 解析并**校验** `config.json` → 当前配置另存 `tv-buddy.db.bak.json` → 写库 → 恢复台标 → 替换快照（立即解除看门狗冷却） |
 | 恢复响应 | `{"ok":true,"config_reloaded":true,"report":{"files":[…],"skipped":[…]},"groups":N}` |
 | 失败 | 无 `config.json`、配置不合法、非 gzip → `400`；未登录 → `401` |
-| 旧包兼容 | 包里只有 `config.toml` 时按旧格式解析恢复 |
 
 > 台标以外的脚本类文件（`epg/scripts`、`resolvers`）只备份，不在恢复时执行。
 
@@ -714,7 +713,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 
 ## 9. M1 实施清单
 
-> 状态：**已实现**（`src/http/routes/groups.rs`、`src/playlist.rs`、`src/auth/play_token.rs`、`frontend/src/groups.tsx`；验证见 `scripts/smoke-m1.sh` 与 `PROGRESS_bak.md` §3c）。`x-tvg-url` 在 EPG 开启时输出（见 `src/playlist.rs` `header()`）。
+> 状态：**已实现**（`src/http/routes/groups.rs`、`src/playlist.rs`、`src/auth/play_token.rs`、`frontend/src/groups.tsx`；验证见 `scripts/smoke-m1.sh`）。`x-tvg-url` 在 EPG 开启时输出（见 `src/playlist.rs` `header()`）。
 
 1. 分组 CRUD + 频道 CRUD（§6.2），改后原子写盘并替换内存快照。
 2. 订阅渲染（§5）：总订阅与分组订阅、`access` 过滤、Token 附加、`m3u_header_lines`、`x-tvg-url`（EPG 开启时输出）。

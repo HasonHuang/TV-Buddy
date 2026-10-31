@@ -20,6 +20,7 @@ use axum::{
     Router,
 };
 use reqwest::{redirect::Policy, Client, Response as HttpResponse};
+use serde_json::json;
 use tv_buddy::{config, epg, http, logging::RingBuffer, state::AppState};
 
 const LIVE_BODY: &str = "#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nseg1.ts\n#EXTINF:4.0,\nseg2.ts\n#EXT-X-ENDLIST\n";
@@ -300,17 +301,49 @@ async fn fixture() -> Fixture {
 /// 聚合源文本：三条频道，供 `[playlist]` 过滤测试。
 const EXTRA: &str = "#EXTM3U\n#EXTINF:-1 tvg-id=\"keep\" group-title=\"远端组\",远端频道\nhttp://placeholder.test/remote.m3u8\n#EXTINF:-1 tvg-id=\"skip\" group-title=\"远端组\",跳过频道\nhttp://placeholder.test/skip.m3u8\n#EXTINF:-1 tvg-id=\"excluded\" group-title=\"远端组\",全局排除\nhttp://placeholder.test/excluded.m3u8\n";
 
+/// 把 JSON 片段合并进基准配置。
+///
+/// 同名的对象按键合并；`groups` 数组追加；其余覆盖。
+fn merge_json(base: &mut serde_json::Value, fragment: &str) {
+    let trimmed = fragment.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let extra: serde_json::Value = serde_json::from_str(trimmed).expect("片段必须是 JSON");
+    let Some(extra) = extra.as_object() else {
+        return;
+    };
+    let Some(base) = base.as_object_mut() else {
+        return;
+    };
+    for (key, value) in extra {
+        match (base.get_mut(key), value) {
+            (Some(serde_json::Value::Array(items)), serde_json::Value::Array(more)) => {
+                items.extend(more.iter().cloned());
+            }
+            (Some(serde_json::Value::Object(current)), serde_json::Value::Object(more)) => {
+                for (inner_key, inner_value) in more {
+                    current.insert(inner_key.clone(), inner_value.clone());
+                }
+            }
+            _ => {
+                base.insert(key.clone(), value.clone());
+            }
+        }
+    }
+}
+
 /// `epg_enabled` 为真时，伪上游额外提供 `/epg.xml`，配置里打开 EPG。
 async fn fixture_with(epg_enabled: bool) -> Fixture {
     fixture_with_all(epg_enabled, "").await
 }
 
-/// 带额外 TOML 片段的夹具（用于 `[playlist]` 聚合）。
+/// 带额外 JSON 片段的夹具（用于 `[playlist]` 聚合）。
 async fn fixture_with_extra(extra: &str) -> Fixture {
     fixture_with_all(false, extra).await
 }
 
-/// 带额外 TOML 片段与 `[auth]` 键的夹具。
+/// 带额外 JSON 片段与 `[auth]` 键的夹具。
 async fn fixture_with_extra_and_auth(extra: &str, auth_extra: &str) -> Fixture {
     fixture_with_options(false, extra, true, auth_extra, "disk").await
 }
@@ -357,129 +390,120 @@ async fn fixture_with_options(
     }
     let upstream = serve(upstream_app).await;
     let extra_section = extra_section.replace("{upstream}", &upstream);
+    let auth_extra = auth_extra.replace("{upstream}", &upstream);
 
-    let toml = format!(
-        r#"
-[server]
-bind = "127.0.0.1:0"
-log_level = "error"
-not_found_url = "http://placeholder.test/404.mp4"
-error_url = "http://placeholder.test/mistake.mp4"
+    // 夹具直接是 JSON：与运行时存储形态一致。
+    let live = format!("{upstream}/live.m3u8");
+    let mut config = json!({
+        "server": {
+            "bind": "127.0.0.1:0",
+            "log_level": "error",
+            "not_found_url": "http://placeholder.test/404.mp4",
+            "error_url": "http://placeholder.test/mistake.mp4"
+        },
+        "auth": {
+            "token_enabled": true,
+            "token_failure_url": "http://placeholder.test/Failure.mp4"
+        },
+        "cache": {
+            "backend": cache_backend,
+            "disk_path": format!("{}/cache", dir.display()),
+            "disguise": { "enabled": true, "formats": ["jpg", "png"] }
+        },
+        "groups": [
+            {
+                "id": "pg",
+                "name": "代理组",
+                "mode": "proxy",
+                "access": "public",
+                "headers": ["X-Group: group", "X-Both: group"],
+                "channels": [{
+                    "id": "c1",
+                    "name": "媒体清单频道",
+                    "url": live,
+                    "headers": ["X-Token: abc123", "X-Both: channel"]
+                }]
+            },
+            {
+                "id": "pm",
+                "name": "主清单组",
+                "mode": "proxy",
+                "access": "public",
+                "channels": [{
+                    "id": "c1",
+                    "name": "主清单频道",
+                    "url": format!("{upstream}/master.m3u8")
+                }]
+            },
+            {
+                "id": "ar",
+                "name": "归档组",
+                "mode": "proxy",
+                "access": "archived",
+                "channels": [{ "id": "c1", "name": "归档频道", "url": live }]
+            },
+            {
+                "id": "op",
+                "name": "开放组",
+                "mode": "proxy",
+                "access": "open",
+                "channels": [{ "id": "c1", "name": "开放频道", "url": live }]
+            },
+            {
+                "id": "pt",
+                "name": "透传组",
+                "mode": "passthrough",
+                "access": "public",
+                "channels": [{ "id": "c1", "name": "透传频道", "url": live }]
+            },
+            {
+                "id": "badlist",
+                "name": "失败清单组",
+                "mode": "proxy",
+                "access": "open",
+                "channels": [{
+                    "id": "c1",
+                    "name": "失败清单频道",
+                    "url": format!("{upstream}/missing.m3u8")
+                }]
+            },
+            {
+                "id": "badseg",
+                "name": "失败切片组",
+                "mode": "proxy",
+                "access": "open",
+                "channels": [{
+                    "id": "c1",
+                    "name": "失败切片频道",
+                    "url": format!("{upstream}/badseg.m3u8")
+                }]
+            }
+        ]
+    });
 
-[auth]
-token_enabled = true
-token_failure_url = "http://placeholder.test/Failure.mp4"
-{auth_extra}
+    if epg_enabled {
+        config["epg"] = json!({
+            "enabled": true,
+            "public_viewer_enabled": public_viewer_enabled,
+            "keep_days": 3,
+            "future_days": 1,
+            "keep_yesterday": false,
+            "match_by_name": true,
+            "sources": [{
+                "id": "s1",
+                "name": "本地源",
+                "kind": "xml",
+                "url": format!("{upstream}/epg.xml")
+            }]
+        });
+    }
+    merge_json(&mut config, &extra_section);
+    if let Some(base) = config.get_mut("auth") {
+        merge_json(base, &auth_extra);
+    }
 
-[cache]
-backend = "{cache_backend}"
-disk_path = "{dir}/cache"
-[cache.disguise]
-enabled = true
-formats = ["jpg", "png"]
-
-[[groups]]
-id = "pg"
-name = "代理组"
-mode = "proxy"
-access = "public"
-headers = ["X-Group: group", "X-Both: group"]
-[[groups.channels]]
-id = "c1"
-name = "媒体清单频道"
-url = "{upstream}/live.m3u8"
-headers = ["X-Token: abc123", "X-Both: channel"]
-
-[[groups]]
-id = "pm"
-name = "主清单组"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "主清单频道"
-url = "{upstream}/master.m3u8"
-
-[[groups]]
-id = "ar"
-name = "归档组"
-mode = "proxy"
-access = "archived"
-[[groups.channels]]
-id = "c1"
-name = "归档频道"
-url = "{upstream}/live.m3u8"
-
-[[groups]]
-id = "op"
-name = "开放组"
-mode = "proxy"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "开放频道"
-url = "{upstream}/live.m3u8"
-
-[[groups]]
-id = "pt"
-name = "透传组"
-mode = "passthrough"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "透传频道"
-url = "{upstream}/live.m3u8"
-
-[[groups]]
-id = "badlist"
-name = "失败清单组"
-mode = "proxy"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "失败清单频道"
-url = "{upstream}/missing.m3u8"
-
-[[groups]]
-id = "badseg"
-name = "失败切片组"
-mode = "proxy"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "失败切片频道"
-url = "{upstream}/badseg.m3u8"
-{epg_section}
-{extra_section}
-"#,
-        dir = dir.display(),
-        extra_section = extra_section,
-        auth_extra = auth_extra,
-        cache_backend = cache_backend,
-        epg_section = if epg_enabled {
-            format!(
-                r#"
-[epg]
-enabled = true
-public_viewer_enabled = {public_viewer_enabled}
-keep_days = 3
-future_days = 1
-keep_yesterday = false
-match_by_name = true
-
-[[epg.sources]]
-id = "s1"
-name = "本地源"
-kind = "xml"
-url = "{upstream}/epg.xml"
-"#
-            )
-        } else {
-            String::new()
-        }
-    );
-    // 夹具仍是 TOML 字面量，走一次性迁移解析器。
-    let cfg = config::legacy::parse(&toml).expect("加载配置");
+    let cfg: config::Config = serde_json::from_value(config).expect("解析配置");
+    config::validate(&cfg).expect("校验配置");
     let db_path = dir.join("tv-buddy.db");
 
     let state =
@@ -2350,23 +2374,7 @@ async fn security_token_rotation_and_ip_ban() {
 
 #[tokio::test]
 async fn playlist_aggregates_sources_with_filters() {
-    let extra = r#"
-[playlist]
-merge_ttl_secs = 60
-merge_position = "top"
-global_exclude = ["id:excluded"]
-
-[[playlist.sources]]
-id = "s1"
-name = "远端源"
-url = "{upstream}/extra.m3u8"
-enabled = true
-ttl_secs = 60
-group_mode = "map"
-group_map = { "远端组" = "映射组" }
-unlisted_groups = "keep"
-exclude = ["id:skip"]
-"#;
+    let extra = r#"{"playlist":{"merge_ttl_secs":60,"merge_position":"top","global_exclude":["id:excluded"],"sources":[{"id":"s1","name":"远端源","url":"{upstream}/extra.m3u8","enabled":true,"ttl_secs":60,"group_mode":"map","group_map":{"远端组":"映射组"},"unlisted_groups":"keep","exclude":["id:skip"]}]}}"#;
     let fixture = fixture_with_extra(extra).await;
     let body = fetch(&fixture, "/playlist.m3u")
         .await
@@ -2389,21 +2397,7 @@ exclude = ["id:skip"]
 
 #[tokio::test]
 async fn playlist_dedups_urls_across_sources() {
-    let extra = r#"
-[[playlist.sources]]
-id = "s1"
-name = "源一"
-url = "{upstream}/extra.m3u8"
-enabled = true
-unlisted_groups = "keep"
-
-[[playlist.sources]]
-id = "s2"
-name = "源二"
-url = "{upstream}/extra.m3u8"
-enabled = true
-unlisted_groups = "keep"
-"#;
+    let extra = r#"{"playlist":{"sources":[{"id":"s1","name":"源一","url":"{upstream}/extra.m3u8","enabled":true,"unlisted_groups":"keep"},{"id":"s2","name":"源二","url":"{upstream}/extra.m3u8","enabled":true,"unlisted_groups":"keep"}]}}"#;
     let fixture = fixture_with_extra(extra).await;
     let body = fetch(&fixture, "/playlist.m3u")
         .await
@@ -2430,13 +2424,7 @@ unlisted_groups = "keep"
 
 #[tokio::test]
 async fn playlist_source_failure_does_not_break_subscription() {
-    let extra = r#"
-[[playlist.sources]]
-id = "bad"
-name = "坏源"
-url = "http://127.0.0.1:9/none.m3u8"
-enabled = true
-"#;
+    let extra = r#"{"playlist":{"sources":[{"id":"bad","name":"坏源","url":"http://127.0.0.1:9/none.m3u8","enabled":true}]}}"#;
     let fixture = fixture_with_extra(extra).await;
     let response = fetch(&fixture, "/playlist.m3u").await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -2471,22 +2459,7 @@ async fn channel_proxy_is_used_for_upstream() {
     )
     .await;
     let extra = format!(
-        r#"
-[[groups]]
-id = "px"
-name = "代理组"
-mode = "proxy"
-access = "open"
-
-[groups.proxy]
-kind = "http"
-addr = "{proxy}"
-
-[[groups.channels]]
-id = "c1"
-name = "代理频道"
-url = "{{upstream}}/live.m3u8"
-"#
+        r#"{{"groups":[{{"id":"px","name":"代理组","mode":"proxy","access":"open","proxy":{{"kind":"http","addr":"{proxy}"}},"channels":[{{"id":"c1","name":"代理频道","url":"{{upstream}}/live.m3u8"}}]}}]}}"#
     );
     let fixture = fixture_with_extra(&extra).await;
     let response = fetch(&fixture, "/px/c1.m3u8").await;
@@ -2496,15 +2469,7 @@ url = "{{upstream}}/live.m3u8"
 
 #[tokio::test]
 async fn subs_status_lists_configured_sources() {
-    let extra = r#"
-[[playlist.sources]]
-id = "s1"
-name = "远端源"
-url = "{upstream}/extra.m3u8"
-enabled = true
-unlisted_groups = "keep"
-include = ["group:远端组"]
-"#;
+    let extra = r#"{"playlist":{"sources":[{"id":"s1","name":"远端源","url":"{upstream}/extra.m3u8","enabled":true,"unlisted_groups":"keep","include":["group:远端组"]}]}}"#;
     let fixture = fixture_with_extra(extra).await;
     let response = fetch(&fixture, "/subs/status").await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -2593,17 +2558,7 @@ async fn subs_groups_lists_upstream_groups() {
 
 #[tokio::test]
 async fn subs_preview_applies_group_map_and_filters() {
-    let extra = r#"
-[playlist]
-global_exclude = ["id:excluded"]
-
-[[playlist.sources]]
-id = "s1"
-name = "远端源"
-url = "{upstream}/extra.m3u8"
-enabled = true
-exclude = ["id:skip"]
-"#;
+    let extra = r#"{"playlist":{"global_exclude":["id:excluded"],"sources":[{"id":"s1","name":"远端源","url":"{upstream}/extra.m3u8","enabled":true,"exclude":["id:skip"]}]}}"#;
     let fixture = fixture_with_extra(extra).await;
     let response = fixture
         .client
@@ -2933,14 +2888,7 @@ async fn media_assets_subtitles_and_resolver_scripts() {
 #[tokio::test]
 async fn share_pull_checks_key_and_source_ip() {
     let fixture = fixture_with_extra(
-        r#"
-[share]
-enabled = true
-role = "master"
-key = "REAKEY"
-trust_ips = ["127.0.0.1"]
-poll_secs = 5
-"#,
+        r#"{"share":{"enabled":true,"role":"master","key":"REAKEY","trust_ips":["127.0.0.1"],"poll_secs":5}}"#
     )
     .await;
 
@@ -3011,15 +2959,7 @@ async fn share_disabled_returns_404_and_follower_cannot_rotate() {
 
     // follower 角色禁止本地轮换 → 409。
     let follower = fixture_with_extra(
-        r#"
-[share]
-enabled = true
-role = "follower"
-key = "REAKEY"
-master_url = "http://placeholder.test"
-trust_ips = ["127.0.0.1"]
-poll_secs = 5
-"#,
+        r#"{"share":{"enabled":true,"role":"follower","key":"REAKEY","master_url":"http://placeholder.test","trust_ips":["127.0.0.1"],"poll_secs":5}}"#
     )
     .await;
     let session = login(&follower).await;
@@ -3037,17 +2977,7 @@ poll_secs = 5
 #[tokio::test]
 async fn dash_tracks_scan_url_health_and_timeshift_status() {
     let fixture = fixture_with_extra(
-        r#"
-[[groups]]
-id = "dg"
-name = "DASH 组"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "DASH 频道"
-url = "{upstream}/manifest.mpd"
-"#,
+        r#"{"groups":[{"id":"dg","name":"DASH 组","mode":"proxy","access":"public","channels":[{"id":"c1","name":"DASH 频道","url":"{upstream}/manifest.mpd"}]}]}"#
     )
     .await;
     let session = login(&fixture).await;
@@ -3136,19 +3066,7 @@ url = "{upstream}/manifest.mpd"
 #[tokio::test]
 async fn dash_mode_converts_mpd_to_hls_and_proxies_segments() {
     let fixture = fixture_with_extra(
-        r#"
-[[groups]]
-id = "dg2"
-name = "DASH 转封装"
-mode = "dash"
-access = "open"
-mpd_keep_seconds = 4
-
-[[groups.channels]]
-id = "c1"
-name = "DASH 频道"
-url = "{upstream}/dash/live.mpd"
-"#,
+        r#"{"groups":[{"id":"dg2","name":"DASH 转封装","mode":"dash","access":"open","mpd_keep_seconds":4,"channels":[{"id":"c1","name":"DASH 频道","url":"{upstream}/dash/live.mpd"}]}]}"#
     )
     .await;
 
@@ -3242,23 +3160,7 @@ async fn dash_pool_falls_back_and_remembers_success() {
     POOL_B_HITS.store(0, Ordering::SeqCst);
 
     let pooled = fixture_with_extra(
-        r#"
-[cache.dash]
-retry_max = 2
-retry_initial_ms = 1
-
-[[groups]]
-id = "pool"
-name = "池组"
-mode = "dash"
-access = "open"
-
-[[groups.channels]]
-id = "c1"
-name = "池频道"
-url = "{upstream}/dash/pool/live.mpd"
-url_pool_size = 2
-"#,
+        r#"{"cache":{"dash":{"retry_max":2,"retry_initial_ms":1}},"groups":[{"id":"pool","name":"池组","mode":"dash","access":"open","channels":[{"id":"c1","name":"池频道","url":"{upstream}/dash/pool/live.mpd","url_pool_size":2}]}]}"#
     )
     .await;
 
@@ -3302,22 +3204,7 @@ url_pool_size = 2
     POOL_A_HITS.store(0, Ordering::SeqCst);
     POOL_B_HITS.store(0, Ordering::SeqCst);
     let single = fixture_with_extra(
-        r#"
-[cache.dash]
-retry_max = 2
-retry_initial_ms = 1
-
-[[groups]]
-id = "pool"
-name = "池组"
-mode = "dash"
-access = "open"
-
-[[groups.channels]]
-id = "c1"
-name = "池频道"
-url = "{upstream}/dash/pool/live.mpd"
-"#,
+        r#"{"cache":{"dash":{"retry_max":2,"retry_initial_ms":1}},"groups":[{"id":"pool","name":"池组","mode":"dash","access":"open","channels":[{"id":"c1","name":"池频道","url":"{upstream}/dash/pool/live.mpd"}]}]}"#
     )
     .await;
     let media = fetch(&single, "/pool/c1/video_720p/index.txt").await;
@@ -3345,23 +3232,7 @@ url = "{upstream}/dash/pool/live.mpd"
 /// `session_ttl_secs` 内回来会拿到 `limit_url`。
 #[tokio::test]
 async fn play_session_limit_only_when_guard_enabled() {
-    let groups = r#"
-[[groups]]
-id = "sl"
-name = "会话组"
-mode = "proxy"
-access = "open"
-
-[[groups.channels]]
-id = "a"
-name = "A"
-url = "{upstream}/live.m3u8"
-
-[[groups.channels]]
-id = "b"
-name = "B"
-url = "{upstream}/live.m3u8"
-"#;
+    let groups = r#"{"groups":[{"id":"sl","name":"会话组","mode":"proxy","access":"open","channels":[{"id":"a","name":"A","url":"{upstream}/live.m3u8"},{"id":"b","name":"B","url":"{upstream}/live.m3u8"}]}]}"#;
     let limit = "https://material.yang-1989.eu.org/v/limit.mp4";
 
     // 默认：`ip_guard_enabled = false`，两个频道都能播，没有踢人。
@@ -3371,7 +3242,7 @@ url = "{upstream}/live.m3u8"
     assert_eq!(fetch(&off, "/sl/a.m3u8").await.status(), StatusCode::OK);
 
     // 打开守卫：第二个频道入，第一个频道被踢。
-    let on = fixture_with_extra_and_auth(groups, "ip_guard_enabled = true\n").await;
+    let on = fixture_with_extra_and_auth(groups, r#"{"ip_guard_enabled":true}"#).await;
     assert_eq!(fetch(&on, "/sl/a.m3u8").await.status(), StatusCode::OK);
     assert_eq!(fetch(&on, "/sl/b.m3u8").await.status(), StatusCode::OK);
     let kicked = fetch(&on, "/sl/a.m3u8").await;
@@ -3383,7 +3254,7 @@ url = "{upstream}/live.m3u8"
     // 白名单豁免：同一地址看两个频道都放行。
     let exempt = fixture_with_extra_and_auth(
         groups,
-        "ip_guard_enabled = true\nwhitelist = [\"127.0.0.1\"]\n",
+        r#"{"ip_guard_enabled":true,"whitelist":["127.0.0.1"]}"#,
     )
     .await;
     assert_eq!(fetch(&exempt, "/sl/a.m3u8").await.status(), StatusCode::OK);
@@ -3396,18 +3267,7 @@ url = "{upstream}/live.m3u8"
 /// L2 是突发上限，L1 是持续上限；只计入口请求，不计切片。
 #[tokio::test]
 async fn play_rate_limit_only_when_guard_enabled() {
-    let groups = r#"
-[[groups]]
-id = "rl"
-name = "限流组"
-mode = "proxy"
-access = "open"
-
-[[groups.channels]]
-id = "a"
-name = "A"
-url = "{upstream}/live.m3u8"
-"#;
+    let groups = r#"{"groups":[{"id":"rl","name":"限流组","mode":"proxy","access":"open","channels":[{"id":"a","name":"A","url":"{upstream}/live.m3u8"}]}]}"#;
     let off = fixture_with_extra_and_auth(groups, "").await;
     for _ in 0..5 {
         assert_eq!(fetch(&off, "/rl/a.m3u8").await.status(), StatusCode::OK);
@@ -3415,7 +3275,7 @@ url = "{upstream}/live.m3u8"
 
     let on = fixture_with_extra_and_auth(
         groups,
-        "ip_guard_enabled = true\nl2_window_secs = 30\nl2_limit = 1\nl1_limit = 100\ncooldown_secs = 5\n",
+        r#"{"ip_guard_enabled":true,"l2_window_secs":30,"l2_limit":1,"l1_limit":100,"cooldown_secs":5}"#,
     )
     .await;
     assert_eq!(fetch(&on, "/rl/a.m3u8").await.status(), StatusCode::OK);
@@ -3476,7 +3336,7 @@ async fn random_id_enabled_generates_random_channel_ids() {
     let ids = channel_ids(&plain).await;
     assert!(ids.iter().any(|id| id == "cctv1"), "{ids:?}");
 
-    let random = fixture_with_extra_and_auth("", "random_id_enabled = true\n").await;
+    let random = fixture_with_extra_and_auth("", r#"{"random_id_enabled":true}"#).await;
     import_m3u(&random, text).await;
     let ids = channel_ids(&random).await;
     assert!(
@@ -3516,20 +3376,7 @@ async fn memory_backend_keeps_segments_in_process() {
 #[tokio::test]
 async fn dash_timeshift_serves_recorded_playlist_and_segments() {
     let fixture = fixture_with_extra(
-        r#"
-[[groups]]
-id = "dts"
-name = "DASH 时移"
-mode = "dash"
-access = "open"
-
-[[groups.channels]]
-id = "c1"
-name = "DASH 回看频道"
-url = "{upstream}/dash/live.mpd"
-dash_timeshift = true
-dash_timeshift_hours = 4
-"#,
+        r#"{"groups":[{"id":"dts","name":"DASH 时移","mode":"dash","access":"open","channels":[{"id":"c1","name":"DASH 回看频道","url":"{upstream}/dash/live.mpd","dash_timeshift":true,"dash_timeshift_hours":4}]}]}"#
     )
     .await;
 
@@ -3622,17 +3469,7 @@ dash_timeshift_hours = 4
 #[tokio::test]
 async fn dash_timeshift_requires_channel_flag() {
     let fixture = fixture_with_extra(
-        r#"
-[[groups]]
-id = "dnt"
-name = "无时移"
-mode = "dash"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "DASH"
-url = "{upstream}/dash/live.mpd"
-"#,
+        r#"{"groups":[{"id":"dnt","name":"无时移","mode":"dash","access":"open","channels":[{"id":"c1","name":"DASH","url":"{upstream}/dash/live.mpd"}]}]}"#
     )
     .await;
     let response = fetch(
@@ -3647,22 +3484,7 @@ url = "{upstream}/dash/live.mpd"
 #[tokio::test]
 async fn proxy_mode_rewrites_mpd_base_url_and_proxies_segments() {
     let fixture = fixture_with_extra(
-        r#"
-[[groups]]
-id = "mpg"
-name = "代理 MPD"
-mode = "proxy"
-access = "open"
-mpd_keep_seconds = 4
-[[groups.channels]]
-id = "c1"
-name = "无 BaseURL"
-url = "{upstream}/dash/live.mpd"
-[[groups.channels]]
-id = "c2"
-name = "相对 BaseURL"
-url = "{upstream}/dash/base.mpd"
-"#,
+        r#"{"groups":[{"id":"mpg","name":"代理 MPD","mode":"proxy","access":"open","mpd_keep_seconds":4,"channels":[{"id":"c1","name":"无 BaseURL","url":"{upstream}/dash/live.mpd"},{"id":"c2","name":"相对 BaseURL","url":"{upstream}/dash/base.mpd"}]}]}"#
     )
     .await;
 
@@ -3747,19 +3569,7 @@ url = "{upstream}/dash/base.mpd"
 #[tokio::test]
 async fn dash_mode_resolver_url_is_used_for_media_playlist() {
     let fixture = fixture_with_extra(
-        r#"
-[[groups]]
-id = "dgr"
-name = "DASH 解析组"
-mode = "dash"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "DASH 解析频道"
-url = "http://127.0.0.1:9/never"
-resolver_script = "dash_probe.py"
-resolver_ttl = 60
-"#,
+        r#"{"groups":[{"id":"dgr","name":"DASH 解析组","mode":"dash","access":"open","channels":[{"id":"c1","name":"DASH 解析频道","url":"http://127.0.0.1:9/never","resolver_script":"dash_probe.py","resolver_ttl":60}]}]}"#
     )
     .await;
     let resolvers = fixture.dir.join("cache/resolvers");
@@ -3787,30 +3597,7 @@ resolver_ttl = 60
 #[tokio::test]
 async fn resolver_script_overrides_channel_url_with_ttl_cache() {
     let fixture = fixture_with_extra(
-        r#"
-[[groups]]
-id = "rg"
-name = "解析组"
-mode = "proxy"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "脚本频道"
-url = "http://127.0.0.1:9/never"
-resolver_script = "probe.py"
-resolver_arg = "MARKER_PATH"
-resolver_ttl = 60
-[[groups.channels]]
-id = "c2"
-name = "坏脚本频道"
-url = "http://127.0.0.1:9/never"
-resolver_script = "bad.py"
-[[groups.channels]]
-id = "c3"
-name = "缺脚本频道"
-url = "http://127.0.0.1:9/never"
-resolver_script = "missing.py"
-"#,
+        r#"{"groups":[{"id":"rg","name":"解析组","mode":"proxy","access":"open","channels":[{"id":"c1","name":"脚本频道","url":"http://127.0.0.1:9/never","resolver_script":"probe.py","resolver_arg":"MARKER_PATH","resolver_ttl":60},{"id":"c2","name":"坏脚本频道","url":"http://127.0.0.1:9/never","resolver_script":"bad.py"},{"id":"c3","name":"缺脚本频道","url":"http://127.0.0.1:9/never","resolver_script":"missing.py"}]}]}"#
     )
     .await;
 
@@ -3940,17 +3727,7 @@ async fn wait_remux_playlist(client: &Client, url: &str) -> HttpResponse {
 #[tokio::test]
 async fn remux_segments_continuous_ts_and_serves_disguised_slices() {
     let fixture = fixture_with_extra(
-        r#"
-[[groups]]
-id = "rx"
-name = "Remux 组"
-mode = "remux"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "连续流"
-url = "{upstream}/live.ts"
-"#,
+        r#"{"groups":[{"id":"rx","name":"Remux 组","mode":"remux","access":"open","channels":[{"id":"c1","name":"连续流","url":"{upstream}/live.ts"}]}]}"#
     )
     .await;
 
@@ -4109,14 +3886,7 @@ async fn schedule_crud_and_livestream_toggle() {
 async fn epg_script_source_runs_python_and_merges_output() {
     let fixture = fixture_with_all(
         true,
-        r#"
-[[epg.sources]]
-id = "s2"
-name = "脚本源"
-kind = "script"
-script = "gen.py"
-timeout_secs = 30
-"#,
+        r#"{"epg":{"sources":[{"id":"s2","name":"脚本源","kind":"script","script":"gen.py","timeout_secs":30}]}}"#,
     )
     .await;
 
@@ -4150,16 +3920,7 @@ print(f'''<?xml version="1.0" encoding="UTF-8"?>
 async fn epg_script_source_reports_missing_script() {
     let fixture = fixture_with_all(
         false,
-        r#"
-[epg]
-enabled = true
-
-[[epg.sources]]
-id = "s2"
-name = "缺失脚本"
-kind = "script"
-script = "missing.py"
-"#,
+        r#"{"epg":{"enabled":true,"sources":[{"id":"s2","name":"缺失脚本","kind":"script","script":"missing.py"}]}}"#,
     )
     .await;
 
@@ -4173,18 +3934,7 @@ script = "missing.py"
 #[tokio::test]
 async fn dash_schedule_rejects_static_mpd() {
     let fixture = fixture_with_extra(
-        r#"
-[[groups]]
-id = "rgd"
-name = "DASH 录制组"
-mode = "dash"
-access = "open"
-format = "mpd"
-[[groups.channels]]
-id = "c1"
-name = "静态 DASH"
-url = "{upstream}/dash/base.mpd"
-"#,
+        r#"{"groups":[{"id":"rgd","name":"DASH 录制组","mode":"dash","access":"open","format":"mpd","channels":[{"id":"c1","name":"静态 DASH","url":"{upstream}/dash/base.mpd"}]}]}"#
     )
     .await;
     let session = login(&fixture).await;
@@ -4333,13 +4083,8 @@ async fn subtitle_translate_endpoints_report_missing_engine() {
 
 #[tokio::test]
 async fn subtitle_mtran_reports_connection_failure_when_configured() {
-    let fixture = fixture_with_extra(
-        r#"
-[subtitle.translate]
-url = "http://127.0.0.1:9"
-"#,
-    )
-    .await;
+    let fixture =
+        fixture_with_extra(r#"{"subtitle":{"translate":{"url":"http://127.0.0.1:9"}}}"#).await;
 
     let response = fixture
         .client
@@ -4363,19 +4108,7 @@ url = "http://127.0.0.1:9"
 #[tokio::test]
 async fn timeshift_buffers_livestream_and_serves_vod_playlist() {
     let fixture = fixture_with_extra(
-        r#"
-[[groups]]
-id = "ts"
-name = "回看组"
-mode = "proxy"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "回看频道"
-url = "{upstream}/live.m3u8"
-livestream = true
-timeshift_hours = 4
-"#,
+        r#"{"groups":[{"id":"ts","name":"回看组","mode":"proxy","access":"open","channels":[{"id":"c1","name":"回看频道","url":"{upstream}/live.m3u8","livestream":true,"timeshift_hours":4}]}]}"#
     )
     .await;
 
@@ -4523,13 +4256,8 @@ async fn playlist_config_roundtrip_and_validation() {
 
 #[tokio::test]
 async fn subtitle_translation_engine_translates_and_caches() {
-    let extra = r#"
-[subtitle.translate]
-enabled = true
-url = "{upstream}"
-target = "zh-cn"
-# 不设 translation_first：走目标默认 true（译文在上）
-"#;
+    let extra =
+        r#"{"subtitle":{"translate":{"enabled":true,"url":"{upstream}","target":"zh-cn"}}}"#;
     let fixture = fixture_with_all(false, extra).await;
     let auth = format!("Bearer {}", login(&fixture).await);
     let directory = fixture.dir.join("cache/subtitles");
@@ -4611,13 +4339,7 @@ target = "zh-cn"
 
 #[tokio::test]
 async fn subtitle_translation_accepts_mtran_v5_and_token() {
-    let extra = r#"
-[subtitle.translate]
-enabled = true
-url = "{upstream}/v5"
-token = "demo-token"
-target = "zh-cn"
-"#;
+    let extra = r#"{"subtitle":{"translate":{"enabled":true,"url":"{upstream}/v5","token":"demo-token","target":"zh-cn"}}}"#;
     let fixture = fixture_with_all(false, extra).await;
     let auth = format!("Bearer {}", login(&fixture).await);
     let directory = fixture.dir.join("cache/subtitles");
@@ -4670,13 +4392,8 @@ target = "zh-cn"
 
 #[tokio::test]
 async fn subtitle_mtran_falls_back_to_single_endpoint() {
-    let fixture = fixture_with_extra(
-        r#"
-[subtitle.translate]
-url = "{upstream}/single"
-"#,
-    )
-    .await;
+    let fixture =
+        fixture_with_extra(r#"{"subtitle":{"translate":{"url":"{upstream}/single"}}}"#).await;
 
     let response = fixture
         .client
@@ -4695,12 +4412,8 @@ url = "{upstream}/single"
 
 #[tokio::test]
 async fn subtitle_translation_converts_ass_to_vtt() {
-    let extra = r#"
-[subtitle.translate]
-enabled = true
-url = "{upstream}"
-target = "zh-cn"
-"#;
+    let extra =
+        r#"{"subtitle":{"translate":{"enabled":true,"url":"{upstream}","target":"zh-cn"}}}"#;
     let fixture = fixture_with_all(false, extra).await;
     let auth = format!("Bearer {}", login(&fixture).await);
     let directory = fixture.dir.join("cache/subtitles");
@@ -4824,13 +4537,7 @@ async fn epg_translate_endpoints_report_unconfigured_engine() {
 
 #[tokio::test]
 async fn epg_translation_engine_appends_target_texts_and_reuses_cache() {
-    let extra = r#"
-[epg.translate]
-enabled = true
-url = "{upstream}"
-target = "zh-cn"
-source = "auto"
-"#;
+    let extra = r#"{"epg":{"translate":{"enabled":true,"url":"{upstream}","target":"zh-cn","source":"auto"}}}"#;
     let fixture = fixture_with_all(true, extra).await;
     let auth = login(&fixture).await;
 
@@ -5068,36 +4775,10 @@ async fn logo_animate_generates_animated_webp() {
 // ---------------------------------------------------------------------------
 
 /// T2：分组级关闭预取、频道级重新打开。
-const PREFETCH_SECTION: &str = r#"
-[[groups]]
-id = "npf"
-name = "关闭预取组"
-mode = "proxy"
-access = "open"
-[groups.prefetch]
-enabled = false
-[[groups.channels]]
-id = "c1"
-name = "关闭预取频道"
-url = "{upstream}/live.m3u8"
-
-[[groups]]
-id = "npfc"
-name = "频道重开组"
-mode = "proxy"
-access = "open"
-[groups.prefetch]
-enabled = false
-[[groups.channels]]
-id = "c1"
-name = "频道重开频道"
-url = "{upstream}/live.m3u8"
-[groups.channels.prefetch]
-enabled = true
-"#;
+const PREFETCH_SECTION: &str = r#"{"groups":[{"id":"npf","name":"关闭预取组","mode":"proxy","access":"open","prefetch":{"enabled":false},"channels":[{"id":"c1","name":"关闭预取频道","url":"{upstream}/live.m3u8"}]},{"id":"npfc","name":"频道重开组","mode":"proxy","access":"open","prefetch":{"enabled":false},"channels":[{"id":"c1","name":"频道重开频道","url":"{upstream}/live.m3u8","prefetch":{"enabled":true}}]}]}"#;
 
 /// T4：`[cdn]` 打开（其余取默认值）。
-const CDN_AUTO: &str = "[cdn]\nenabled = true\n";
+const CDN_AUTO: &str = r#"{"cdn":{"enabled":true}}"#;
 
 /// 数 `<cache>/seg_bytes` 下属于该分组的切片文件；最多等 1 秒。
 ///
@@ -5160,7 +4841,8 @@ async fn prefetch_channel_reenables_disabled_group() {
 
 #[tokio::test]
 async fn cdn_explicit_ttl_wins() {
-    let fixture = fixture_with_extra("[cdn]\nenabled = true\nsegment_max_age_secs = 777\n").await;
+    let fixture =
+        fixture_with_extra(r#"{"cdn":{"enabled":true,"segment_max_age_secs":777}}"#).await;
     let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
     let body = response.text().await.expect("读正文");
     let path = segment_path(&body, &fixture.base, 1);
@@ -5183,7 +4865,7 @@ async fn cdn_auto_ttl_uses_measurement() {
 
 #[tokio::test]
 async fn cdn_shared_cache_hits_makes_hit_public() {
-    let fixture = fixture_with_extra("[cdn]\nenabled = true\nshared_cache_hits = true\n").await;
+    let fixture = fixture_with_extra(r#"{"cdn":{"enabled":true,"shared_cache_hits":true}}"#).await;
     let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
     let body = response.text().await.expect("读正文");
     let path = segment_path(&body, &fixture.base, 1);
@@ -5199,7 +4881,7 @@ async fn cdn_shared_cache_hits_makes_hit_public() {
 #[tokio::test]
 async fn cdn_public_base_overrides_host() {
     let fixture =
-        fixture_with_extra("[cdn]\nenabled = true\npublic_base = \"https://cdn.example\"\n").await;
+        fixture_with_extra(r#"{"cdn":{"enabled":true,"public_base":"https://cdn.example"}}"#).await;
     let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
     let body = response.text().await.expect("读正文");
     for url in media_lines(&body) {
@@ -5229,7 +4911,7 @@ async fn cdn_empty_body_becomes_502() {
 async fn cdn_dont_cache_empty_keeps_200() {
     // `empty_status = 0` 不是错误码 → 退回「200 空体 + no-store」。
     let fixture =
-        fixture_with_extra("[cdn]\nenabled = true\nempty_status = 0\ndont_cache_empty = true\n")
+        fixture_with_extra(r#"{"cdn":{"enabled":true,"empty_status":0,"dont_cache_empty":true}}"#)
             .await;
     let response = fetch(&fixture, "/badseg/c1.m3u8").await;
     let body = response.text().await.expect("读正文");
@@ -5265,12 +4947,13 @@ async fn cdn_disabled_matches_legacy() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-/// 按给定 TOML 起夹具（`{dir}` 会被替换成临时目录）。
-async fn fixture_from_toml(toml: &str) -> Fixture {
+/// 按给定 JSON 起夹具（`{dir}` 会被替换成临时目录）。
+async fn fixture_from_json(body: &str) -> Fixture {
     let dir = std::env::temp_dir().join(format!("tv-buddy-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("建临时目录");
-    let body = toml.replace("{dir}", &dir.display().to_string());
-    let cfg = config::legacy::parse(&body).expect("加载配置");
+    let body = body.replace("{dir}", &dir.display().to_string());
+    let cfg: config::Config = serde_json::from_str(&body).expect("解析配置");
+    config::validate(&cfg).expect("校验配置");
     let db_path = dir.join("tv-buddy.db");
     let state =
         Arc::new(AppState::new(db_path, cfg, Arc::new(RingBuffer::default())).expect("建状态"));
@@ -5335,38 +5018,47 @@ static ESTIMATE_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(()
 async fn estimate_returns_recommendation() {
     let _serial = ESTIMATE_TESTS.lock().await;
     let upstream = serve_live().await;
-    let fixture = fixture_from_toml(&format!(
-        r#"
-[server]
-bind = "127.0.0.1:0"
-log_level = "error"
-
-[cache]
-disk_path = "{{dir}}/cache"
-
-[cdn]
-enabled = true
-
-[[groups]]
-id = "e1"
-name = "估算一"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "估算频道一"
-url = "{upstream}/live.m3u8"
-
-[[groups]]
-id = "e2"
-name = "估算二"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "估算频道二"
-url = "{upstream}/live.m3u8"
-"#
+    let fixture = fixture_from_json(&format!(
+        r#"{{
+    "server": {{
+        "bind": "127.0.0.1:0",
+        "log_level": "error"
+    }},
+    "cache": {{
+        "disk_path": "{{dir}}/cache"
+    }},
+    "cdn": {{
+        "enabled": true
+    }},
+    "groups": [
+        {{
+            "id": "e1",
+            "name": "估算一",
+            "mode": "proxy",
+            "access": "public",
+            "channels": [
+                {{
+                    "id": "c1",
+                    "name": "估算频道一",
+                    "url": "{upstream}/live.m3u8"
+                }}
+            ]
+        }},
+        {{
+            "id": "e2",
+            "name": "估算二",
+            "mode": "proxy",
+            "access": "public",
+            "channels": [
+                {{
+                    "id": "c1",
+                    "name": "估算频道二",
+                    "url": "{upstream}/live.m3u8"
+                }}
+            ]
+        }}
+    ]
+}}"#
     ))
     .await;
     let session = login(&fixture).await;
@@ -5386,38 +5078,47 @@ async fn estimate_all_failed_is_not_500() {
     let _serial = ESTIMATE_TESTS.lock().await;
     // 上游只有 `live.m3u8`；频道指向不存在的路径 → 全部失败，但仍返回 200。
     let upstream = serve_live().await;
-    let fixture = fixture_from_toml(&format!(
-        r#"
-[server]
-bind = "127.0.0.1:0"
-log_level = "error"
-
-[cache]
-disk_path = "{{dir}}/cache"
-
-[cdn]
-enabled = true
-
-[[groups]]
-id = "e1"
-name = "估算一"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "估算频道一"
-url = "{upstream}/missing.m3u8"
-
-[[groups]]
-id = "e2"
-name = "估算二"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "估算频道二"
-url = "{upstream}/missing.m3u8"
-"#
+    let fixture = fixture_from_json(&format!(
+        r#"{{
+    "server": {{
+        "bind": "127.0.0.1:0",
+        "log_level": "error"
+    }},
+    "cache": {{
+        "disk_path": "{{dir}}/cache"
+    }},
+    "cdn": {{
+        "enabled": true
+    }},
+    "groups": [
+        {{
+            "id": "e1",
+            "name": "估算一",
+            "mode": "proxy",
+            "access": "public",
+            "channels": [
+                {{
+                    "id": "c1",
+                    "name": "估算频道一",
+                    "url": "{upstream}/missing.m3u8"
+                }}
+            ]
+        }},
+        {{
+            "id": "e2",
+            "name": "估算二",
+            "mode": "proxy",
+            "access": "public",
+            "channels": [
+                {{
+                    "id": "c1",
+                    "name": "估算频道二",
+                    "url": "{upstream}/missing.m3u8"
+                }}
+            ]
+        }}
+    ]
+}}"#
     ))
     .await;
     let session = login(&fixture).await;
@@ -5436,58 +5137,73 @@ async fn estimate_skips_archived_groups() {
     let _serial = ESTIMATE_TESTS.lock().await;
     // 归档组放最前且指向 404：若被探测，`failed` 里就会出现它。
     let upstream = serve_live().await;
-    let fixture = fixture_from_toml(&format!(
-        r#"
-[server]
-bind = "127.0.0.1:0"
-log_level = "error"
-
-[cache]
-disk_path = "{{dir}}/cache"
-
-[cdn]
-enabled = true
-
-[[groups]]
-id = "arch"
-name = "归档组"
-mode = "proxy"
-access = "archived"
-[[groups.channels]]
-id = "c1"
-name = "归档频道"
-url = "{upstream}/missing.m3u8"
-
-[[groups]]
-id = "e1"
-name = "估算一"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "估算频道一"
-url = "{upstream}/live.m3u8"
-
-[[groups]]
-id = "e2"
-name = "估算二"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "估算频道二"
-url = "{upstream}/live.m3u8"
-
-[[groups]]
-id = "e3"
-name = "估算三"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "估算频道三"
-url = "{upstream}/live.m3u8"
-"#
+    let fixture = fixture_from_json(&format!(
+        r#"{{
+    "server": {{
+        "bind": "127.0.0.1:0",
+        "log_level": "error"
+    }},
+    "cache": {{
+        "disk_path": "{{dir}}/cache"
+    }},
+    "cdn": {{
+        "enabled": true
+    }},
+    "groups": [
+        {{
+            "id": "arch",
+            "name": "归档组",
+            "mode": "proxy",
+            "access": "archived",
+            "channels": [
+                {{
+                    "id": "c1",
+                    "name": "归档频道",
+                    "url": "{upstream}/missing.m3u8"
+                }}
+            ]
+        }},
+        {{
+            "id": "e1",
+            "name": "估算一",
+            "mode": "proxy",
+            "access": "public",
+            "channels": [
+                {{
+                    "id": "c1",
+                    "name": "估算频道一",
+                    "url": "{upstream}/live.m3u8"
+                }}
+            ]
+        }},
+        {{
+            "id": "e2",
+            "name": "估算二",
+            "mode": "proxy",
+            "access": "public",
+            "channels": [
+                {{
+                    "id": "c1",
+                    "name": "估算频道二",
+                    "url": "{upstream}/live.m3u8"
+                }}
+            ]
+        }},
+        {{
+            "id": "e3",
+            "name": "估算三",
+            "mode": "proxy",
+            "access": "public",
+            "channels": [
+                {{
+                    "id": "c1",
+                    "name": "估算频道三",
+                    "url": "{upstream}/live.m3u8"
+                }}
+            ]
+        }}
+    ]
+}}"#
     ))
     .await;
     let session = login(&fixture).await;

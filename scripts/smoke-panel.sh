@@ -10,7 +10,7 @@ BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19926}
 UPORT=${UPORT:-19927}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 
 cat > "$WORK/manifest.mpd" <<'MPD'
@@ -30,16 +30,19 @@ MPD
 python3 -m http.server "$UPORT" --bind 127.0.0.1 --directory "$WORK" >"$WORK/upstream.log" 2>&1 &
 UPID=$!
 
-cat > "$CFG" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
+cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  }
+}
+JSON
 
-[cache]
-disk_path = "$WORK/cache"
-TOML
-
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT

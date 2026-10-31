@@ -15,19 +15,12 @@
 | 未建模键 | 存 `extra`（`toml::Table`），随 JSON 往返保留 | 设计决策（避免丢第三方配置） |
 | 写回 | 单条 UPSERT，事务原子 | S-CFG-01（F-006） |
 | 并发 | 进程内一把写锁；跨进程靠 SQLite 锁与 `busy_timeout=5000` | 设计决策 |
-| 旧 TOML | 只在 `import-config` 子命令与旧备份恢复时解析 | 迁移决策 |
-
-启动参数以 `.toml` 结尾时直接报错，提示改用 `import-config`。库为空且同目录存在
-`config.toml` 时也拒绝启动，避免用空分组跑起来。
-
-**兼容性变化**：本实现不再直接读取目标产品的 `config.toml`。升级时先运行一次
-`tv-buddy import-config <config.toml>`，之后配置只从数据库来。
 
 子命令：
 
 | 命令 | 作用 |
 | --- | --- |
-| `import-config <toml> [--db <路径>] [--force]` | 旧配置一次性导入 |
+| `config import <config.json> [--db <路径>] [--force]` | 从 JSON 文件导入整份配置 |
 | `config get <a.b.c>` | 读一个配置值 |
 | `config set <a.b.c> <值>` | 写一个配置值 |
 | `config reset [--force]` | 配置恢复默认，保留用户 |
@@ -190,7 +183,7 @@ tv-buddy-<version>-<arch>/
 
 > 说明：本机访问 `github.com` 的 release 资产与 `static.rust-lang.org` 会被中间设备断开 TLS，
 > 因此不用 `cross`，改用 Docker Hub 可用的 `rust:1-alpine` 完成双架构静态构建。
-| 备份（P2） | `tar.gz` 含 `config.json` + `cache/logos` + `schedule.json`；恢复时原配置另存 `tv-buddy.db.bak.json`。旧包里的 `config.toml` 仍可恢复 | S-BAK-01/02、F-013 §9 |
+| 备份（P2） | `tar.gz` 含 `config.json` + `cache/logos` + `schedule.json`；恢复时原配置另存 `tv-buddy.db.bak.json` | S-BAK-01/02、F-013 §9 |
 
 ## 7. 未决问题
 

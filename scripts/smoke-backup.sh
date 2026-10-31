@@ -9,24 +9,29 @@ cd "$(dirname "$0")/.."
 BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19919}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 
-cat > "$CFG" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
+cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  },
+  "groups": [
+    {
+      "id": "g1",
+      "name": "原组",
+      "mode": "proxy"
+    }
+  ]
+}
+JSON
 
-[cache]
-disk_path = "$WORK/cache"
-
-[[groups]]
-id = "g1"
-name = "原组"
-mode = "proxy"
-TOML
-
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
@@ -52,7 +57,7 @@ check "备份类型" "application/gzip" "$(awk 'BEGIN{IGNORECASE=1}index($0,"con
 check "备份文件名" "1" "$(awk 'BEGIN{IGNORECASE=1}/^content-disposition:/&&/tv-buddy-backup-/{n=1}END{print n+0}' "$WORK/backup.head")"
 check "备份魔数" "1f8b" "$(od -An -tx1 -N2 "$WORK/backup.tar.gz" | tr -d ' ')"
 check "备份含配置" "1" "$(tar tzf "$WORK/backup.tar.gz" 2>/dev/null | grep -c 'tv-buddy-backup/config.json' || true)"
-check "备份不含 TOML" "0" "$(tar tzf "$WORK/backup.tar.gz" 2>/dev/null | grep -c 'config.toml' || true)"
+check "备份包只有一份配置" "1" "$(tar tzf "$WORK/backup.tar.gz" 2>/dev/null | grep -c 'config' || true)"
 
 IMPORT='[{"id":"tmp","name":"临时组","mode":"proxy"}]'
 curl -s -o /dev/null -X POST "$B/panel/api/groups/import" -H "$AUTH" -H 'content-type: application/json' -d "$IMPORT"

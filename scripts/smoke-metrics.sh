@@ -29,43 +29,53 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
-cat > "$WORK/config.toml" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
+cat > "$WORK/config.json" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  },
+  "health": {
+    "enabled": true,
+    "interval_secs": 10,
+    "timeout_secs": 2,
+    "concurrency": 2
+  },
+  "auth": {
+    "token_enabled": true
+  },
+  "groups": [
+    {
+      "id": "mx",
+      "name": "指标组",
+      "mode": "proxy",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "可用频道",
+          "url": "http://127.0.0.1:$UPORT/live.m3u8"
+        },
+        {
+          "id": "c2",
+          "name": "连不通频道",
+          "url": "http://127.0.0.1:1/dead.m3u8"
+        },
+        {
+          "id": "c3",
+          "name": "404 频道",
+          "url": "http://127.0.0.1:$UPORT/missing.m3u8"
+        }
+      ]
+    }
+  ]
+}
+JSON
 
-[cache]
-disk_path = "$WORK/cache"
-
-[health]
-enabled = true
-interval_secs = 10
-timeout_secs = 2
-concurrency = 2
-
-[auth]
-token_enabled = true
-
-[[groups]]
-id = "mx"
-name = "指标组"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "可用频道"
-url = "http://127.0.0.1:$UPORT/live.m3u8"
-[[groups.channels]]
-id = "c2"
-name = "连不通频道"
-url = "http://127.0.0.1:1/dead.m3u8"
-[[groups.channels]]
-id = "c3"
-name = "404 频道"
-url = "http://127.0.0.1:$UPORT/missing.m3u8"
-TOML
-
-"$BIN" import-config "$WORK/config.toml" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
+"$BIN" config import "$WORK/config.json" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
 "$BIN" "$WORK/tv-buddy.db" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT

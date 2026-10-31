@@ -9,28 +9,36 @@ cd "$(dirname "$0")/.."
 BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19918}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 
-cat > "$CFG" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
+cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  },
+  "groups": [
+    {
+      "id": "g1",
+      "name": "分组",
+      "mode": "proxy",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "频道",
+          "url": "http://127.0.0.1:9/none.m3u8"
+        }
+      ]
+    }
+  ]
+}
+JSON
 
-[cache]
-disk_path = "$WORK/cache"
-
-[[groups]]
-id = "g1"
-name = "分组"
-mode = "proxy"
-[[groups.channels]]
-id = "c1"
-name = "频道"
-url = "http://127.0.0.1:9/none.m3u8"
-TOML
-
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
@@ -63,7 +71,7 @@ check "取图缓存头" "public, max-age=86400" "$(header "$B/logo/cctv1.png" ca
 check "取图魔数" "89504e47" "$(od -An -tx1 -N4 "$WORK/logo.png" | tr -d ' ')"
 check "列表计数" "1" "$(curl -s "$B/logo/api/list" | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])')"
 check "缺文件 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/missing.png")"
-check "越界名 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/..%2F..%2Fconfig.toml")"
+check "越界名 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/..%2F..%2Fconfig.json")"
 check "越界扩展 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/evil.exe")"
 
 check "台标页 200" "200" "$(curl -s -o "$WORK/page.html" -w '%{http_code}' "$B/logo")"

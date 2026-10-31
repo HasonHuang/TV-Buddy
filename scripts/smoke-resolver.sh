@@ -17,34 +17,43 @@ mkdir -p "$WORK/cache/resolvers"
 printf 'import sys\nopen(r"%s","a").write("x")\nprint("http://127.0.0.1:%s/live.m3u8")\n' "$MARK" "$UPORT" > "$WORK/cache/resolvers/probe.py"
 printf 'print("not-a-url")\n' > "$WORK/cache/resolvers/bad.py"
 
-cat > "$WORK/config.toml" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
-error_url = "http://placeholder.test/mistake.mp4"
+cat > "$WORK/config.json" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn",
+    "error_url": "http://placeholder.test/mistake.mp4"
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  },
+  "groups": [
+    {
+      "id": "rg",
+      "name": "解析组",
+      "mode": "proxy",
+      "access": "open",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "脚本频道",
+          "url": "http://127.0.0.1:9/never",
+          "resolver_script": "probe.py",
+          "resolver_ttl": 60
+        },
+        {
+          "id": "c2",
+          "name": "坏脚本",
+          "url": "http://127.0.0.1:9/never",
+          "resolver_script": "bad.py"
+        }
+      ]
+    }
+  ]
+}
+JSON
 
-[cache]
-disk_path = "$WORK/cache"
-
-[[groups]]
-id = "rg"
-name = "解析组"
-mode = "proxy"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "脚本频道"
-url = "http://127.0.0.1:9/never"
-resolver_script = "probe.py"
-resolver_ttl = 60
-[[groups.channels]]
-id = "c2"
-name = "坏脚本"
-url = "http://127.0.0.1:9/never"
-resolver_script = "bad.py"
-TOML
-
-"$BIN" import-config "$WORK/config.toml" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
+"$BIN" config import "$WORK/config.json" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
 "$BIN" "$WORK/tv-buddy.db" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT

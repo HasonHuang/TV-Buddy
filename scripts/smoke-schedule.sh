@@ -10,26 +10,34 @@ BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19934}
 WORK=$(mktemp -d)
 
-cat > "$WORK/config.toml" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
+cat > "$WORK/config.json" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  },
+  "groups": [
+    {
+      "id": "g",
+      "name": "组",
+      "mode": "proxy",
+      "access": "open",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "频道",
+          "url": "http://127.0.0.1:1/x.m3u8"
+        }
+      ]
+    }
+  ]
+}
+JSON
 
-[cache]
-disk_path = "$WORK/cache"
-
-[[groups]]
-id = "g"
-name = "组"
-mode = "proxy"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "频道"
-url = "http://127.0.0.1:1/x.m3u8"
-TOML
-
-"$BIN" import-config "$WORK/config.toml" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
+"$BIN" config import "$WORK/config.json" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
 "$BIN" "$WORK/tv-buddy.db" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT

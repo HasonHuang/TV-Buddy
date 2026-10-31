@@ -1,10 +1,3 @@
-> **2026-10-31 起配置存 SQLite。**
-> 数据库是 `<prefix>/tv-buddy.db`。本文里凡是「编辑 `config.toml`」的步骤，改为
-> `tv-buddy config set <键> <值>`；凡是把 `config.toml` 当启动参数的，改为
-> `tv-buddy <prefix>/tv-buddy.db`。需要一次导入旧配置时运行
-> `tv-buddy import-config <config.toml> --db <prefix>/tv-buddy.db`。
-> 备份、重装、恢复的载体是同名数据库文件。详见 `PROGRESS.md` §5。
-
 ## 1. 目的
 
 这份文档证明管理面板的外观与结构可用。判据是**元素存在、顺序正确、尺寸正确**，不是像素一致。
@@ -13,7 +6,7 @@
 
 范围外：
 
-- 目标 `/panel` 的像素级比对。`docs/design/07-coverage-and-plan.md` §5 明确不做像素比对。
+- 目标 `/panel` 的像素级比对。本项目不做像素比对。
 - 浏览器兼容性。只测 Chrome。
 
 > 本实现的界面文案全部自研。目标截图只用来对照布局层级，不用来对照文字（`docs/design/reference/README.md` §7）。
@@ -25,7 +18,7 @@
 | 机器 | 已按 `01-install-and-start.md` 装好并启动 |
 | 浏览器 | Chrome 133 或更新版本 |
 | 视口 | 1440×1000，设备像素比 1 |
-| 面板账号 | 默认 `admin` / `admin` |
+| 面板账号 | `admin`，口令由 `TV_BUDDY_INITIAL_PASSWORD` 固定为 `admin` |
 | 伪上游 | `python3 -m http.server 9999` 提供 `live.m3u8` 与 `live.mpd` |
 | 端口 | `19898/tcp` 空闲。用独立实例测，不动生产实例 |
 
@@ -35,18 +28,12 @@
 
 ```bash
 sudo mkdir -p /tmp/tv-buddy-panel-test/cache
-sudo tee /tmp/tv-buddy-panel-test/config.toml >/dev/null <<'EOF'
-[server]
-bind = "127.0.0.1:19898"
-log_level = "info"
-
-[health]
-interval_secs = 10
-
-[cache]
-disk_path = "/tmp/tv-buddy-panel-test/cache"
-EOF
-sudo /opt/tv-buddy/tv-buddy /tmp/tv-buddy-panel-test/config.toml \
+DB=/tmp/tv-buddy-panel-test/tv-buddy.db
+sudo /opt/tv-buddy/tv-buddy config set server.bind "127.0.0.1:19898" --db "$DB"
+sudo /opt/tv-buddy/tv-buddy config set server.log_level info --db "$DB"
+sudo /opt/tv-buddy/tv-buddy config set health.interval_secs 10 --db "$DB"
+sudo /opt/tv-buddy/tv-buddy config set cache.disk_path /tmp/tv-buddy-panel-test/cache --db "$DB"
+TV_BUDDY_INITIAL_PASSWORD=admin sudo -E /opt/tv-buddy/tv-buddy "$DB" \
   >/tmp/tv-buddy-panel-test/run.log 2>&1 &
 echo $! | sudo tee /tmp/tv-buddy-panel-test/pid
 sleep 1
@@ -55,7 +42,7 @@ curl -fsS http://127.0.0.1:19898/health; echo
 
 预期：`ok`。
 
-配置路径是**第一个位置参数**。没有 `--config` 开关（`src/main.rs:14-17`）。
+数据库路径是**第一个位置参数**。配置只能通过面板或 `config` 子命令改。
 
 ### 2.2 启动本地伪上游
 
@@ -205,7 +192,7 @@ JSON.stringify({
 | 概览 | 系统概览 | 实时运行状态 |
 | 缓存状态 | 缓存状态 | `<后端> · <字节数>` |
 | 分组管理 | 分组管理 | 管理直播分组与频道 |
-| 系统设置 | 系统设置 | 修改后点击保存生效；保存写回整份 config.toml。 |
+| 系统设置 | 系统设置 | 修改后点击保存生效；配置保存在本地数据库。 |
 | 安全管控 | 安全管控 | 播放 Token、访问控制与限流 |
 | 频道热度 | 频道热度 | `版本 <版本号>` |
 | 定时录制 | 定时录制 | 按时间表用 ffmpeg 录制，产物为 MKV |

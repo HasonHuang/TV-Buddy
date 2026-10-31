@@ -15,41 +15,17 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(code);
     }
 
-    // 第一个参数是数据库路径。旧参数 `config.toml` 给出明确提示。
+    // 第一个参数是数据库路径。
     let db_path: PathBuf = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "tv-buddy.db".to_string())
         .into();
-    if db_path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
-    {
-        anyhow::bail!(
-            "配置已改为 SQLite。先运行 `tv-buddy import-config {}` 导入，再用数据库路径启动",
-            db_path.display()
-        );
-    }
 
     let conn = db::connect(&db_path)?;
     let store = config::ConfigStore::new(conn.clone());
     let (cfg, fresh) = match store.load()? {
         Some(config) => (config, false),
         None => {
-            // 库里没有配置，旁边却有旧配置文件：多半是升级后忘了导入。
-            // 不静默生成默认配置，否则会用空分组启动，且用户库路径也找错。
-            let legacy = db_path
-                .parent()
-                .filter(|dir| !dir.as_os_str().is_empty())
-                .unwrap_or_else(|| std::path::Path::new("."))
-                .join("config.toml");
-            if legacy.is_file() {
-                anyhow::bail!(
-                    "检测到旧配置文件 {}。请先运行 `tv-buddy import-config {} --db {}`",
-                    legacy.display(),
-                    legacy.display(),
-                    db_path.display()
-                );
-            }
             let config = config::Config::default();
             store.save(&config)?;
             (config, true)

@@ -55,28 +55,36 @@ PY
 python3 -m http.server "$UPORT" --bind 127.0.0.1 --directory "$WORK" >"$WORK/up.log" 2>&1 &
 UP_PID=$!
 
-cat > "$WORK/config.toml" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
-timezone_offset_hours = 8
+cat > "$WORK/config.json" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn",
+    "timezone_offset_hours": 8
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  },
+  "groups": [
+    {
+      "id": "dh",
+      "name": "DASH 组",
+      "mode": "dash",
+      "access": "open",
+      "format": "mpd",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "DASH 录制频道",
+          "url": "http://127.0.0.1:$UPORT/live.mpd"
+        }
+      ]
+    }
+  ]
+}
+JSON
 
-[cache]
-disk_path = "$WORK/cache"
-
-[[groups]]
-id = "dh"
-name = "DASH 组"
-mode = "dash"
-access = "open"
-format = "mpd"
-[[groups.channels]]
-id = "c1"
-name = "DASH 录制频道"
-url = "http://127.0.0.1:$UPORT/live.mpd"
-TOML
-
-"$BIN" import-config "$WORK/config.toml" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
+"$BIN" config import "$WORK/config.json" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
 "$BIN" "$WORK/tv-buddy.db" >"$WORK/server.log" 2>&1 &
 PID=$!
 B="http://127.0.0.1:$PORT"

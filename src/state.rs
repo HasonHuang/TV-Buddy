@@ -108,11 +108,6 @@ impl AppState {
         if config_store.load()?.is_none() {
             config_store.save(&config)?;
         }
-        // 旧版本把用户存在 `<cache>/users.db`。首次启动搬进主库，旧文件不动。
-        if let Err(error) = crate::users::store::migrate_legacy(&conn, &cache_dir.join("users.db"))
-        {
-            tracing::warn!(%error, "迁移旧用户库失败");
-        }
         let users = crate::users::UserStore::attach(conn)?;
         let offset_hours = config.server.timezone_offset_hours as i64;
         ensure_cache_dirs(&cache_dir);

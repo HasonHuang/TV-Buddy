@@ -350,11 +350,6 @@ install -m 0755 "$ASSET_DIR/tv-buddy.sh" "$PREFIX/tv-buddy.sh"
 DB="$PREFIX/tv-buddy.db"
 if [ -f "$DB" ]; then
     echo "保留已有数据库：$DB"
-elif [ -f "$PREFIX/config.toml" ]; then
-    # 旧版本升级：把 config.toml 一次性导入数据库。原文件保留。
-    echo "检测到旧配置，导入数据库…"
-    "$PREFIX/tv-buddy" import-config "$PREFIX/config.toml" --db "$DB" \
-        || fail "导入旧配置失败：$PREFIX/config.toml"
 fi
 
 if [ "$LOW_SPEC" = 1 ]; then

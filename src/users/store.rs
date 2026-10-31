@@ -18,15 +18,13 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 
 use super::model::{now_ms, AccessToken, Purpose, Role, User};
 use crate::db::SharedConn;
 
 const USERS: &str = "users";
 const TOKENS: &str = "access_tokens";
-/// 旧用户库已迁移的标记位。
-const MIGRATED_KEY: &str = "users_migrated";
 /// 初始管理员用户名。与目标一致。
 pub const INITIAL_ADMIN: &str = "admin";
 
@@ -495,73 +493,6 @@ pub fn write_credentials_file(path: &Path, username: &str, password: &str) -> Re
     Ok(())
 }
 
-/// 把旧版本的 `<cache>/users.db` 迁进主库。
-///
-/// 只在 `users_migrated` 标记未置位且旧库存在时执行。旧文件保持不动。
-/// 旧库不是有效数据库时返回错误，由调用方记日志，不阻断启动。
-pub fn migrate_legacy(conn: &SharedConn, legacy: &Path) -> Result<usize> {
-    // 用标记位判断，不用「用户表是否为空」。
-    // 否则把用户全删光后重启，旧账号会被复活。
-    {
-        let guard = conn.lock().unwrap_or_else(|e| e.into_inner());
-        let done: Option<String> = guard
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                params![MIGRATED_KEY],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if done.is_some() {
-            return Ok(0);
-        }
-    }
-    if !legacy.is_file() {
-        return Ok(0);
-    }
-    let old =
-        rusqlite::Connection::open_with_flags(legacy, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .with_context(|| format!("打开旧用户库失败: {}", legacy.display()))?;
-
-    let mut moved = 0usize;
-    let guard = conn.lock().unwrap_or_else(|e| e.into_inner());
-    let tx = guard.unchecked_transaction()?;
-    for table in [USERS, TOKENS] {
-        let mut stmt = old.prepare(&format!(
-            "SELECT id, sort_order, config_json, updated_at_ms FROM {table}"
-        ))?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })?;
-        for row in rows {
-            let (id, order, json, updated) = row?;
-            moved += tx.execute(
-                &format!(
-                    "INSERT OR IGNORE INTO {table}
-                       (id, sort_order, config_json, updated_at_ms)
-                     VALUES (?1, ?2, ?3, ?4)"
-                ),
-                params![id, order, json, updated],
-            )?;
-        }
-    }
-    tx.execute(
-        "INSERT INTO settings (key, value, updated_at_ms) VALUES (?1, ?2, ?3)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![MIGRATED_KEY, "1", now_ms()],
-    )?;
-    tx.commit()?;
-    drop(guard);
-    if moved > 0 {
-        tracing::info!(count = moved, path = %legacy.display(), "已迁移旧用户库");
-    }
-    Ok(moved)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -656,34 +587,6 @@ mod tests {
         assert!(store.find_token(&token.token).is_some());
         store.revoke_token(&token.token).expect("撤销");
         assert!(store.find_token(&token.token).is_none());
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn migrates_legacy_database_once() {
-        let dir = temp_dir("migrate-legacy");
-        let legacy_path = dir.join("users.db");
-        {
-            let conn = crate::db::connect(&legacy_path).expect("旧库");
-            let old = UserStore::attach(conn).expect("载入旧库");
-            let user = old.create_user(sample_user("legacy")).expect("新建");
-            old.create_token(&user.id, Purpose::Device, None, None)
-                .expect("建令牌");
-        }
-
-        let target = crate::db::connect(&dir.join("tv-buddy.db")).expect("新库");
-        assert_eq!(migrate_legacy(&target, &legacy_path).expect("迁移"), 2);
-        let store = UserStore::attach(target.clone()).expect("载入新库");
-        let user = store.find_by_username("legacy").expect("已迁移");
-        assert_eq!(store.list_tokens(&user.id).len(), 1);
-
-        // 删光用户后重跑：标记位已置位，旧账号不复活。
-        store.delete_user(&user.id).expect("删除");
-        assert_eq!(migrate_legacy(&target, &legacy_path).expect("再迁移"), 0);
-        assert!(store.find_by_username("legacy").is_none());
-
-        // 旧库文件仍在。
-        assert!(legacy_path.is_file());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

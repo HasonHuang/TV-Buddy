@@ -25,28 +25,36 @@ ffmpeg -loglevel error -f lavfi -i testsrc=size=320x240:rate=25 -t 16 \
 python3 -m http.server "$UPORT" --bind 127.0.0.1 --directory "$WORK" >"$WORK/up.log" 2>&1 &
 UPID=$!
 
-cat > "$WORK/config.toml" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
+cat > "$WORK/config.json" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  },
+  "groups": [
+    {
+      "id": "dg",
+      "name": "DASH 组",
+      "mode": "dash",
+      "access": "open",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "DASH 频道",
+          "url": "http://127.0.0.1:$UPORT/out.mpd",
+          "dash_timeshift": true,
+          "dash_timeshift_hours": 4
+        }
+      ]
+    }
+  ]
+}
+JSON
 
-[cache]
-disk_path = "$WORK/cache"
-
-[[groups]]
-id = "dg"
-name = "DASH 组"
-mode = "dash"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "DASH 频道"
-url = "http://127.0.0.1:$UPORT/out.mpd"
-dash_timeshift = true
-dash_timeshift_hours = 4
-TOML
-
-"$BIN" import-config "$WORK/config.toml" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
+"$BIN" config import "$WORK/config.json" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
 "$BIN" "$WORK/tv-buddy.db" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT

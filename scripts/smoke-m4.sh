@@ -13,7 +13,7 @@ BIN=$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")
 PORT=${PORT:-19918}
 UP=${UP:-19919}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 CACHE="$WORK/cache"
 
@@ -40,35 +40,46 @@ cat > "$WORK/up/main.mpd" <<'EOF'
 EOF
 
 write_config() { # 参数 1：DASH 频道地址
-  cat > "$CFG" <<EOF
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "info"
-
-[cache]
-disk_path = "$CACHE"
-
-[[groups]]
-id = "pg"
-name = "代理组"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "代理频道"
-url = "http://127.0.0.1:$UP/live.m3u8"
-
-[[groups]]
-id = "dg"
-name = "DASH 组"
-mode = "dash"
-access = "public"
-format = "mpd"
-[[groups.channels]]
-id = "d1"
-name = "DASH 频道"
-url = "$1"
-EOF
+  cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "info"
+  },
+  "cache": {
+    "disk_path": "$CACHE"
+  },
+  "groups": [
+    {
+      "id": "pg",
+      "name": "代理组",
+      "mode": "proxy",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "代理频道",
+          "url": "http://127.0.0.1:$UP/live.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "dg",
+      "name": "DASH 组",
+      "mode": "dash",
+      "access": "public",
+      "format": "mpd",
+      "channels": [
+        {
+          "id": "d1",
+          "name": "DASH 频道",
+          "url": "$1"
+        }
+      ]
+    }
+  ]
+}
+JSON
 }
 
 write_config "http://127.0.0.1:1/dead.mpd"
@@ -80,7 +91,7 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 # 在 $WORK 里启动，日志文件落在 $WORK/tv-buddy.log。
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 (cd "$WORK" && exec "$BIN" "$DB" >"$WORK/server.log" 2>&1) &
 PID=$!
 trap '{ kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"; } 2>/dev/null' EXIT
@@ -112,21 +123,25 @@ A=(-H "Authorization: Bearer $T" -H 'Content-Type: application/json')
 # --- 重载：管理 CLI 改库，面板接口生效 ---
 check "重载前 2 条" "2" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
 python3 - <<PY
-text = open("$CFG", encoding="utf-8").read()
-text += '''
-[[groups]]
-id = "hot"
-name = "热重载组"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "h1"
-name = "热重载频道"
-url = "http://127.0.0.1:$UP/live.m3u8"
-'''
-open("$CFG", "w", encoding="utf-8").write(text)
+import json
+path = "$CFG"
+cfg = json.load(open(path, encoding="utf-8"))
+cfg["groups"].append({
+    "id": "hot",
+    "name": "热重载组",
+    "mode": "proxy",
+    "access": "public",
+    "channels": [
+        {
+            "id": "h1",
+            "name": "热重载频道",
+            "url": "http://127.0.0.1:$UP/live.m3u8",
+        }
+    ],
+})
+json.dump(cfg, open(path, "w", encoding="utf-8"), ensure_ascii=False)
 PY
-"$BIN" import-config "$CFG" --db "$DB" --force >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" --force >/dev/null || exit 1
 check "改库后未生效" "2" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
 check "重载接口 200" "200" "$(code -X POST "${A[@]}" "$B/panel/api/reload")"
 for _ in $(seq 1 50); do
@@ -138,8 +153,8 @@ check "重载后 3 条" "3" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
 check "重载已记日志" "1" "$(grep -c '配置已重载' "$WORK/tv-buddy.log")"
 
 # 坏配置：导入失败，库与快照都不变
-printf '[server]\nbind = "127.0.0.1:1"\nbind = "127.0.0.1:2"\n' > "$CFG.bad"
-if "$BIN" import-config "$CFG.bad" --db "$DB" --force >/dev/null 2>&1; then
+printf '{"server":{"bind":123}}\n' > "$CFG.bad"
+if "$BIN" config import "$CFG.bad" --db "$DB" --force >/dev/null 2>&1; then
   check "坏配置被拒" "拒绝" "接受"
 else
   check "坏配置被拒" "拒绝" "拒绝"
@@ -159,10 +174,16 @@ check "冷却秒数字段在场" "1" "$(grep -c 'cooldown_secs' "$WORK/tv-buddy.
 check "冷却秒数为 3600" "1" "$(grep 'cooldown_secs' "$WORK/tv-buddy.log" | grep -c '3600')"
 # 修好上游并重载 → 立即解除冷却（S-MODE-17）
 python3 - <<PY
-text = open("$CFG", encoding="utf-8").read().replace("http://127.0.0.1:1/dead.mpd", "http://127.0.0.1:$UP/main.mpd")
-open("$CFG", "w", encoding="utf-8").write(text)
+import json
+path = "$CFG"
+cfg = json.load(open(path, encoding="utf-8"))
+for group in cfg["groups"]:
+    for channel in group.get("channels", []):
+        if channel.get("url") == "http://127.0.0.1:1/dead.mpd":
+            channel["url"] = "http://127.0.0.1:$UP/main.mpd"
+json.dump(cfg, open(path, "w", encoding="utf-8"), ensure_ascii=False)
 PY
-"$BIN" import-config "$CFG" --db "$DB" --force >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" --force >/dev/null || exit 1
 curl -s -o /dev/null -X POST "${A[@]}" "$B/panel/api/reload"
 check "改配置解除冷却" "200" "$(status "$B/dg/d1.m3u8")"
 

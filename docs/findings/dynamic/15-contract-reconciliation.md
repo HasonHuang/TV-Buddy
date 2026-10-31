@@ -3,7 +3,7 @@
 - 日期：2026-10-20
 - 方法：同一份夹具（伪上游 + 同一键面配置），容器内目标 v0.8.2 与本实现各跑一份。
   `scripts/compare-p0.py` 比对状态码、响应头、正文形状；`scripts/compare-p0.sh` 负责启动两侧。
-- 结果：`docs/design/reconciliation-report.md`。
+- 结果：见 `PROGRESS.md` §5 的兼容性结论。
 
 ## 观察与结论
 

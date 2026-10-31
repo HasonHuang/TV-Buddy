@@ -1,7 +1,6 @@
 # PROGRESS · TV Buddy（IPTV Proxy v0.8.2 兼容重实现）
 
 > 本文件是**进度**与**功能缺口**的权威入口。
-> 历史日志已迁入 [`PROGRESS_bak.md`](PROGRESS_bak.md)。
 > 规范见 [`docs/spec/`](docs/spec/)。发现见 [`docs/findings/`](docs/findings/)。设计见 [`docs/design/`](docs/design/)。
 > 目标版本：**IPTV Proxy v0.8.2**（上游提交 `d302316fb8`）。
 > 写作风格：ASD-STE100 简化技术写作。一句一个意思。主动语态。用简单现在时。
@@ -43,7 +42,7 @@
 | 项 | 数量 |
 | --- | --- |
 | 路由注册（`src/http.rs`） | 131 |
-| 测试 | 371（279 单元 + 92 契约） |
+| 测试 | 368（276 单元 + 92 契约） |
 | 冒烟脚本（`scripts/smoke-*.sh`） | 26 |
 
 已覆盖的能力：
@@ -322,8 +321,8 @@
 
 | ID | 项 | 当前结论 |
 | --- | --- | --- |
-| V-10 | 面板逐屏视觉与交互 | API 对拍 22/22 差异 0。2026-10-29 完成逐屏对拍（P3-6）。页头骨架、侧栏、13 个分区可达性一致。版式栅格与 4 项功能入口不一致，见 §3.7 与 [`docs/tests/runs/2026-10-29.md`](docs/tests/runs/2026-10-29.md) |
-| — | `dash-timeshift/status` 的 `hours` | 本实现统一返回 `hours`。值按频道类型取 `dash_timeshift_hours` 或 `timeshift_hours`。目标的键名未验证（P3-7）。方案见 [`08-open-decisions.md`](docs/design/08-open-decisions.md) §3 |
+| V-10 | 面板逐屏视觉与交互 | API 对拍 22/22 差异 0。2026-10-29 完成逐屏对拍（P3-6）。页头骨架、侧栏、13 个分区可达性一致。版式栅格与 4 项功能入口不一致，见 §3.7 |
+| — | `dash-timeshift/status` 的 `hours` | 本实现统一返回 `hours`。值按频道类型取 `dash_timeshift_hours` 或 `timeshift_hours`。目标的键名未验证（P3-7）。保持统一键 `hours` |
 | — | U-06 其余 5 种台标效果 | 只有 `breathe` 逐字节一致。其余为近似 |
 
 ### 3.5 面板外观与安装行为（2026-10-29）
@@ -395,7 +394,7 @@
 约束：
 
 - 判据只用「通过 / 不通过 / 未验证」三种取值。
-- 记录落在 `docs/tests/runs/<日期>.md`。已有 [`2026-10-29.md`](docs/tests/runs/2026-10-29.md)（P3-6 逐屏对拍）。
+- 记录落在 `docs/tests/runs/<日期>.md`。
 - 截图脚本：`scripts/panel-shots.js`。用完不提交图片，只提交结论。
 - 文档内所有命令、端点与配置键都按源码核对过。01 与 02 的关键路径在本机独立实例上实跑过。
 
@@ -403,7 +402,7 @@
 
 ### 3.7 P3-6 对拍发现的功能缺口（2026-10-29）
 
-逐屏对拍的方法与全部结果见 [`docs/tests/runs/2026-10-29.md`](docs/tests/runs/2026-10-29.md)。
+逐屏对拍的方法与结果见 §3.5。
 本节只登记**功能面**的缺口。版式与装饰差异见该文档 §6，不在此登记。
 
 | ID | 项 | 现状 | 影响 |
@@ -458,35 +457,26 @@ VG-3 与 VG-4 带后端改动。`src/stats.rs` 加频道维度计数，`src/metr
 | 项 | 结果 |
 | --- | --- |
 | `cargo fmt --check` | 通过 |
-| `cargo test --offline --all-targets` | 349 项通过（257 单元 + 92 契约） |
-| `cargo clippy --offline --all-targets` | 0 error，27 条历史 warning |
-| 冒烟脚本 | 26 个全部通过。`smoke-record-dash` 需要 ffmpeg，且要求端口 19970/19971 空闲 |
+| `cargo test --offline --all-targets` | 368 项通过（276 单元 + 92 契约） |
+| `cargo clippy --offline --all-targets` | 0 error，31 条历史 warning |
+| 冒烟脚本 | 25 个全部通过（`smoke-translate-live` 需外网翻译服务）。`smoke-record-dash` 需要 ffmpeg |
 | `pnpm build` | 通过（含 `tsc --noEmit`） |
 | 发布校验 | 上一轮双架构产物通过 `verify-release.sh`。本轮未重跑 |
 | CI | 只在 `v*` tag 触发。fmt/clippy/test、CLI 冒烟、双架构校验已配置 |
 
 ---
 
-## 5. 存储迁移（v2026.6）
+## 5. 存储（v2026.6）
 
 **事实源**：`<安装目录>/tv-buddy.db`。表 `settings`（配置 JSON）、`users`、`access_tokens`。
 
 **读取**：启动时从库读配置。库为空时写入默认值。
-同目录存在旧 `config.toml` 时拒绝启动，防止用空分组跑起来。
 
 **写入**：面板保存、分组编辑、CLI 都写库。进程内一把写锁串行化「读 → 改 → 写 → 替换快照」。
 
-**迁移**：
+**子命令**：`config import/get/set/reset`、`passwd`。
 
-| 来源 | 做法 |
-| --- | --- |
-| 旧 `config.toml` | `tv-buddy import-config <toml> --db <db>` |
-| 旧 `<cache>/users.db` | 首次启动只读迁移，`users_migrated` 标记防止重复；旧文件保留 |
-| 旧备份包 | 包里是 `config.toml` 时按旧格式解析恢复 |
-
-**兼容性变化**：不再直接读取目标产品的 `config.toml`。升级需先导入一次。
-
-**子命令**：`import-config`、`config get/set/reset`、`passwd`。
+**备份**：包内 `config.json`。恢复前当前配置另存 `tv-buddy.db.bak.json`。
 
 ---
 
@@ -589,9 +579,9 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | P3-2 | DASH 文字轨出口 | ✅ 定案保留（2026-10-28）。目标在夹具里不写 master，本实现输出 `SUBTITLES` 组：这是超集，播放器不用也不受影响 | F-016 §5.1 |
 | P3-3 | `[subtitle].style.*` 样式注入 | ❌ 不做（2026-10-28）。本实现没有面向播放器的字幕出口：字幕只在面板里上传/管理，注入样式无处生效 | `05` §4.1 |
 | P3-4 | 播放侧 `compat_mode`、`srt_ua_keywords` | ❌ 不做。目标未测出行为（D19），按「不猜」处理 | D19 |
-| P3-5 | U-06 其余 5 种台标效果 | ✅ 定案（2026-10-29）。保持近似。`breathe` 已逐字节对齐，其余 5 种不补取证（[`08`](docs/design/08-open-decisions.md) §2） | F-011 |
-| P3-6 | 逐屏视觉对拍（验证类） | ✅ 已完成（2026-10-29）。13 个分区加登录页按 1440×1000 截图，与 `reference/img/` 并排比对。页头骨架与侧栏一致；发现 4 项功能缺口（VG-1 至 VG-4）与若干版式差异。见 §3.7 与 `docs/tests/runs/2026-10-29.md` | `07` §5、V-10 |
-| P3-7 | `dash-timeshift/status` 的 `hours` 键核对（验证类） | ✅ 定案（2026-10-29）。保持统一键 `hours`（[`08`](docs/design/08-open-decisions.md) §3） | F-016 §5.1 |
+| P3-5 | U-06 其余 5 种台标效果 | ✅ 定案（2026-10-29）。保持近似。`breathe` 已逐字节对齐，其余 5 种不补取证 | F-011 |
+| P3-6 | 逐屏视觉对拍（验证类） | ✅ 已完成（2026-10-29）。13 个分区加登录页按 1440×1000 截图，与 `reference/img/` 并排比对。页头骨架与侧栏一致；发现 4 项功能缺口（VG-1 至 VG-4）与若干版式差异。见 §3.7 | V-10 |
+| P3-7 | `dash-timeshift/status` 的 `hours` 键核对（验证类） | ✅ 定案（2026-10-29）。保持统一键 `hours` | F-016 §5.1 |
 
 ### 6.4 外部依赖（需要你参与）
 
@@ -620,8 +610,6 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | --- | --- |
 | 目标规范 | [`docs/spec/08-target-spec.md`](docs/spec/08-target-spec.md) |
 | 验证矩阵 | [`docs/spec/07-baseline-and-verification.md`](docs/spec/07-baseline-and-verification.md) |
-| 全量覆盖对比与规划 | [`docs/design/07-coverage-and-plan.md`](docs/design/07-coverage-and-plan.md) |
-| 未决项对比方案 | [`docs/design/08-open-decisions.md`](docs/design/08-open-decisions.md) |
 | F-1 用户与设备调研 | [`docs/design/09-users-and-devices.md`](docs/design/09-users-and-devices.md) |
 | 低配与高配参数差异 | [`docs/design/10-low-vs-high-spec.md`](docs/design/10-low-vs-high-spec.md) |
 | HTTP 契约 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) |
@@ -632,13 +620,12 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | 面板字段清单 | [`docs/design/05-frontend.md`](docs/design/05-frontend.md) |
 | 手工验收测试 | [`docs/tests/README.md`](docs/tests/README.md) |
 | 发现索引 | [`docs/findings/README.md`](docs/findings/README.md) |
-| 历史进度 | [`PROGRESS_bak.md`](PROGRESS_bak.md) |
 
 ---
 
 ## 9. 归档
 
-2026-10-25，本文件按 ASD-STE100 重写。旧内容全部迁入 [`PROGRESS_bak.md`](PROGRESS_bak.md)。
+2026-10-25，本文件按 ASD-STE100 重写。
 
 归档含：
 

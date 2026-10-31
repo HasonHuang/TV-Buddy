@@ -66,31 +66,38 @@ try:
         except Exception:
             pass
         time.sleep(0.1)
-    config = os.path.join(work, "config.toml")
+    config = os.path.join(work, "config.json")
     with open(config, "w", encoding="utf-8") as handle:
         handle.write(
-            f"""[server]
-bind = "127.0.0.1:{PORT}"
-log_level = "warn"
-
-[cache]
-disk_path = "{work}/cache"
-
-[[groups]]
-id = "dg"
-name = "DASH 组"
-mode = "dash"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "DASH 频道"
-url = "http://127.0.0.1:{UPORT}/out.mpd"
-dash_timeshift = true
-dash_timeshift_hours = 4
-"""
+            f"""{{
+  "server": {{
+    "bind": "{PORT}",
+    "log_level": "warn"
+  }},
+  "cache": {{
+    "disk_path": "{work}/cache"
+  }},
+  "groups": [
+    {{
+      "id": "dg",
+      "name": "DASH 组",
+      "mode": "dash",
+      "access": "open",
+      "channels": [
+        {{
+          "id": "c1",
+          "name": "DASH 频道",
+          "url": "http://127.0.0.1:{UPORT}/out.mpd",
+          "dash_timeshift": true,
+          "dash_timeshift_hours": 4
+        }}
+      ]
+    }}
+  ]
+}}"""
         )
     db = os.path.join(work, "tv-buddy.db")
-    subprocess.run([BIN, "import-config", config, "--db", db], check=True)
+    subprocess.run([BIN, "config", "import", config, "--db", db], check=True)
     log_path = os.path.join(work, "server.log")
     with open(log_path, "wb") as log:
         procs.append(subprocess.Popen([BIN, db], stdout=log, stderr=subprocess.STDOUT))

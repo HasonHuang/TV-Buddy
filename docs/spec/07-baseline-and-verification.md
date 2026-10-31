@@ -165,7 +165,7 @@ HasonHuang/sontv/docs/iptv-proxy/
 - 差异范围：**文档描述与实际实现不符**（非版本/架构差异）。
 - 处置：**已更正**——`S-BUG-02` 的声明改为「面板提供分组与频道排序」并标 ⚠️；
   重排很可能通过 `PUT /panel/api/config` 全量回写 `groups` 数组实现，因此「路由表无 `move` 端点」与该现象并不矛盾。
-  本实现的对应缺口记在 [`../design/07-coverage-and-plan.md`](../design/07-coverage-and-plan.md) §3.A9。
+  本实现的对应缺口记在 [`../../PROGRESS.md`](../../PROGRESS.md) §5。
 
 **`D-005` 详情**
 - 基线原文（`08` §5 `S-MODE-10`）：`Rewrite + MPD` / `Redirect + MPD` → **直连 CDN**（不转封装）。

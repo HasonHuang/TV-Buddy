@@ -1,14 +1,12 @@
 //! 配置模型、校验与持久化入口。
 //!
 //! 存：SQLite 单行 JSON 文档，见 [`store`]。
-//! 运行时不再读写 TOML。旧 TOML 的解析只在 [`legacy`] 里，供迁移使用。
+//! 运行时只认数据库里的 JSON，不读写 TOML。
 
-pub mod legacy;
 pub mod model;
 pub mod store;
 
 use anyhow::bail;
-use sha2::{Digest, Sha256};
 
 pub use model::Config;
 pub use store::ConfigStore;
@@ -34,11 +32,4 @@ pub fn validate(config: &Config) -> anyhow::Result<()> {
         }
     }
     Ok(())
-}
-
-/// 计算口令摘要。目标用 SHA-256 十六进制小写（S-AUTH-01）。
-pub fn sha256_hex(input: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    hex::encode(hasher.finalize())
 }

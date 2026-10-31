@@ -4,22 +4,19 @@
 //!
 //! | 命令 | 作用 |
 //! | --- | --- |
-//! | `import-config <toml>` | 把旧配置一次性导入数据库 |
+//! | `config import <config.json>` | 从 JSON 文件导入整份配置 |
 //! | `config get <a.b.c>` | 读一个配置值 |
 //! | `config set <a.b.c> <值>` | 写一个配置值 |
 //! | `config reset` | 配置恢复默认，保留用户 |
 //! | `passwd <用户名>` | 重设用户口令 |
 
-use std::{
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::{io::Read, path::PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use crate::{
-    config::{legacy, Config, ConfigStore},
+    config::{Config, ConfigStore},
     db,
     users::{password, UserStore},
 };
@@ -70,7 +67,6 @@ pub fn run_if_subcommand() -> Result<Option<i32>> {
         return Ok(None);
     };
     match command.as_str() {
-        "import-config" => import_config(&args[1..])?,
         "config" => config_command(&args[1..])?,
         "passwd" => passwd(&args[1..])?,
         "--help" | "-h" | "help" => print_help(),
@@ -84,7 +80,7 @@ fn print_help() {
         "tv-buddy [数据库路径]\n\
          \n\
          子命令：\n\
-         \x20 import-config <config.toml> [--db <路径>] [--force]   导入旧配置\n\
+         \x20 config import <config.json> [--db <路径>] [--force]    从文件导入整份配置\n\
          \x20 config get <a.b.c> [--db <路径>]                       读配置值\n\
          \x20 config set <a.b.c> <值> [--db <路径>]                  写配置值\n\
          \x20 config reset [--db <路径>] [--force]                   配置恢复默认\n\
@@ -94,36 +90,28 @@ fn print_help() {
     );
 }
 
-fn import_config(raw: &[String]) -> Result<()> {
-    let args = Args::parse(raw)?;
-    let Some(source) = args.positional.first() else {
-        bail!("用法：tv-buddy import-config <config.toml> [--db <路径>] [--force]");
-    };
-    let config = legacy::load(Path::new(source))?;
-
-    let conn = db::connect(&args.db)?;
-    let store = ConfigStore::new(conn);
-    if !args.force && store.load()?.is_some() {
-        bail!("数据库已有配置。确需覆盖请加 --force");
-    }
-    store.save(&config)?;
-    println!(
-        "已导入配置：{} 个分组 → {}",
-        config.groups.len(),
-        args.db.display()
-    );
-    Ok(())
-}
-
 fn config_command(raw: &[String]) -> Result<()> {
     let args = Args::parse(raw)?;
     let Some(action) = args.positional.first().map(String::as_str) else {
-        bail!("用法：tv-buddy config get|set|reset ...");
+        bail!("用法：tv-buddy config import|get|set|reset ...");
     };
     let conn = db::connect(&args.db)?;
     let store = ConfigStore::new(conn);
 
     match action {
+        "import" => {
+            let Some(source) = args.positional.get(1) else {
+                bail!("用法：tv-buddy config import <config.json>");
+            };
+            if !args.force && store.load()?.is_some() {
+                bail!("数据库已有配置。确需覆盖请加 --force");
+            }
+            let text =
+                std::fs::read_to_string(source).with_context(|| format!("无法读取 {source}"))?;
+            let config: Config = serde_json::from_str(&text).context("配置格式错误")?;
+            store.save(&config)?;
+            println!("已导入配置：{} 个分组", config.groups.len());
+        }
         "get" => {
             let Some(path) = args.positional.get(1) else {
                 bail!("用法：tv-buddy config get <a.b.c>");

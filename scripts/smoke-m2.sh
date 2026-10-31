@@ -11,7 +11,7 @@ BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19914}
 UP=${UP:-19915}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 CACHE="$WORK/cache"
 
@@ -44,61 +44,80 @@ v1.ts
 EOF
 head -c 1024 /dev/urandom > "$WORK/up/v0/v1.ts"
 
-cat > "$CFG" <<EOF
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
-not_found_url = "http://placeholder.test/404.mp4"
-error_url = "http://placeholder.test/mistake.mp4"
-
-[auth]
-token_enabled = false
-token_failure_url = "http://placeholder.test/Failure.mp4"
-
-[cache]
-disk_path = "$CACHE"
-# 本脚本断言首写/命中缓存头；关闭预取，避免首请求直接命中预取结果。
-[cache.prefetch]
-enabled = false
-[cache.disguise]
-enabled = true
-playlist = true
-formats = ["jpg", "png"]
-
-[[groups]]
-id = "p1"
-name = "代理组"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "频道一"
-url = "http://127.0.0.1:$UP/index.m3u8"
-[[groups.channels]]
-id = "m1"
-name = "主清单频道"
-url = "http://127.0.0.1:$UP/master.m3u8"
-
-[[groups]]
-id = "arc"
-name = "归档组"
-mode = "proxy"
-access = "archived"
-[[groups.channels]]
-id = "c9"
-name = "归档频道"
-url = "http://127.0.0.1:$UP/index.m3u8"
-
-[[groups]]
-id = "op"
-name = "开放组"
-mode = "proxy"
-access = "open"
-[[groups.channels]]
-id = "c8"
-name = "开放频道"
-url = "http://127.0.0.1:$UP/index.m3u8"
-EOF
+cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn",
+    "not_found_url": "http://placeholder.test/404.mp4",
+    "error_url": "http://placeholder.test/mistake.mp4"
+  },
+  "auth": {
+    "token_enabled": false,
+    "token_failure_url": "http://placeholder.test/Failure.mp4"
+  },
+  "cache": {
+    "disk_path": "$CACHE",
+    "prefetch": {
+      "enabled": false
+    },
+    "disguise": {
+      "enabled": true,
+      "playlist": true,
+      "formats": [
+        "jpg",
+        "png"
+      ]
+    }
+  },
+  "groups": [
+    {
+      "id": "p1",
+      "name": "代理组",
+      "mode": "proxy",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "频道一",
+          "url": "http://127.0.0.1:$UP/index.m3u8"
+        },
+        {
+          "id": "m1",
+          "name": "主清单频道",
+          "url": "http://127.0.0.1:$UP/master.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "arc",
+      "name": "归档组",
+      "mode": "proxy",
+      "access": "archived",
+      "channels": [
+        {
+          "id": "c9",
+          "name": "归档频道",
+          "url": "http://127.0.0.1:$UP/index.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "op",
+      "name": "开放组",
+      "mode": "proxy",
+      "access": "open",
+      "channels": [
+        {
+          "id": "c8",
+          "name": "开放频道",
+          "url": "http://127.0.0.1:$UP/index.m3u8"
+        }
+      ]
+    }
+  ]
+}
+JSON
 
 python3 -m http.server "$UP" --directory "$WORK/up" >"$WORK/up.log" 2>&1 &
 UP_PID=$!
@@ -106,7 +125,7 @@ for _ in $(seq 1 50); do
   curl -fsS "http://127.0.0.1:$UP/index.m3u8" >/dev/null 2>&1 && break
   sleep 0.1
 done
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT

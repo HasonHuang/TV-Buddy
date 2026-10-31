@@ -10,30 +10,37 @@ cd "$(dirname "$0")/.."
 BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19911}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 
-cat > "$CFG" <<EOF
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
+cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "groups": [
+    {
+      "id": "test1",
+      "name": "test1",
+      "mode": "proxy",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "C1",
+          "url": "http://example.invalid/x.m3u8"
+        }
+      ]
+    }
+  ],
+  "epg": {
+    "enabled": true,
+    "cron": "* * * * *"
+  }
+}
+JSON
 
-[[groups]]
-id = "test1"
-name = "test1"
-mode = "proxy"
-
-[[groups.channels]]
-id = "c1"
-name = "C1"
-url = "http://example.invalid/x.m3u8"
-
-[epg]
-enabled = true
-cron = "* * * * *"
-EOF
-
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true; rm -rf "$WORK"' EXIT
@@ -106,20 +113,22 @@ check "未知路径 302" "302" "$code"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$B/panel/api/nope")
 check "未知接口 404" "404" "$code"
 
-printf '[server]\nbind = "127.0.0.1:1"\nbind = "127.0.0.1:2"\n' > "$WORK/bad.toml"
-if "$BIN" import-config "$WORK/bad.toml" --db "$WORK/bad.db" >/dev/null 2>&1; then
-  printf 'FAIL 重复键未报错\n'
+# 类型错必须被拒绝。JSON 重复键由 serde_json 取最后一个，不报错。
+printf '{"server":{"bind":123}}\n' > "$WORK/bad.json"
+if "$BIN" config import "$WORK/bad.json" --db "$WORK/bad.db" >/dev/null 2>&1; then
+  printf 'FAIL 类型错未报错\n'
   fail=1
 else
-  printf 'ok   重复键被拒绝\n'
+  printf 'ok   类型错被拒绝\n'
 fi
 
-# 旧的 TOML 路径不能再当启动参数。
-if "$BIN" "$WORK/bad.toml" >/dev/null 2>&1; then
-  printf 'FAIL 旧配置路径未被拒绝\n'
+# 空 bind 必须被校验拦住。
+printf '{"server":{"bind":""}}\n' > "$WORK/empty-bind.json"
+if "$BIN" config import "$WORK/empty-bind.json" --db "$WORK/empty.db" >/dev/null 2>&1; then
+  printf 'FAIL 空 bind 未被拒绝\n'
   fail=1
 else
-  printf 'ok   旧配置路径被拒绝\n'
+  printf 'ok   空 bind 被拒绝\n'
 fi
 
 if [ "$fail" = "0" ]; then

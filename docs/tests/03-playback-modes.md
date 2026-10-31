@@ -1,10 +1,3 @@
-> **2026-10-31 起配置存 SQLite。**
-> 数据库是 `<prefix>/tv-buddy.db`。本文里凡是「编辑 `config.toml`」的步骤，改为
-> `tv-buddy config set <键> <值>`；凡是把 `config.toml` 当启动参数的，改为
-> `tv-buddy <prefix>/tv-buddy.db`。需要一次导入旧配置时运行
-> `tv-buddy import-config <config.toml> --db <prefix>/tv-buddy.db`。
-> 备份、重装、恢复的载体是同名数据库文件。详见 `PROGRESS.md` §5。
-
 ## 1. 目的
 
 本测试证明六种分组模式都能从订阅入口走到切片响应。六种模式是 `proxy`、`redirect`、`rewrite`、`passthrough`、`remux`、`dash`。本测试还证明 `proxy` 模式的 MPD 反代分支，以及 DASH 的轨道命名。
@@ -194,148 +187,192 @@ wc -c < /srv/fixture/dash-1.m4s
 先备份已有配置。执行：
 
 ```
-sudo cp -a /etc/tv-buddy/config.toml /etc/tv-buddy/config.toml.bak.$(date +%s) 2>/dev/null || true
+sudo cp -a /etc/tv-buddy/tv-buddy.db /etc/tv-buddy/tv-buddy.db.bak.$(date +%s) 2>/dev/null || true
 ```
 
 再写新配置。执行：
 
-```
-cat > /etc/tv-buddy/config.toml <<'EOF'
-[server]
-bind = "127.0.0.1:19899"
-not_found_url = "http://127.0.0.1:18080/not-found.mp4"
-error_url = "http://127.0.0.1:18080/error.mp4"
-log_level = "info"
-
-[auth]
-token_enabled = false
-
-[cache]
-disk_path = "/var/lib/tv-buddy/cache"
-
-[cache.prefetch]
-enabled = false
-
-[cache.ttl]
-segment_secs = 300
-
-[cdn]
-enabled = false
-
-[epg]
-enabled = false
-
-[[groups]]
-id = "pg"
-name = "proxy 媒体"
-mode = "proxy"
-access = "open"
-format = "hls"
-[[groups.channels]]
-id = "c1"
-name = "HLS 媒体清单"
-url = "http://127.0.0.1:18080/live.m3u8"
-[[groups.channels]]
-id = "c2"
-name = "上游 404"
-url = "http://127.0.0.1:18080/missing.m3u8"
-
-[[groups]]
-id = "pm"
-name = "proxy 主清单"
-mode = "proxy"
-access = "open"
-format = "hls"
-[[groups.channels]]
-id = "c1"
-name = "HLS 主清单"
-url = "http://127.0.0.1:18080/master.m3u8"
-
-[[groups]]
-id = "pmp"
-name = "proxy MPD"
-mode = "proxy"
-access = "open"
-format = "mpd"
-[[groups.channels]]
-id = "c1"
-name = "MPD"
-url = "http://127.0.0.1:18080/proxy.mpd"
-
-[[groups]]
-id = "rd"
-name = "redirect 直连"
-mode = "redirect"
-access = "open"
-redirect_mode = "direct"
-[[groups.channels]]
-id = "c1"
-name = "直连"
-url = "http://127.0.0.1:18080/live.m3u8"
-
-[[groups]]
-id = "rb"
-name = "redirect 选画质"
-mode = "redirect"
-access = "open"
-redirect_mode = "best"
-redirect_ttl = 300
-[[groups.channels]]
-id = "c1"
-name = "选画质"
-url = "http://127.0.0.1:18080/master.m3u8"
-
-[[groups]]
-id = "rw"
-name = "rewrite"
-mode = "rewrite"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "改写"
-url = "http://127.0.0.1:18080/live.m3u8"
-
-[[groups]]
-id = "pt"
-name = "passthrough"
-mode = "passthrough"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "透传"
-url = "http://127.0.0.1:18080/master.m3u8"
-
-[[groups]]
-id = "rx"
-name = "remux"
-mode = "remux"
-access = "open"
-[[groups.channels]]
-id = "c1"
-name = "连续 TS"
-url = "http://127.0.0.1:18080/live.ts"
-
-[[groups]]
-id = "dh"
-name = "dash"
-mode = "dash"
-access = "open"
-format = "mpd"
-[[groups.channels]]
-id = "c1"
-name = "DASH"
-url = "http://127.0.0.1:18080/dash/out.mpd"
-[[groups.channels]]
-id = "c2"
-name = "DASH 坏清单"
-url = "http://127.0.0.1:18080/bad.mpd"
-EOF
-grep -c '^\[\[groups\]\]' /etc/tv-buddy/config.toml
+```bash
+sudo /opt/tv-buddy/tv-buddy config import /etc/tv-buddy/config.json --db /etc/tv-buddy/tv-buddy.db --force
 ```
 
-预期：最后一条命令输出 `9`。
+夹具内容（写到 `/etc/tv-buddy/config.json`）：
 
-本配置使用默认面板账号 `admin` / `admin`，见 `src/config/model.rs:162-165`。服务只监听 `127.0.0.1`，不对外暴露。
+```json
+{
+  "server": {
+    "bind": "127.0.0.1:19899",
+    "not_found_url": "http://127.0.0.1:18080/not-found.mp4",
+    "error_url": "http://127.0.0.1:18080/error.mp4",
+    "log_level": "info"
+  },
+  "auth": {
+    "token_enabled": false
+  },
+  "cache": {
+    "disk_path": "/var/lib/tv-buddy/cache",
+    "prefetch": {
+      "enabled": false
+    },
+    "ttl": {
+      "segment_secs": 300
+    }
+  },
+  "cdn": {
+    "enabled": false
+  },
+  "epg": {
+    "enabled": false
+  },
+  "groups": [
+    {
+      "id": "pg",
+      "name": "proxy 媒体",
+      "mode": "proxy",
+      "access": "open",
+      "format": "hls",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "HLS 媒体清单",
+          "url": "http://127.0.0.1:18080/live.m3u8"
+        },
+        {
+          "id": "c2",
+          "name": "上游 404",
+          "url": "http://127.0.0.1:18080/missing.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "pm",
+      "name": "proxy 主清单",
+      "mode": "proxy",
+      "access": "open",
+      "format": "hls",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "HLS 主清单",
+          "url": "http://127.0.0.1:18080/master.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "pmp",
+      "name": "proxy MPD",
+      "mode": "proxy",
+      "access": "open",
+      "format": "mpd",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "MPD",
+          "url": "http://127.0.0.1:18080/proxy.mpd"
+        }
+      ]
+    },
+    {
+      "id": "rd",
+      "name": "redirect 直连",
+      "mode": "redirect",
+      "access": "open",
+      "redirect_mode": "direct",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "直连",
+          "url": "http://127.0.0.1:18080/live.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "rb",
+      "name": "redirect 选画质",
+      "mode": "redirect",
+      "access": "open",
+      "redirect_mode": "best",
+      "redirect_ttl": 300,
+      "channels": [
+        {
+          "id": "c1",
+          "name": "选画质",
+          "url": "http://127.0.0.1:18080/master.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "rw",
+      "name": "rewrite",
+      "mode": "rewrite",
+      "access": "open",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "改写",
+          "url": "http://127.0.0.1:18080/live.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "pt",
+      "name": "passthrough",
+      "mode": "passthrough",
+      "access": "open",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "透传",
+          "url": "http://127.0.0.1:18080/master.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "rx",
+      "name": "remux",
+      "mode": "remux",
+      "access": "open",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "连续 TS",
+          "url": "http://127.0.0.1:18080/live.ts"
+        }
+      ]
+    },
+    {
+      "id": "dh",
+      "name": "dash",
+      "mode": "dash",
+      "access": "open",
+      "format": "mpd",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "DASH",
+          "url": "http://127.0.0.1:18080/dash/out.mpd"
+        },
+        {
+          "id": "c2",
+          "name": "DASH 坏清单",
+          "url": "http://127.0.0.1:18080/bad.mpd"
+        }
+      ]
+    }
+  ]
+}
+```
+
+再确认分组数量：
+
+```bash
+sudo /opt/tv-buddy/tv-buddy config get groups --db /etc/tv-buddy/tv-buddy.db \
+  | grep -o '"id"' | wc -l
+```
+
+预期：输出 `9`。
+
+夹具用 `--force` 覆盖配置。账号 `admin` 与口令由首次启动生成，见 `cache/admin_initial_credentials.txt`。服务只监听 `127.0.0.1`，不对外暴露。
 
 ### 3.8 启动上游夹具
 
@@ -351,7 +388,7 @@ curl -fsS http://127.0.0.1:18080/live.m3u8 >/dev/null && echo upstream-ok
 ### 3.9 启动 tv-buddy 并登录面板
 
 ```
-nohup /opt/tv-buddy/tv-buddy /etc/tv-buddy/config.toml >/tmp/tv-buddy.out 2>&1 &
+nohup /opt/tv-buddy/tv-buddy /etc/tv-buddy/tv-buddy.db >/tmp/tv-buddy.out 2>&1 &
 echo $! > /tmp/tv-buddy.pid
 for i in $(seq 1 50); do
   curl -fsS http://127.0.0.1:19899/health >/dev/null 2>&1 && break
@@ -1021,7 +1058,7 @@ sha256sum /opt/tv-buddy/tv-buddy >> /tmp/report-env.txt
 
 ```
 tar -czf /tmp/playback-modes-$(date +%Y%m%d-%H%M%S).tgz \
-  /etc/tv-buddy/config.toml \
+  /etc/tv-buddy/tv-buddy.db \
   /tmp/report-tv-buddy.log /tmp/report-stdout.log /tmp/report-upstream.log \
   /tmp/report-panel-logs.json /tmp/report-stats.json /tmp/report-cache-stats.json \
   /tmp/report-cache-files.txt /tmp/report-ports.txt /tmp/report-procs.txt /tmp/report-env.txt

@@ -76,15 +76,14 @@ pub async fn login(
         return Err(ApiError::Forbidden("面板未启用".into()));
     }
 
-    // 账号来自 `users.db`。口令用 argon2id 校验。
+    // 账号来自数据库。口令用 argon2id 校验。
     let Some(user) = state.users.find_by_username(req.username.trim()) else {
         state.login_guard.failure(&ip, window);
         return Err(ApiError::Unauthorized(
             json!({ "error": "用户名或密码错误" }),
         ));
     };
-    let verdict = crate::users::password::verify_any(&req.password, &user.password_hash);
-    if verdict == crate::users::password::Verdict::Fail {
+    if !crate::users::password::verify(&req.password, &user.password_hash) {
         state.login_guard.failure(&ip, window);
         return Err(ApiError::Unauthorized(
             json!({ "error": "用户名或密码错误" }),
@@ -93,17 +92,6 @@ pub async fn login(
     if !user.web_ui_access && !user.role.is_admin() {
         return Err(ApiError::Forbidden("该账号不允许登录面板".into()));
     }
-    // 旧 `sha256:` 散列在首次登录时升级成 argon2id。
-    if verdict == crate::users::password::Verdict::OkNeedsRehash {
-        if let Ok(hash) = crate::users::password::hash(&req.password) {
-            let mut next = user.clone();
-            next.password_hash = hash;
-            if let Err(error) = state.users.update_user(next) {
-                tracing::warn!(%error, "口令散列升级失败");
-            }
-        }
-    }
-
     state.login_guard.success(&ip);
     let token = state
         .sessions

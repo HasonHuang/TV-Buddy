@@ -171,7 +171,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 设备令牌 | 12 位短串，带用途与有效期 | 只有全局 `[auth].token` |
 | 订阅入口 | `/sub/:token/playlist.m3u` | `/playlist.m3u`，可带全局 token |
 | 可见范围 | 分组 + 频道两级 | 只有分组 `access` 字段 |
-| 存储 | SQLite | `config.toml` |
+| 存储 | SQLite | 单库 `tv-buddy.db` |
 
 ## 7. SQLite 评估
 
@@ -185,7 +185,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 
 | 方案 | 写入 | 并发 | 迁移 | 依赖 |
 | --- | --- | --- | --- | --- |
-| 写进 `config.toml` 的 `[[users]]` | 每次改用户都整份回写 | 需全局锁 | 改 TOML 结构要迁移 | 无 |
+| 写进配置文件 | 每次改用户都整份回写 | 需全局锁 | 改文件结构要迁移 | 无 |
 | 独立 JSON 文件 | 整份回写 | 需全局锁 | 手写迁移 | 无 |
 | SQLite | 单行 `UPDATE` | 事务 | 版本号与建表语句 | `rusqlite` + bundled |
 
@@ -197,7 +197,6 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 4. 目标实现同样用 SQLite。表结构可以直接对齐，便于日后比对。
 
 用户与令牌和配置**同一个库文件**：`<安装目录>/tv-buddy.db`（2026-10-31 配置也迁入 SQLite）。
-旧版本的 `<cache>/users.db` 在首次启动时只读迁移进来，旧文件保留不动。
 
 ### 7.4 若选 JSON 的退路
 
@@ -227,7 +226,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 
 | 层 | 做法 |
 | --- | --- |
-| 数据 | 单库 `tv-buddy.db`。表 `users`、`access_tokens`，字段按 §2。旧 `<cache>/users.db` 首次启动时迁移 |
+| 数据 | 单库 `tv-buddy.db`。表 `users`、`access_tokens`，字段按 §2 |
 | 口令 | 用 `argon2` 校验。迁移时把现有 `[panel].password_sha256` 转成一个 admin 用户，口令不变 |
 | 会话 | 登录成功签发会话。会话绑定 `user_id` |
 | 令牌 | 12 位短串。播放与订阅按 401 语义分流 |
@@ -248,7 +247,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 层 | 落点 | 状态 |
 | --- | --- | --- |
 | 数据层 | `src/users/{model,password,store}.rs` | SQLite，表结构与 §2 一致 |
-| 口令 | argon2id。旧 `sha256:<hex>` 首次登录自动升级 | 完成 |
+| 口令 | argon2id。不支持旧散列格式 | 完成 |
 | 首次安装 | 无用户时建 `admin`，随机 16 位口令写入 `<cache>/admin_initial_credentials.txt`（0600） | 完成 |
 | 登录 | `POST /panel/api/login` 查 `users` 表，会话绑定用户 | 完成 |
 | 用户 API | `/panel/api/users` 全套，含 `channel-options`、`password` | 完成 |
@@ -264,9 +263,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | # | 项 | 说明 |
 | --- | --- | --- |
 | 1 | EPG 用户隔离 | `/sub/:token/epg.xml(.gz)` 未实现。当前订阅头仍指向全局 `/epg.xml.gz` |
-| 2 | 旧配置键清理 | 配置已迁入数据库，`import-config` 时这两个键落进 `extra`。不再生效，也不会报错 |
 | 3 | 管理 CLI | 完成：改为调用 `tv-buddy passwd` 写入 `users` 表，不再读 `panel username` / `password_sha256` |
-| 4 | 旧口令迁移 | 旧 `password_sha256` 不迁移。首次启动创建 `admin` 新账号，口令写入 `admin_initial_credentials.txt` |
 | 5 | Docker 集成冒烟 | `smoke-dash-timeshift-docker.sh` 在容器内起服务后清单请求无响应。待查 |
 
 ### 9.3 行为变化

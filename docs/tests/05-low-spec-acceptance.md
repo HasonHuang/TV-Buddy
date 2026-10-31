@@ -1,10 +1,3 @@
-> **2026-10-31 起配置存 SQLite。**
-> 数据库是 `<prefix>/tv-buddy.db`。本文里凡是「编辑 `config.toml`」的步骤，改为
-> `tv-buddy config set <键> <值>`；凡是把 `config.toml` 当启动参数的，改为
-> `tv-buddy <prefix>/tv-buddy.db`。需要一次导入旧配置时运行
-> `tv-buddy import-config <config.toml> --db <prefix>/tv-buddy.db`。
-> 备份、重装、恢复的载体是同名数据库文件。详见 `PROGRESS.md` §5。
-
 ## 1. 目的
 
 本验收证明两件事：S4 的磁盘回收在真实磁盘上收敛到上限；S6 的 64 MB 实例连续运行 24 小时不 OOM，且回收目录不超限。

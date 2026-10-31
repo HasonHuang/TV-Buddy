@@ -1,7 +1,7 @@
 # 01 · 技术选型（TV Buddy）
 
 > 设计版本 v1.0 ｜ 2026-10-19 ｜ 状态：**已确认（用户决策）**
-> 依据：[`../spec/08-target-spec.md`](../spec/08-target-spec.md)、[`../spec/03-environment-and-tooling.md`](../spec/03-environment-and-tooling.md)、[`../../PROGRESS_bak.md`](../../PROGRESS_bak.md) 附录 A
+> 依据：[`../spec/08-target-spec.md`](../spec/08-target-spec.md)、[`../spec/03-environment-and-tooling.md`](../spec/03-environment-and-tooling.md)
 
 ## 1. 目标与约束
 
@@ -15,7 +15,7 @@
 
 **完全兼容的判据**：
 
-- 沿用 `config.toml` 的键名与默认值（`spec/08` §11）。
+- 沿用目标配置的键名与默认值（`spec/08` §11）。存储用 SQLite。
 - 沿用全部路由与播放地址规则（`spec/08` §2、§3）。
 - 沿用响应状态码、关键响应头与缓存窗口（`spec/08` §10，F-006）。
 - 现有客户端与订阅地址不改即可播放。
@@ -35,7 +35,7 @@
 | 前端 | **Vite + React + TypeScript** | Vue、Svelte、无构建原生 | 用户决策；组件化便于复刻面板的四个页面 |
 | 前端嵌入 | 构建产物经 `rust-embed` 嵌入二进制 | 运行时读目录 | 单文件发布；与目标形态一致（F-003） |
 | 面板 UI | **复刻目标面板**（布局与交互对齐，实现自研） | 全新 UI | 用户决策；便于逐屏对拍，降低回归风险 |
-| 配置 | `toml` + `serde`，**严格模式** | 宽松解析 | 目标对重复键报错（F-008），严格模式对齐该行为 |
+| 配置 | `serde_json` + SQLite | TOML 文件 | 单文件存储，无解析歧义 |
 | 首发范围 | **P0 反代核心** | P0+P1、全量 | 用户决策；先打通播放链路再扩面 |
 
 ## 3. 后端依赖清单
@@ -50,10 +50,12 @@
 | `tower` / `tower-http` | 0.5 / 0.6 | 中间件（trace、limit、set-header） | `S-GAP-08` |
 | `reqwest` | 0.12（`rustls-tls`） | 上游拉流与 302 解析 | `S-MODE-04` |
 | `rustls` + `webpki-roots` | 0.23 | TLS | — |
-| `serde` / `serde_json` / `toml` | 1 / 1 / 0.8 | 配置与 API 载荷 | `S-CFG-*` |
+| `serde` / `serde_json` | 1 / 1 | 配置与 API 载荷 | `S-CFG-*` |
+| `toml` | 0.8 | 兼容键保留（`extra` 字段仍是 `toml::Table`） | `S-CFG-04` |
+| `rusqlite` | 0.41（bundled） | 配置、用户与令牌存储 | F-1、v2026.6 |
+| `argon2` | 0.5 | 口令散列 | F-1 |
 | `tracing` / `tracing-subscriber` | 0.1 / 0.3 | 日志（`log_level`） | `S-CACHE-05` |
-| `clap` | 4 | 命令行（`config.toml` 参数、`pass`/`port`） | `S-CLI-01` |
-| `notify` | 6 | 配置文件热重载 | `S-CFG-02` |
+| 手写解析 | — | 命令行（数据库参数、`config`/`passwd` 子命令） | `S-CLI-01` |
 | `sha2` / `hex` | 0.10 / 0.4 | 密码校验、切片指纹 `<S>` | `S-DIS-01`、F-004 |
 | `base64` / `uuid` / `rand` | 0.22 / 1 / 0.8 | Token、Cookie、随机前缀 `<P>` | `S-AUTH-*`、F-017 |
 | `url` / `percent-encoding` | 2 | URL 改写与清单重写 | `S-MODE-05` |
@@ -95,7 +97,7 @@
 
 | 契约 | 来源 | 加载阶段 |
 | --- | --- | --- |
-| `config.toml` 键名与默认值 | `spec/08` §11 | P0 |
+| 配置键名与默认值 | `spec/08` §11 | P0 |
 | 路由表与鉴权面 | `spec/08` §2、F-012 §3 | P0 |
 | 播放地址与扩展名规则 | `spec/08` §3 | P0 |
 | 六种模式语义 | `spec/08` §4、F-005 | P0（proxy/redirect/rewrite/passthrough）、P1（remux/dash） |
@@ -125,7 +127,7 @@
 ```
 /opt/tv-buddy/
 ├── tv-buddy            # 单二进制
-├── config.toml         # 与目标键面一致（spec/08 §11）
+├── tv-buddy.db         # 配置 + 用户 + 令牌
 ├── tv-buddy.log        # 5 MB 轮转（S-CACHE-05）
 └── cache/              # cache.disk_path（默认 ./cache）
     ├── epg/  logos/  m3u8/  recordings/
@@ -139,7 +141,7 @@
 
 | 模块 | 责任 | 关联规格 |
 | --- | --- | --- |
-| `cli` | `config.toml` 参数、`pass`/`port`/`update` 子命令 | `S-CLI-01` |
+| `cli` | 数据库参数、`config`/`passwd` 子命令 | `S-CLI-01` |
 | `config` | 加载、默认值、规范化写回、热重载 | `S-CFG-01/02` |
 | `http` | 路由、中间件、错误映射、302 占位 | `S-EP-*` |
 | `proxy` | 六种模式的分发与转发 | `S-MODE-*` |
@@ -183,7 +185,7 @@
 
 | 判据 | 方法 | 规格 |
 | --- | --- | --- |
-| 配置加载与规范化写回 | 与目标 `config.toml` 逐键对比 | `S-CFG-01` |
+| 配置加载与写回 | 与目标配置逐键对比 | `S-CFG-01` |
 | 热重载 | 改 `[server]`/`[auth]` 后立即生效 | `S-CFG-02` |
 | 总/分组订阅形状 | 与目标清单逐行对比（条目、token、头行） | `S-EP-02`、`S-URL-04/07` |
 | 入口地址与 302 规则 | 未知频道、`access` 四档、`archived` | `S-URL-01/02/03` |

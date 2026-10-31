@@ -20,7 +20,8 @@ CONTAINER=${CONTAINER:-iptv82}
 WORK=$(mktemp -d)
 ORIGIN="$WORK/origin"
 BASE_CFG="$WORK/base.toml"
-OUR_CFG="$WORK/config.toml"
+OUR_CFG="$WORK/ours-config.toml"
+OUR_JSON="$WORK/config.json"
 TARGET_CFG="$WORK/cmp-config.toml"
 BACKUP=/app/config.cmp-backup.toml
 
@@ -177,6 +178,13 @@ PY
 }
 
 build_cfg "127.0.0.1:$OUR_PORT" "$WORK/cache" "http://127.0.0.1:$UP" "$OUR_CFG"
+# 本实现只认 JSON。目标容器仍要 TOML，所以两份都留着。
+python3 - "$OUR_CFG" "$OUR_JSON" <<'PY'
+import json, sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    data = tomllib.load(handle)
+json.dump(data, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
+PY
 build_cfg "[::]:$TARGET_PORT" "/app/cmp-cache" "http://host.docker.internal:$UP" "$TARGET_CFG"
 
 # --- 备份容器内配置，装入夹具后重启容器 ---
@@ -196,7 +204,7 @@ trap cleanup EXIT
 
 python3 -m http.server "$UP" --directory "$ORIGIN" >"$WORK/origin.log" 2>&1 &
 ORIGIN_PID=$!
-"$BIN" import-config "$OUR_CFG" --db "$WORK/ours.db" >/dev/null || exit 1
+"$BIN" config import "$OUR_JSON" --db "$WORK/ours.db" >/dev/null || exit 1
 (cd "$WORK" && exec "$BIN" "$WORK/ours.db" >"$WORK/ours.log" 2>&1) &
 OUR_PID=$!
 

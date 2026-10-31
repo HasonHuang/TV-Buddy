@@ -1,10 +1,3 @@
-> **2026-10-31 起配置存 SQLite。**
-> 数据库是 `<prefix>/tv-buddy.db`。本文里凡是「编辑 `config.toml`」的步骤，改为
-> `tv-buddy config set <键> <值>`；凡是把 `config.toml` 当启动参数的，改为
-> `tv-buddy <prefix>/tv-buddy.db`。需要一次导入旧配置时运行
-> `tv-buddy import-config <config.toml> --db <prefix>/tv-buddy.db`。
-> 备份、重装、恢复的载体是同名数据库文件。详见 `PROGRESS.md` §5。
-
 ## 1. 目的
 
 本文档证明 CDN 边缘缓存按设计工作。切片被缓存。清单、订阅清单、面板接口不被缓存。切片字节不被改写。清单下发 `https://` 切片地址。
@@ -20,13 +13,13 @@
 | 操作系统 | Linux。amd64 或 arm64 |
 | 服务 | `tv-buddy` 已安装并运行 |
 | 默认安装目录 | `/opt/tv-buddy`（`install.sh:17`） |
-| 默认配置路径 | `/opt/tv-buddy/config.toml`（`packaging/tv-buddy.service`） |
+| 默认数据库路径 | `/opt/tv-buddy/tv-buddy.db`（`packaging/tv-buddy.service`） |
 | 默认监听 | `[::]:19899`（`src/config/model.rs:130`） |
 | 日志文件 | `/opt/tv-buddy/tv-buddy.log`（`src/logging.rs:163`） |
 | 面板 | `[panel].enabled = true`，默认成立（`src/config/model.rs:158-169`） |
 | 缓存后端 | `[cache].backend = "disk"`（`src/config/model.rs:251-270`） |
 
-服务必须以配置文件路径作为第一个参数启动。默认取 `config.toml`（`src/main.rs:14-16`）。systemd 单元已按此写法生成。
+服务必须以数据库路径作为第一个参数启动。默认取 `tv-buddy.db`。systemd 单元已按此写法生成。
 
 检查服务状态：
 
@@ -85,7 +78,7 @@ VPS 上必须有：
 | 缓存键是否含查询串、Cookie、UA、请求头 | 仓库无控制面 | 第 3.7 节取消 Cookie；其余按失败表排查 |
 | 控制台 TTL 单位 | 仓库只产出秒（`src/cache_estimate.rs:30-42`） | 见第 3.6 节的换算 |
 | 「忽略 Set-Cookie」「缓存带 Cookie 的响应」是否存在 | 取决于 CDN | 三选一，记录实际选项 |
-| VPS 上实际的 `[cdn]` 取值 | 仓库没有 `config.toml` | 第 3.2 节读取实际值 |
+| VPS 上实际的 `[cdn]` 取值 | 仓库没有运行时数据库 | 第 3.2 节读取实际值 |
 | CDN 是否把 `Host` 改写为源站地址 | 仓库无控制面 | 第 3.14 节验证；失败时配 `public_base` |
 | 控制台实际 TTL | 只能由控制台证明 | 第 3.15 节按过期时间验证 |
 
@@ -110,7 +103,6 @@ printf 'token=%s\n' "$ADMIN"
 ### 3.2 读取生效配置
 
 ```bash
-CFG=/opt/tv-buddy/config.toml
 curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
   | jq '{cdn, cache_backend: .cache.backend, disk_path: .cache.disk_path, prefetch: .cache.prefetch.enabled, gc: .cache.gc.enabled, token_enabled: .auth.token_enabled}'
 ```

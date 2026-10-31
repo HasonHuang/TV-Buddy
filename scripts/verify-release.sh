@@ -12,23 +12,31 @@ trap 'rm -rf "$WORK"' EXIT
 tar -C "$WORK" -xzf "$TARBALL"
 DIR=$(find "$WORK" -maxdepth 1 -type d -name 'tv-buddy-*' | head -1)
 
-cat > "$DIR/config.toml" <<'EOF'
-[server]
-bind = "127.0.0.1:19899"
-log_level = "warn"
-
-[cache]
-disk_path = "/tmp/cache"
-
-[[groups]]
-id = "g"
-name = "组"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c"
-name = "频道"
-url = "http://127.0.0.1:1/x.m3u8"
+cat > "$DIR/config.json" <<'EOF'
+{
+  "server": {
+    "bind": "127.0.0.1:19899",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "/tmp/cache"
+  },
+  "groups": [
+    {
+      "id": "g",
+      "name": "组",
+      "mode": "proxy",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c",
+          "name": "频道",
+          "url": "http://127.0.0.1:1/x.m3u8"
+        }
+      ]
+    }
+  ]
+}
 EOF
 
 # 静态判定：ELF 程序头里不应有 PT_INTERP（值为 3）。
@@ -54,7 +62,7 @@ PY
 
 docker run --rm --platform "linux/$ARCH" -v "$DIR":/w -w /w alpine:3.20 sh -c '
 set -e
-./tv-buddy import-config /w/config.toml --db /w/tv-buddy.db >/dev/null
+./tv-buddy config import /w/config.json --db /w/tv-buddy.db >/dev/null
 ./tv-buddy /w/tv-buddy.db >/w/run.log 2>&1 &
 pid=$!
 ok=0

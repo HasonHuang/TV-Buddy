@@ -1,10 +1,3 @@
-> **2026-10-31 起配置存 SQLite。**
-> 数据库是 `<prefix>/tv-buddy.db`。本文里凡是「编辑 `config.toml`」的步骤，改为
-> `tv-buddy config set <键> <值>`；凡是把 `config.toml` 当启动参数的，改为
-> `tv-buddy <prefix>/tv-buddy.db`。需要一次导入旧配置时运行
-> `tv-buddy import-config <config.toml> --db <prefix>/tv-buddy.db`。
-> 备份、重装、恢复的载体是同名数据库文件。详见 `PROGRESS.md` §5。
-
 ## 1. 目的
 
 证明 `install.sh` 在真实 Linux VPS 上完成安装、注册系统服务并启动进程。同时证明默认监听端口、默认面板账号与健康检查可用。

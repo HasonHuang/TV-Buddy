@@ -12,61 +12,72 @@ cd "$(dirname "$0")/.."
 BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19930}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 
-cat > "$CFG" <<TOML
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
+cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn"
+  },
+  "auth": {
+    "token_enabled": false
+  },
+  "cache": {
+    "disk_path": "$WORK/cache"
+  },
+  "groups": [
+    {
+      "id": "ga",
+      "name": "甲组",
+      "mode": "proxy",
+      "access": "public",
+      "channels": [
+        {
+          "id": "a1",
+          "name": "甲一",
+          "url": "http://example.invalid/a1.m3u8"
+        },
+        {
+          "id": "a2",
+          "name": "甲二",
+          "url": "http://example.invalid/a2.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "gb",
+      "name": "乙组",
+      "mode": "dash",
+      "access": "public",
+      "channels": [
+        {
+          "id": "b1",
+          "name": "乙一",
+          "url": "http://example.invalid/b1.mpd",
+          "livestream": true
+        }
+      ]
+    },
+    {
+      "id": "gc",
+      "name": "丙组",
+      "mode": "proxy",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "丙一",
+          "url": "http://example.invalid/c1.m3u8"
+        }
+      ]
+    }
+  ]
+}
+JSON
 
-[auth]
-token_enabled = false
-
-[cache]
-disk_path = "$WORK/cache"
-
-[[groups]]
-id = "ga"
-name = "甲组"
-mode = "proxy"
-access = "public"
-
-[[groups.channels]]
-id = "a1"
-name = "甲一"
-url = "http://example.invalid/a1.m3u8"
-
-[[groups.channels]]
-id = "a2"
-name = "甲二"
-url = "http://example.invalid/a2.m3u8"
-
-[[groups]]
-id = "gb"
-name = "乙组"
-mode = "dash"
-access = "public"
-
-[[groups.channels]]
-id = "b1"
-name = "乙一"
-url = "http://example.invalid/b1.mpd"
-livestream = true
-
-[[groups]]
-id = "gc"
-name = "丙组"
-mode = "proxy"
-access = "public"
-
-[[groups.channels]]
-id = "c1"
-name = "丙一"
-url = "http://example.invalid/c1.m3u8"
-TOML
-
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT

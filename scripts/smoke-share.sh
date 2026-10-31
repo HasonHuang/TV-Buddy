@@ -11,44 +11,56 @@ MPORT=${MPORT:-19930}
 FPORT=${FPORT:-19931}
 WORK=$(mktemp -d)
 
-cat > "$WORK/master.toml" <<TOML
-[server]
-bind = "127.0.0.1:$MPORT"
-log_level = "warn"
+cat > "$WORK/master.json" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$MPORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/master-cache"
+  },
+  "share": {
+    "enabled": true,
+    "role": "master",
+    "key": "REAKEY",
+    "trust_ips": [
+      "127.0.0.1"
+    ],
+    "poll_secs": 5,
+    "follower_urls": [
+      "http://127.0.0.1:$FPORT"
+    ]
+  }
+}
+JSON
 
-[cache]
-disk_path = "$WORK/master-cache"
+cat > "$WORK/follower.json" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$FPORT",
+    "log_level": "warn"
+  },
+  "cache": {
+    "disk_path": "$WORK/follower-cache"
+  },
+  "share": {
+    "enabled": true,
+    "role": "follower",
+    "key": "REAKEY",
+    "trust_ips": [
+      "127.0.0.1"
+    ],
+    "poll_secs": 5,
+    "master_url": "http://127.0.0.1:$MPORT"
+  }
+}
+JSON
 
-[share]
-enabled = true
-role = "master"
-key = "REAKEY"
-trust_ips = ["127.0.0.1"]
-poll_secs = 5
-follower_urls = ["http://127.0.0.1:$FPORT"]
-TOML
-
-cat > "$WORK/follower.toml" <<TOML
-[server]
-bind = "127.0.0.1:$FPORT"
-log_level = "warn"
-
-[cache]
-disk_path = "$WORK/follower-cache"
-
-[share]
-enabled = true
-role = "follower"
-key = "REAKEY"
-trust_ips = ["127.0.0.1"]
-poll_secs = 5
-master_url = "http://127.0.0.1:$MPORT"
-TOML
-
-"$BIN" import-config "$WORK/master.toml" --db "$WORK/master.db" >/dev/null || exit 1
+"$BIN" config import "$WORK/master.json" --db "$WORK/master.db" >/dev/null || exit 1
 "$BIN" "$WORK/master.db" >"$WORK/master.log" 2>&1 &
 MPID=$!
-"$BIN" import-config "$WORK/follower.toml" --db "$WORK/follower.db" >/dev/null || exit 1
+"$BIN" config import "$WORK/follower.json" --db "$WORK/follower.db" >/dev/null || exit 1
 "$BIN" "$WORK/follower.db" >"$WORK/follower.log" 2>&1 &
 FPID=$!
 trap 'kill $MPID $FPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT

@@ -110,8 +110,7 @@ pub fn file_name() -> String {
 
 /// 解包并校验备份：返回配置与报告，最后落盘台标。
 ///
-/// 包内优先找 `config.json`。找不到时按 `config.toml` 处理，
-/// 兼容旧版本生成的备份。返回的配置由调用方写入数据库并替换快照。
+/// 包内必须有 `config.json`。返回的配置由调用方写入数据库并替换快照。
 pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Report)> {
     let mut decoder = flate2::read::GzDecoder::new(data);
     let mut raw = Vec::new();
@@ -119,7 +118,6 @@ pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Report)> {
     let entries = tar::parse(&raw).context("读取 tar 失败")?;
 
     let mut config_json: Option<String> = None;
-    let mut config_toml: Option<String> = None;
     let mut logos: Vec<(String, Vec<u8>)> = Vec::new();
     let mut report = Report::default();
 
@@ -135,10 +133,6 @@ pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Report)> {
             config_json = Some(String::from_utf8(entry.data).context("配置不是 UTF-8")?);
             continue;
         }
-        if name == "config.toml" {
-            config_toml = Some(String::from_utf8(entry.data).context("配置不是 UTF-8")?);
-            continue;
-        }
         if let Some((_, file)) = entry.name.rsplit_once("/logos/") {
             let Some(ext) = file.rsplit_once('.').map(|(_, ext)| ext) else {
                 report.skipped.push(entry.name);
@@ -152,15 +146,11 @@ pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Report)> {
         }
     }
 
-    let config = match (config_json, config_toml) {
-        (Some(text), _) => {
-            let config: Config = serde_json::from_str(&text).context("备份配置不合法")?;
-            crate::config::validate(&config).context("备份配置不合法")?;
-            config
-        }
-        (None, Some(text)) => crate::config::legacy::parse(&text).context("备份配置不合法")?,
-        (None, None) => bail!("备份中没有 config.json"),
+    let Some(text) = config_json else {
+        bail!("备份中没有 config.json");
     };
+    let config: Config = serde_json::from_str(&text).context("备份配置不合法")?;
+    crate::config::validate(&config).context("备份配置不合法")?;
 
     for (name, bytes) in &logos {
         let base = name.rsplit_once('.').map(|(base, _)| base).unwrap_or(name);
@@ -269,33 +259,6 @@ mod tests {
 
         // 非法数据。
         assert!(restore(&cache.to_string_lossy(), b"not gzip").is_err());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn restores_legacy_toml_backup() {
-        let dir = std::env::temp_dir().join(format!("backup-legacy-{}", uuid::Uuid::new_v4()));
-        let cache = dir.join("cache");
-        fs::create_dir_all(&cache).unwrap();
-
-        let manifest = format!("{ROOT}/manifest.json");
-        let legacy = format!("{ROOT}/config.toml");
-        let entries = vec![
-            tar::Entry {
-                name: manifest,
-                data: b"{}".to_vec(),
-            },
-            tar::Entry {
-                name: legacy,
-                data: b"[server]\nnot_found_url = \"http://old/404.mp4\"\n".to_vec(),
-            },
-        ];
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        encoder.write_all(&tar::build(&entries)).unwrap();
-        let data = encoder.finish().unwrap();
-
-        let (config, _) = restore(&cache.to_string_lossy(), &data).unwrap();
-        assert_eq!(config.server.not_found_url, "http://old/404.mp4");
         let _ = fs::remove_dir_all(&dir);
     }
 }

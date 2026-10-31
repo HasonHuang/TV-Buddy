@@ -1,10 +1,3 @@
-> **2026-10-31 起配置存 SQLite。**
-> 数据库是 `<prefix>/tv-buddy.db`。本文里凡是「编辑 `config.toml`」的步骤，改为
-> `tv-buddy config set <键> <值>`；凡是把 `config.toml` 当启动参数的，改为
-> `tv-buddy <prefix>/tv-buddy.db`。需要一次导入旧配置时运行
-> `tv-buddy import-config <config.toml> --db <prefix>/tv-buddy.db`。
-> 备份、重装、恢复的载体是同名数据库文件。详见 `PROGRESS.md` §5。
-
 ## 1. 目的
 
 这份文档证明一件事：在真实 VPS 上，`[auth]` 的会话上限、两级限流、违规封禁、白名单、登录失败锁、播放 Token 与 `random_id_enabled` 按本实现的规则生效。
@@ -29,10 +22,10 @@
 | 权限 | `root`，或可执行 `sudo` 的账号 |
 | 服务 | `tv-buddy` 0.1.0 已安装并在运行 |
 | 二进制 | `/opt/tv-buddy/tv-buddy`（`packaging/tv-buddy.service:10`） |
-| 配置 | `/opt/tv-buddy/config.toml`（`packaging/tv-buddy.service:10`） |
+| 配置 | `/opt/tv-buddy/tv-buddy.db`（`packaging/tv-buddy.service:10`） |
 | 监听 | `[::]:19899`（`src/config/model.rs:130`） |
 | 服务单元 | `tv-buddy`（`packaging/tv-buddy.sh:29`） |
-| 面板账号 | `admin` / `admin`（默认，`src/config/model.rs:162`、`src/config/model.rs:164`） |
+| 面板账号 | `admin`，口令由 `TV_BUDDY_INITIAL_PASSWORD` 指定 |
 | 工具 | `curl`、`jq` |
 | 测试分组 | 至少 2 个频道。分组 id 与频道 id 只用 ASCII 字母、数字、`_`、`-` |
 | 分组访问级别 | `access` 不是 `open`。否则 Token 校验被跳过（`src/http/routes/stream.rs:1500`） |

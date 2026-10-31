@@ -10,74 +10,96 @@ cd "$(dirname "$0")/.."
 BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19912}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 
-cat > "$CFG" <<EOF
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
-m3u_header_lines = ["#EXTVLCOPT:http-user-agent=ReaTest/1.0"]
+cat > "$CFG" <<JSON
+{
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn",
+    "m3u_header_lines": [
+      "#EXTVLCOPT:http-user-agent=ReaTest/1.0"
+    ]
+  },
+  "auth": {
+    "token_enabled": false
+  },
+  "groups": [
+    {
+      "id": "pub",
+      "name": "公开组",
+      "mode": "proxy",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "频道一",
+          "url": "http://example.invalid/a.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "hid",
+      "name": "隐藏组",
+      "mode": "proxy",
+      "access": "hidden",
+      "channels": [
+        {
+          "id": "c2",
+          "name": "频道二",
+          "url": "http://example.invalid/b.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "op",
+      "name": "开放组",
+      "mode": "proxy",
+      "access": "open",
+      "channels": [
+        {
+          "id": "c3",
+          "name": "频道三",
+          "url": "http://example.invalid/c.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "arc",
+      "name": "归档组",
+      "mode": "proxy",
+      "access": "archived",
+      "channels": [
+        {
+          "id": "c4",
+          "name": "频道四",
+          "url": "http://example.invalid/d.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "pass",
+      "name": "直通组",
+      "mode": "passthrough",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c5",
+          "name": "频道五",
+          "url": "http://example.invalid/live.m3u8"
+        }
+      ]
+    }
+  ],
+  "epg": {
+    "enabled": true,
+    "cron": "* * * * *"
+  }
+}
+JSON
 
-[auth]
-token_enabled = false
-
-[[groups]]
-id = "pub"
-name = "公开组"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "c1"
-name = "频道一"
-url = "http://example.invalid/a.m3u8"
-
-[[groups]]
-id = "hid"
-name = "隐藏组"
-mode = "proxy"
-access = "hidden"
-[[groups.channels]]
-id = "c2"
-name = "频道二"
-url = "http://example.invalid/b.m3u8"
-
-[[groups]]
-id = "op"
-name = "开放组"
-mode = "proxy"
-access = "open"
-[[groups.channels]]
-id = "c3"
-name = "频道三"
-url = "http://example.invalid/c.m3u8"
-
-[[groups]]
-id = "arc"
-name = "归档组"
-mode = "proxy"
-access = "archived"
-[[groups.channels]]
-id = "c4"
-name = "频道四"
-url = "http://example.invalid/d.m3u8"
-
-[[groups]]
-id = "pass"
-name = "直通组"
-mode = "passthrough"
-access = "public"
-[[groups.channels]]
-id = "c5"
-name = "频道五"
-url = "http://example.invalid/live.m3u8"
-
-[epg]
-enabled = true
-cron = "* * * * *"
-EOF
-
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true; rm -rf "$WORK"' EXIT

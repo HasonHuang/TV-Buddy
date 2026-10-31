@@ -214,13 +214,7 @@ http://<host>:19899/<gid>/playlist.m3u   # 单个分组
 配置存在 `<prefix>/tv-buddy.db`。面板「系统设置」是唯一入口。
 命令行也能改：`tv-buddy config get <键> `、`tv-buddy config set <键> <值>`。
 
-旧版本的 `config.toml` 用一次导入即可：
-
-```bash
-sudo tv-buddy import-config <prefix>/config.toml --db <prefix>/tv-buddy.db
-```
-
-下面的 TOML 片段是**键名参考**，也是 `import-config` 接受的格式。
+下面的 TOML 片段只是**键名参考**。实际存储是 JSON，面板保存时自动转换。
 
 ```toml
 [server]
@@ -654,7 +648,6 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 | [`docs/findings/`](docs/findings/) | 逆向证据（`F-*`、`D-*`） |
 | [`docs/design/`](docs/design/) | 实现方案：选型、架构、HTTP 契约、低配优化 |
 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) | 路由表与接口契约 |
-| [`docs/design/reconciliation-report.md`](docs/design/reconciliation-report.md) | 与目标 v0.8.2 的 P0 对拍报告 |
 | [`PROGRESS.md`](PROGRESS.md) | 进度与缺口。唯一进度权威 |
 
 ---
@@ -668,7 +661,7 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 - **EPG**：录制前后缓冲与部分私有端点未实现。
 - **录制**：DASH 频道要求直播 MPD 且系统有 ffmpeg。静态 MPD 报「录制区间内无可用切片」。
 - **未实现**：`l1`/`l2` 限流、每 IP 会话上限、`random_id_enabled` 的随机 ID 行为、`compat_mode`、`srt_ua_keywords`、`socks5`。部分只保留配置键。
-- **兼容差异**：以 [`docs/design/reconciliation-report.md`](docs/design/reconciliation-report.md) 为准。22 项对拍用例差异为 0。
+- **兼容差异**：P0 对拍 22 项用例差异为 0。
 
 ---
 

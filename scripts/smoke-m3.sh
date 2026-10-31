@@ -11,7 +11,7 @@ BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19916}
 UP=${UP:-19917}
 WORK=$(mktemp -d)
-CFG="$WORK/config.toml"
+CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"
 
 mkdir -p "$WORK/up/1080" "$WORK/up/360"
@@ -65,99 +65,125 @@ EOF
 head -c 2048 /dev/urandom > "$WORK/up/seg1.ts"
 head -c 2048 /dev/urandom > "$WORK/up/dash-1.m4s"
 
-cat > "$CFG" <<EOF
-# 健康探测会在启动后抓上游，干扰「不抓上游」计数。测试里关掉。
-[health]
-enabled = false
-
-[server]
-bind = "127.0.0.1:$PORT"
-log_level = "warn"
-error_url = "http://placeholder.test/mistake.mp4"
-
-[auth]
-token_enabled = false
-token_failure_url = "http://placeholder.test/Failure.mp4"
-
-[[groups]]
-id = "rd"
-name = "直连组"
-mode = "redirect"
-access = "public"
-redirect_ttl = 300
-redirect_mode = "direct"
-[[groups.channels]]
-id = "c1"
-name = "直连频道"
-url = "http://127.0.0.1:$UP/direct.m3u8"
-
-[[groups]]
-id = "rb"
-name = "选画质组"
-mode = "redirect"
-access = "public"
-redirect_ttl = 300
-redirect_mode = "best"
-[[groups.channels]]
-id = "c2"
-name = "选画质频道"
-url = "http://127.0.0.1:$UP/master.m3u8"
-
-[[groups]]
-id = "rw"
-name = "改写组"
-mode = "rewrite"
-access = "public"
-[[groups.channels]]
-id = "c3"
-name = "改写频道"
-url = "http://127.0.0.1:$UP/rw.m3u8"
-
-[[groups]]
-id = "pt"
-name = "透传组"
-mode = "passthrough"
-access = "public"
-[[groups.channels]]
-id = "c4"
-name = "透传频道"
-url = "http://127.0.0.1:$UP/pt.m3u8"
-
-[[groups]]
-id = "rm"
-name = "转封装组"
-mode = "remux"
-access = "public"
-[[groups.channels]]
-id = "c5"
-name = "转封装频道"
-url = "http://127.0.0.1:$UP/seg1.ts"
-
-[[groups]]
-id = "dh"
-name = "DASH 组"
-mode = "dash"
-access = "public"
-format = "mpd"
-[[groups.channels]]
-id = "c6"
-name = "DASH 频道"
-url = "http://127.0.0.1:$UP/main.mpd"
-[[groups.channels]]
-id = "c7"
-name = "DASH 失败频道"
-url = "http://127.0.0.1:1/dead.mpd"
-
-[[groups]]
-id = "mp"
-name = "代理 MPD 组"
-mode = "proxy"
-access = "public"
-[[groups.channels]]
-id = "m1"
-name = "代理 MPD 频道"
-url = "http://127.0.0.1:$UP/main.mpd"
-EOF
+cat > "$CFG" <<JSON
+{
+  "health": {
+    "enabled": false
+  },
+  "server": {
+    "bind": "127.0.0.1:$PORT",
+    "log_level": "warn",
+    "error_url": "http://placeholder.test/mistake.mp4"
+  },
+  "auth": {
+    "token_enabled": false,
+    "token_failure_url": "http://placeholder.test/Failure.mp4"
+  },
+  "groups": [
+    {
+      "id": "rd",
+      "name": "直连组",
+      "mode": "redirect",
+      "access": "public",
+      "redirect_ttl": 300,
+      "redirect_mode": "direct",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "直连频道",
+          "url": "http://127.0.0.1:$UP/direct.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "rb",
+      "name": "选画质组",
+      "mode": "redirect",
+      "access": "public",
+      "redirect_ttl": 300,
+      "redirect_mode": "best",
+      "channels": [
+        {
+          "id": "c2",
+          "name": "选画质频道",
+          "url": "http://127.0.0.1:$UP/master.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "rw",
+      "name": "改写组",
+      "mode": "rewrite",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c3",
+          "name": "改写频道",
+          "url": "http://127.0.0.1:$UP/rw.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "pt",
+      "name": "透传组",
+      "mode": "passthrough",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c4",
+          "name": "透传频道",
+          "url": "http://127.0.0.1:$UP/pt.m3u8"
+        }
+      ]
+    },
+    {
+      "id": "rm",
+      "name": "转封装组",
+      "mode": "remux",
+      "access": "public",
+      "channels": [
+        {
+          "id": "c5",
+          "name": "转封装频道",
+          "url": "http://127.0.0.1:$UP/seg1.ts"
+        }
+      ]
+    },
+    {
+      "id": "dh",
+      "name": "DASH 组",
+      "mode": "dash",
+      "access": "public",
+      "format": "mpd",
+      "channels": [
+        {
+          "id": "c6",
+          "name": "DASH 频道",
+          "url": "http://127.0.0.1:$UP/main.mpd"
+        },
+        {
+          "id": "c7",
+          "name": "DASH 失败频道",
+          "url": "http://127.0.0.1:1/dead.mpd"
+        }
+      ]
+    },
+    {
+      "id": "mp",
+      "name": "代理 MPD 组",
+      "mode": "proxy",
+      "access": "public",
+      "channels": [
+        {
+          "id": "m1",
+          "name": "代理 MPD 频道",
+          "url": "http://127.0.0.1:$UP/main.mpd"
+        }
+      ]
+    }
+  ]
+}
+JSON
 
 python3 -m http.server "$UP" --directory "$WORK/up" >"$WORK/up.log" 2>&1 &
 UP_PID=$!
@@ -165,7 +191,7 @@ for _ in $(seq 1 50); do
   curl -fsS "http://127.0.0.1:$UP/seg1.ts" >/dev/null 2>&1 && break
   sleep 0.1
 done
-"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" config import "$CFG" --db "$DB" >/dev/null || exit 1
 "$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
