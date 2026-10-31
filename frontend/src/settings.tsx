@@ -637,8 +637,8 @@ export function SettingsPage() {
             </Card>
 
             <Card
-              title="功能入口"
-              note="关闭后侧栏不再显示该分区；已有播放链路不受影响"
+              title="功能开关"
+              note="关闭后侧栏不显示该分区，相关接口返回 403"
             >
               <div className="fields">
                 <BoolPick label="定时录制" path="features.recording" />
@@ -647,11 +647,11 @@ export function SettingsPage() {
                 <BoolPick label="订阅聚合" path="features.playlist" />
                 <BoolPick label="视频素材" path="features.assets" />
                 <BoolPick label="用户与设备" path="features.users" />
-                <BoolPick label="节目指南" path="features.epg" />
-                <BoolPick label="频道热度" path="features.stats" />
               </div>
               <p className="muted">
-                概览、缓存状态、分组管理、系统设置、安全管控与运行日志始终显示。
+                节目指南由「节目指南」页的总开关控制，频道热度由下方「监控」卡片的
+                访问统计控制。概览、缓存状态、分组管理、系统设置、安全管控与运行日志
+                始终显示。
               </p>
             </Card>
 

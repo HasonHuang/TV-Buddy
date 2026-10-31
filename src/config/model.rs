@@ -146,9 +146,10 @@ impl Default for ServerCfg {
 
 /// `[features]`——面板功能入口开关。
 ///
-/// 关掉某项后，侧栏不再显示该分区的入口。接口与后台任务不受影响：
-/// 这是界面减负，不是权限控制。核心分区（概览、缓存、分组、设置、安全、日志）
-/// 没有开关，始终显示。
+/// 关掉某项后，侧栏不再显示该分区，相关接口返回 `403`。
+/// 语义与部署规格无关：高配与低配行为一致。
+/// 节目指南与频道热度不在这里，分别由 `[epg].enabled` 与 `[stats].enabled` 控制。
+/// 核心分区（概览、缓存、分组、设置、安全、日志）没有开关，始终显示。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FeaturesCfg {
@@ -164,10 +165,6 @@ pub struct FeaturesCfg {
     pub assets: bool,
     /// 用户与设备。
     pub users: bool,
-    /// 节目指南。
-    pub epg: bool,
-    /// 频道热度。
-    pub stats: bool,
     #[serde(flatten)]
     pub extra: toml::Table,
 }
@@ -181,8 +178,6 @@ impl Default for FeaturesCfg {
             playlist: true,
             assets: true,
             users: true,
-            epg: true,
-            stats: true,
             extra: toml::Table::new(),
         }
     }

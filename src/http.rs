@@ -357,6 +357,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.clone(),
             guard::ip_guard,
         ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            guard::feature_gate,
+        ))
         .with_state(state)
         .layer(tower_http::cors::CorsLayer::permissive())
 }

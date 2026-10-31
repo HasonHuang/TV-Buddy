@@ -417,28 +417,33 @@ VG-3 与 VG-4 带后端改动。`src/stats.rs` 加频道维度计数，`src/metr
 
 ### 3.9 面板功能入口开关（2026-10-31）
 
-新增 `[features]` 配置段，控制侧栏显示哪些分区。
+新增 `[features]` 配置段，控制功能是否可用。
 
-| 开关 | 控制的分区 |
+| 开关 | 控制的功能 |
 | --- | --- |
 | `recording` | 定时录制 |
 | `livestream` | 回看管理 |
 | `logo` | 台标管理 |
-| `playlist` | 订阅聚合 |
-| `assets` | 视频素材 |
+| `playlist` | 订阅聚合与聚合源接口 |
+| `assets` | 视频素材与字幕 |
 | `users` | 用户与设备 |
-| `epg` | 节目指南 |
-| `stats` | 频道热度 |
+
+节目指南与频道热度不在这里。它们分别由 `[epg].enabled` 与 `[stats].enabled`
+控制，避免同一个功能有两套开关。
 
 概览、缓存状态、分组管理、系统设置、安全管控、运行日志没有开关，始终显示。
 
 语义约束：
 
-- 只影响侧栏入口。接口与后台任务不受影响。
-- 关闭某分区时，若当前停留其上，前端回退到概览。
-- 配置在 `/panel/api/status` 的 `features` 字段返回。
+1. **关闭即不可用**。侧栏不显示该分区，相关接口返回 `403`。
+2. **与部署规格无关**。高配与低配行为一致，不做「低配才拦截」的分支。
+3. 恢复路径不受拦截。`/panel/api/config`、`/panel/api/login`、`/panel/api/me` 始终可用。
+4. 关闭某分区时，若前端停在上面，回退到概览。
+5. 配置在 `/panel/api/status` 的 `features` 字段返回。
 
-面板位置：系统设置 → 功能入口。
+拦截在中间件里按路径前缀做，见 `src/http/guard.rs` 的 `feature_gate`。
+
+面板位置：系统设置 → 功能开关。
 
 低配与高配的参数差异见 [`docs/design/10-low-vs-high-spec.md`](docs/design/10-low-vs-high-spec.md)。
 
