@@ -3,23 +3,42 @@
 > 设计版本 v1.0 ｜ 2026-10-19 ｜ 状态：**初稿**
 > 上游：[`03-http-contract.md`](03-http-contract.md) ｜ 判据：[`../spec/08-target-spec.md`](../spec/08-target-spec.md) §11 ｜ 证据：F-006、F-008、F-015、F-013
 
-## 1. 配置文件
+## 1. 配置存储
+
+配置存 SQLite，不再用 TOML 文件。一个库文件装配置、用户与令牌。
 
 | 项 | 设计 | 依据 |
 | --- | --- | --- |
-| 路径 | 来自启动参数（`tv-buddy <config.toml>`），默认 `config.toml` | S-ENV-06 |
-| 解析 | 严格 TOML：重复键、类型错都报错并退出 | S-EPG-01（F-008 实测） |
-| 默认值 | 缺省键用内置默认补齐；默认值对齐目标 v0.8.2 | S-CFG-04 |
-| 未建模键 | 存 `extra`（`toml::Table`），保存时原样写回 | 设计决策（避免丢第三方配置） |
-| 写回 | 全量规范化 + 原子替换（`config.toml.tmp` → `rename`） | S-CFG-01（F-006） |
-| 并发 | 进程内用一把写锁串行化"改内存 + 写盘" | 设计决策 |
+| 路径 | 来自启动参数（`tv-buddy <tv-buddy.db>`），默认 `./tv-buddy.db` | S-ENV-06 |
+| 存储 | `settings` 表一行 JSON 文档，键为 `config`，值是整份配置 | 设计决策（2026-10-31） |
+| 默认值 | 库为空时写入内置默认；默认值对齐目标 v0.8.2 | S-CFG-04 |
+| 未建模键 | 存 `extra`（`toml::Table`），随 JSON 往返保留 | 设计决策（避免丢第三方配置） |
+| 写回 | 单条 UPSERT，事务原子 | S-CFG-01（F-006） |
+| 并发 | 进程内一把写锁；跨进程靠 SQLite 锁与 `busy_timeout=5000` | 设计决策 |
+| 旧 TOML | 只在 `import-config` 子命令与旧备份恢复时解析 | 迁移决策 |
+
+启动参数以 `.toml` 结尾时直接报错，提示改用 `import-config`。库为空且同目录存在
+`config.toml` 时也拒绝启动，避免用空分组跑起来。
+
+**兼容性变化**：本实现不再直接读取目标产品的 `config.toml`。升级时先运行一次
+`tv-buddy import-config <config.toml>`，之后配置只从数据库来。
+
+子命令：
+
+| 命令 | 作用 |
+| --- | --- |
+| `import-config <toml> [--db <路径>] [--force]` | 旧配置一次性导入 |
+| `config get <a.b.c>` | 读一个配置值 |
+| `config set <a.b.c> <值>` | 写一个配置值 |
+| `config reset [--force]` | 配置恢复默认，保留用户 |
+| `passwd <用户名> [--stdin]` | 重设口令 |
 
 ### 1.1 段与职责
 
 | 段 | 关键键 | P0 用途 |
 | --- | --- | --- |
 | `[server]` | `bind`、`not_found_url`、`error_url`、`home_url`、`m3u_header_lines`、`timezone_offset_hours`、`log_level`、`trust_proxy` | 监听、跳转、订阅头行、日志级别 |
-| `[panel]` | `enabled`、`username`、`password_sha256`、`session_ttl` | 面板登录 |
+| `[panel]` | `enabled`、`session_ttl` | 面板登录。账号与口令在 `users` 表（见 `09-users-and-devices.md`） |
 | `[cache]` | `backend`（`disk`/`memory`）、`disk_path`、`m3u8/segment_max_entries`、`disk_max_mb`、`memory_max_mb`、`disguise.*` | 缓存与伪装 |
 | `[cache.prefetch]` | `enabled`、`concurrency`、`timeout`、`prefetch_limit`、`skip_tail`、`mpd_readahead` | 媒体清单刷新后按并发与超时预取切片；`skip_tail` 跳过尾部。分组/频道可用 `[groups.prefetch]` 覆盖（见 §11） |
 | `[cache.segments]` | `global_max`、`per_channel_max`、`retain_count` | 内存切片索引上限；`per_channel_max > 0` 时同时约束磁盘索引条数（`seg_url/*.json`） |
@@ -58,9 +77,14 @@
 | `[playlist]`/`[[playlist.sources]]` | 立即；源正文按源级 TTL 复用 | F-020 |
 | `[panel]` | 立即（新会话按新口令） | 设计决策 |
 
-实现：`notify` 监视配置文件。事件到达后重读；解析失败只记日志、保留旧快照。自身写盘时先登记内容摘要，忽略自己触发的下一次事件（避免写回循环）。
+实现：没有文件可监视，也没有热重载线程。三条路径：
 
-> 竞态：目标存在"文件直改 vs 面板保存"的竞态（面板以内存态回写）。本实现以**文件为唯一事实源**：任何保存都从当前文件重读合并，再写回。这会与目标行为不同（更安全），登记为设计差异。
+- 面板保存：写库后立即替换快照。
+- `POST /panel/api/reload`：从库重读，替换快照。
+- 管理 CLI 改库：需要重启服务，或调用上面这个接口。
+
+> 竞态：面板保存、分组编辑与 CLI 改库都以**数据库为唯一事实源**。
+> 进程内用一把写锁串行化「读库 → 改 → 写库 → 替换快照」，不会丢更新。
 
 ## 3. 存储布局
 
@@ -135,11 +159,14 @@
 ```text
 /opt/tv-buddy/
 ├─ tv-buddy            静态 musl 二进制
-├─ config.toml         首次启动生成默认配置
+├─ tv-buddy.db         配置 + 用户 + 令牌（首次启动生成，权限 600）
 ├─ tv-buddy.log
 ├─ cache/
 └─ tv-buddy.sh         管理 CLI（无参数打开菜单）
 ```
+
+数据库还有两个 WAL 旁路文件：`tv-buddy.db-wal`、`tv-buddy.db-shm`。
+备份与迁移时不要把主文件单独拷走。
 
 | 项 | 实现 | 依据 |
 | --- | --- | --- |
@@ -155,7 +182,6 @@
 ```text
 tv-buddy-<version>-<arch>/
 ├─ tv-buddy            静态 musl 二进制
-├─ config.toml.example 首次安装复制为 config.toml
 ├─ tv-buddy.sh         管理 CLI（菜单、启停、端口、密码、更新、卸载）
 ├─ install.sh          安装到 /opt/tv-buddy，注册服务
 ├─ tv-buddy.service    systemd 单元
@@ -164,13 +190,13 @@ tv-buddy-<version>-<arch>/
 
 > 说明：本机访问 `github.com` 的 release 资产与 `static.rust-lang.org` 会被中间设备断开 TLS，
 > 因此不用 `cross`，改用 Docker Hub 可用的 `rust:1-alpine` 完成双架构静态构建。
-| 备份（P2） | `tar.gz` 含 `config.toml` + `cache/logos` + `schedule.json`；恢复时原配置另存 `config.toml.bak` | S-BAK-01/02、F-013 §9 |
+| 备份（P2） | `tar.gz` 含 `config.json` + `cache/logos` + `schedule.json`；恢复时原配置另存 `tv-buddy.db.bak.json`。旧包里的 `config.toml` 仍可恢复 | S-BAK-01/02、F-013 §9 |
 
 ## 7. 未决问题
 
 | 问题 | 处理 |
 | --- | --- |
-| 是否复刻目标的"面板保存"规范化格式 | 用 `toml::to_string_pretty`；不追求与目标逐字节相同 |
+| 是否复刻目标的"面板保存"规范化格式 | 配置存 JSON，不做 TOML 规范化 |
 | CLI `update` 的下载源 | 用 `TV_BUDDY_{BIN,ARCHIVE,URL}` 覆盖；本仓库未发布 release 资产 |
 | `disk_path` 变更是否允许热重载 | 当前要求重启（与目标一致） |
 

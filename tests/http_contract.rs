@@ -478,12 +478,12 @@ url = "{upstream}/epg.xml"
             String::new()
         }
     );
-    let config_path = dir.join("config.toml");
-    std::fs::write(&config_path, toml).expect("写配置");
-    let cfg = config::load(&config_path).expect("加载配置");
+    // 夹具仍是 TOML 字面量，走一次性迁移解析器。
+    let cfg = config::legacy::parse(&toml).expect("加载配置");
+    let db_path = dir.join("tv-buddy.db");
 
     let state =
-        Arc::new(AppState::new(config_path, cfg, Arc::new(RingBuffer::default())).expect("建状态"));
+        Arc::new(AppState::new(db_path, cfg, Arc::new(RingBuffer::default())).expect("建状态"));
     // 契约测试固定用 admin/admin 登录。
     tv_buddy::users::ensure_admin(&state.users, "admin").expect("初始管理员");
     let base = serve(http::router(state.clone())).await;
@@ -5270,11 +5270,10 @@ async fn fixture_from_toml(toml: &str) -> Fixture {
     let dir = std::env::temp_dir().join(format!("tv-buddy-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("建临时目录");
     let body = toml.replace("{dir}", &dir.display().to_string());
-    let config_path = dir.join("config.toml");
-    std::fs::write(&config_path, body).expect("写配置");
-    let cfg = config::load(&config_path).expect("加载配置");
+    let cfg = config::legacy::parse(&body).expect("加载配置");
+    let db_path = dir.join("tv-buddy.db");
     let state =
-        Arc::new(AppState::new(config_path, cfg, Arc::new(RingBuffer::default())).expect("建状态"));
+        Arc::new(AppState::new(db_path, cfg, Arc::new(RingBuffer::default())).expect("建状态"));
     // 契约测试固定用 admin/admin 登录。
     tv_buddy::users::ensure_admin(&state.users, "admin").expect("初始管理员");
     let base = serve(http::router(state.clone())).await;

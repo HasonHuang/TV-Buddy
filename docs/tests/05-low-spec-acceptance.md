@@ -1,3 +1,10 @@
+> **2026-10-31 起配置存 SQLite。**
+> 数据库是 `<prefix>/tv-buddy.db`。本文里凡是「编辑 `config.toml`」的步骤，改为
+> `tv-buddy config set <键> <值>`；凡是把 `config.toml` 当启动参数的，改为
+> `tv-buddy <prefix>/tv-buddy.db`。需要一次导入旧配置时运行
+> `tv-buddy import-config <config.toml> --db <prefix>/tv-buddy.db`。
+> 备份、重装、恢复的载体是同名数据库文件。详见 `PROGRESS.md` §5。
+
 ## 1. 目的
 
 本验收证明两件事：S4 的磁盘回收在真实磁盘上收敛到上限；S6 的 64 MB 实例连续运行 24 小时不 OOM，且回收目录不超限。
@@ -98,7 +105,7 @@ echo "$TAG"
 用已下载的发布包安装。`<version>` 是 tag 去掉前缀 `v`，`<arch>` 是 `amd64` 或 `arm64`：
 
 ```bash
-sudo sh install.sh --archive "/root/tv-buddy-<version>-<arch>.tar.gz"
+sudo sh install.sh --archive "/root/tv-buddy-<version>-<arch>.tar.gz" --low-spec
 ```
 
 或者直接从 Release 装指定 tag：
@@ -112,29 +119,27 @@ sudo sh install.sh --version "$TAG"
 预期输出包含：
 
 ```
-已生成配置：/opt/tv-buddy/config.toml（请修改后重启）
+已写入低配参数：/opt/tv-buddy/tv-buddy.db
 安装完成：/opt/tv-buddy
 状态：服务已启动
 ```
 
-安装脚本复制的是 `packaging/config.toml.example`（`install.sh:342-348`），不是低配样例。所以下一步覆盖配置：
+`--low-spec` 写入 5 个差异键：`cache.segments.per_channel_max=200`、
+`cache.prefetch.concurrency=2`、`auth.token_enabled=true`、
+`auth.ip_guard_enabled=true`、`cdn.enabled=true`。
+
+面板口令由首次启动随机生成，写在 `/opt/tv-buddy/cache/admin_initial_credentials.txt`。
+不需要手工算哈希。要指定口令，安装前设环境变量：
 
 ```bash
-sudo install -m 0644 docs/design/config-low-spec.toml /opt/tv-buddy/config.toml
+TV_BUDDY_INITIAL_PASSWORD='NEWPASS' sudo -E sh install.sh --low-spec
 ```
 
-生成面板口令哈希。把 `NEWPASS` 换成你的口令：
+改单个配置值：
 
 ```bash
-printf '%s' 'NEWPASS' | sha256sum | cut -d' ' -f1
-```
-
-预期：64 位十六进制字符串。
-
-编辑配置：
-
-```bash
-sudoedit /opt/tv-buddy/config.toml
+sudo tv-buddy config set cache.gc.max_disk_mb 120
+sudo tv-buddy restart
 ```
 
 在 `[panel]` 段内补两行。样例只有 `enabled = true`，没有口令：
@@ -295,7 +300,7 @@ sudo find /opt/tv-buddy/cache/seg_bytes -maxdepth 1 -name 'fill_*.bin' -delete
 步骤 1：确认上限是自动值：
 
 ```bash
-sudo sed -n '/^\[cache.gc\]/,/^\[/p' /opt/tv-buddy/config.toml | grep max_disk_mb
+sudo tv-buddy config get cache.gc.max_disk_mb
 ```
 
 预期：`max_disk_mb = 0`。显式填数时，代码直接返回该值，公式不参与（`src/cache_gc.rs:70-72`）。
@@ -451,7 +456,7 @@ sudo find /opt/tv-buddy/cache/seg_bytes -maxdepth 1 -name 'fill_*.bin' -delete
 ```bash
 free -m
 cat /sys/fs/cgroup/memory.max
-sudo sed -n '/^\[cache.gc\]/,/^\[/p' /opt/tv-buddy/config.toml | grep enabled
+sudo tv-buddy config get cache.gc.enabled
 ```
 
 预期：内存与 64 MB 或 128 MB 档一致；`enabled = true`。
@@ -633,7 +638,7 @@ enabled = false
 删除本验收加入的 `session_ttl`，恢复默认 86400 秒：
 
 ```bash
-sudoedit /opt/tv-buddy/config.toml
+sudo tv-buddy config set cache.gc.enabled true
 ```
 
 删除测试数据：
@@ -752,7 +757,7 @@ S4-3-b 与 S6-e 只能记录数值，结论写「未验证」，并写缺什么�
 D=/root/tv-buddy-fail-$(date +%Y%m%d-%H%M)
 sudo mkdir -p "$D"
 sudo cp /opt/tv-buddy/tv-buddy.log "$D"/ 2>/dev/null
-sudo cp /opt/tv-buddy/config.toml "$D"/ 2>/dev/null
+sudo cp /opt/tv-buddy/tv-buddy.db "$D"/ 2>/dev/null
 systemctl status tv-buddy --no-pager > "$D/systemctl.txt" 2>&1
 journalctl -u tv-buddy --since '48 hours ago' --no-pager > "$D/journal.txt" 2>&1
 PID=$(systemctl show -p MainPID --value tv-buddy)
@@ -784,7 +789,7 @@ echo "$D.tar.gz"
 
 第 3 步：把 tar 包路径交给开发者。开发者在 `PROGRESS.md` 立一条缺口。
 
-必须包含的文件：`tv-buddy.log`、`config.toml`、`cache-stats.json`、`statvfs.txt`、`cache-files.txt`、`memory.events`。
+必须包含的文件：`tv-buddy.log`、`tv-buddy.db`、`cache-stats.json`、`statvfs.txt`、`cache-files.txt`、`memory.events`。
 
 S4-1 或 S4-2 失败时，另附回收前后的两次 `cache-files.txt`。没有两份文件，无法判断是「没删」还是「删了又写回」。
 

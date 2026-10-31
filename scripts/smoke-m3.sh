@@ -12,6 +12,7 @@ PORT=${PORT:-19916}
 UP=${UP:-19917}
 WORK=$(mktemp -d)
 CFG="$WORK/config.toml"
+DB="$WORK/tv-buddy.db"
 
 mkdir -p "$WORK/up/1080" "$WORK/up/360"
 cat > "$WORK/up/direct.m3u8" <<'EOF'
@@ -164,7 +165,8 @@ for _ in $(seq 1 50); do
   curl -fsS "http://127.0.0.1:$UP/seg1.ts" >/dev/null 2>&1 && break
   sleep 0.1
 done
-"$BIN" "$CFG" >"$WORK/server.log" 2>&1 &
+"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 

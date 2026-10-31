@@ -40,7 +40,6 @@ package() { # 参数：架构（amd64/arm64）
   rm -rf "$stage"
   install -d "$stage"
   install -m 0755 "target/pack-$platform/release/tv-buddy" "$stage/tv-buddy"
-  install -m 0644 packaging/config.toml.example "$stage/config.toml.example"
   install -m 0755 packaging/tv-buddy.sh "$stage/tv-buddy.sh"
   install -m 0755 install.sh "$stage/install.sh"
   install -m 0644 packaging/tv-buddy.service "$stage/tv-buddy.service"

@@ -160,6 +160,7 @@ sudo ./install.sh
 | `--no-link` | 不创建命令软链 |
 | `--no-start` | 安装后不启动服务 |
 | `--start` | 安装后启动服务（默认行为，保留以兼容旧用法） |
+| `--low-spec` | 写入低配参数：省内存、省 CPU |
 | `-h`、`--help` | 显示帮助 |
 
 ### 安装内容
@@ -167,7 +168,7 @@ sudo ./install.sh
 ```text
 <prefix>/
   tv-buddy            # 服务二进制
-  config.toml         # 配置。已存在时不覆盖
+  tv-buddy.db         # 配置 + 用户 + 令牌（首次启动生成，权限 600）
   cache/              # 切片与录制缓存
   tv-buddy.sh         # 管理脚本
 /usr/local/bin/tv-buddy     # 命令软链，可用 --no-link 跳过
@@ -192,11 +193,12 @@ sudo tv-buddy start   # 启动服务（未加 --start 时）
 http://<host>:19899/panel
 ```
 
-默认账号 `admin`，默认口令 `admin`。
+首次启动生成账号 `admin`，口令随机，写在 `<cache>/admin_initial_credentials.txt`（权限 600）。
+也可以用环境变量 `TV_BUDDY_INITIAL_PASSWORD` 指定。
 
 > **先改口令。** 执行 `sudo tv-buddy pass '新口令' admin`。改后旧会话立即失效。
 
-接下来在面板里加分组与频道。也可以直接编辑 `<prefix>/config.toml`，保存后服务自动重载。
+接下来在面板里加分组与频道，配置只在面板里改。
 
 订阅地址形如：
 
@@ -209,7 +211,16 @@ http://<host>:19899/<gid>/playlist.m3u   # 单个分组
 
 ## 配置
 
-配置文件为 `<prefix>/config.toml`。完整样例见 [`packaging/config.toml.example`](packaging/config.toml.example)。
+配置存在 `<prefix>/tv-buddy.db`。面板「系统设置」是唯一入口。
+命令行也能改：`tv-buddy config get <键> `、`tv-buddy config set <键> <值>`。
+
+旧版本的 `config.toml` 用一次导入即可：
+
+```bash
+sudo tv-buddy import-config <prefix>/config.toml --db <prefix>/tv-buddy.db
+```
+
+下面的 TOML 片段是**键名参考**，也是 `import-config` 接受的格式。
 
 ```toml
 [server]
@@ -246,7 +257,8 @@ url = "http://example.com/live.m3u8"
 | `[epg.translate]` | `enabled`、`mtran_url` | 节目单翻译 |
 | `[[groups]]` | `mode`、`format`、`mpd_keep_seconds` | 分组行为 |
 
-热重载：改 `config.toml` 即生效。`[epg]` 与 `[cache].disk_path` 需要重启。
+生效方式：面板保存立即生效；`tv-buddy config set` 之后调用 `POST /panel/api/reload` 或重启。
+`[epg]` 与 `[cache].disk_path` 需要重启。
 
 ### 翻译服务
 
@@ -281,7 +293,8 @@ TRANSLATE_URL=http://127.0.0.1:8989 TRANSLATE_TOKEN=secret scripts/smoke-transla
 
 TV Buddy 可在 **1 vCPU / 128 MB 内存 / 1 GB 磁盘** 的实例上运行。前提是前面挂 CDN，把播放流量挡在边缘。
 
-完整样例：[`docs/design/config-low-spec.toml`](docs/design/config-low-spec.toml)。原理与公式：[`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md)。
+装的时候加 `--low-spec`：`sudo ./install.sh --low-spec`。
+样例：[`docs/design/config-low-spec.toml`](docs/design/config-low-spec.toml)（可用 `import-config` 导入）。原理与公式：[`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md)。
 
 ### 两个硬前提
 
@@ -441,8 +454,8 @@ sudo tv-buddy log 200
 | `url` | 打印面板地址与账号 |
 | `port <N>` | 修改面板端口并重启 |
 | `pass [密码] [账号]` | 修改口令，可同时改账号。无参数进入交互 |
-| `update` | 更换二进制，保留配置 |
-| `reinstall` | 备份配置后重装 |
+| `update` | 更换二进制，保留数据库 |
+| `reinstall` | 备份数据库、重置配置后重装（用户保留） |
 | `install [参数]` | 在发布包目录调用 `install.sh` |
 | `uninstall` | 移除服务。询问是否删除数据 |
 
@@ -487,7 +500,7 @@ scripts/build-frontend.sh
 cargo build --release
 
 # 3) 运行
-target/release/tv-buddy config.toml
+target/release/tv-buddy ./tv-buddy.db
 ```
 
 ### 交叉编译静态二进制
@@ -504,7 +517,7 @@ scripts/build-release.sh            # amd64 与 arm64 两个静态 musl 包
 scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
 ```
 
-产物在 `dist/tv-buddy-<version>-<arch>.tar.gz`，含二进制、配置样例、启停脚本、安装脚本与服务单元。CI 产出的资产名与本地一致。
+产物在 `dist/tv-buddy-<version>-<arch>.tar.gz`，含二进制、启停脚本、安装脚本与服务单元。CI 产出的资产名与本地一致。
 
 构建用 Docker `rust:1-alpine`。镜像宿主三元组即 `*-linux-musl`，直接产出静态二进制。容器无外网，依赖来自宿主 `~/.cargo` 缓存。
 
@@ -619,14 +632,14 @@ src/
   main.rs          启动入口。只做参数、日志、状态、监听
   lib.rs           库根：模块声明
   state.rs         共享状态（ArcSwap 配置快照 + 改动串行化 + 缓存目录）
-  config.rs        配置模型入口；config/model.rs 为键面模型
+  config.rs        配置入口；config/store.rs 为 SQLite 存储；config/model.rs 为键面模型
   playlist.rs      M3U 订阅渲染
   proxy.rs         清单改写、切片索引与字节缓存；proxy/{media,modes,segments}.rs
   auth.rs          面板会话、播放 Token；auth/{play_token,session}.rs
   http.rs          路由、提取器、错误映射、内嵌静态资源
 frontend/          Vite + React + TS 面板（12 个管理分区 + 独立台标/解封页）
 scripts/           构建、发布与冒烟测试脚本
-packaging/         配置样例、服务单元、管理脚本
+packaging/         服务单元与管理脚本
 docs/              规格、逆向发现、设计与对拍报告
 tests/             路由级集成测试（起真实服务 + 伪上游）
 ```

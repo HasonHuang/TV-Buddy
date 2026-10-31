@@ -112,9 +112,10 @@ for _ in $(seq 1 50); do
     sleep 0.1
 done
 
+"$BIN" import-config "$WORK/config.toml" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
 (
     cd "$WORK" || exit 1
-    exec "$BIN" config.toml >server.log 2>&1
+    exec "$BIN" tv-buddy.db >server.log 2>&1
 ) &
 echo $! >"$WORK/pid"
 for _ in $(seq 1 20); do

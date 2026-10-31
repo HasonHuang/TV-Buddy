@@ -11,6 +11,7 @@ BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19912}
 WORK=$(mktemp -d)
 CFG="$WORK/config.toml"
+DB="$WORK/tv-buddy.db"
 
 cat > "$CFG" <<EOF
 [server]
@@ -76,7 +77,8 @@ enabled = true
 cron = "* * * * *"
 EOF
 
-"$BIN" "$CFG" >"$WORK/server.log" 2>&1 &
+"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
@@ -121,7 +123,7 @@ check "新建分组 200" "200" \
 check "重复 id 409" "409" \
   "$(code -X POST "${A[@]}" -d '{"id":"new1"}' "$B/panel/api/groups")"
 check "重复 id 错误串" "Group id already exists" "$(jget 'd["error"]')"
-check "落盘含新组" "1" "$(grep -c '^id = "new1"' "$CFG")"
+check "落库含新组" "1" "$("$BIN" config get groups --db "$DB" | grep -c '"id":"new1"' || true)"
 check "空 id 400" "400" \
   "$(code -X POST "${A[@]}" -d '{"name":"无 id"}' "$B/panel/api/groups")"
 
@@ -196,8 +198,7 @@ check "开放组不带 Token" "0" "$(curl -s "$B/op/playlist.m3u" | grep -c 'tok
 check "直通组不带 Token" "0" "$(curl -s "$B/playlist.m3u" | grep -c 'example.invalid/live.m3u8?token' || true)"
 
 # --- 未建模段保留 ---
-check "未建模段保留" "* * * * *" \
-  "$(python3 -c 'import tomllib,sys;print(tomllib.load(open(sys.argv[1],"rb"))["epg"]["cron"])' "$CFG")"
+check "未建模段保留" "* * * * *" "$("$BIN" config get epg.cron --db "$DB")"
 
 if [ "$fail" = "0" ]; then
   printf 'M1 冒烟测试全部通过\n'

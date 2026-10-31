@@ -76,7 +76,8 @@ name = "DASH 录制频道"
 url = "http://127.0.0.1:$UPORT/live.mpd"
 TOML
 
-"$BIN" "$WORK/config.toml" >"$WORK/server.log" 2>&1 &
+"$BIN" import-config "$WORK/config.toml" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
+"$BIN" "$WORK/tv-buddy.db" >"$WORK/server.log" 2>&1 &
 PID=$!
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 80); do

@@ -1,7 +1,7 @@
 //! 共享状态。
 //!
 //! 播放路径**只读**配置快照。热重载用 `ArcSwap` 原子替换（ADR-02）。
-//! 配置改动走 [`AppState::mutate`]：以磁盘为准重读 → 改 → 校验落盘 → 替换快照。
+//! 配置改动走 [`AppState::mutate`]：以数据库为准重读 → 改 → 校验落库 → 替换快照。
 
 use std::{
     path::PathBuf,
@@ -30,8 +30,10 @@ pub(crate) const DEFAULT_USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 pub struct AppState {
-    /// 配置文件路径（保存与重载用）。
-    pub config_path: PathBuf,
+    /// 数据库文件路径（备份恢复时另存旁路文件用）。
+    pub db_path: PathBuf,
+    /// 配置仓库（SQLite 单行文档）。
+    pub config_store: crate::config::ConfigStore,
     /// 当前配置快照。
     pub config: ArcSwap<Config>,
     /// 面板会话（内存，重启失效）。
@@ -97,14 +99,21 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(
-        config_path: PathBuf,
-        config: Config,
-        logs: Arc<RingBuffer>,
-    ) -> anyhow::Result<Self> {
+    pub fn new(db_path: PathBuf, config: Config, logs: Arc<RingBuffer>) -> anyhow::Result<Self> {
         let ttl = Duration::from_secs(config.panel.session_ttl.max(60));
         let cache_dir = PathBuf::from(&config.cache.disk_path);
-        let users = crate::users::UserStore::open(&cache_dir.join("users.db"))?;
+        let conn = crate::db::connect(&db_path)?;
+        let config_store = crate::config::ConfigStore::new(conn.clone());
+        // 库为空：把调用方给的配置写进去，作为初始状态。
+        if config_store.load()?.is_none() {
+            config_store.save(&config)?;
+        }
+        // 旧版本把用户存在 `<cache>/users.db`。首次启动搬进主库，旧文件不动。
+        if let Err(error) = crate::users::store::migrate_legacy(&conn, &cache_dir.join("users.db"))
+        {
+            tracing::warn!(%error, "迁移旧用户库失败");
+        }
+        let users = crate::users::UserStore::attach(conn)?;
         let offset_hours = config.server.timezone_offset_hours as i64;
         ensure_cache_dirs(&cache_dir);
         let segments = SegmentIndex::new();
@@ -116,7 +125,8 @@ impl AppState {
         let estimate = crate::cache_estimate::Estimator::load_or_default(&cache_dir);
         estimate.set_auto_tune(config.cdn.auto_tune);
         Ok(Self {
-            config_path,
+            db_path,
+            config_store,
             config: ArcSwap::from_pointee(config),
             sessions: SessionStore::new(ttl),
             users,
@@ -224,23 +234,30 @@ impl AppState {
         self.config.store(Arc::new(config));
     }
 
-    /// 改配置：读盘 → 改 → 落盘 → 替换快照。
+    /// 保存整份配置。与 [`AppState::mutate`] 共用写锁，避免并发丢更新。
+    pub fn save_config(&self, config: Config) -> anyhow::Result<()> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.config_store.save(&config)?;
+        self.replace(config);
+        Ok(())
+    }
+
+    /// 改配置：读库 → 改 → 落库 → 替换快照。
     ///
-    /// 以磁盘为唯一事实源，避免内存态覆盖外部直改（`04-config-and-storage.md` §2）。
+    /// 以数据库为唯一事实源，避免内存态覆盖外部直改
+    /// （管理 CLI 也写同一个库）。
     pub fn mutate<F>(&self, change: F) -> anyhow::Result<()>
     where
         F: FnOnce(&mut Config) -> anyhow::Result<()>,
     {
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let mut config = match crate::config::load(&self.config_path) {
-            Ok(from_disk) => from_disk,
-            Err(err) => {
-                tracing::warn!(error = %err, "重读配置失败，改用内存快照");
-                (*self.snapshot()).clone()
-            }
+        // 记录损坏时直接报错，不能用内存快照覆盖掉它。
+        let mut config = match self.config_store.load()? {
+            Some(from_db) => from_db,
+            None => (*self.snapshot()).clone(),
         };
         change(&mut config)?;
-        crate::config::save(&self.config_path, &config)?;
+        self.config_store.save(&config)?;
         self.replace(config);
         Ok(())
     }

@@ -10,6 +10,7 @@ BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19919}
 WORK=$(mktemp -d)
 CFG="$WORK/config.toml"
+DB="$WORK/tv-buddy.db"
 
 cat > "$CFG" <<TOML
 [server]
@@ -25,7 +26,8 @@ name = "原组"
 mode = "proxy"
 TOML
 
-"$BIN" "$CFG" >"$WORK/server.log" 2>&1 &
+"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 B="http://127.0.0.1:$PORT"
@@ -49,7 +51,8 @@ check "备份 200" "200" "$STATUS"
 check "备份类型" "application/gzip" "$(awk 'BEGIN{IGNORECASE=1}index($0,"content-type:")==1{sub(/\r$/,"");print substr($0,15)}' "$WORK/backup.head")"
 check "备份文件名" "1" "$(awk 'BEGIN{IGNORECASE=1}/^content-disposition:/&&/tv-buddy-backup-/{n=1}END{print n+0}' "$WORK/backup.head")"
 check "备份魔数" "1f8b" "$(od -An -tx1 -N2 "$WORK/backup.tar.gz" | tr -d ' ')"
-check "备份含配置" "1" "$(tar tzf "$WORK/backup.tar.gz" 2>/dev/null | grep -c 'tv-buddy-backup/config.toml' || true)"
+check "备份含配置" "1" "$(tar tzf "$WORK/backup.tar.gz" 2>/dev/null | grep -c 'tv-buddy-backup/config.json' || true)"
+check "备份不含 TOML" "0" "$(tar tzf "$WORK/backup.tar.gz" 2>/dev/null | grep -c 'config.toml' || true)"
 
 IMPORT='[{"id":"tmp","name":"临时组","mode":"proxy"}]'
 curl -s -o /dev/null -X POST "$B/panel/api/groups/import" -H "$AUTH" -H 'content-type: application/json' -d "$IMPORT"

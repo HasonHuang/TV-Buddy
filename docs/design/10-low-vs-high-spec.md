@@ -120,6 +120,21 @@
 
 系统会按 §2 的公式自动算三个量。其中两个可以手动覆盖。
 
+低配机器在**安装时**写入低配参数：
+
+```sh
+sudo ./install.sh --low-spec
+```
+
+它写入 §1 的 5 个差异键。也可以手工一条条改：
+
+```sh
+tv-buddy config set cache.segments.per_channel_max 200
+tv-buddy config set cache.prefetch.concurrency 2
+```
+
+配置存在 `tv-buddy.db`。改完需要重启服务，或调 `POST /panel/api/reload`。
+
 ### 5.1 磁盘上限（可直接覆盖）
 
 面板路径：**系统设置 → 切片缓存 → 磁盘上限**。配置键 `cache.gc.max_disk_mb`。

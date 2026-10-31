@@ -1,3 +1,10 @@
+> **2026-10-31 起配置存 SQLite。**
+> 数据库是 `<prefix>/tv-buddy.db`。本文里凡是「编辑 `config.toml`」的步骤，改为
+> `tv-buddy config set <键> <值>`；凡是把 `config.toml` 当启动参数的，改为
+> `tv-buddy <prefix>/tv-buddy.db`。需要一次导入旧配置时运行
+> `tv-buddy import-config <config.toml> --db <prefix>/tv-buddy.db`。
+> 备份、重装、恢复的载体是同名数据库文件。详见 `PROGRESS.md` §5。
+
 ## 1. 目的
 
 证明 `install.sh` 在真实 Linux VPS 上完成安装、注册系统服务并启动进程。同时证明默认监听端口、默认面板账号与健康检查可用。
@@ -15,7 +22,7 @@
 | 校验工具 | 建议有 `sha256sum` 或 `shasum`。两者都没有时安装脚本跳过校验 | `install.sh:163-170` |
 | 解包工具 | `tar` | `install.sh:280` |
 | HTTP 检查工具 | `curl`。步骤 8 至 14 使用它 | 本文档 |
-| 端口 | 本机 19899/TCP 空闲 | `packaging/config.toml.example:5` |
+| 端口 | 本机 19899/TCP 空闲 | `ServerCfg::default`（`src/config/model.rs`） |
 | 服务管理器 | systemd 或 OpenRC。两者都没有时走 PID 文件模式 | `install.sh:372-386` |
 | 外网访问 | VPS 安全组与防火墙放行 19899/TCP | 仓库无防火墙配置依据，未验证。本测试不依赖 |
 
@@ -52,12 +59,12 @@ curl -fsSL -o /root/install-tv-buddy.sh https://raw.githubusercontent.com/HasonH
 # wget -O /root/install-tv-buddy.sh https://raw.githubusercontent.com/HasonHuang/TV-Buddy/main/install.sh
 sha256sum /root/install-tv-buddy.sh
 # 只有 shasum 时改用：shasum -a 256 /root/install-tv-buddy.sh
-ls -l /root/tv-buddy /root/config.toml.example 2>/dev/null || echo "本地包文件不存在"
+ls -l /root/tv-buddy /root/tv-buddy.sh 2>/dev/null || echo "本地包文件不存在"
 ```
 
 预期：`install-tv-buddy.sh` 存在，输出 64 位十六进制摘要。`本地包文件不存在`。
 
-预期第 3 条的原因：脚本对当前目录有分支。`/root` 同时存在可执行的 `tv-buddy` 与 `config.toml.example` 时，脚本改用本地文件，不再下载（`install.sh:29`、`install.sh:312-315`）。
+预期第 3 条的原因：脚本对当前目录有分支。`/root` 存在可执行的 `tv-buddy` 时，脚本改用本地文件，不再下载。
 
 ### 3. 记录安装前状态
 
@@ -81,10 +88,11 @@ echo "exit=$?"
 ```text
 下载：https://github.com/HasonHuang/TV-Buddy/releases/download/<tag>/tv-buddy-<version>-<arch>.tar.gz
 校验通过：pkg.tar.gz
-已生成配置：/opt/tv-buddy/config.toml（请修改后重启）
+（首次启动时创建数据库并生成管理员口令文件）
 命令：/usr/local/bin/tv-buddy
 安装完成：/opt/tv-buddy
-配置：/opt/tv-buddy/config.toml
+数据：/opt/tv-buddy/tv-buddy.db
+初始口令：/opt/tv-buddy/cache/admin_initial_credentials.txt
 面板：http://<主机>:19899/panel（默认 admin / admin，请及时修改）
 状态：服务已启动
 exit=0
@@ -97,7 +105,7 @@ exit=0
 - `校验通过：pkg.tar.gz` 打印的是临时文件名，不是 Release 资产名（`install.sh:172`、`install.sh:293`、`install.sh:326`）。Release 缺少同名 `.sha256` 时不打印该行（`install.sh:160`、`install.sh:294-298`）。
 - 输出 `状态：服务已启动` 表示重启命令返回 0（`install.sh:394`、`install.sh:399`、`install.sh:404`、`install.sh:414-415`）。
 - systemd 的 `Type=simple` 在进程刚拉起时就返回成功（`packaging/tv-buddy.service:8`）。配置错误时进程会退出，随后每 3 秒重启一次（`packaging/tv-buddy.service:11-12`）。因此 `is-active` 可能短暂报告 active。判定以第 8 步的健康检查为准。
-- 首次安装时脚本复制 `config.toml.example` 为 `config.toml`，并打印「已生成配置」（`install.sh:346-349`）。样例配置可用，本次启动不受影响。
+- 首次安装不再下发配置文件。首次启动创建 `tv-buddy.db`，写入默认配置，并创建管理员 `admin`（口令随机，见 `admin_initial_credentials.txt`）。
 - 面板行固定写 `19899` 与 `<主机>` 占位符（`install.sh:413`）。它不是最后一行。最后一行是 `状态：服务已启动`，或 `启动：...`。实际地址以第 12 步的 `tv-buddy url` 为准。
 - 没有任何服务管理器时，脚本先打印 `未发现 systemd/OpenRC；用 /opt/tv-buddy/tv-buddy.sh start 启动`（`install.sh:385`），再走 PID 文件模式。
 
@@ -114,25 +122,24 @@ readlink -f /usr/local/bin/tv-buddy
 ```text
 -rwxr-xr-x ... tv-buddy
 -rwxr-xr-x ... tv-buddy.sh
--rw-r--r-- ... config.toml.example
--rw-r--r-- ... config.toml
+-rw------- ... tv-buddy.db
 -rw-r--r-- ... tv-buddy.log
 ```
 
 `readlink -f` 预期输出 `/opt/tv-buddy/tv-buddy.sh`（`install.sh:357`）。
 
-说明：`install.sh` 不把自身复制进安装目录。它安装三个资产：`tv-buddy`、`tv-buddy.sh`、`config.toml.example`，再复制一份 `config.toml`（`install.sh:339-349`）。因此以后执行 `tv-buddy install` 时，脚本在安装目录及其两级父目录都找不到 `install.sh`，只打印「已安装」提示，不重新安装（`packaging/tv-buddy.sh:607-615`）。
+说明：`install.sh` 不把自身复制进安装目录。它安装两个资产：`tv-buddy`、`tv-buddy.sh`。数据库由首次启动创建。因此以后执行 `tv-buddy install` 时，脚本在安装目录及其两级父目录都找不到 `install.sh`，只打印「已安装」提示，不重新安装。
 
 ### 6. 核对配置取值
 
 ```bash
-grep -n '^bind' /opt/tv-buddy/config.toml
-grep -n '^\[panel\]' /opt/tv-buddy/config.toml || echo "无 [panel] 段"
+sudo tv-buddy config get server.bind
+sudo tv-buddy config get panel.enabled
 ```
 
 预期：`bind = "[::]:19899"`。第二条输出 `无 [panel] 段`。
 
-预期第二条的原因：样例配置全文不含 `[panel]` 段（`packaging/config.toml.example:1-84`）。面板默认值来自代码：`enabled=true`、账号 `admin`、口令 `admin` 的 SHA-256（`src/config/model.rs:158-169`）。默认值由第 10 步的登录结果验证。
+预期：第一条输出 `[::]:19899`，第二条输出 `true`。账号 `admin` 与随机口令由首次启动创建，登录结果在第 10 步验证。
 
 ### 7. 核对服务状态
 
@@ -273,8 +280,8 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/health
 | 2 | 脚本下载 | `install-tv-buddy.sh` 存在，`sha256sum` 输出 64 位摘要 | 下载失败或摘要为空 |
 | 3 | 安装退出码 | `exit=0` | 非 0 |
 | 4 | 安装完成标记 | 输出含 `安装完成：/opt/tv-buddy` | 缺该行 |
-| 5 | 安装文件 | 存在 `tv-buddy`、`tv-buddy.sh`、`config.toml.example`、`config.toml` | 缺任一文件 |
-| 6 | 文件权限 | `tv-buddy` 与 `tv-buddy.sh` 为 `0755`，`config.toml` 为 `0644` | 权限不符 |
+| 5 | 安装文件 | 存在 `tv-buddy`、`tv-buddy.sh`；首次启动后存在 `tv-buddy.db` | 缺任一文件 |
+| 6 | 文件权限 | `tv-buddy` 与 `tv-buddy.sh` 为 `0755`，`tv-buddy.db` 为 `0600` | 权限不符 |
 | 7 | 命令软链 | `readlink -f /usr/local/bin/tv-buddy` 输出 `/opt/tv-buddy/tv-buddy.sh` | 软链不存在或指向别的文件 |
 | 8 | 配置端口 | `bind = "[::]:19899"` | 其他值 |
 | 9 | 服务状态 | 第 7 步所选分支的退出码为 `0` | 非 0 |
@@ -347,7 +354,7 @@ restart 后 /health 状态码：
 
 ```bash
 ls -l /opt/tv-buddy > /tmp/tv-files.txt 2>&1
-cp /opt/tv-buddy/config.toml /tmp/tv-config.toml
+cp /opt/tv-buddy/tv-buddy.db /tmp/tv-buddy.db
 cp /opt/tv-buddy/tv-buddy.log /tmp/tv-buddy.log
 systemctl cat tv-buddy > /tmp/tv-unit.txt 2>&1
 systemctl status tv-buddy --no-pager -l > /tmp/tv-status.txt 2>&1
@@ -383,9 +390,9 @@ cat /opt/tv-buddy/tv-buddy.pid 2>/dev/null || echo "无 PID 文件"
 | 安装打印 `警告：systemctl restart tv-buddy 失败` | 单元状态 | `/tmp/tv-journal.txt`、`/tmp/tv-unit.txt` |
 | 安装打印 `警告：rc-service tv-buddy restart 失败` | OpenRC 状态 | `/tmp/tv-rc.txt`、`/tmp/tv-messages.txt` |
 | 安装打印 `警告：服务启动失败，见 /opt/tv-buddy/tv-buddy.log` | 日志末尾 | `/tmp/tv-buddy.log` |
-| 服务反复重启 | `journalctl` 是否出现 `读取配置失败` | `/tmp/tv-journal.txt`、`/tmp/tv-config.toml` |
+| 服务反复重启 | `journalctl` 里是否有 `打开数据库失败` | `/tmp/tv-journal.txt`、`/tmp/tv-buddy.db` |
 | `/health` 连接失败 | 进程是否存活、端口是否被占 | `/tmp/tv-listen.txt`、`/tmp/tv-journal.txt` |
-| `/health` 返回 200 但登录 401 | `[panel]` 配置值 | `/tmp/tv-config.toml`（口令哈希打码） |
+| `/health` 返回 200 但登录 401 | 账号是否为 `admin`；口令是否取自凭据文件 | `/tmp/tv-buddy.db`、`cache/admin_initial_credentials.txt` |
 | 登录返回 429 | 失败次数是否超限 | `/tmp/tv-journal.txt` |
 
 补充规则：
@@ -404,4 +411,4 @@ cat /opt/tv-buddy/tv-buddy.pid 2>/dev/null || echo "无 PID 文件"
 sh -x /root/install-tv-buddy.sh > /tmp/install-debug.log 2>&1; echo "exit=$?"
 ```
 
-上报内容必须包含：安装脚本 SHA-256、完整安装输出、`/tmp/tv-journal.txt`、`/tmp/tv-buddy.log`、`/tmp/tv-config.toml`（删除 `password_sha256` 的值）、`/tmp/tv-env.txt`。
+上报内容必须包含：安装脚本 SHA-256、完整安装输出、`/tmp/tv-journal.txt`、`/tmp/tv-buddy.log`、`/tmp/tv-env.txt`。数据库不要上报，里面有口令散列与访问令牌。

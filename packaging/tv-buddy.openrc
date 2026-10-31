@@ -6,7 +6,7 @@ name="tv-buddy"
 description="TV Buddy——自托管 IPTV 代理服务"
 
 command="/opt/tv-buddy/tv-buddy"
-command_args="/opt/tv-buddy/config.toml"
+command_args="/opt/tv-buddy/tv-buddy.db"
 command_background=true
 command_user="root"
 pidfile="/run/${RC_SVCNAME}.pid"

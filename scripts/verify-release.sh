@@ -54,7 +54,8 @@ PY
 
 docker run --rm --platform "linux/$ARCH" -v "$DIR":/w -w /w alpine:3.20 sh -c '
 set -e
-./tv-buddy /w/config.toml >/w/run.log 2>&1 &
+./tv-buddy import-config /w/config.toml --db /w/tv-buddy.db >/dev/null
+./tv-buddy /w/tv-buddy.db >/w/run.log 2>&1 &
 pid=$!
 ok=0
 for _ in $(seq 1 50); do

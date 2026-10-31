@@ -10,6 +10,7 @@ BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19920}
 WORK=$(mktemp -d)
 CFG="$WORK/config.toml"
+DB="$WORK/tv-buddy.db"
 
 cat > "$CFG" <<TOML
 [server]
@@ -32,7 +33,8 @@ name = "频道"
 url = "http://127.0.0.1:9/none.m3u8"
 TOML
 
-"$BIN" "$CFG" >"$WORK/server.log" 2>&1 &
+"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 B="http://127.0.0.1:$PORT"

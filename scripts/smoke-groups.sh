@@ -13,6 +13,7 @@ BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19930}
 WORK=$(mktemp -d)
 CFG="$WORK/config.toml"
+DB="$WORK/tv-buddy.db"
 
 cat > "$CFG" <<TOML
 [server]
@@ -65,7 +66,8 @@ name = "丙一"
 url = "http://example.invalid/c1.m3u8"
 TOML
 
-"$BIN" "$CFG" >"$WORK/server.log" 2>&1 &
+"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 B="http://127.0.0.1:$PORT"
@@ -115,7 +117,8 @@ check "排序 PUT 200" "200" "$(putcfg "$WORK/moved.json")"
 getcfg "$WORK/after.json"
 check "分组顺序已改" "ga,gc,gb" \
   "$(python3 -c 'import json;print(",".join(g["id"] for g in json.load(open("'"$WORK"'/after.json"))["groups"]))')"
-check "排序落盘" "1" "$(grep -c '^id = "gc"' "$CFG")"
+check "排序落盘" "ga,gc,gb" \
+  "$("$BIN" config get groups --db "$DB" | python3 -c 'import json,sys;print(",".join(g["id"] for g in json.load(sys.stdin)))')"
 
 # 订阅顺序跟着走：EXTINF 的先后就是数组顺序。
 curl -s "$B/playlist.m3u" > "$WORK/pl.m3u"

@@ -1,3 +1,10 @@
+> **2026-10-31 起配置存 SQLite。**
+> 数据库是 `<prefix>/tv-buddy.db`。本文里凡是「编辑 `config.toml`」的步骤，改为
+> `tv-buddy config set <键> <值>`；凡是把 `config.toml` 当启动参数的，改为
+> `tv-buddy <prefix>/tv-buddy.db`。需要一次导入旧配置时运行
+> `tv-buddy import-config <config.toml> --db <prefix>/tv-buddy.db`。
+> 备份、重装、恢复的载体是同名数据库文件。详见 `PROGRESS.md` §5。
+
 ## 1. 目的
 
 这份文档证明一件事：在真实 VPS 上，`[auth]` 的会话上限、两级限流、违规封禁、白名单、登录失败锁、播放 Token 与 `random_id_enabled` 按本实现的规则生效。

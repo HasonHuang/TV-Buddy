@@ -11,6 +11,7 @@ PORT=${PORT:-19916}
 UP=${UP:-19917}
 WORK=$(mktemp -d)
 CFG="$WORK/config.toml"
+DB="$WORK/tv-buddy.db"
 mkdir -p "$WORK/up"
 
 python3 - "$WORK/up/epg.xml" <<'PY'
@@ -72,7 +73,8 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
-"$BIN" "$CFG" >"$WORK/server.log" 2>&1 &
+"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 

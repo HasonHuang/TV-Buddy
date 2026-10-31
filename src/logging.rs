@@ -162,9 +162,9 @@ mod tests {
 /// 日志文件名（`design/04` §5）。
 pub const LOG_FILE: &str = "tv-buddy.log";
 
-/// 日志文件与配置同目录。
-pub fn log_path_for(config_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let dir = config_path.parent()?;
+/// 日志文件与数据库同目录。
+pub fn log_path_for(db_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let dir = db_path.parent()?;
     if dir.as_os_str().is_empty() {
         Some(std::path::PathBuf::from(LOG_FILE))
     } else {

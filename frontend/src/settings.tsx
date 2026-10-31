@@ -587,7 +587,7 @@ export function SettingsPage() {
       <PageHead
         icon="settings"
         title="系统设置"
-        sub="修改后点击保存生效；保存写回整份 config.toml。"
+        sub="修改后点击保存生效；配置保存在本地数据库。"
       >
         <button className="ghost" onClick={() => void load()}>
           <Icon name="refresh" size={14} />

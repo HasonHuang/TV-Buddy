@@ -11,6 +11,7 @@ BIN=${BIN:-target/debug/tv-buddy}
 PORT=${PORT:-19911}
 WORK=$(mktemp -d)
 CFG="$WORK/config.toml"
+DB="$WORK/tv-buddy.db"
 
 cat > "$CFG" <<EOF
 [server]
@@ -32,7 +33,8 @@ enabled = true
 cron = "* * * * *"
 EOF
 
-"$BIN" "$CFG" &
+"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" "$DB" &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
@@ -88,9 +90,8 @@ print(json.dumps(cfg))
 code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" \
   -H "Authorization: Bearer $T" -H 'Content-Type: application/json' --data-binary "@$WORK/put.json")
 check "配置保存成功" "200" "$code"
-check "改动已落盘" "debug" "$(grep -m1 '^log_level' "$CFG" | cut -d'"' -f2)"
-check "未建模段保留" "* * * * *" \
-  "$(python3 -c 'import tomllib,sys;print(tomllib.load(open(sys.argv[1],"rb"))["epg"]["cron"])' "$CFG")"
+check "改动已入数据库" "debug" "$("$BIN" config get server.log_level --db "$DB")"
+check "未建模段保留" "* * * * *" "$("$BIN" config get epg.cron --db "$DB")"
 
 code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" \
   -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"groups":"bad"}')
@@ -106,11 +107,19 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "$B/panel/api/nope")
 check "未知接口 404" "404" "$code"
 
 printf '[server]\nbind = "127.0.0.1:1"\nbind = "127.0.0.1:2"\n' > "$WORK/bad.toml"
-if "$BIN" "$WORK/bad.toml" >/dev/null 2>&1; then
+if "$BIN" import-config "$WORK/bad.toml" --db "$WORK/bad.db" >/dev/null 2>&1; then
   printf 'FAIL 重复键未报错\n'
   fail=1
 else
   printf 'ok   重复键被拒绝\n'
+fi
+
+# 旧的 TOML 路径不能再当启动参数。
+if "$BIN" "$WORK/bad.toml" >/dev/null 2>&1; then
+  printf 'FAIL 旧配置路径未被拒绝\n'
+  fail=1
+else
+  printf 'ok   旧配置路径被拒绝\n'
 fi
 
 if [ "$fail" = "0" ]; then

@@ -196,7 +196,8 @@ trap cleanup EXIT
 
 python3 -m http.server "$UP" --directory "$ORIGIN" >"$WORK/origin.log" 2>&1 &
 ORIGIN_PID=$!
-(cd "$WORK" && exec "$BIN" "$OUR_CFG" >"$WORK/ours.log" 2>&1) &
+"$BIN" import-config "$OUR_CFG" --db "$WORK/ours.db" >/dev/null || exit 1
+(cd "$WORK" && exec "$BIN" "$WORK/ours.db" >"$WORK/ours.log" 2>&1) &
 OUR_PID=$!
 
 ready() { # 参数：base

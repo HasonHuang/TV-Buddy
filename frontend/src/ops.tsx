@@ -632,7 +632,7 @@ export function BackupPage() {
           恢复
         </div>
         <p className="muted">
-          恢复会覆盖 <code className="mono">config.toml</code>，旧文件另存为 <code className="mono">config.toml.bak</code>。非法内容不会落盘。
+          恢复会覆盖当前配置，旧配置另存为 <code className="mono">tv-buddy.db.bak.json</code>。非法内容不会落盘。
         </p>
         <input
           ref={file}

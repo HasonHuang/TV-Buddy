@@ -89,9 +89,11 @@ dash_timeshift = true
 dash_timeshift_hours = 4
 """
         )
+    db = os.path.join(work, "tv-buddy.db")
+    subprocess.run([BIN, "import-config", config, "--db", db], check=True)
     log_path = os.path.join(work, "server.log")
     with open(log_path, "wb") as log:
-        procs.append(subprocess.Popen([BIN, config], stdout=log, stderr=subprocess.STDOUT))
+        procs.append(subprocess.Popen([BIN, db], stdout=log, stderr=subprocess.STDOUT))
         base = f"http://127.0.0.1:{PORT}"
         for _ in range(60):
             try:

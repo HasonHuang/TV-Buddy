@@ -22,8 +22,8 @@ resolve_self() {
 
 BASE_DIR=$(resolve_self "$0")
 BIN="$BASE_DIR/tv-buddy"
-CFG="$BASE_DIR/config.toml"
-CFG_EXAMPLE="$BASE_DIR/config.toml.example"
+# 配置、用户与令牌都在这个 SQLite 文件里。
+DB="$BASE_DIR/tv-buddy.db"
 LOG_FILE="$BASE_DIR/tv-buddy.log"
 PID_FILE="$BASE_DIR/tv-buddy.pid"
 SERVICE_NAME=tv-buddy
@@ -75,11 +75,11 @@ tv-buddy 管理 CLI
   restart               重启服务
   status                查看服务状态
   log [行数]            查看日志；终端下持续跟随
-  url                   打印面板地址与账号
+  url                   打印面板地址
   port <N>              修改面板端口并重启
-  pass [密码] [账号]    修改面板密码，可同时改账号；无参数进入交互
-  update                更新二进制，保留配置
-  reinstall             备份配置后重装
+  pass [密码] [账号]    修改已有账号的密码；无参数进入交互
+  update                更新二进制，保留数据库
+  reinstall             备份数据库、重置配置后重装
   install [参数]        调用同目录 install.sh 安装或修复
   uninstall             卸载服务；询问是否删除数据
 
@@ -149,12 +149,11 @@ svc_do() {
 }
 
 is_installed() {
-    [ -x "$BIN" ] && [ -f "$CFG" ]
+    [ -x "$BIN" ]
 }
 
 require_installed() {
     [ -x "$BIN" ] || fail "未安装：$BIN"
-    [ -f "$CFG" ] || fail "缺少配置文件：$CFG"
 }
 
 ensure_mutable() {
@@ -173,13 +172,12 @@ daemon_running() {
 
 daemon_start() {
     [ -x "$BIN" ] || fail "缺少可执行文件：$BIN"
-    [ -f "$CFG" ] || fail "缺少配置文件：$CFG"
     if daemon_running; then
         return 0
     fi
     (
         cd "$BASE_DIR" || exit 1
-        exec "$BIN" "$CFG" >>"$LOG_FILE" 2>&1
+        exec "$BIN" "$DB" >>"$LOG_FILE" 2>&1
     ) &
     echo $! >"$PID_FILE"
     i=0
@@ -236,83 +234,16 @@ health_check() {
     return 1
 }
 
-# ---- config.toml 读写：按段落定位，避免改到同名字段 ----
+# ---- 配置读写：交给二进制的 config 子命令 ----
 
 cfg_get() {
-    [ -f "$CFG" ] || return 1
-    awk -v s="[$1]" -v k="$2" '
-        function trim(x) {
-            sub(/^[ \t]+/, "", x)
-            sub(/[ \t\r]+$/, "", x)
-            return x
-        }
-        {
-            t = trim($0)
-            if (t ~ /^\[/) {
-                inx = (t == s)
-                next
-            }
-            if (!inx) next
-            if (t ~ "^" k "[ \t]*=") {
-                sub(/^[^=]*=[ \t]*/, "", t)
-                sub(/[ \t]*#.*$/, "", t)
-                t = trim(t)
-                if (t ~ /^".*"$/) {
-                    t = substr(t, 2, length(t) - 2)
-                }
-                print t
-                exit
-            }
-        }' "$CFG"
+    [ -f "$DB" ] || return 1
+    "$BIN" config get "$1.$2" --db "$DB" 2>/dev/null
 }
 
 cfg_set() {
-    section=$1
-    key=$2
-    value=$3
-    [ -f "$CFG" ] || fail "配置文件不存在：$CFG"
-    tmp=$(mktemp "$CFG.XXXXXX") || fail "无法创建临时文件"
-    awk -v s="[$section]" -v k="$key" -v v="$value" '
-        function trim(x) {
-            sub(/^[ \t]+/, "", x)
-            sub(/[ \t\r]+$/, "", x)
-            return x
-        }
-        BEGIN { inx = 0; done = 0; found = 0 }
-        {
-            t = trim($0)
-            if (t ~ /^\[/) {
-                if (inx && !done) {
-                    print k " = " v
-                    done = 1
-                }
-                inx = (t == s)
-                if (inx) found = 1
-                print
-                next
-            }
-            if (inx && !done && t ~ "^" k "[ \t]*=") {
-                print k " = " v
-                done = 1
-                next
-            }
-            print
-        }
-        END {
-            if (inx && !done) {
-                print k " = " v
-            }
-            if (!found) {
-                print ""
-                print s
-                print k " = " v
-            }
-        }' "$CFG" >"$tmp" || {
-        rm -f "$tmp"
-        fail "写入配置失败"
-    }
-    chmod 600 "$tmp"
-    mv -f "$tmp" "$CFG"
+    [ -f "$DB" ] || fail "数据库不存在：$DB"
+    "$BIN" config set "$1.$2" "$3" --db "$DB" >/dev/null || fail "写入配置失败"
 }
 
 get_bind() {
@@ -334,22 +265,6 @@ set_port() {
     [ -n "$bind" ] && host="${bind%:*}"
     [ -n "$host" ] || host="[::]"
     cfg_set server bind "\"$host:$1\""
-}
-
-sha256hex() {
-    if command -v sha256sum >/dev/null 2>&1; then
-        printf '%s' "$1" | sha256sum | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
-    elif command -v openssl >/dev/null 2>&1; then
-        printf '%s' "$1" | openssl dgst -sha256 2>/dev/null | awk '{print $NF}'
-    else
-        fail "缺少 sha256sum / shasum / openssl"
-    fi
-}
-
-toml_escape() {
-    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
 detect_ip() {
@@ -379,9 +294,8 @@ show_url() {
     case "$host" in
         *:*) host="[$host]" ;;
     esac
-    user=$(cfg_get panel username || true)
     printf '面板地址：http://%s:%s/panel\n' "$host" "$port"
-    printf '账号：%s\n' "${user:-$DEFAULT_USER}"
+    printf '账号：在面板「用户与设备」管理；初始口令见 admin_initial_credentials.txt\n'
 }
 
 # ---- 二进制更新 ----
@@ -709,40 +623,31 @@ cmd_port() {
 
 cmd_pass_interactive() {
     require_installed
-    current=$(cfg_get panel username || true)
-    printf '当前账号：%s\n' "${current:-$DEFAULT_USER}"
-    printf '新账号 [回车=不改]：'
+    printf '账号 [回车=%s]：' "$DEFAULT_USER"
     read -r account || account=
-    printf '新密码（至少 4 位，回车=不改）：'
+    account=${account:-$DEFAULT_USER}
+    printf '新密码（至少 4 位）：'
     stty -echo 2>/dev/null || true
     read -r password || password=
     stty echo 2>/dev/null || true
     printf '\n'
 
-    if [ -z "$account" ] && [ -z "$password" ]; then
+    [ -n "$password" ] || {
         info "未修改"
         return 0
-    fi
-    if [ -n "$password" ]; then
-        [ "${#password}" -ge 4 ] || fail "密码太短（至少 4 位）"
-    fi
+    }
+    [ "${#password}" -ge 4 ] || fail "密码太短（至少 4 位）"
     ensure_mutable
-    if [ -n "$password" ]; then
-        hash=$(sha256hex "$password")
-        cfg_set panel password_sha256 "\"$hash\""
-    fi
-    if [ -n "$account" ]; then
-        cfg_set panel username "\"$(toml_escape "$account")\""
-    fi
-    restart_runtime || fail "配置已写入，但重启失败；见 $LOG_FILE"
-    [ -n "$password" ] && info "密码已更新，旧登录会话失效"
-    [ -n "$account" ] && info "账号已改为：$account"
+    printf '%s' "$password" | "$BIN" passwd "$account" --db "$DB" --stdin >/dev/null ||
+        fail "改密失败：账号不存在？请先在面板创建"
+    restart_runtime || fail "密码已更新，但重启失败；见 $LOG_FILE"
+    info "密码已更新，旧登录会话失效"
 }
 
 cmd_pass() {
     require_installed
     password=${1:-}
-    account=${2:-}
+    account=${2:-$DEFAULT_USER}
     if [ -z "$password" ]; then
         [ -t 0 ] || fail "用法：tv-buddy pass <密码> [账号]"
         cmd_pass_interactive
@@ -750,14 +655,10 @@ cmd_pass() {
     fi
     [ "${#password}" -ge 4 ] || fail "密码太短（至少 4 位）"
     ensure_mutable
-    hash=$(sha256hex "$password")
-    cfg_set panel password_sha256 "\"$hash\""
-    if [ -n "$account" ]; then
-        cfg_set panel username "\"$(toml_escape "$account")\""
-    fi
-    restart_runtime || fail "密码已写入配置，但重启失败；见 $LOG_FILE"
+    printf '%s' "$password" | "$BIN" passwd "$account" --db "$DB" --stdin >/dev/null ||
+        fail "改密失败：账号不存在？请先在面板创建"
+    restart_runtime || fail "密码已写入数据库，但重启失败；见 $LOG_FILE"
     info "密码已更新，旧登录会话失效"
-    [ -n "$account" ] && info "账号已改为：$account"
 }
 
 cmd_update() {
@@ -811,7 +712,7 @@ cmd_reinstall() {
         :
     else
         if [ -t 0 ]; then
-            printf '重装会备份配置并清空后重来，确认继续？[y/N] '
+            printf '重装会备份数据库、重置配置；用户与令牌保留。确认继续？[y/N] '
         fi
         if read -r answer && { [ "$answer" = "y" ] || [ "$answer" = "Y" ]; }; then
             :
@@ -821,8 +722,6 @@ cmd_reinstall() {
         fi
     fi
     old_port=$(get_port)
-    old_user=$(cfg_get panel username || true)
-    [ -n "$old_user" ] || old_user=$DEFAULT_USER
 
     # 先取更新源，避免停服后才发现下载地址不可用。
     new_bin=
@@ -836,23 +735,20 @@ cmd_reinstall() {
     else
         daemon_stop
     fi
-    cp -f "$CFG" "$CFG.bak" 2>/dev/null || true
-    info "配置已备份：$CFG.bak"
+    if [ -f "$DB" ]; then
+        cp -f "$DB" "$DB.bak" 2>/dev/null || true
+        info "数据库已备份：$DB.bak"
+    fi
 
     if [ -n "$new_bin" ]; then
         install_binary "$new_bin" || warn "二进制未更新，继续使用当前版本"
     fi
 
-    rm -f "$CFG"
-    if [ -f "$CFG_EXAMPLE" ]; then
-        cp "$CFG_EXAMPLE" "$CFG"
-    else
-        : >"$CFG"
-    fi
-    chmod 600 "$CFG"
+    # 重装只重置配置。用户与令牌保留。
+    "$BIN" config reset --force --db "$DB" >/dev/null || fail "重置配置失败"
 
     port=${TV_BUDDY_PORT:-$(read_default "面板端口" "$old_port")}
-    user=${TV_BUDDY_USER:-$(read_default "面板账号" "$old_user")}
+    user=${TV_BUDDY_USER:-$DEFAULT_USER}
     password=${TV_BUDDY_PASS:-}
     if [ -z "$password" ] && [ -t 0 ]; then
         printf '面板密码 [回车=%s]：' "$DEFAULT_PASS"
@@ -869,8 +765,8 @@ cmd_reinstall() {
     [ "${#password}" -ge 4 ] || fail "密码太短（至少 4 位）"
 
     set_port "$port"
-    cfg_set panel username "\"$(toml_escape "$user")\""
-    cfg_set panel password_sha256 "\"$(sha256hex "$password")\""
+    printf '%s' "$password" | "$BIN" passwd "$user" --db "$DB" --stdin >/dev/null ||
+        warn "账号 $user 不存在，未改密码；请在面板创建"
     restart_runtime || fail "配置已重置，但重启失败；见 $LOG_FILE"
     show_url
 }
@@ -959,9 +855,8 @@ main_menu() {
         printf '%s=============================================%s\n' "$BLUE" "$RESET"
         printf '  状态: %s\n' "$(state_line)"
         if is_installed; then
-            account=$(cfg_get panel username || true)
             printf '  目录: %s%s%s\n' "$DIM" "$BASE_DIR" "$RESET"
-            printf '  端口: %s    账号: %s\n' "$(get_port)" "${account:-$DEFAULT_USER}"
+            printf '  端口: %s\n' "$(get_port)"
         fi
         printf '%s---------------------------------------------%s\n' "$BLUE" "$RESET"
         if is_installed; then

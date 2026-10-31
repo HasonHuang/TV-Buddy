@@ -1,40 +1,17 @@
-//! 配置加载、校验与保存。
+//! 配置模型、校验与持久化入口。
 //!
-//! 读：严格 TOML。重复键或类型错都会报错（ADR-08）。
-//! 写：全量规范化 + 原子替换（临时文件 → `rename`，ADR-06）。
+//! 存：SQLite 单行 JSON 文档，见 [`store`]。
+//! 运行时不再读写 TOML。旧 TOML 的解析只在 [`legacy`] 里，供迁移使用。
 
+pub mod legacy;
 pub mod model;
+pub mod store;
 
-use std::path::Path;
-
-use anyhow::{bail, Context};
+use anyhow::bail;
 use sha2::{Digest, Sha256};
 
 pub use model::Config;
-
-/// 读取配置。缺省字段用默认值补齐。
-pub fn load(path: &Path) -> anyhow::Result<Config> {
-    let text =
-        std::fs::read_to_string(path).with_context(|| format!("无法读取 {}", path.display()))?;
-    parse(&text)
-}
-
-/// 解析并校验配置文本。
-pub fn parse(text: &str) -> anyhow::Result<Config> {
-    let config: Config = toml::from_str(text).context("TOML 解析失败")?;
-    validate(&config)?;
-    Ok(config)
-}
-
-/// 保存配置。先写临时文件，再原子替换。
-pub fn save(path: &Path, config: &Config) -> anyhow::Result<()> {
-    validate(config)?;
-    let text = toml::to_string_pretty(config).context("序列化配置失败")?;
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, text).with_context(|| format!("无法写入 {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("无法替换 {}", path.display()))?;
-    Ok(())
-}
+pub use store::ConfigStore;
 
 /// 基本校验。只拦会破坏运行的值。
 pub fn validate(config: &Config) -> anyhow::Result<()> {

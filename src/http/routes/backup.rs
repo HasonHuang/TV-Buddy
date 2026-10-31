@@ -25,7 +25,7 @@ pub async fn backup(
     let config = state.snapshot();
     let include = params.get("include").map(String::as_str).unwrap_or("all");
     let data = backup::create(
-        &state.config_path,
+        &config,
         &config.cache.disk_path,
         include,
         env!("CARGO_PKG_VERSION"),
@@ -50,10 +50,20 @@ pub async fn restore(
     if body.is_empty() {
         return Err(ApiError::bad_request("备份内容为空"));
     }
-    let config = state.snapshot();
-    let (restored, report) = backup::restore(&state.config_path, &config.cache.disk_path, &body)
+    let current = state.snapshot();
+    let (restored, report) = backup::restore(&current.cache.disk_path, &body)
         .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
-    crate::reload::reload(&state);
+
+    // 覆盖前把当前配置另存到库文件旁，便于手工回退。
+    if let Ok(text) = serde_json::to_string_pretty(&*current) {
+        let path = state.db_path.with_extension("db.bak.json");
+        if let Err(error) = std::fs::write(&path, text) {
+            tracing::warn!(%error, path = %path.display(), "写配置备份失败");
+        }
+    }
+    state
+        .save_config(restored.clone())
+        .map_err(|error| ApiError::internal(format!("写入配置失败: {error:#}")))?;
     Ok(Json(json!({
         "ok": true,
         "config_reloaded": true,

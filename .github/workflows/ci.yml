@@ -140,7 +140,6 @@ jobs:
           mkdir -p "$STAGE"
           # 包内可执行文件名沿用二进制产物名，安装脚本按它查找。
           install -m 0755 "target/${{ matrix.target }}/release/tv-buddy" "$STAGE/tv-buddy"
-          install -m 0644 packaging/config.toml.example "$STAGE/config.toml.example"
           install -m 0644 packaging/tv-buddy.service "$STAGE/tv-buddy.service"
           install -m 0644 packaging/tv-buddy.openrc "$STAGE/tv-buddy.openrc"
           # 把默认发布源换成实际仓库，fork 后不必改脚本（仍可用 --repo 覆盖）。
@@ -159,7 +158,7 @@ jobs:
           NAME="${PRODUCT_SLUG}-${VERSION}-${{ matrix.name }}"
           mkdir -p check
           tar -C check -xzf "out/${NAME}.tar.gz"
-          for f in tv-buddy config.toml.example tv-buddy.sh tv-buddy.service tv-buddy.openrc install.sh; do
+          for f in tv-buddy tv-buddy.sh tv-buddy.service tv-buddy.openrc install.sh; do
             [ -f "check/${NAME}/${f}" ] || { echo "包内缺少 ${f}" >&2; exit 1; }
           done
           # 包内二进制必须可执行，且与本次目标架构一致。
@@ -170,9 +169,14 @@ jobs:
             amd64) file "$BIN" | grep -q "x86-64" ;;
             arm64) file "$BIN" | grep -q "ARM aarch64" ;;
           esac || { echo "包内二进制架构不符：${{ matrix.name }}" >&2; exit 1; }
-          # 没有配置参数时应报读取配置失败并退出，而不是静默启动。
+          # 数据库目录不可写时应报错退出，而不是静默启动。
+          if "$BIN" /nonexistent/tv-buddy.db >/dev/null 2>&1; then
+            echo "数据库不可写时不应退出码为 0" >&2
+            exit 1
+          fi
+          # 旧参数（config.toml）必须被明确拒绝。
           if "$BIN" /nonexistent/config.toml >/dev/null 2>&1; then
-            echo "缺少配置时不应退出码为 0" >&2
+            echo "旧配置路径应被拒绝" >&2
             exit 1
           fi
           echo "包内容 OK"

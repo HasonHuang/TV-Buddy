@@ -45,9 +45,11 @@ poll_secs = 5
 master_url = "http://127.0.0.1:$MPORT"
 TOML
 
-"$BIN" "$WORK/master.toml" >"$WORK/master.log" 2>&1 &
+"$BIN" import-config "$WORK/master.toml" --db "$WORK/master.db" >/dev/null || exit 1
+"$BIN" "$WORK/master.db" >"$WORK/master.log" 2>&1 &
 MPID=$!
-"$BIN" "$WORK/follower.toml" >"$WORK/follower.log" 2>&1 &
+"$BIN" import-config "$WORK/follower.toml" --db "$WORK/follower.db" >/dev/null || exit 1
+"$BIN" "$WORK/follower.db" >"$WORK/follower.log" 2>&1 &
 FPID=$!
 trap 'kill $MPID $FPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 

@@ -40,8 +40,8 @@
 
 启动顺序（对齐目标行为）：
 
-1. 解析 CLI（`tv-buddy <config.toml>`；子命令见 `cli`）。
-2. 读配置并校验（**严格 TOML**：重复键报错，F-008）。
+1. 解析 CLI（`tv-buddy <tv-buddy.db>`；子命令见 `cli`）。
+2. 从数据库读配置并校验（库为空时写入默认值）。
 3. 创建 `cache/` 子目录（仅启动时创建，F-006）。
 4. 初始化缓存索引、Token 存储、封禁表。
 5. 启动后台任务。
@@ -67,8 +67,10 @@
 | --- | --- | --- | --- |
 | `main` | 启动、日志、信号处理 | `fn main` | S-ENV-06 |
 | `config::model` | 全部段与字段、默认值 | `Config`、`ServerCfg`、`PanelCfg`、`CacheCfg`、`AuthCfg`、`Group`、`Channel` | S-CFG-04、S-MODEL-01/02 |
-| `config::load` | 严格解析、默认合并、原子写回、规范化 | `load_config`、`save_config` | S-CFG-01 |
-| `config::watch` | 文件监视与分段生效 | `ConfigWatcher` | S-CFG-02、S-CFG-03 |
+| `config::store` | 配置读写：SQLite 单行 JSON 文档 | `ConfigStore` | S-CFG-01 |
+| `config::legacy` | 旧 TOML 解析，仅迁移用 | `parse`、`load` | 迁移决策 |
+| `db` | 单库连接与建表 | `connect`、`SharedConn` | 设计决策（2026-10-31） |
+| `cli` | 子命令：导入配置、读写配置值、改口令 | `run_if_subcommand` | 迁移决策 |
 | `state` | 共享状态容器 | `AppState` | — |
 | `http::router` | 路由表组装、中间件栈 | `build_router(AppState) -> Router` | S-EP-16 |
 | `http::error` | 错误 → 响应（302/400/403/404/422/503） | `ApiError`、`PlayError` | S-DIS-15、S-EP-08 |

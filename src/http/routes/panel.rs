@@ -223,22 +223,21 @@ pub async fn put_config(
     let config: config::Config = serde_json::from_value(body)
         .map_err(|err| ApiError::bad_request(format!("配置格式错误: {err}")))?;
 
-    config::save(&state.config_path, &config)
+    state
+        .save_config(config)
         .map_err(|err| ApiError::internal(format!("保存失败: {err}")))?;
-    state.replace(config);
 
     tracing::info!("配置已保存并生效");
     Ok(Json(json!({ "ok": true })))
 }
 
-/// `POST /panel/api/reload`——从磁盘重读配置。
+/// `POST /panel/api/reload`——从数据库重读配置。
+///
+/// 管理 CLI 直接改库后调用它生效。
 pub async fn reload(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let config = config::load(&state.config_path)
-        .map_err(|err| ApiError::internal(format!("重载失败: {err}")))?;
-    state.replace(config);
-    tracing::info!("配置已重载");
+    crate::reload::reload(&state);
     Ok(Json(json!({ "ok": true })))
 }

@@ -14,6 +14,7 @@ PORT=${PORT:-19918}
 UP=${UP:-19919}
 WORK=$(mktemp -d)
 CFG="$WORK/config.toml"
+DB="$WORK/tv-buddy.db"
 CACHE="$WORK/cache"
 
 mkdir -p "$WORK/up"
@@ -79,7 +80,8 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 # 在 $WORK 里启动，日志文件落在 $WORK/tv-buddy.log。
-(cd "$WORK" && exec "$BIN" "$CFG" >"$WORK/server.log" 2>&1) &
+"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+(cd "$WORK" && exec "$BIN" "$DB" >"$WORK/server.log" 2>&1) &
 PID=$!
 trap '{ kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"; } 2>/dev/null' EXIT
 
@@ -107,8 +109,8 @@ T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 A=(-H "Authorization: Bearer $T" -H 'Content-Type: application/json')
 
-# --- 热重载 ---
-check "热重载前 2 条" "2" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
+# --- 重载：管理 CLI 改库，面板接口生效 ---
+check "重载前 2 条" "2" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
 python3 - <<PY
 text = open("$CFG", encoding="utf-8").read()
 text += '''
@@ -124,22 +126,25 @@ url = "http://127.0.0.1:$UP/live.m3u8"
 '''
 open("$CFG", "w", encoding="utf-8").write(text)
 PY
+"$BIN" import-config "$CFG" --db "$DB" --force >/dev/null || exit 1
+check "改库后未生效" "2" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
+check "重载接口 200" "200" "$(code -X POST "${A[@]}" "$B/panel/api/reload")"
 for _ in $(seq 1 50); do
   [ "$(status "$B/hot/h1.m3u8")" = "200" ] && break
   sleep 0.2
 done
-check "热重载新组可播" "200" "$(status "$B/hot/h1.m3u8")"
-check "热重载后 3 条" "3" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
-check "热重载已记日志" "1" "$(grep -c '配置已热重载' "$WORK/tv-buddy.log")"
+check "重载新组可播" "200" "$(status "$B/hot/h1.m3u8")"
+check "重载后 3 条" "3" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
+check "重载已记日志" "1" "$(grep -c '配置已重载' "$WORK/tv-buddy.log")"
 
-# 坏配置：保留旧快照
-cp "$CFG" "$CFG.good"
-printf '[server]\nbind = "127.0.0.1:1"\nbind = "127.0.0.1:2"\n' > "$CFG"
-sleep 1
+# 坏配置：导入失败，库与快照都不变
+printf '[server]\nbind = "127.0.0.1:1"\nbind = "127.0.0.1:2"\n' > "$CFG.bad"
+if "$BIN" import-config "$CFG.bad" --db "$DB" --force >/dev/null 2>&1; then
+  check "坏配置被拒" "拒绝" "接受"
+else
+  check "坏配置被拒" "拒绝" "拒绝"
+fi
 check "坏配置保留旧快照" "3" "$(curl -s "$B/playlist.m3u" | grep -c '^#EXTINF')"
-check "坏配置已记日志" "1" "$(grep -c '配置解析失败' "$WORK/tv-buddy.log")"
-cp "$CFG.good" "$CFG"
-sleep 1
 
 # --- 看门狗 ---
 for _ in $(seq 1 6); do
@@ -152,12 +157,13 @@ check "冷却文案" "timeout waiting for master playlist" "$(cat "$WORK/body")"
 check "冷却已记录日志" "1" "$(grep -c 'DASH 连续失败，进入冷却' "$WORK/tv-buddy.log")"
 check "冷却秒数字段在场" "1" "$(grep -c 'cooldown_secs' "$WORK/tv-buddy.log")"
 check "冷却秒数为 3600" "1" "$(grep 'cooldown_secs' "$WORK/tv-buddy.log" | grep -c '3600')"
-# 修好上游并触发热重载 → 立即解除冷却（S-MODE-17）
+# 修好上游并重载 → 立即解除冷却（S-MODE-17）
 python3 - <<PY
 text = open("$CFG", encoding="utf-8").read().replace("http://127.0.0.1:1/dead.mpd", "http://127.0.0.1:$UP/main.mpd")
 open("$CFG", "w", encoding="utf-8").write(text)
 PY
-sleep 1
+"$BIN" import-config "$CFG" --db "$DB" --force >/dev/null || exit 1
+curl -s -o /dev/null -X POST "${A[@]}" "$B/panel/api/reload"
 check "改配置解除冷却" "200" "$(status "$B/dg/d1.m3u8")"
 
 # --- 缓存接口 ---

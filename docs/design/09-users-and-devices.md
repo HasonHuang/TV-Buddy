@@ -196,7 +196,8 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 3. **未来扩展**。设备数、令牌数会增长。SQLite 不需要先全读再全写。
 4. 目标实现同样用 SQLite。表结构可以直接对齐，便于日后比对。
 
-不变的部分：`config.toml` 继续管配置。用户与令牌是运行期数据，单独一个库文件，放 `<cache>/users.db`。
+用户与令牌和配置**同一个库文件**：`<安装目录>/tv-buddy.db`（2026-10-31 配置也迁入 SQLite）。
+旧版本的 `<cache>/users.db` 在首次启动时只读迁移进来，旧文件保留不动。
 
 ### 7.4 若选 JSON 的退路
 
@@ -226,7 +227,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 
 | 层 | 做法 |
 | --- | --- |
-| 数据 | 新增 `<cache>/users.db`。两张表 `users`、`access_tokens`，字段按 §2 |
+| 数据 | 单库 `tv-buddy.db`。表 `users`、`access_tokens`，字段按 §2。旧 `<cache>/users.db` 首次启动时迁移 |
 | 口令 | 用 `argon2` 校验。迁移时把现有 `[panel].password_sha256` 转成一个 admin 用户，口令不变 |
 | 会话 | 登录成功签发会话。会话绑定 `user_id` |
 | 令牌 | 12 位短串。播放与订阅按 401 语义分流 |
@@ -249,7 +250,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 数据层 | `src/users/{model,password,store}.rs` | SQLite，表结构与 §2 一致 |
 | 口令 | argon2id。旧 `sha256:<hex>` 首次登录自动升级 | 完成 |
 | 首次安装 | 无用户时建 `admin`，随机 16 位口令写入 `<cache>/admin_initial_credentials.txt`（0600） | 完成 |
-| 登录 | `POST /panel/api/login` 查 `users.db`，会话绑定用户 | 完成 |
+| 登录 | `POST /panel/api/login` 查 `users` 表，会话绑定用户 | 完成 |
 | 用户 API | `/panel/api/users` 全套，含 `channel-options`、`password` | 完成 |
 | 令牌 API | `/panel/api/users/:id/tokens` 全套 | 完成 |
 | 当前用户 | `GET /panel/api/me` | 完成 |
@@ -263,9 +264,9 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | # | 项 | 说明 |
 | --- | --- | --- |
 | 1 | EPG 用户隔离 | `/sub/:token/epg.xml(.gz)` 未实现。当前订阅头仍指向全局 `/epg.xml.gz` |
-| 2 | 旧配置键清理 | `[panel].username` / `password_sha256` 已从结构体删除，旧值落进 `extra`。需要一次性删除并落盘 |
-| 3 | 管理 CLI | `packaging/tv-buddy.sh` 仍读写 `panel username` / `password_sha256`。要改成提示或直接操作 `users.db` |
-| 4 | 旧口令迁移 | 老配置里 `password_sha256` 的值没有自动建成用户。需要一次性迁移逻辑 |
+| 2 | 旧配置键清理 | 配置已迁入数据库，`import-config` 时这两个键落进 `extra`。不再生效，也不会报错 |
+| 3 | 管理 CLI | 完成：改为调用 `tv-buddy passwd` 写入 `users` 表，不再读 `panel username` / `password_sha256` |
+| 4 | 旧口令迁移 | 旧 `password_sha256` 不迁移。首次启动创建 `admin` 新账号，口令写入 `admin_initial_credentials.txt` |
 | 5 | Docker 集成冒烟 | `smoke-dash-timeshift-docker.sh` 在容器内起服务后清单请求无响应。待查 |
 
 ### 9.3 行为变化

@@ -9,6 +9,7 @@ UP=${UP:-19924}
 WORK=$(mktemp -d)
 mkdir -p "$WORK/up"
 CFG="$WORK/config.toml"
+DB="$WORK/tv-buddy.db"
 
 cat > "$WORK/up/extra.m3u8" <<M3U
 #EXTM3U
@@ -59,7 +60,8 @@ unlisted_groups = "keep"
 exclude = ["id:skip"]
 TOML
 
-"$BIN" "$CFG" >"$WORK/server.log" 2>&1 &
+"$BIN" import-config "$CFG" --db "$DB" >/dev/null || exit 1
+"$BIN" "$DB" >"$WORK/server.log" 2>&1 &
 PID=$!
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 60); do

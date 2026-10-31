@@ -269,7 +269,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | POST | `/panel/api/logo/suggest` | — | 体 `{"threshold","limit"}`；按名称相似度推荐，`{"threshold","count","channels":[{"gid","cid","name","suggest":[{"file","score"}]}]}` | F-012（形状自定） |
 | GET | `/panel/api/groups/{gid}/export` | — | 单个分组对象 | F-013 §1 |
 
-写入语义：分组与频道改动**立即重写** `config.toml`；`PUT /config` 是**全量替换**（F-013 §6）。
+写入语义：分组与频道改动**立即写入数据库**；`PUT /config` 是**全量替换**（F-013 §6）。
 
 ### 6.2.1 M3U 导入语义
 
@@ -385,11 +385,12 @@ http://<host>/<gid>/<cid>.<ext>[?token=<48hex>]
 | --- | --- |
 | 备份请求 | `GET /panel/api/backup?include=all\|epg-scripts\|resolver`；其它值回退 `all` |
 | 备份响应 | `200 application/gzip`；`Content-Disposition: attachment; filename="tv-buddy-backup-YYYYmmdd-HHMMSS.tar.gz"`（UTC） |
-| 包内布局 | `tv-buddy-backup/config.toml`、`logos/*`、`epg/scripts/*.py`、`epg/epg_map.json`、`resolvers/*.py`、`manifest.json`（`generator`/`version`/`created`/`scope`） |
+| 包内布局 | `tv-buddy-backup/config.json`、`logos/*`、`epg/scripts/*.py`、`epg/epg_map.json`、`resolvers/*.py`、`manifest.json`（`generator`/`version`/`created`/`scope`） |
 | 恢复请求 | `POST /panel/api/restore`，`Content-Type: application/gzip`，体为 tar.gz 原文；上限 64 MiB |
-| 恢复步骤 | 解包 → 解析并**校验** `config.toml` → 旧文件另存 `config.toml.bak` → 原子写入 → 恢复台标 → 重载快照（立即解除看门狗冷却） |
+| 恢复步骤 | 解包 → 解析并**校验** `config.json` → 当前配置另存 `tv-buddy.db.bak.json` → 写库 → 恢复台标 → 替换快照（立即解除看门狗冷却） |
 | 恢复响应 | `{"ok":true,"config_reloaded":true,"report":{"files":[…],"skipped":[…]},"groups":N}` |
-| 失败 | 无 `config.toml`、配置不合法、非 gzip → `400`；未登录 → `401` |
+| 失败 | 无 `config.json`、配置不合法、非 gzip → `400`；未登录 → `401` |
+| 旧包兼容 | 包里只有 `config.toml` 时按旧格式解析恢复 |
 
 > 台标以外的脚本类文件（`epg/scripts`、`resolvers`）只备份，不在恢复时执行。
 

@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/tv-buddy
-ExecStart=/opt/tv-buddy/tv-buddy /opt/tv-buddy/config.toml
+ExecStart=/opt/tv-buddy/tv-buddy /opt/tv-buddy/tv-buddy.db
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65536

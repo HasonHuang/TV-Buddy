@@ -7,9 +7,10 @@
 #   发布包目录：sudo ./install.sh                 # 用旁边的已解包文件，不再下载
 #   仓库根目录：sudo ./install.sh --local         # 改用 dist/ 中最新的同架构包
 #   指定安装包：sudo ./install.sh --archive /path/to/tv-buddy-<version>-<arch>.tar.gz
+#   低配机器：  sudo ./install.sh --low-spec   # 写入省内存/省 CPU 的参数
 #   远程安装包：sudo ./install.sh --archive https://example.com/tv-buddy.tar.gz
 #
-# 只支持 Linux amd64/arm64。脚本幂等；已有 config.toml 不覆盖。
+# 只支持 Linux amd64/arm64。脚本幂等；已有数据库不覆盖。
 # 装完即启动服务（`--no-start` 可关闭）。
 
 set -eu
@@ -24,6 +25,7 @@ DO_SERVICE=1
 DO_LINK=1
 DO_START=1
 USE_DIST=0
+LOW_SPEC=0
 TMP_DIR=
 DOWNLOADED=
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -42,6 +44,7 @@ usage() {
   --local            不从 Release 下载，改用本地 dist/ 中的安装包
   --no-service       不注册 systemd/OpenRC 服务
   --no-link          不创建 tv-buddy 命令软链
+  --low-spec         安装时写入低配参数（省内存与 CPU）
   --no-start         安装后不启动服务（默认会启动）
   --start            安装后启动服务（默认行为，保留以兼容旧用法）
   -h, --help         显示本帮助
@@ -113,6 +116,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --no-start)
             DO_START=0
+            shift
+            ;;
+        --low-spec)
+            LOW_SPEC=1
             shift
             ;;
         -h|--help)
@@ -309,7 +316,7 @@ if [ -n "$ARCHIVE" ]; then
     [ -f "$ARCHIVE" ] || fail "安装包不存在：$ARCHIVE"
     verify_digest "$ARCHIVE"
     extract_archive "$ARCHIVE"
-elif [ -x "$SCRIPT_DIR/tv-buddy" ] && [ -f "$SCRIPT_DIR/config.toml.example" ]; then
+elif [ -x "$SCRIPT_DIR/tv-buddy" ]; then
     # 已解包的发布目录：包内容就在旁边，直接用，不必再下载。
     SRC_DIR=$SCRIPT_DIR
     BIN_SRC=$SCRIPT_DIR/tv-buddy
@@ -328,24 +335,41 @@ else
 fi
 
 # 发布包把资源放在顶层；仓库里在 packaging/。
-if [ -f "$SRC_DIR/packaging/config.toml.example" ]; then
+if [ -f "$SRC_DIR/packaging/tv-buddy.sh" ]; then
     ASSET_DIR=$SRC_DIR/packaging
 else
     ASSET_DIR=$SRC_DIR
 fi
-[ -f "$ASSET_DIR/config.toml.example" ] || fail "缺少 config.toml.example"
 [ -f "$ASSET_DIR/tv-buddy.sh" ] || fail "缺少 tv-buddy.sh"
 
 install -d "$PREFIX" "$PREFIX/cache"
 install -m 0755 "$BIN_SRC" "$PREFIX/tv-buddy"
 install -m 0755 "$ASSET_DIR/tv-buddy.sh" "$PREFIX/tv-buddy.sh"
-install -m 0644 "$ASSET_DIR/config.toml.example" "$PREFIX/config.toml.example"
 
-if [ -f "$PREFIX/config.toml" ]; then
-    echo "保留已有配置：$PREFIX/config.toml"
-else
-    install -m 0644 "$ASSET_DIR/config.toml.example" "$PREFIX/config.toml"
-    echo "已生成配置：$PREFIX/config.toml（请修改后重启）"
+# 配置、用户与令牌都在一个 SQLite 文件里。
+DB="$PREFIX/tv-buddy.db"
+if [ -f "$DB" ]; then
+    echo "保留已有数据库：$DB"
+elif [ -f "$PREFIX/config.toml" ]; then
+    # 旧版本升级：把 config.toml 一次性导入数据库。原文件保留。
+    echo "检测到旧配置，导入数据库…"
+    "$PREFIX/tv-buddy" import-config "$PREFIX/config.toml" --db "$DB" \
+        || fail "导入旧配置失败：$PREFIX/config.toml"
+fi
+
+if [ "$LOW_SPEC" = 1 ]; then
+    for pair in \
+        "cache.segments.per_channel_max 200" \
+        "cache.prefetch.concurrency 2" \
+        "auth.token_enabled true" \
+        "auth.ip_guard_enabled true" \
+        "cdn.enabled true"; do
+        # shellcheck disable=SC2086
+        set -- $pair
+        "$PREFIX/tv-buddy" config set "$1" "$2" --db "$DB" >/dev/null \
+            || fail "写入低配参数失败：$1"
+    done
+    echo "已写入低配参数：$DB"
 fi
 
 if [ "$DO_LINK" = 1 ]; then
@@ -409,7 +433,7 @@ if [ "$DO_START" = 1 ]; then
 fi
 
 echo "安装完成：$PREFIX"
-echo "配置：$PREFIX/config.toml"
+echo "数据：$PREFIX/tv-buddy.db"
 echo "面板：http://<主机>:19899/panel（账号 admin；初始口令见下）"
 echo "初始口令：$PREFIX/cache/admin_initial_credentials.txt（首次启动后生成，权限 600）"
 if [ "$STARTED" = 1 ]; then

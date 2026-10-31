@@ -44,7 +44,8 @@ url = "http://127.0.0.1:9/never"
 resolver_script = "bad.py"
 TOML
 
-"$BIN" "$WORK/config.toml" >"$WORK/server.log" 2>&1 &
+"$BIN" import-config "$WORK/config.toml" --db "$WORK/tv-buddy.db" >/dev/null || exit 1
+"$BIN" "$WORK/tv-buddy.db" >"$WORK/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID $UPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 B="http://127.0.0.1:$PORT"
