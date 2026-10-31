@@ -51,7 +51,6 @@
 | `reqwest` | 0.12（`rustls-tls`） | 上游拉流与 302 解析 | `S-MODE-04` |
 | `rustls` + `webpki-roots` | 0.23 | TLS | — |
 | `serde` / `serde_json` | 1 / 1 | 配置与 API 载荷 | `S-CFG-*` |
-| `toml` | 0.8 | 兼容键保留（`extra` 字段仍是 `toml::Table`） | `S-CFG-04` |
 | `rusqlite` | 0.41（bundled） | 配置、用户与令牌存储 | F-1、v2026.6 |
 | `argon2` | 0.5 | 口令散列 | F-1 |
 | `tracing` / `tracing-subscriber` | 0.1 / 0.3 | 日志（`log_level`） | `S-CACHE-05` |

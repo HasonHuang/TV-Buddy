@@ -42,7 +42,7 @@
 | 项 | 数量 |
 | --- | --- |
 | 路由注册（`src/http.rs`） | 131 |
-| 测试 | 368（276 单元 + 92 契约） |
+| 测试 | 370（278 单元 + 92 契约） |
 | 冒烟脚本（`scripts/smoke-*.sh`） | 26 |
 
 已覆盖的能力：
@@ -474,7 +474,11 @@ VG-3 与 VG-4 带后端改动。`src/stats.rs` 加频道维度计数，`src/metr
 
 **写入**：面板保存、分组编辑、CLI 都写库。进程内一把写锁串行化「读 → 改 → 写 → 替换快照」。
 
-**子命令**：`config import/get/set/reset`、`passwd`。
+**子命令**：`config import/get/set/reset`、`passwd`。`config get/set` 的路径支持数组下标，
+例如 `groups.0.channels.1.url`。
+
+**未建模键**：`extra` 是 `serde_json::Map<String, Value>`。保存时原样写回，不丢第三方配置。
+`toml` crate 已移除。
 
 **备份**：包内 `config.json`。恢复前当前配置另存 `tv-buddy.db.bak.json`。
 
@@ -615,7 +619,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | HTTP 契约 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) |
 | 配置与存储 | [`docs/design/04-config-and-storage.md`](docs/design/04-config-and-storage.md) |
 | 低配置优化 | [`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md) |
-| 低配置示例 | [`docs/design/config-low-spec.toml`](docs/design/config-low-spec.toml) |
+| 低配置示例 | [`docs/design/config-low-spec.json`](docs/design/config-low-spec.json) |
 | 架构 | [`docs/design/02-architecture.md`](docs/design/02-architecture.md) |
 | 面板字段清单 | [`docs/design/05-frontend.md`](docs/design/05-frontend.md) |
 | 手工验收测试 | [`docs/tests/README.md`](docs/tests/README.md) |

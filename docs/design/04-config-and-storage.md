@@ -12,7 +12,7 @@
 | 路径 | 来自启动参数（`tv-buddy <tv-buddy.db>`），默认 `./tv-buddy.db` | S-ENV-06 |
 | 存储 | `settings` 表一行 JSON 文档，键为 `config`，值是整份配置 | 设计决策（2026-10-31） |
 | 默认值 | 库为空时写入内置默认；默认值对齐目标 v0.8.2 | S-CFG-04 |
-| 未建模键 | 存 `extra`（`toml::Table`），随 JSON 往返保留 | 设计决策（避免丢第三方配置） |
+| 未建模键 | 存 `extra`（`serde_json::Map<String, Value>`），随 JSON 往返保留 | 设计决策（避免丢第三方配置） |
 | 写回 | 单条 UPSERT，事务原子 | S-CFG-01（F-006） |
 | 并发 | 进程内一把写锁；跨进程靠 SQLite 锁与 `busy_timeout=5000` | 设计决策 |
 
@@ -215,7 +215,8 @@ tv-buddy-<version>-<arch>/
 ## 11. 低配置优化段
 
 > 设计：[`06-low-spec-optimization.md`](06-low-spec-optimization.md)。
-> 现成样例：[`config-low-spec.toml`](config-low-spec.toml)（1 vCPU / 128 MB / 1 GB + 多 CDN）。
+> 现成样例：[`config-low-spec.json`](config-low-spec.json)（1 vCPU / 128 MB / 1 GB + 多 CDN）。
+> 导入：`tv-buddy config import docs/design/config-low-spec.json --db tv-buddy.db --force`。
 
 三段都**默认不改变既有行为**：`[cdn].enabled = false`、`[cache.gc].enabled = true`（补洞，见下）、
 分组/频道的 `prefetch` 缺省即继承全局。
@@ -259,12 +260,12 @@ tv-buddy-<version>-<arch>/
 
 `[groups.prefetch]` 与 `[groups.channels.prefetch]` 各三个**可选**字段，缺省即继承上层：
 
-```toml
-[groups.prefetch]
-enabled = true        # 三态：未设置 = 继承
-prefetch_limit = 6    # 别名 `limit` 也接受
-concurrency = 2
+```json
+{ "groups": [ { "id": "hk", "prefetch": { "enabled": true, "prefetch_limit": 6, "concurrency": 2 } } ] }
 ```
+
+`enabled` 是三态：未设置 = 继承，`true` = 显式开，`false` = 显式关。
+`prefetch_limit` 也接受别名 `limit`。
 
 合并顺序与 `proxy_for` 一致：**频道 > 分组 > 全局**（`Config::prefetch_for`）。
 面板「分组管理」的编辑弹窗提供同样四个选项：跟随全局 / 只覆盖数量与并发 / 开启 / 关闭。

@@ -127,7 +127,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
 }
 ```
 
-`public_base` 未出现表示未配置。默认值来自 `src/config/model.rs:198-210`。低配示例配置把 `[cdn].enabled` 设为 `true`（`docs/design/config-low-spec.toml:61-69`）。以本机实际值为准。
+`public_base` 未出现表示未配置。默认值来自 `src/config/model.rs`。低配示例配置把 `cdn.enabled` 设为 `true`（`docs/design/config-low-spec.json`）。以本机实际值为准。
 
 ### 3.3 选择测试分组与频道
 

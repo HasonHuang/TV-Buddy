@@ -4,7 +4,7 @@
 
 ## 1. 结论
 
-低配示例 `config-low-spec.toml` 与默认值的**真实差异只有 4 项**。
+低配示例 `config-low-spec.json` 与默认值的**真实差异只有 4 项**。
 
 其余键都显式写出默认值。作用是文档，不是调优。
 
@@ -139,10 +139,9 @@ tv-buddy config set cache.prefetch.concurrency 2
 
 面板路径：**系统设置 → 切片缓存 → 磁盘上限**。配置键 `cache.gc.max_disk_mb`。
 
-```toml
-[cache.gc]
-max_disk_mb = 0      # 0 = 走公式（默认）
-max_disk_mb = 120    # 非 0 = 直接用这个值，公式不参与
+```bash
+tv-buddy config set cache.gc.max_disk_mb 0      # 0 = 走公式（默认）
+tv-buddy config set cache.gc.max_disk_mb 120    # 非 0 = 直接用这个值，公式不参与
 ```
 
 代码位置：`src/cache_gc.rs` 的 `effective_cap_mb`。第一行就是

@@ -1098,7 +1098,7 @@ pub fn translate_config(config: &Config) -> TranslateCfg {
         }
     }
     let batch = get("mtran_batch")
-        .and_then(|value| value.as_integer())
+        .and_then(|value| value.as_i64())
         .filter(|value| *value > 0)
         .unwrap_or(40)
         .min(500) as usize;
@@ -2079,12 +2079,15 @@ mod tests {
     #[test]
     fn translate_config_reads_targets_and_endpoint() {
         let mut config = Config::default();
-        let mut translate = toml::Table::new();
-        translate.insert("enabled".into(), toml::Value::Boolean(true));
-        translate.insert("url".into(), toml::Value::String("http://mtran/".into()));
-        translate.insert("target".into(), toml::Value::String(" ja ".into()));
-        let mut epg = toml::Table::new();
-        epg.insert("translate".into(), toml::Value::Table(translate));
+        let mut translate = serde_json::Map::new();
+        translate.insert("enabled".into(), serde_json::Value::Bool(true));
+        translate.insert(
+            "url".into(),
+            serde_json::Value::String("http://mtran/".into()),
+        );
+        translate.insert("target".into(), serde_json::Value::String(" ja ".into()));
+        let mut epg = serde_json::Map::new();
+        epg.insert("translate".into(), serde_json::Value::Object(translate));
         config.epg.extra = epg;
 
         let cfg = translate_config(&config);
@@ -2099,19 +2102,25 @@ mod tests {
     #[test]
     fn translate_config_reads_mtran_aliases() {
         let mut config = Config::default();
-        let mut translate = toml::Table::new();
-        translate.insert("enabled".into(), toml::Value::Boolean(true));
-        translate.insert("engine".into(), toml::Value::String("mtran".into()));
+        let mut translate = serde_json::Map::new();
+        translate.insert("enabled".into(), serde_json::Value::Bool(true));
+        translate.insert("engine".into(), serde_json::Value::String("mtran".into()));
         translate.insert(
             "mtran_url".into(),
-            toml::Value::String("https://translate.example/translate".into()),
+            serde_json::Value::String("https://translate.example/translate".into()),
         );
-        translate.insert("mtran_token".into(), toml::Value::String("secret".into()));
-        translate.insert("mtran_source".into(), toml::Value::String("en".into()));
-        translate.insert("mtran_batch".into(), toml::Value::Integer(50));
-        translate.insert("target".into(), toml::Value::String("zh-cn".into()));
-        let mut epg = toml::Table::new();
-        epg.insert("translate".into(), toml::Value::Table(translate));
+        translate.insert(
+            "mtran_token".into(),
+            serde_json::Value::String("secret".into()),
+        );
+        translate.insert(
+            "mtran_source".into(),
+            serde_json::Value::String("en".into()),
+        );
+        translate.insert("mtran_batch".into(), serde_json::Value::Number((50).into()));
+        translate.insert("target".into(), serde_json::Value::String("zh-cn".into()));
+        let mut epg = serde_json::Map::new();
+        epg.insert("translate".into(), serde_json::Value::Object(translate));
         config.epg.extra = epg;
 
         let cfg = translate_config(&config);
@@ -2128,18 +2137,18 @@ mod tests {
     #[test]
     fn translate_config_prefers_explicit_targets() {
         let mut config = Config::default();
-        let mut translate = toml::Table::new();
+        let mut translate = serde_json::Map::new();
         translate.insert(
             "targets".into(),
-            toml::Value::Array(vec![
-                toml::Value::String("zh-cn".into()),
-                toml::Value::String("".into()),
-                toml::Value::String("en".into()),
+            serde_json::Value::Array(vec![
+                serde_json::Value::String("zh-cn".into()),
+                serde_json::Value::String("".into()),
+                serde_json::Value::String("en".into()),
             ]),
         );
-        translate.insert("target".into(), toml::Value::String("ja".into()));
-        let mut epg = toml::Table::new();
-        epg.insert("translate".into(), toml::Value::Table(translate));
+        translate.insert("target".into(), serde_json::Value::String("ja".into()));
+        let mut epg = serde_json::Map::new();
+        epg.insert("translate".into(), serde_json::Value::Object(translate));
         config.epg.extra = epg;
 
         assert_eq!(translate_config(&config).targets, vec!["zh-cn", "en"]);
@@ -2208,7 +2217,7 @@ mod tests {
         first.name = "CCTV-1 综合".into();
         first
             .extra
-            .insert("tvg_id".into(), toml::Value::String("CCTV1".into()));
+            .insert("tvg_id".into(), serde_json::Value::String("CCTV1".into()));
         let mut second = crate::config::model::Channel::default();
         second.id = "e2".into();
         second.name = " cctv-3　综艺 ".into();
@@ -2235,7 +2244,7 @@ mod tests {
         e1.id = "e1".into();
         e1.name = "CCTV-1 综合".into();
         e1.extra
-            .insert("tvg_id".into(), toml::Value::String("cctv1".into()));
+            .insert("tvg_id".into(), serde_json::Value::String("cctv1".into()));
         let mut e2 = crate::config::model::Channel::default();
         e2.id = "e2".into();
         e2.name = "cctv-1 综合".into();
@@ -2246,7 +2255,7 @@ mod tests {
         e4.id = "e4".into();
         e4.name = "CCTV-1 综合".into();
         e4.extra
-            .insert("tvg_id".into(), toml::Value::String("missing".into()));
+            .insert("tvg_id".into(), serde_json::Value::String("missing".into()));
         group.channels = vec![e1, e2, e3, e4];
         config.groups.push(group);
         let targets = channel_targets(&config);

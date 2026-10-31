@@ -770,10 +770,14 @@ pub async fn candidates(
 /// 读取 `[assets].map`：上游 URL → 本地路径。
 fn asset_map(config: &crate::config::model::Config) -> HashMap<String, String> {
     let mut out = HashMap::new();
-    let Some(table) = config.extra.get("assets").and_then(toml::Value::as_table) else {
+    let Some(table) = config
+        .extra
+        .get("assets")
+        .and_then(serde_json::Value::as_object)
+    else {
         return out;
     };
-    let Some(map) = table.get("map").and_then(toml::Value::as_table) else {
+    let Some(map) = table.get("map").and_then(serde_json::Value::as_object) else {
         return out;
     };
     for (url, local) in map {
@@ -818,21 +822,24 @@ fn set_asset_map(state: &Arc<AppState>, url: &str, local: Option<&str>) -> anyho
         let assets = config
             .extra
             .entry("assets".to_string())
-            .or_insert_with(|| toml::Value::Table(Default::default()));
-        if !assets.is_table() {
-            *assets = toml::Value::Table(Default::default());
+            .or_insert_with(|| serde_json::Value::Object(Default::default()));
+        if !assets.is_object() {
+            *assets = serde_json::Value::Object(Default::default());
         }
-        let table = assets.as_table_mut().expect("assets 表");
+        let table = assets.as_object_mut().expect("assets 表");
         let map = table
             .entry("map".to_string())
-            .or_insert_with(|| toml::Value::Table(Default::default()));
-        if !map.is_table() {
-            *map = toml::Value::Table(Default::default());
+            .or_insert_with(|| serde_json::Value::Object(Default::default()));
+        if !map.is_object() {
+            *map = serde_json::Value::Object(Default::default());
         }
-        let map = map.as_table_mut().expect("map 表");
+        let map = map.as_object_mut().expect("map 表");
         match local {
             Some(local) => {
-                map.insert(url.to_string(), toml::Value::String(local.to_string()));
+                map.insert(
+                    url.to_string(),
+                    serde_json::Value::String(local.to_string()),
+                );
             }
             None => {
                 map.remove(url);

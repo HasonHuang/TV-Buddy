@@ -1,11 +1,18 @@
 //! 配置模型。
 //!
-//! 字段与目标 v0.8.2 的 `config.toml` 对齐（`docs/spec/08-target-spec.md` §11）。
-//! 未建模的段与键落在 `extra`，保存时原样写回。这样不丢第三方配置。
+//! 键名与默认值对齐目标 v0.8.2（`docs/spec/08-target-spec.md` §11）。
+//! 存储是 SQLite 里的 JSON 文档。未建模的段与键落在 `extra`，保存时原样写回，
+//! 这样不丢第三方配置。
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+
+/// 未建模的段与键。
+///
+/// 与存储格式一致，直接用 JSON 值承载。保存时原样写回，不丢第三方配置。
+pub type Extra = Map<String, Value>;
 
 /// 顶层配置。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -30,7 +37,7 @@ pub struct Config {
     pub groups: Vec<Group>,
     /// 未建模的段与键。
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Config {
@@ -50,9 +57,9 @@ impl Config {
         let Some(table) = self
             .extra
             .get("assets")
-            .and_then(toml::Value::as_table)
+            .and_then(Value::as_object)
             .and_then(|assets| assets.get("map"))
-            .and_then(toml::Value::as_table)
+            .and_then(Value::as_object)
         else {
             return out;
         };
@@ -68,11 +75,11 @@ impl Config {
     pub fn asset_local(&self, url: &str) -> Option<&str> {
         self.extra
             .get("assets")
-            .and_then(toml::Value::as_table)
+            .and_then(Value::as_object)
             .and_then(|assets| assets.get("map"))
-            .and_then(toml::Value::as_table)
+            .and_then(Value::as_object)
             .and_then(|map| map.get(url))
-            .and_then(toml::Value::as_str)
+            .and_then(Value::as_str)
     }
 
     /// 频道的有效上游代理：频道级优先，其次分组级。
@@ -123,7 +130,7 @@ pub struct ServerCfg {
     /// 低配模式开关。目标只在 `/panel/api/status` 回显，本实现同此。
     pub low_resource_mode: bool,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for ServerCfg {
@@ -139,7 +146,7 @@ impl Default for ServerCfg {
             log_level: "info".into(),
             trust_proxy: Vec::new(),
             low_resource_mode: false,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -166,7 +173,7 @@ pub struct FeaturesCfg {
     /// 用户与设备。
     pub users: bool,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for FeaturesCfg {
@@ -178,7 +185,7 @@ impl Default for FeaturesCfg {
             playlist: true,
             assets: true,
             users: true,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -193,7 +200,7 @@ pub struct PanelCfg {
     pub enabled: bool,
     pub session_ttl: u64,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for PanelCfg {
@@ -201,7 +208,7 @@ impl Default for PanelCfg {
         Self {
             enabled: true,
             session_ttl: 86400,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -229,7 +236,7 @@ pub struct CdnCfg {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_base: Option<String>,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for CdnCfg {
@@ -242,7 +249,7 @@ impl Default for CdnCfg {
             dont_cache_empty: false,
             empty_status: 502,
             public_base: None,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -282,7 +289,7 @@ pub struct CacheCfg {
     pub remux: CacheRemuxCfg,
     pub disguise: DisguiseCfg,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for CacheCfg {
@@ -302,7 +309,7 @@ impl Default for CacheCfg {
             dash: CacheDashCfg::default(),
             remux: CacheRemuxCfg::default(),
             disguise: DisguiseCfg::default(),
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -318,7 +325,7 @@ pub struct CachePrefetchCfg {
     pub skip_tail: u64,
     pub mpd_readahead: u64,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for CachePrefetchCfg {
@@ -330,7 +337,7 @@ impl Default for CachePrefetchCfg {
             prefetch_limit: 0,
             skip_tail: 1,
             mpd_readahead: 1,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -365,7 +372,7 @@ pub struct PrefetchOverrideCfg {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<u32>,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 /// `[cache.segments]`。
@@ -376,7 +383,7 @@ pub struct CacheSegmentsCfg {
     pub per_channel_max: u64,
     pub retain_count: u64,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for CacheSegmentsCfg {
@@ -385,7 +392,7 @@ impl Default for CacheSegmentsCfg {
             global_max: 0,
             per_channel_max: 0,
             retain_count: 20,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -413,7 +420,7 @@ pub struct CacheGcCfg {
     /// 自动上限的下限（MB）。
     pub min_mb: u64,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for CacheGcCfg {
@@ -428,7 +435,7 @@ impl Default for CacheGcCfg {
             disk_budget_ratio: 0.8,
             reserve_mb: 100,
             min_mb: 50,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -442,7 +449,7 @@ pub struct CacheTtlCfg {
     pub refresh_ratio: f64,
     pub fallback_mpd_secs: u64,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for CacheTtlCfg {
@@ -452,7 +459,7 @@ impl Default for CacheTtlCfg {
             segment_secs: 300,
             refresh_ratio: 0.4,
             fallback_mpd_secs: 8,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -493,7 +500,7 @@ pub struct CacheDashCfg {
     pub watchdog_rebuild_stagger_ms: u64,
     pub session_max_lifetime_secs: u64,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for CacheDashCfg {
@@ -528,7 +535,7 @@ impl Default for CacheDashCfg {
             watchdog_cooldown_secs: 3_600,
             watchdog_rebuild_stagger_ms: 300,
             session_max_lifetime_secs: 0,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -542,7 +549,7 @@ pub struct CacheRemuxCfg {
     pub publish_delay_segments: u64,
     pub reconnect_backoff_ms: Vec<u64>,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for CacheRemuxCfg {
@@ -552,7 +559,7 @@ impl Default for CacheRemuxCfg {
             window_segments: 6,
             publish_delay_segments: 2,
             reconnect_backoff_ms: vec![200, 1_000, 2_000],
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -567,7 +574,7 @@ pub struct DisguiseCfg {
     pub playlist: bool,
     pub master: bool,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for DisguiseCfg {
@@ -581,7 +588,7 @@ impl Default for DisguiseCfg {
             subtitle: false,
             playlist: true,
             master: false,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -600,7 +607,7 @@ pub struct SubtitleCfg {
     pub style: SubtitleStyleCfg,
     pub translate: SubtitleTranslateCfg,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for SubtitleCfg {
@@ -614,7 +621,7 @@ impl Default for SubtitleCfg {
             ],
             style: SubtitleStyleCfg::default(),
             translate: SubtitleTranslateCfg::default(),
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -632,7 +639,7 @@ pub struct SubtitleStyleCfg {
     /// 0–100，越大越靠下。
     pub position: u32,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for SubtitleStyleCfg {
@@ -643,7 +650,7 @@ impl Default for SubtitleStyleCfg {
             font_size: "80%".into(),
             bold: false,
             position: 90,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -671,7 +678,7 @@ pub struct SubtitleTranslateCfg {
     #[serde(alias = "mtran_batch")]
     pub batch: u64,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for SubtitleTranslateCfg {
@@ -688,7 +695,7 @@ impl Default for SubtitleTranslateCfg {
             set_default: true,
             timeout_ms: 1500,
             batch: 40,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -757,7 +764,7 @@ pub struct AuthCfg {
     /// 登录锁升级统计窗口（秒）。超出窗口后重新按第 1 次计。
     pub auth_fail_ban_escalate_window_secs: u64,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for AuthCfg {
@@ -789,7 +796,7 @@ impl Default for AuthCfg {
             auth_fail_ban_duration_secs: 3_600,
             auth_fail_ban_repeat_duration_secs: 2_592_000,
             auth_fail_ban_escalate_window_secs: 86_400,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -803,7 +810,7 @@ pub struct HealthCfg {
     pub timeout_secs: u64,
     pub concurrency: u32,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for HealthCfg {
@@ -813,7 +820,7 @@ impl Default for HealthCfg {
             interval_secs: 300,
             timeout_secs: 10,
             concurrency: 3,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -825,7 +832,7 @@ pub struct StatsCfg {
     pub enabled: bool,
     pub online_window_secs: u64,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for StatsCfg {
@@ -833,7 +840,7 @@ impl Default for StatsCfg {
         Self {
             enabled: true,
             online_window_secs: 90,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -923,7 +930,7 @@ pub struct Group {
     pub mpd_keep_seconds: u64,
     pub redirect_ttl: u64,
     pub redirect_mode: String,
-    pub headers: Vec<toml::Value>,
+    pub headers: Vec<Value>,
     /// 分组级上游代理；频道级优先。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<ProxyCfg>,
@@ -933,7 +940,7 @@ pub struct Group {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub channels: Vec<Channel>,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for Group {
@@ -952,7 +959,7 @@ impl Default for Group {
             proxy: None,
             prefetch: None,
             channels: Vec::new(),
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -964,7 +971,7 @@ pub struct Channel {
     pub id: String,
     pub name: String,
     pub url: String,
-    pub headers: Vec<toml::Value>,
+    pub headers: Vec<Value>,
     /// 频道级上游代理；覆盖分组级。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<ProxyCfg>,
@@ -985,7 +992,7 @@ pub struct Channel {
     pub catchup_days: u32,
     pub url_pool_size: u32,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for Channel {
@@ -1010,7 +1017,7 @@ impl Default for Channel {
             resolver_catchup: false,
             catchup_days: 7,
             url_pool_size: 1,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -1034,7 +1041,7 @@ pub struct EpgCfg {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<EpgSource>,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for EpgCfg {
@@ -1053,7 +1060,7 @@ impl Default for EpgCfg {
             record_pad_before_secs: 60,
             record_pad_after_secs: 180,
             sources: Vec::new(),
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -1074,7 +1081,7 @@ pub struct EpgSource {
     pub timeout_secs: u64,
     pub tz_shift_mins: i64,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for EpgSource {
@@ -1090,7 +1097,7 @@ impl Default for EpgSource {
             cron: String::new(),
             timeout_secs: 0,
             tz_shift_mins: 0,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -1107,7 +1114,7 @@ pub struct PlaylistCfg {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<PlaylistSource>,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for PlaylistCfg {
@@ -1117,7 +1124,7 @@ impl Default for PlaylistCfg {
             merge_position: "bottom".into(),
             global_exclude: Vec::new(),
             sources: Vec::new(),
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -1144,7 +1151,7 @@ pub struct PlaylistSource {
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for PlaylistSource {
@@ -1161,7 +1168,7 @@ impl Default for PlaylistSource {
             unlisted_groups: "drop".into(),
             include: Vec::new(),
             exclude: Vec::new(),
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -1189,7 +1196,7 @@ pub struct ShareCfg {
     /// 所以该键不控制载荷内容。语义未知，见 `PROGRESS.md` §3.3。
     pub share_token: bool,
     #[serde(flatten)]
-    pub extra: toml::Table,
+    pub extra: Extra,
 }
 
 impl Default for ShareCfg {
@@ -1203,7 +1210,7 @@ impl Default for ShareCfg {
             follower_urls: Vec::new(),
             poll_secs: 300,
             share_token: false,
-            extra: toml::Table::new(),
+            extra: Extra::new(),
         }
     }
 }
@@ -1246,25 +1253,21 @@ mod tests {
 
     #[test]
     fn cache_subsections_round_trip() {
-        let text = r#"
-[cache]
-disk_path = "cache"
-[cache.prefetch]
-enabled = false
-concurrency = 2
-[cache.segments]
-global_max = 10
-per_channel_max = 3
-[cache.ttl]
-segment_secs = 42
-[cache.dash]
-mpd_timeout_secs = 7
-[cache.remux]
-window_segments = 8
-publish_delay_segments = 2
-reconnect_backoff_ms = [100, 500]
-"#;
-        let config: Config = toml::from_str(text).expect("解析配置");
+        let body = serde_json::json!({
+            "cache": {
+                "disk_path": "cache",
+                "prefetch": { "enabled": false, "concurrency": 2 },
+                "segments": { "global_max": 10, "per_channel_max": 3 },
+                "ttl": { "segment_secs": 42 },
+                "dash": { "mpd_timeout_secs": 7 },
+                "remux": {
+                    "window_segments": 8,
+                    "publish_delay_segments": 2,
+                    "reconnect_backoff_ms": [100, 500]
+                }
+            }
+        });
+        let config: Config = serde_json::from_value(body).expect("解析配置");
         assert!(!config.cache.prefetch.enabled);
         assert_eq!(config.cache.prefetch.concurrency, 2);
         assert_eq!(config.cache.segments.global_max, 10);
@@ -1272,28 +1275,31 @@ reconnect_backoff_ms = [100, 500]
         assert_eq!(config.cache.ttl.segment_secs, 42);
         assert_eq!(config.cache.dash.mpd_timeout_secs, 7);
         assert_eq!(config.cache.remux.window_segments, 8);
-        let encoded = toml::to_string(&config).expect("序列化");
-        let decoded: Config = toml::from_str(&encoded).expect("再解析");
+        let encoded = serde_json::to_value(&config).expect("序列化");
+        let decoded: Config = serde_json::from_value(encoded).expect("再解析");
         assert_eq!(decoded.cache.remux.reconnect_backoff_ms, vec![100, 500]);
     }
 
     #[test]
-    fn proxy_is_parsed_from_toml() {
-        let text = r#"
-[[groups]]
-id = "g"
-name = "组"
-[groups.proxy]
-kind = "http"
-addr = "http://127.0.0.1:8080"
-username = "u"
-password = "p"
-[[groups.channels]]
-id = "c"
-name = "频道"
-url = "http://up/live.m3u8"
-"#;
-        let config: Config = toml::from_str(text).expect("解析配置");
+    fn proxy_is_parsed_from_json() {
+        let body = serde_json::json!({
+            "groups": [{
+                "id": "g",
+                "name": "组",
+                "proxy": {
+                    "kind": "http",
+                    "addr": "http://127.0.0.1:8080",
+                    "username": "u",
+                    "password": "p"
+                },
+                "channels": [{
+                    "id": "c",
+                    "name": "频道",
+                    "url": "http://up/live.m3u8"
+                }]
+            }]
+        });
+        let config: Config = serde_json::from_value(body).expect("解析配置");
         let proxy = config.proxy_for("g", "c").expect("代理");
         assert_eq!(proxy.kind, "http");
         assert_eq!(proxy.user.as_deref(), Some("u"));
@@ -1329,9 +1335,9 @@ url = "http://up/live.m3u8"
         let group = config.group("g").expect("分组");
         assert_eq!(
             group.headers[0]
-                .as_table()
+                .as_object()
                 .and_then(|table| table.get("name"))
-                .and_then(toml::Value::as_str),
+                .and_then(Value::as_str),
             Some("X-Group")
         );
 
@@ -1451,23 +1457,21 @@ url = "http://up/live.m3u8"
     }
 
     #[test]
-    fn prefetch_override_reads_toml_and_limit_alias() {
-        let text = r#"
-[[groups]]
-id = "hot"
-name = "热"
-[groups.prefetch]
-enabled = true
-limit = 6
-concurrency = 2
-[[groups.channels]]
-id = "c"
-name = "频道"
-url = "http://up/live.m3u8"
-[groups.channels.prefetch]
-enabled = false
-"#;
-        let config: Config = toml::from_str(text).expect("解析配置");
+    fn prefetch_override_reads_json_and_limit_alias() {
+        let body = serde_json::json!({
+            "groups": [{
+                "id": "hot",
+                "name": "热",
+                "prefetch": { "enabled": true, "limit": 6, "concurrency": 2 },
+                "channels": [{
+                    "id": "c",
+                    "name": "频道",
+                    "url": "http://up/live.m3u8",
+                    "prefetch": { "enabled": false }
+                }]
+            }]
+        });
+        let config: Config = serde_json::from_value(body).expect("解析配置");
         let group = config.group("hot").expect("分组");
         assert_eq!(
             group.prefetch.as_ref().and_then(|over| over.prefetch_limit),
@@ -1499,16 +1503,16 @@ enabled = false
     }
 
     #[test]
-    fn cdn_and_gc_round_trip_through_toml() {
+    fn cdn_and_gc_round_trip_through_json() {
         let mut config = Config::default();
         config.cdn.enabled = true;
         config.cdn.public_base = Some("https://cdn.example".into());
         config.cache.gc.max_disk_mb = 200;
-        let encoded = toml::to_string(&config).expect("序列化");
-        assert!(encoded.contains("[cdn]"), "{encoded}");
-        assert!(encoded.contains("[cache.gc]"), "{encoded}");
-        assert!(encoded.contains("public_base = "), "{encoded}");
-        let decoded: Config = toml::from_str(&encoded).expect("再解析");
+        let encoded = serde_json::to_value(&config).expect("序列化");
+        assert_eq!(encoded["cdn"]["enabled"], true);
+        assert_eq!(encoded["cache"]["gc"]["max_disk_mb"], 200);
+        assert_eq!(encoded["cdn"]["public_base"], "https://cdn.example");
+        let decoded: Config = serde_json::from_value(encoded).expect("再解析");
         assert!(decoded.cdn.enabled);
         assert_eq!(
             decoded.cdn.public_base.as_deref(),
@@ -1525,10 +1529,9 @@ enabled = false
             name: "组".into(),
             ..Group::default()
         });
-        let encoded = toml::to_string(&config).expect("序列化");
-        assert!(!encoded.contains("prefetch ="), "{encoded}");
-        assert!(!encoded.contains("[groups.prefetch]"), "{encoded}");
-        let decoded: Config = toml::from_str(&encoded).expect("再解析");
+        let encoded = serde_json::to_value(&config).expect("序列化");
+        assert!(encoded["groups"][0].get("prefetch").is_none(), "{encoded}");
+        let decoded: Config = serde_json::from_value(encoded).expect("再解析");
         assert!(decoded.group("g").expect("分组").prefetch.is_none());
     }
 }

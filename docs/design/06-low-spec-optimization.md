@@ -283,17 +283,22 @@ cap     = clamp( min(working, budget), 50 MB, total × 0.7 )
 
 ### 6.2 磁盘回收（1 GB 磁盘的硬前提）
 
-```toml
-[cache.gc]
-enabled = true
-max_disk_mb = 0          # 0 = 按 §3.3 自动
-max_age_secs = 1800
-interval_secs = 300
-scan_limit = 500         # 单次扫描上限，避免 1 vCPU 抖动
-disk_budget_ratio = 0.8  # 最多占可用空间的 80%
-reserve_mb = 100         # 给系统、日志、其它缓存目录预留
-min_mb = 50              # 自动值下限
+```json
+{ "cache": { "gc": {
+  "enabled": true,
+  "max_disk_mb": 0,
+  "max_age_secs": 1800,
+  "interval_secs": 300,
+  "scan_limit": 500,
+  "disk_budget_ratio": 0.8,
+  "reserve_mb": 100,
+  "min_mb": 50
+} } }
 ```
+
+`max_disk_mb = 0` 表示按 §3.3 自动。`scan_limit` 是单次扫描上限，避免 1 vCPU 抖动。
+`disk_budget_ratio` 是最多占可用空间的比例。`reserve_mb` 给系统、日志、其它缓存目录预留。
+`min_mb` 是自动值的下限。
 
 实现：按 mtime 删旧文件。顺序是超龄 → 超量 LRU → 磁盘见底时紧急清理。
 紧急模式忽略 `max_age_secs`，删到 `cap / 2`。
@@ -319,14 +324,15 @@ L1 的默认值不变：`enabled=true`、`concurrency=4`、`prefetch_limit=0`、
 
 分组与频道可以覆盖：
 
-```toml
-[[groups]]
-id = "hot"
-[groups.prefetch]        # 缺省 = 继承全局
-enabled = true           # 三态：未设置 / true / false
-limit = 6
-concurrency = 2
+```json
+{ "groups": [ { "id": "hot", "prefetch": {
+  "enabled": true,
+  "prefetch_limit": 6,
+  "concurrency": 2
+} } ] }
 ```
+
+`prefetch` 缺省即继承全局。`enabled` 是三态：未设置 / `true` / `false`。
 
 合并顺序：**频道 > 分组 > 全局**。实现与 `Config::proxy_for` 相同。
 
@@ -337,16 +343,21 @@ concurrency = 2
 缓存状态页只读，显示推荐值。系统设置页可编辑三段配置。字段旁显示「自动（实测 300s）」，
 也可以改为手动值。
 
-```toml
-[cdn]
-enabled = true
-auto_tune = true              # false = 关闭被动实测
-segment_max_age_secs = 0      # 0 = 自动推荐
-shared_cache_hits = false     # 四家都能忽略源站头时不需要
-dont_cache_empty = false      # 强制 TTL 下无效，用 502
-empty_status = 502
-# public_base = "https://<域名>"
+```json
+{ "cdn": {
+  "enabled": true,
+  "auto_tune": true,
+  "segment_max_age_secs": 0,
+  "shared_cache_hits": false,
+  "dont_cache_empty": false,
+  "empty_status": 502
+} }
 ```
+
+`auto_tune = false` 关闭被动实测。`segment_max_age_secs = 0` 用自动推荐值。
+四家 CDN 都能忽略源站头时，`shared_cache_hits` 不需要打开。
+强制 TTL 下 `dont_cache_empty` 无效，用 `empty_status = 502` 代替。
+CDN 不下发 `X-Forwarded-Proto` 时补 `public_base`。
 
 | 配置 | 面板位置 | 接口 |
 | --- | --- | --- |

@@ -1638,19 +1638,19 @@ pub(crate) fn channel_headers(state: &AppState, gid: &str, cid: &str) -> Vec<(St
     )
 }
 
-fn user_agent(extra: &toml::Table) -> Option<&str> {
+fn user_agent(extra: &crate::config::model::Extra) -> Option<&str> {
     extra
         .get("user_agent")
-        .and_then(toml::Value::as_str)
+        .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
 }
 
 /// 纯函数形式，便于单测。
 fn merge_upstream_headers(
-    group_headers: &[toml::Value],
+    group_headers: &[serde_json::Value],
     group_agent: Option<&str>,
-    channel_headers: &[toml::Value],
+    channel_headers: &[serde_json::Value],
     channel_agent: Option<&str>,
 ) -> Vec<(String, String)> {
     let mut merged = Vec::new();
@@ -1671,7 +1671,7 @@ fn merge_upstream_headers(
     merged
 }
 
-fn header_pair(value: &toml::Value) -> Option<(String, String)> {
+fn header_pair(value: &serde_json::Value) -> Option<(String, String)> {
     if let Some(text) = value.as_str() {
         let (name, value) = text.split_once(':')?;
         let name = name.trim();
@@ -1680,7 +1680,7 @@ fn header_pair(value: &toml::Value) -> Option<(String, String)> {
         }
         return Some((name.to_string(), value.trim().to_string()));
     }
-    let table = value.as_table()?;
+    let table = value.as_object()?;
     let name = table.get("name")?.as_str()?.trim();
     let value = table.get("value")?.as_str()?.trim();
     (!name.is_empty()).then(|| (name.to_string(), value.to_string()))
@@ -1804,11 +1804,11 @@ mod tests {
         );
     }
 
-    fn header(name: &str, value: &str) -> toml::Value {
-        toml::Value::Table(
+    fn header(name: &str, value: &str) -> serde_json::Value {
+        serde_json::Value::Object(
             [
-                ("name".to_string(), toml::Value::String(name.into())),
-                ("value".to_string(), toml::Value::String(value.into())),
+                ("name".to_string(), serde_json::Value::String(name.into())),
+                ("value".to_string(), serde_json::Value::String(value.into())),
             ]
             .into_iter()
             .collect(),
@@ -1854,9 +1854,9 @@ mod tests {
     #[test]
     fn accepts_legacy_header_strings() {
         let merged = merge_upstream_headers(
-            &[toml::Value::String("X-Token: abc".into())],
+            &[serde_json::Value::String("X-Token: abc".into())],
             None,
-            &[toml::Value::String("Referer: http://ref/".into())],
+            &[serde_json::Value::String("Referer: http://ref/".into())],
             None,
         );
         assert_eq!(

@@ -277,9 +277,10 @@ pub async fn apply(
                 .iter_mut()
                 .find(|channel| channel.id == cid)
                 .ok_or_else(|| anyhow::anyhow!("Channel not found"))?;
-            channel
-                .extra
-                .insert("logo".into(), toml::Value::String(format!("/logo/{safe}")));
+            channel.extra.insert(
+                "logo".into(),
+                serde_json::Value::String(format!("/logo/{safe}")),
+            );
             Ok(())
         })
         .map_err(|error| {
@@ -446,9 +447,9 @@ fn extra_u64(config: &crate::config::Config, key: &str, default: u64) -> u64 {
     config
         .extra
         .get("logo")
-        .and_then(toml::Value::as_table)
+        .and_then(serde_json::Value::as_object)
         .and_then(|logo| logo.get(key))
-        .and_then(toml::Value::as_integer)
+        .and_then(serde_json::Value::as_i64)
         .map(|value| value.max(0) as u64)
         .unwrap_or(default)
 }

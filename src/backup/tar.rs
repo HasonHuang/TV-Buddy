@@ -112,8 +112,8 @@ mod tests {
     fn roundtrip() {
         let entries = vec![
             Entry {
-                name: "tv-buddy-backup/config.toml".into(),
-                data: b"[server]\n".to_vec(),
+                name: "tv-buddy-backup/config.json".into(),
+                data: b"{}".to_vec(),
             },
             Entry {
                 name: "tv-buddy-backup/logos/a.png".into(),
@@ -128,7 +128,7 @@ mod tests {
         assert_eq!(data.len() % 512, 0);
         let parsed = parse(&data).expect("解析");
         assert_eq!(parsed.len(), 3);
-        assert_eq!(parsed[0].name, "tv-buddy-backup/config.toml");
+        assert_eq!(parsed[0].name, "tv-buddy-backup/config.json");
         assert_eq!(parsed[1].data, vec![0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
         assert!(parsed[2].data.is_empty());
     }

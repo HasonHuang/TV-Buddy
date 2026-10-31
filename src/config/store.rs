@@ -89,10 +89,10 @@ mod tests {
         config.server.bind = "127.0.0.1:1234".into();
         config.cache.gc.max_disk_mb = 120;
         // 未建模键会落进 extra，必须跟着往返。
-        config
-            .epg
-            .extra
-            .insert("custom_flag".into(), toml::Value::String("keep".into()));
+        config.epg.extra.insert(
+            "custom_flag".into(),
+            serde_json::Value::String("keep".into()),
+        );
         store.save(&config).expect("保存");
 
         let loaded = store.load().expect("读取").expect("有配置");
@@ -101,7 +101,7 @@ mod tests {
         // 未建模段跟着走。
         assert_eq!(
             loaded.epg.extra.get("custom_flag"),
-            Some(&toml::Value::String("keep".into()))
+            Some(&serde_json::Value::String("keep".into()))
         );
 
         // 覆盖保存只有一行。

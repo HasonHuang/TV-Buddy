@@ -214,30 +214,28 @@ http://<host>:19899/<gid>/playlist.m3u   # 单个分组
 配置存在 `<prefix>/tv-buddy.db`。面板「系统设置」是唯一入口。
 命令行也能改：`tv-buddy config get <键> `、`tv-buddy config set <键> <值>`。
 
-下面的 TOML 片段只是**键名参考**。实际存储是 JSON，面板保存时自动转换。
+下面的 JSON 是**键名参考**。存进数据库的文档就是这个形状。
 
-```toml
-[server]
-bind = "[::]:19899"
-log_level = "info"
-
-[auth]
-token_enabled = false
-
-[cache]
-disk_path = "./cache"
-
-[[groups]]
-id = "demo"
-name = "示例分组"
-mode = "proxy"
-access = "public"
-
-[[groups.channels]]
-id = "c1"
-name = "示例频道"
-url = "http://example.com/live.m3u8"
+```json
+{
+  "server": { "bind": "[::]:19899", "log_level": "info" },
+  "auth": { "token_enabled": false },
+  "cache": { "disk_path": "./cache" },
+  "groups": [
+    {
+      "id": "demo",
+      "name": "示例分组",
+      "mode": "proxy",
+      "access": "public",
+      "channels": [
+        { "id": "c1", "name": "示例频道", "url": "http://example.com/live.m3u8" }
+      ]
+    }
+  ]
+}
 ```
+
+整份导入：`tv-buddy config import config.json --force`。
 
 常用可选项：
 
@@ -258,14 +256,18 @@ url = "http://example.com/live.m3u8"
 
 内置客户端支持 MTranServer v5 与旧批量接口。先请求 `/translate/batch`，失败回退 `/translate`。地址可写根地址、`/translate` 或 `/translate/batch`。
 
-```toml
-[subtitle.translate]
-enabled = true
-url = "https://translate.ipacel.cc/translate"
-target = "zh-cn"
-source = "auto"
-# token = "可选。以 Authorization: Bearer 发送"
+```json
+{
+  "subtitle": { "translate": {
+    "enabled": true,
+    "url": "https://translate.ipacel.cc/translate",
+    "target": "zh-cn",
+    "source": "auto"
+  } }
+}
 ```
+
+需要 token 时加 `"token": "..."`，以 `Authorization: Bearer` 发送。
 
 `https://translate.ipacel.cc/translate` 是社区试用服务。可用性、速度与额度不保证。生产环境建议自建 MTranServer。
 
@@ -288,7 +290,9 @@ TRANSLATE_URL=http://127.0.0.1:8989 TRANSLATE_TOKEN=secret scripts/smoke-transla
 TV Buddy 可在 **1 vCPU / 128 MB 内存 / 1 GB 磁盘** 的实例上运行。前提是前面挂 CDN，把播放流量挡在边缘。
 
 装的时候加 `--low-spec`：`sudo ./install.sh --low-spec`。
-样例：[`docs/design/config-low-spec.toml`](docs/design/config-low-spec.toml)（可用 `import-config` 导入）。原理与公式：[`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md)。
+样例：[`docs/design/config-low-spec.json`](docs/design/config-low-spec.json)。
+导入：`tv-buddy config import docs/design/config-low-spec.json --db tv-buddy.db --force`。
+原理与公式：[`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md)。
 
 ### 两个硬前提
 
@@ -301,50 +305,43 @@ TV Buddy 可在 **1 vCPU / 128 MB 内存 / 1 GB 磁盘** 的实例上运行。�
 
 ### 服务端配置
 
-```toml
-[server]
-bind = "[::]:19899"
-log_level = "info"
+`--low-spec` 写入的就是这份 JSON。想手工导入，用
+[`docs/design/config-low-spec.json`](docs/design/config-low-spec.json)。
 
-[panel]
-enabled = true
-# 上线前必须改口令。password_sha256 是口令的 SHA-256 十六进制。
-
-[auth]
-token_enabled = true
-ip_guard_enabled = true
-
-[cache]
-disk_path = "./cache"
-
-# 每个频道的切片索引压到 200 条。0 = 只用内置默认 4096
-[cache.segments]
-per_channel_max = 200
-
-# 1 vCPU：降低开播瞬间的 CPU 抢占
-[cache.prefetch]
-enabled = true
-concurrency = 2
-
-# 磁盘回收。上限自动，按「可用空间 × 0.8 − 100 MB」与实测工作集取小
-[cache.gc]
-enabled = true
-max_disk_mb = 0          # 0 = 自动。1 GB 盘通常落在 100–150 MB
-max_age_secs = 1800
-interval_secs = 300
-scan_limit = 500         # 单轮最多处理 500 个文件，防抖动
-disk_budget_ratio = 0.8
-reserve_mb = 100
-min_mb = 50
-
-# CDN 兜底。CDN 能忽略源站头时保持默认即可
-[cdn]
-enabled = true
-auto_tune = true           # 被动实测推荐值
-segment_max_age_secs = 0   # 0 = 用实测推荐值
-empty_status = 502         # 强制 TTL 下挡住「200 + 空体」
-# public_base = "https://cdn.example"   # CDN 不下发 XFP 时填这里
+```json
+{
+  "server": { "bind": "[::]:19899", "log_level": "info" },
+  "panel": { "enabled": true },
+  "auth": { "token_enabled": true, "ip_guard_enabled": true },
+  "cache": {
+    "disk_path": "./cache",
+    "segments": { "per_channel_max": 200 },
+    "prefetch": { "enabled": true, "concurrency": 2 },
+    "gc": {
+      "enabled": true,
+      "max_disk_mb": 0,
+      "max_age_secs": 1800,
+      "interval_secs": 300,
+      "scan_limit": 500,
+      "disk_budget_ratio": 0.8,
+      "reserve_mb": 100,
+      "min_mb": 50
+    }
+  },
+  "cdn": {
+    "enabled": true,
+    "auto_tune": true,
+    "segment_max_age_secs": 0,
+    "empty_status": 502
+  }
+}
 ```
+
+`max_disk_mb = 0` 表示自动。1 GB 盘通常落在 100–150 MB。
+`scan_limit` 是单轮最多处理的文件数，防 1 vCPU 抖动。
+`segment_max_age_secs = 0` 表示用实测推荐值。
+`empty_status = 502` 在强制 TTL 下挡住「200 + 空体」。
+CDN 不下发 `X-Forwarded-Proto` 时，在 `cdn` 里加 `"public_base": "https://cdn.example"`。
 
 ### CDN 控制台设置
 

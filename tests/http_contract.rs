@@ -1831,7 +1831,7 @@ async fn logo_library_upload_serve_and_delete() {
     // 缺文件与越界名 → 404。
     for path in [
         "/logo/missing.png",
-        "/logo/..%2F..%2Fconfig.toml",
+        "/logo/..%2F..%2Ftv-buddy.db",
         "/logo/evil.exe",
     ] {
         let response = fetch(&fixture, path).await;
@@ -1916,14 +1916,14 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
             let assets = config
                 .extra
                 .entry("assets".to_string())
-                .or_insert_with(|| toml::Value::Table(Default::default()));
-            let table = assets.as_table_mut().expect("assets 表");
+                .or_insert_with(|| serde_json::Value::Object(Default::default()));
+            let table = assets.as_object_mut().expect("assets 表");
             let map = table
                 .entry("map".to_string())
-                .or_insert_with(|| toml::Value::Table(Default::default()));
-            map.as_table_mut().expect("map 表").insert(
+                .or_insert_with(|| serde_json::Value::Object(Default::default()));
+            map.as_object_mut().expect("map 表").insert(
                 "http://placeholder.test/404.mp4".to_string(),
-                toml::Value::String("/assets/convert/demo/index.m3u8".to_string()),
+                serde_json::Value::String("/assets/convert/demo/index.m3u8".to_string()),
             );
             Ok(())
         })
@@ -3604,12 +3604,12 @@ async fn resolver_script_overrides_channel_url_with_ttl_cache() {
     let resolvers = fixture.dir.join("cache/resolvers");
     std::fs::create_dir_all(&resolvers).expect("建脚本目录");
     let marker = fixture.dir.join("probe.count");
-    let toml = format!(
+    let script = format!(
         "import sys\nopen(r'{}', 'a').write('x')\nprint('{}/live.m3u8')\n",
         marker.display(),
         fixture.upstream
     );
-    std::fs::write(resolvers.join("probe.py"), toml).expect("写脚本");
+    std::fs::write(resolvers.join("probe.py"), script).expect("写脚本");
     std::fs::write(resolvers.join("bad.py"), "print('not-a-url')\n").expect("写脚本");
 
     // 首次请求：执行脚本，返回代理清单。

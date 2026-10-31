@@ -57,7 +57,7 @@ impl Setting {
         let ttl = channel
             .extra
             .get("resolver_ttl")
-            .and_then(|value| value.as_integer())
+            .and_then(|value| value.as_i64())
             .filter(|value| *value >= 0)
             .unwrap_or(30) as u64;
         Some(Self { script, arg, ttl })
@@ -190,7 +190,7 @@ fn script_path(cache_dir: &str, name: &str) -> Result<PathBuf> {
 mod tests {
     use super::*;
 
-    fn channel(extra: toml::Table) -> Channel {
+    fn channel(extra: crate::config::model::Extra) -> Channel {
         Channel {
             id: "c1".into(),
             name: "频道".into(),
@@ -202,26 +202,29 @@ mod tests {
 
     #[test]
     fn reads_setting_from_extra() {
-        let mut extra = toml::Table::new();
+        let mut extra = crate::config::model::Extra::new();
         extra.insert(
             "resolver_script".into(),
-            toml::Value::String("probe.py".into()),
+            serde_json::Value::String("probe.py".into()),
         );
-        extra.insert("resolver_arg".into(), toml::Value::String("abc".into()));
-        extra.insert("resolver_ttl".into(), toml::Value::Integer(5));
+        extra.insert(
+            "resolver_arg".into(),
+            serde_json::Value::String("abc".into()),
+        );
+        extra.insert("resolver_ttl".into(), serde_json::Value::Number(5.into()));
         let setting = Setting::from_channel(&channel(extra)).expect("设置");
         assert_eq!(setting.script, "probe.py");
         assert_eq!(setting.arg, "abc");
         assert_eq!(setting.ttl, 5);
-        assert!(Setting::from_channel(&channel(toml::Table::new())).is_none());
+        assert!(Setting::from_channel(&channel(crate::config::model::Extra::new())).is_none());
     }
 
     #[test]
     fn defaults_ttl_and_rejects_bad_name() {
-        let mut extra = toml::Table::new();
+        let mut extra = crate::config::model::Extra::new();
         extra.insert(
             "resolver_script".into(),
-            toml::Value::String("probe".into()),
+            serde_json::Value::String("probe".into()),
         );
         assert_eq!(
             Setting::from_channel(&channel(extra)).expect("设置").ttl,

@@ -29,7 +29,7 @@
 | [`04-config-and-storage.md`](04-config-and-storage.md) | 配置与存储细节 | ✅ 初稿 |
 | [`05-frontend.md`](05-frontend.md) | 前端页面与交互设计 | ✅ 初稿 |
 | [`06-low-spec-optimization.md`](06-low-spec-optimization.md) | 低配置 + 多 CDN 优化：边缘缓存、推荐值、磁盘回收、预取覆盖 | ✅ 已实施（T0 待人工） |
-| [`config-low-spec.toml`](config-low-spec.toml) | 低配 + 多 CDN 示例配置（1 vCPU / 128 MB / 1 GB） | ✅ 已试跑 |
+| [`config-low-spec.json`](config-low-spec.json) | 低配 + 多 CDN 示例配置（1 vCPU / 128 MB / 1 GB） | ✅ 已试跑 |
 | [`reference/`](reference/) | 目标 UI 参考截图（30 张）+ 功能与证据映射 | ✅ 已采集 |
 
 ## 3. 写作要求

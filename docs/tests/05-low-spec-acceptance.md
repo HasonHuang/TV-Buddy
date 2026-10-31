@@ -6,7 +6,7 @@
 
 - 1 vCPU 抖动的量化阈值。仓库只写「不抖动」，没有延迟或 CPU 上限（`docs/design/06-low-spec-optimization.md:390`）。
 - 非回收目录的增长阈值。GC 只扫 `seg_bytes` 与 `seg_url`（`src/cache_gc.rs:33`）。
-- 64 MB 档位的专用配置。仓库只有 128 MB 档位的 `memory_max_mb = 4` 注释（`docs/design/config-low-spec.toml:29-31`）。
+- 64 MB 档位的专用配置。仓库只有 128 MB 档位的 `memory_max_mb = 4` 注释（`docs/design/config-low-spec.json`）。
 
 ## 2. 前置条件
 
@@ -17,8 +17,8 @@
 | 权限 | `root`（`sudo`） |
 | 已通过 | [`01-install-and-start.md`](01-install-and-start.md) |
 | 二进制 | 来自 `v*` tag 的发布包。执行前先 `git fetch --tags` 并记录实际 tag |
-| 源码目录 | 需要 `docs/design/config-low-spec.toml` |
-| 真实源 | S6 需要一条能播放的 HLS 地址。样例里的 `upstream.example` 不能播放（`docs/design/config-low-spec.toml:87`） |
+| 源码目录 | 需要 `docs/design/config-low-spec.json` |
+| 真实源 | S6 需要一条能播放的 HLS 地址。样例里的 `upstream.example` 不能播放 |
 | 工具 | `curl`、`sha256sum`、`dd`、`find`、`awk`、`sed`、`grep`、`tar`、`systemctl`、`journalctl` |
 | 工具（S4-3） | `pidstat`、`mpstat`。属于 sysstat。仓库未声明该依赖，先确认可用 |
 | 磁盘余量 | S4-1 开始前，`/opt/tv-buddy/cache` 所在文件系统可用空间不少于 313 MB |
@@ -135,30 +135,27 @@ sudo tv-buddy config set cache.gc.max_disk_mb 120
 sudo tv-buddy restart
 ```
 
-在 `[panel]` 段内补两行。样例只有 `enabled = true`，没有口令：
+在 `panel` 段内加 `session_ttl`：
 
-```toml
-password_sha256 = "<上一步的 64 位十六进制>"
-session_ttl = 604800
+```bash
+sudo tv-buddy config set panel.session_ttl 604800
 ```
 
-`session_ttl` 默认 86400 秒（`src/config/model.rs:166`）。S6 要跑 24 小时，会话会在同一时刻过期。本验收临时改为 7 天。回滚时删除这一行。
+`session_ttl` 默认 86400 秒（`src/config/model.rs`）。S6 要跑 24 小时，会话会在同一时刻过期。
+本验收临时改为 7 天。回滚时恢复 86400。
 
 改分组与频道。这三处必须指向你的真实值：
 
-```toml
-[[groups]]
-id = "<分组 id>"
-name = "<分组名>"
-mode = "proxy"
-access = "public"
-format = "hls"
-
-[[groups.channels]]
-id = "<频道 id>"
-name = "<频道名>"
-url = "<真实 HLS 地址>"
+```bash
+sudo tv-buddy config set groups.0.id "<分组 id>"
+sudo tv-buddy config set groups.0.name "<分组名>"
+sudo tv-buddy config set groups.0.channels.0.id "<频道 id>"
+sudo tv-buddy config set groups.0.channels.0.name "<频道名>"
+sudo tv-buddy config set groups.0.channels.0.url "<真实 HLS 地址>"
 ```
+
+`config set` 只改单个值。分组与频道已存在时，按上面的下标逐项改。
+要整份替换，改写 JSON 文件后执行 `sudo tv-buddy config import <config.json> --force`。
 
 S4 不需要真实源。S6 必须有真实源，否则 `seg_bytes` 不会增长（`src/http/routes/stream.rs:1278`）。
 
@@ -178,7 +175,7 @@ systemctl is-active tv-buddy
 sudo grep -m1 'config' /opt/tv-buddy/tv-buddy.log
 ```
 
-预期：无「读取配置失败」或 TOML 解析错误。
+预期：无「读取配置失败」或「配置格式错误」。
 
 ### 3.3 取面板 Token
 
@@ -615,23 +612,16 @@ sudo pkill -f /root/s6-sample.sh
 
 把三处开关关掉。配置热重载，下一请求生效，不需要重启（`docs/design/06-low-spec-optimization.md:401-402`）：
 
-```toml
-[cdn]
-enabled = false
-
-[cache.gc]
-enabled = false
+```bash
+sudo tv-buddy config set cdn.enabled false
+sudo tv-buddy config set cache.gc.enabled false
+sudo tv-buddy config set groups.0.prefetch.enabled false
 ```
 
-```toml
-[groups.prefetch]
-enabled = false
-```
-
-删除本验收加入的 `session_ttl`，恢复默认 86400 秒：
+恢复 `session_ttl` 默认 86400 秒：
 
 ```bash
-sudo tv-buddy config set cache.gc.enabled true
+sudo tv-buddy config set panel.session_ttl 86400
 ```
 
 删除测试数据：

@@ -401,37 +401,38 @@ pub async fn import_m3u(
         if let Some(value) = &entry.tvg_id {
             channel
                 .extra
-                .insert("tvg_id".into(), toml::Value::String(value.clone()));
+                .insert("tvg_id".into(), serde_json::Value::String(value.clone()));
         }
         if let Some(value) = &entry.tvg_name {
             channel
                 .extra
-                .insert("tvg_name".into(), toml::Value::String(value.clone()));
+                .insert("tvg_name".into(), serde_json::Value::String(value.clone()));
         }
         if let Some(value) = &entry.tvg_logo {
             channel
                 .extra
-                .insert("tvg_logo".into(), toml::Value::String(value.clone()));
+                .insert("tvg_logo".into(), serde_json::Value::String(value.clone()));
         }
         if let Some(value) = &entry.group_title {
-            channel
-                .extra
-                .insert("group_title".into(), toml::Value::String(value.clone()));
+            channel.extra.insert(
+                "group_title".into(),
+                serde_json::Value::String(value.clone()),
+            );
         }
         if let Some(value) = &entry.user_agent {
             channel
                 .headers
-                .push(toml::Value::String(format!("User-Agent: {value}")));
+                .push(serde_json::Value::String(format!("User-Agent: {value}")));
         }
         if let Some(value) = &entry.referer {
             channel
                 .headers
-                .push(toml::Value::String(format!("Referer: {value}")));
+                .push(serde_json::Value::String(format!("Referer: {value}")));
         }
         for (key, value) in &entry.headers {
             channel
                 .headers
-                .push(toml::Value::String(format!("{key}: {value}")));
+                .push(serde_json::Value::String(format!("{key}: {value}")));
         }
         draft.channels.push(channel);
     }

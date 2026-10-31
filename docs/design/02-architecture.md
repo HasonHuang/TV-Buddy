@@ -68,9 +68,8 @@
 | `main` | 启动、日志、信号处理 | `fn main` | S-ENV-06 |
 | `config::model` | 全部段与字段、默认值 | `Config`、`ServerCfg`、`PanelCfg`、`CacheCfg`、`AuthCfg`、`Group`、`Channel` | S-CFG-04、S-MODEL-01/02 |
 | `config::store` | 配置读写：SQLite 单行 JSON 文档 | `ConfigStore` | S-CFG-01 |
-| `config::legacy` | 旧 TOML 解析，仅迁移用 | `parse`、`load` | 迁移决策 |
 | `db` | 单库连接与建表 | `connect`、`SharedConn` | 设计决策（2026-10-31） |
-| `cli` | 子命令：导入配置、读写配置值、改口令 | `run_if_subcommand` | 迁移决策 |
+| `cli` | 子命令：导入配置、读写配置值、改口令 | `run_if_subcommand` | 设计决策（2026-10-31） |
 | `state` | 共享状态容器 | `AppState` | — |
 | `http::router` | 路由表组装、中间件栈 | `build_router(AppState) -> Router` | S-EP-16 |
 | `http::error` | 错误 → 响应（302/400/403/404/422/503） | `ApiError`、`PlayError` | S-DIS-15、S-EP-08 |
@@ -233,9 +232,9 @@ frontend/            # Vite + React + TS（独立目录）
 | ADR-03 | 缓存 disk-first | memory-first | 目标默认 `disk`；memory 仅保留键 |
 | ADR-04 | `<P>` 自研算法 | 复刻目标算法 | 算法未解且不影响客户端（F-017） |
 | ADR-05 | 前端编译期嵌入 | 运行时读目录 | 单文件发布（F-003） |
-| ADR-06 | 配置规范化 + 原子写（临时文件 + rename） | 直接覆盖 | 目标全量原子写（S-CFG-01） |
+| ADR-06 | 配置存单行 JSON 文档，一条 UPSERT | 写回 TOML 文本 | 库内单行写入天然原子（S-CFG-01） |
 | ADR-07 | 上游单例客户端 | 每请求新建 | 复用连接池，降首字节延迟 |
-| ADR-08 | 严格 TOML 解析 | 宽松忽略 | 目标对重复键报错（F-008） |
+| ADR-08 | 严格 JSON 解析 | 宽松忽略 | 未知类型直接报错，不静默丢字段（F-008） |
 
 ## 13. 测试策略
 

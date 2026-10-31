@@ -23,7 +23,7 @@ pub async fn link_info(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState
         .auth
         .extra
         .get("aliases")
-        .and_then(|value| value.as_table())
+        .and_then(|value| value.as_object())
         .cloned()
         .unwrap_or_default();
     let use_alias = !aliases.is_empty();

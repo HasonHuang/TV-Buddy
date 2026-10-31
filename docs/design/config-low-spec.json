@@ -1,0 +1,59 @@
+{
+  "server": {
+    "bind": "[::]:19899",
+    "log_level": "info"
+  },
+  "panel": {
+    "enabled": true
+  },
+  "auth": {
+    "token_enabled": true,
+    "ip_guard_enabled": true
+  },
+  "cache": {
+    "disk_path": "./cache",
+    "segments": {
+      "per_channel_max": 200
+    },
+    "prefetch": {
+      "enabled": true,
+      "concurrency": 2,
+      "prefetch_limit": 0,
+      "skip_tail": 1
+    },
+    "gc": {
+      "enabled": true,
+      "max_disk_mb": 0,
+      "max_age_secs": 1800,
+      "interval_secs": 300,
+      "scan_limit": 500,
+      "disk_budget_ratio": 0.8,
+      "reserve_mb": 100,
+      "min_mb": 50
+    }
+  },
+  "cdn": {
+    "enabled": true,
+    "auto_tune": true,
+    "segment_max_age_secs": 0,
+    "shared_cache_hits": false,
+    "dont_cache_empty": false,
+    "empty_status": 502
+  },
+  "groups": [
+    {
+      "id": "hk",
+      "name": "香港",
+      "mode": "proxy",
+      "access": "public",
+      "format": "hls",
+      "channels": [
+        {
+          "id": "c1",
+          "name": "示例频道",
+          "url": "https://upstream.example/live.m3u8"
+        }
+      ]
+    }
+  ]
+}

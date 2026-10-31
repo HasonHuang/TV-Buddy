@@ -392,7 +392,7 @@ cat /opt/tv-buddy/tv-buddy.pid 2>/dev/null || echo "无 PID 文件"
 
 - 配置读不到时，进程带上下文 `读取配置失败: <path>` 退出（`src/main.rs:19-20`）。
 - 端口绑不上时，进程带上下文 `监听失败: <bind>` 退出（`src/main.rs:36-38`）。
-- 配置是严格 TOML。重复键或类型错直接报错（`src/config.rs:23-27`）。
+- 配置存于 SQLite（`tv-buddy.db`）。库打不开或 JSON 解析失败时直接报错。
 - 校验会拦：`server.bind` 为空、`panel.enabled=true` 且 `panel.password_sha256` 为空、分组 id 为空或重复、频道 id 重复（`src/config.rs:40-62`）。
 - 缺少 sha256 工具时，安装脚本打印 `未找到 sha256 工具，跳过校验` 并继续（`install.sh:168-169`）。这不是安装失败，但要记录。
 - systemd 下 `Restart=on-failure` 与 `RestartSec=3` 会让坏配置进入每 3 秒重启的循环（`packaging/tv-buddy.service:11-12`）。`is-active` 在该期间可能短暂为 active。以 `journalctl` 中的 `读取配置失败` 与 `/health` 结果为准。

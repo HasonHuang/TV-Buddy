@@ -9,6 +9,9 @@
 //! | `config set <a.b.c> <值>` | 写一个配置值 |
 //! | `config reset` | 配置恢复默认，保留用户 |
 //! | `passwd <用户名>` | 重设用户口令 |
+//!
+//! 路径按 `.` 分段。纯数字段按数组下标，其余按对象键，例如
+//! `groups.0.channels.1.url`。
 
 use std::{io::Read, path::PathBuf};
 
@@ -191,21 +194,55 @@ fn parse_value(text: &str) -> Value {
 fn get_path<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
     let mut current = root;
     for part in path.split('.').filter(|part| !part.is_empty()) {
-        current = current.get(part)?;
+        current = step(current, part)?;
     }
     Some(current)
 }
 
+/// 取一层。纯数字按数组下标，其余按对象键。
+fn step<'a>(current: &'a Value, part: &str) -> Option<&'a Value> {
+    match current {
+        Value::Array(items) => items.get(part.parse::<usize>().ok()?),
+        other => other.get(part),
+    }
+}
+
+/// 写一层。纯数字按数组下标，其余按对象键。
+///
+/// 数组下标越界时报错，不自动扩展——静默补 `null` 会让后续反序列化失败。
 fn set_path(root: &mut Value, path: &str, value: Value) -> Result<()> {
     let parts: Vec<&str> = path.split('.').filter(|part| !part.is_empty()).collect();
     let (last, parents) = parts.split_last().context("路径不能为空")?;
     let mut current = root;
     for part in parents {
-        let map = current.as_object_mut().context("路径指向的不是对象")?;
-        current = map.entry((*part).to_string()).or_insert_with(|| json!({}));
+        current = match current {
+            Value::Array(items) => {
+                let index: usize = part
+                    .parse()
+                    .with_context(|| format!("数组下标无效: {part}"))?;
+                items
+                    .get_mut(index)
+                    .with_context(|| format!("数组下标越界: {index}"))?
+            }
+            Value::Object(map) => map.entry((*part).to_string()).or_insert_with(|| json!({})),
+            _ => bail!("路径 {part} 之前的值不是对象或数组"),
+        };
     }
-    let map = current.as_object_mut().context("路径指向的不是对象")?;
-    map.insert((*last).to_string(), value);
+    match current {
+        Value::Array(items) => {
+            let index: usize = last
+                .parse()
+                .with_context(|| format!("数组下标无效: {last}"))?;
+            let slot = items
+                .get_mut(index)
+                .with_context(|| format!("数组下标越界: {index}"))?;
+            *slot = value;
+        }
+        Value::Object(map) => {
+            map.insert((*last).to_string(), value);
+        }
+        _ => bail!("路径 {last} 之前的值不是对象或数组"),
+    }
     Ok(())
 }
 
@@ -219,6 +256,22 @@ mod tests {
         set_path(&mut root, "cache.gc.max_disk_mb", json!(120)).expect("写入");
         assert_eq!(get_path(&root, "cache.gc.max_disk_mb"), Some(&json!(120)));
         assert_eq!(get_path(&root, "server.bind"), Some(&json!("[::]:19899")));
+    }
+
+    #[test]
+    fn dotted_path_walks_arrays() {
+        let mut root = json!({ "groups": [ { "id": "hk", "channels": [ { "url": "a" } ] } ] });
+        set_path(&mut root, "groups.0.channels.0.url", json!("b")).expect("写入");
+        assert_eq!(
+            get_path(&root, "groups.0.channels.0.url"),
+            Some(&json!("b"))
+        );
+    }
+
+    #[test]
+    fn array_index_out_of_range_is_error() {
+        let mut root = json!({ "groups": [] });
+        assert!(set_path(&mut root, "groups.0.id", json!("x")).is_err());
     }
 
     #[test]
