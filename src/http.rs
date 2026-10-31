@@ -49,6 +49,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         // 面板接口：未知路径固定 404 JSON，先于播放通配路由匹配。
         .route("/panel/api/*rest", any(routes::panel::api_missing))
         // 播放链路（M2）
+        // 订阅条目的路径令牌入口：`/l/<token>/<gid>/<cid>.m3u8`。
+        .route("/l/:token/:gid/:file", get(routes::stream::token_entry))
+        .route(
+            "/l/:token/:gid/:cid/*path",
+            get(routes::stream::token_alias),
+        )
+        // 时间窗签名切片：`/{gid}/{cid}/l/{exp}/{sig}/...`。
+        .route("/:gid/:cid/l/:exp/:sig/*path", get(routes::stream::signed))
         .route("/:gid/:file", get(routes::stream::entry))
         .route("/:gid/:cid/*path", get(routes::stream::wildcard))
         // 内嵌页面（免登录）

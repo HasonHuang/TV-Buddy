@@ -375,7 +375,7 @@ impl Session {
     }
 
     /// 生成回看清单。
-    fn playlist(&self, track: &str, start: i64, end: i64) -> Playlist {
+    fn playlist(&self, track: &str, start: i64, end: i64, slice: &str) -> Playlist {
         self.touch();
         let index = self.index.lock().unwrap_or_else(|error| error.into_inner());
         let Some(entry) = index.tracks.get(track) else {
@@ -404,18 +404,22 @@ impl Session {
             first.seq,
             crate::schedule::format_utc_iso(first.ts)
         );
+        let dir = if slice.is_empty() {
+            format!("/{}/{}/dash-timeshift", self.gid, self.cid)
+        } else {
+            format!("/{}/{}/{slice}/dash-timeshift", self.gid, self.cid)
+        };
         if entry.has_init {
             let init_ext = pick_ext(track, first.seq);
             body.push_str(&format!(
-                "#EXT-X-MAP:URI=\"/{}/{}/dash-timeshift/{}/init.{init_ext}\"\n",
-                self.gid, self.cid, track
+                "#EXT-X-MAP:URI=\"{dir}/{track}/init.{init_ext}\"\n"
             ));
         }
         for (index, item) in picked.iter().enumerate() {
             let ext = pick_ext(track, first.seq + index as u64 + 1);
             body.push_str(&format!(
-                "#EXTINF:{:.3},\n/{}/{}/dash-timeshift/{}/{}.{ext}\n",
-                item.dur, self.gid, self.cid, track, item.seq
+                "#EXTINF:{:.3},\n{dir}/{track}/{}.{ext}\n",
+                item.dur, item.seq
             ));
         }
         body.push_str("#EXT-X-ENDLIST\n");
@@ -748,7 +752,8 @@ impl Manager {
             if session.info().segments == 0 {
                 poll_once(&session, state).await;
             }
-            return match session.playlist(track, start, end) {
+            let slice = crate::sign::prefix(&state.snapshot(), gid, cid);
+            return match session.playlist(track, start, end, &slice) {
                 Playlist::Body(body) => playlist_response(body),
                 Playlist::Empty => text_response(StatusCode::NOT_FOUND, "no segments in range"),
                 Playlist::UnknownTrack => {
@@ -1004,7 +1009,7 @@ mod tests {
         assert!(session.record(&stream, &segment(7), b"aa"));
         assert!(session.record(&stream, &segment(8), b"bb"));
         let now = crate::schedule::now_epoch();
-        let body = match session.playlist("video_720p", now - 60, now + 60) {
+        let body = match session.playlist("video_720p", now - 60, now + 60, "") {
             Playlist::Body(body) => body,
             _ => panic!("应生成清单"),
         };
@@ -1015,6 +1020,14 @@ mod tests {
         assert!(body.contains("/g/c/dash-timeshift/video_720p/7."), "{body}");
         assert!(body.contains("/g/c/dash-timeshift/video_720p/8."), "{body}");
         assert!(body.ends_with("#EXT-X-ENDLIST\n"));
+        let signed = match session.playlist("video_720p", now - 60, now + 60, "l/123/abc") {
+            Playlist::Body(body) => body,
+            _ => panic!("应生成签名清单"),
+        };
+        assert!(
+            signed.contains("/g/c/l/123/abc/dash-timeshift/video_720p/"),
+            "{signed}"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -1025,11 +1038,11 @@ mod tests {
         session.record(&stream(), &segment(1), b"aa");
         let now = crate::schedule::now_epoch();
         assert!(matches!(
-            session.playlist("video_720p", now + 3600, now + 7200),
+            session.playlist("video_720p", now + 3600, now + 7200, ""),
             Playlist::Empty
         ));
         assert!(matches!(
-            session.playlist("missing", now - 10, now + 10),
+            session.playlist("missing", now - 10, now + 10, ""),
             Playlist::UnknownTrack
         ));
         let _ = fs::remove_dir_all(dir);

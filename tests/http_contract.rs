@@ -418,7 +418,9 @@ async fn fixture_with_options(
         },
         "auth": {
             "token_enabled": true,
-            "token_failure_url": "http://placeholder.test/Failure.mp4"
+            "token_failure_url": "http://placeholder.test/Failure.mp4",
+            // 本套件默认关签名，保持旧断言可读；签名行为由专用用例覆盖。
+            "slice_sign_enabled": false
         },
         "cache": {
             "backend": cache_backend,
@@ -729,7 +731,7 @@ async fn health_and_user_playlist() {
         "EPG 关闭时不注入 x-tvg-url"
     );
     // 归档组停播，不进订阅；其余组都进。
-    assert!(body.contains(&format!("/pg/c1.m3u8?token={}", fixture.token)));
+    assert!(body.contains(&format!("/l/{}/pg/c1.m3u8", fixture.token)));
     assert!(body.contains(&format!("/op/c1.m3u8\n")), "open 组不带令牌");
     // 直通组在订阅里直接给上游地址。
     assert!(body.contains(&format!("{}/live.m3u8", fixture.upstream)));
@@ -757,7 +759,7 @@ async fn sub_playlist_filters_by_user_scope() {
         .text()
         .await
         .expect("读正文");
-    assert!(body.contains(&format!("/pg/c1.m3u8?token={}", fixture.user_token)));
+    assert!(body.contains(&format!("/l/{}/pg/c1.m3u8", fixture.user_token)));
     assert!(!body.contains("/pm/"), "未授权的分组不出现");
     assert!(!body.contains("/op/"));
     assert!(!body.contains("/ar/"));
@@ -769,6 +771,87 @@ async fn sub_playlist_filters_by_user_scope() {
         .expect("读正文");
     assert!(admin_body.contains("/pm/"), "管理员看全部");
     assert!(admin_body.len() > body.len());
+}
+
+/// 切片签名：路径令牌入口、签名切片、篡改与无签名拒绝。
+#[tokio::test]
+async fn slice_signature_path_token_and_rejections() {
+    let fixture = fixture_with_extra_and_auth("", r#"{"slice_sign_enabled": true}"#).await;
+
+    // 订阅条目不再带查询参数。
+    let body = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u"))
+        .await
+        .text()
+        .await
+        .expect("读正文");
+    assert!(body.contains(&format!("/l/{}/pg/c1.m3u8", fixture.token)));
+    assert!(!body.contains("?token="));
+
+    // 主清单 → 变体清单 → 切片都带 `l/<exp>/<sig>`。
+    let master = fetch(&fixture, &format!("/l/{}/pm/c1.m3u8", fixture.token))
+        .await
+        .text()
+        .await
+        .expect("主清单");
+    let variant = master
+        .lines()
+        .find(|line| line.contains("/video/index.txt"))
+        .expect("变体地址")
+        .to_string();
+    assert!(variant.contains("/l/"), "{variant}");
+
+    let media = fixture
+        .client
+        .get(&variant)
+        .send()
+        .await
+        .expect("变体请求")
+        .text()
+        .await
+        .expect("媒体清单");
+    let segment = media
+        .lines()
+        .find(|line| line.starts_with(&format!("{}/", fixture.base)))
+        .expect("切片地址")
+        .to_string();
+    assert!(segment.contains("/l/"), "{segment}");
+
+    // 合法切片 → 200。
+    let ok = fixture.client.get(&segment).send().await.expect("切片请求");
+    assert_eq!(ok.status(), StatusCode::OK, "{segment}");
+
+    // 形如 `http://host/gid/cid/l/<exp>/<sig>/<name>`。
+    let parts: Vec<&str> = segment.split('/').collect();
+    assert_eq!(parts.len(), 9, "{segment}");
+
+    // 篡改签名 → 302 失败视频。
+    let mut bad_sig = parts[7].to_string();
+    let first = if bad_sig.starts_with('0') { "1" } else { "0" };
+    bad_sig.replace_range(0..1, first);
+    let tampered = format!(
+        "{}/{}/{}/{}/{}/{}/{}/{}/{}",
+        parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], bad_sig, parts[8]
+    );
+    let bad = fixture
+        .client
+        .get(&tampered)
+        .send()
+        .await
+        .expect("篡改请求");
+    assert_eq!(bad.status(), StatusCode::FOUND, "{tampered}");
+
+    // 去掉签名段 → 302 失败视频。
+    let unsigned = format!(
+        "{}//{}/{}/{}/{}",
+        parts[0], parts[2], parts[3], parts[4], parts[8]
+    );
+    let rejected = fixture
+        .client
+        .get(&unsigned)
+        .send()
+        .await
+        .expect("无签名请求");
+    assert_eq!(rejected.status(), StatusCode::FOUND, "{unsigned}");
 }
 
 #[tokio::test]
@@ -1826,7 +1909,7 @@ async fn group_import_adds_skips_and_overwrites() {
         .expect("读正文");
     assert!(playlist.contains("/imp/c1.m3u8"));
     // 用户订阅给的是该用户自己的令牌，不再是匿名地址。
-    assert!(playlist.contains(&format!("?token={}", fixture.token)));
+    assert!(playlist.contains(&format!("/l/{}/imp/c1.m3u8", fixture.token)));
 
     // 重复导入 → 跳过。
     let response = post("/panel/api/groups/import", &body).await.expect("请求");

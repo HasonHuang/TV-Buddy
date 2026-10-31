@@ -30,6 +30,7 @@ pub mod remux;
 pub mod resolver;
 pub mod schedule;
 pub mod share;
+pub mod sign;
 pub mod source_cache;
 pub mod state;
 pub mod stats;

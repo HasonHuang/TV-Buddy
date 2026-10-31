@@ -108,6 +108,12 @@ impl AppState {
         if config_store.load()?.is_none() {
             config_store.save(&config)?;
         }
+        // 启用了切片签名但没有密钥：生成一个并落库，避免每次重启都换密钥。
+        if crate::sign::needs_secret(&config) {
+            config_store.save(&config)?;
+        }
+        // `save` 可能补了密钥；以库里的版本进快照。
+        let config = config_store.load()?.unwrap_or(config);
         let users = crate::users::UserStore::attach(conn)?;
         let offset_hours = config.server.timezone_offset_hours as i64;
         ensure_cache_dirs(&cache_dir);
@@ -230,8 +236,9 @@ impl AppState {
     }
 
     /// 保存整份配置。与 [`AppState::mutate`] 共用写锁，避免并发丢更新。
-    pub fn save_config(&self, config: Config) -> anyhow::Result<()> {
+    pub fn save_config(&self, mut config: Config) -> anyhow::Result<()> {
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        crate::sign::ensure_secret(&mut config);
         self.config_store.save(&config)?;
         self.replace(config);
         Ok(())
@@ -252,6 +259,7 @@ impl AppState {
             None => (*self.snapshot()).clone(),
         };
         change(&mut config)?;
+        crate::sign::ensure_secret(&mut config);
         self.config_store.save(&config)?;
         self.replace(config);
         Ok(())

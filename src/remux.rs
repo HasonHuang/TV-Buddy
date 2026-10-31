@@ -72,7 +72,7 @@ impl Session {
     }
 
     /// 清单正文；未产出切片时返回 `None`。
-    pub fn playlist(&self) -> Option<String> {
+    pub fn playlist(&self, slice: &str) -> Option<String> {
         self.touch();
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if inner.window.is_empty() {
@@ -83,10 +83,15 @@ impl Session {
             "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:{}\n#EXT-X-MEDIA-SEQUENCE:{first}\n",
             self.target_secs as u64
         );
+        let dir = if slice.is_empty() {
+            format!("/{}/{}", self.gid, self.cid)
+        } else {
+            format!("/{}/{}/{slice}", self.gid, self.cid)
+        };
         for seg in &inner.window {
             body.push_str(&format!(
-                "#EXTINF:{:.3},\n/{}/{}/{}\n",
-                seg.duration, self.gid, self.cid, seg.name
+                "#EXTINF:{:.3},\n{dir}/{}\n",
+                seg.duration, seg.name
             ));
         }
         Some(body)
@@ -611,12 +616,27 @@ mod tests {
         for _ in 0..6 {
             cut(&session, data.clone(), 5.0);
         }
-        let body = session.playlist().expect("清单");
+        let body = session.playlist("").expect("清单");
         assert!(body.contains("#EXT-X-TARGETDURATION:5"));
         assert!(body.contains("#EXT-X-MEDIA-SEQUENCE:2"));
         assert!(body.contains("/g/c/seg_000000000002.bmp"));
         // 窗口只保留 4 条。
         assert_eq!(body.matches("#EXTINF").count(), 4);
+        let _ = fs::remove_dir_all(&session.dir);
+    }
+
+    #[test]
+    fn playlist_inserts_slice_prefix() {
+        let session = session();
+        let data = vec![0x47u8; 188];
+        for _ in 0..2 {
+            cut(&session, data.clone(), 5.0);
+        }
+        let body = session.playlist("l/123/abc").expect("清单");
+        assert!(
+            body.contains("/g/c/l/123/abc/seg_"),
+            "切片地址要带签名前缀: {body}"
+        );
         let _ = fs::remove_dir_all(&session.dir);
     }
 
@@ -668,7 +688,7 @@ mod tests {
             pes.extend(std::iter::repeat(0x88).take(40));
             parser.push(&packet(0x101, true, &pes), &session);
         }
-        assert!(session.playlist().is_some(), "应有切片");
+        assert!(session.playlist("").is_some(), "应有切片");
         let pid = |packet: &[u8]| (((packet[1] & 0x1f) as u16) << 8) | packet[2] as u16;
         let first = fs::read(session.dir.join("seg_000000000000.png")).expect("首片");
         assert_eq!(pid(&first[..188]), 0x11, "首片以源流 SDT 开头");

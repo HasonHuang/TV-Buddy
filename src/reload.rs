@@ -9,7 +9,13 @@ use crate::state::AppState;
 /// 从数据库重读配置并替换快照。失败保留旧快照。
 pub fn reload(state: &AppState) {
     match state.config_store.load() {
-        Ok(Some(config)) => {
+        Ok(Some(mut config)) => {
+            if crate::sign::needs_secret(&config) {
+                crate::sign::ensure_secret(&mut config);
+                if let Err(error) = state.config_store.save(&config) {
+                    tracing::warn!(%error, "补写签名密钥失败");
+                }
+            }
             state.replace(config);
             tracing::info!("配置已重载");
         }

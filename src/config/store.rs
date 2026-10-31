@@ -40,10 +40,12 @@ impl ConfigStore {
         Ok(Some(config))
     }
 
-    /// 写配置。先校验，再整条替换。
+    /// 写配置。先补空密钥、校验，再整条替换。
     pub fn save(&self, config: &Config) -> Result<()> {
-        super::validate(config)?;
-        let text = serde_json::to_string(config).context("序列化配置失败")?;
+        let mut config = config.clone();
+        crate::sign::ensure_secret(&mut config);
+        super::validate(&config)?;
+        let text = serde_json::to_string(&config).context("序列化配置失败")?;
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute(
             "INSERT INTO settings (key, value, updated_at_ms)

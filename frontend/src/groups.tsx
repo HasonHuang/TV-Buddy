@@ -80,9 +80,8 @@ function entryUrl(group: Group, channel: Channel): string {
  * 与订阅里的地址同规则（`src/playlist.rs::entry_url`）。
  */
 function playUrl(group: Group, channel: Channel, token: string): string {
-  const url = entryUrl(group, channel);
-  if (group.access === 'open' || token === '') return url;
-  return `${url}?token=${token}`;
+  if (group.access === 'open' || token === '') return entryUrl(group, channel);
+  return `${location.origin}/l/${token}/${group.id}/${channel.id}.${entryExt(group)}`;
 }
 
 /** 读频道配置里的字符串字段；空串按未设置处理。 */

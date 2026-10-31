@@ -21,7 +21,8 @@
 | 面板错误体 | `{"error":"<文本>"}` | F-013 §5 |
 | 播放失败 | `302` 跳占位视频；**不用错误体** | S-DIS-15、F-004 |
 | 面板兜底 | `/panel/api/*` 未匹配 → `404` JSON；其余未匹配 → `302` 占位 | S-EP-08 |
-| 播放 Token 参数 | `?token=<48hex>`；`?t=` 无效 | S-URL-06 |
+| 播放令牌 | 路径：`/l/<token>/<gid>/<cid>.<ext>`；旧查询参数 `?token=` 仍接受；`?t=` 无效 | S-URL-06 |
+| 切片签名 | 路径：`/<gid>/<cid>/l/<exp>/<sig>/<name>`；同一时间窗内全用户相同 | 设计决策（CDN 共享缓存） |
 | 前端资源前缀 | `/__assets/*` | S-EP-16 |
 | 系统时区 | 回看时间戳按 `server.timezone_offset_hours` 解析 | S-URL-05 |
 
@@ -50,9 +51,11 @@
 | POST | `/subs/groups` | 无 | `200` JSON 分组；非 http(s) → `400`；抓取失败 → `502` | ✅ P3 | S-GAP-07 |
 | POST | `/subs/preview` | 无 | `200` JSON 预检 | ✅ P3 | S-GAP-07 |
 | GET | `/{gid}/playlist.m3u` | 无 | `404` 文本，同上 | v2026.7 | 设计决策 |
-| GET | `/sub/:token/playlist.m3u` | 令牌 | `200` M3U；令牌无效或过期 → `404` | ✅ v2026.7 | F-1 §3.3 |
-| GET | `/sub/:token/epg.xml` | 令牌 | `200` XMLTV，只含该用户可见频道；令牌无效 → `404`；EPG 关 → `404` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/sub/:token/playlist.m3u` | 令牌 | `200` M3U；令牌无效或过期 → `404`；`Cache-Control: private, no-store` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/sub/:token/epg.xml` | 令牌 | `200` XMLTV，只含该用户可见频道；令牌无效 → `404`；EPG 关 → `404`；`private, no-store` | ✅ v2026.7 | F-1 §3.3 |
 | GET | `/sub/:token/epg.xml.gz` | 令牌 | 同上，`application/gzip` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/l/:token/:gid/:file` | 路径令牌 | `200` 清单；令牌无效 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
+| GET | `/:gid/:cid/l/:exp/:sig/*path` | 签名 | `200` 切片/子清单；签名错或过期 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
 | GET | `/{gid}/{cid}.{ext}` | 按 token 开关 | `200` 清单 / `302` 占位 | M2 | S-EP-03 |
 | GET | `/{gid}/{cid}/index.m3u8` | 同上 | 同上（兼容旧路径） | M2 | F-012 §3 |
 | GET | `/{gid}/{cid}/video/index.txt` | 无 | `200` `text/plain` 媒体清单（仅主清单上游）；否则 `302 error_url` | M2 | F-004、F-018 |
@@ -185,7 +188,8 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 #EXTM3U x-tvg-url="http://<host>/sub/<token>/epg.xml.gz"   ← EPG 开启才有
 <server.m3u_header_lines 逐行原文>
 #EXTINF:-1 tvg-id="<tvg_id||id>" tvg-name="<tvg_name||name>" tvg-logo="<logo>" group-title="<分组显示名>",<频道名>
-http://<host>/<gid>/<cid>.<ext>[?token=<该用户的令牌>]
+http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
+http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 <聚合源条目，原样保留上游地址>                              ← merge_position 决定位置
 ```
 
@@ -194,7 +198,7 @@ http://<host>/<gid>/<cid>.<ext>[?token=<该用户的令牌>]
 | `tvg-id` | 缺省用频道 id | S-MODEL-04 |
 | `tvg-name` | 缺省用频道名 | S-MODEL-04 |
 | `group-title` | 分组**显示名** | F-013 §3 |
-| Token 附加 | 总是附加该用户自己的令牌，`open` 组除外 | S-URL-04、F-009 |
+| 令牌段 | 非 `open` 组用 `/l/<token>/…` 路径段；`open` 组不带 | S-URL-04、F-009 |
 | `x-tvg-url` | 指向该用户自己的 `/sub/<token>/epg.xml.gz` | F-1 §3.3 |
 | `m3u_header_lines` | 追加在 `#EXTM3U` 后；热重载生效 | S-URL-07 |
 | 范围 | 只含 `allowed_group_ids` 与 `allowed_channel_ids` 允许的频道 | F-1 §5 |

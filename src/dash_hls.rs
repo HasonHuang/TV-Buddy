@@ -426,7 +426,8 @@ impl Manager {
         let xml = fetch_mpd(state, gid, cid, upstream, &dash).await?;
         let presentation = dash::parse_presentation(&xml, upstream)
             .map_err(|error| format!("MPD 解析失败: {error:#}"))?;
-        let body = render_master(&presentation, gid, cid, self_base);
+        let slice = crate::sign::prefix(&state.snapshot(), gid, cid);
+        let body = render_master(&presentation, gid, cid, self_base, &slice);
         self.upsert(gid, cid, upstream.to_string(), keep, pool);
         self.set_tracks(gid, cid, track_statuses(&presentation));
         self.set_ready(
@@ -462,6 +463,7 @@ impl Manager {
         self_base: &str,
     ) -> Option<Response> {
         let (configured, keep, pool) = Self::settings(state, gid, cid)?;
+        let slice = crate::sign::prefix(&state.snapshot(), gid, cid);
         let segment_cache = format!(
             "public, max-age={}",
             state.snapshot().cache.ttl.segment_secs.max(1)
@@ -508,6 +510,7 @@ impl Manager {
                     gid,
                     cid,
                     self_base,
+                    slice: &slice,
                     keep_seconds: window,
                     pool_size: pool,
                     formats: &formats,
@@ -561,6 +564,7 @@ impl Manager {
                                 gid,
                                 cid,
                                 self_base,
+                                slice: &slice,
                                 keep_seconds: window,
                                 pool_size: pool,
                                 formats: &formats,
@@ -673,7 +677,13 @@ struct RenderedMedia {
 }
 
 /// 生成 HLS master。
-pub fn render_master(presentation: &Presentation, gid: &str, cid: &str, self_base: &str) -> String {
+pub fn render_master(
+    presentation: &Presentation,
+    gid: &str,
+    cid: &str,
+    self_base: &str,
+    slice: &str,
+) -> String {
     let audio: Vec<&Stream> = presentation
         .streams
         .iter()
@@ -697,7 +707,7 @@ pub fn render_master(presentation: &Presentation, gid: &str, cid: &str, self_bas
         }
         body.push_str(&format!(
             ",URI=\"{}\"\n",
-            media_url(self_base, gid, cid, &stream.name)
+            media_url(self_base, gid, cid, &stream.name, slice)
         ));
     }
     for (index, stream) in text.iter().enumerate() {
@@ -706,7 +716,7 @@ pub fn render_master(presentation: &Presentation, gid: &str, cid: &str, self_bas
             escape(stream.lang.as_deref().unwrap_or("und")),
             escape(&audio_label(stream)),
             if index == 0 { "YES" } else { "NO" },
-            media_url(self_base, gid, cid, &stream.name)
+            media_url(self_base, gid, cid, &stream.name, slice)
         ));
     }
 
@@ -753,7 +763,7 @@ pub fn render_master(presentation: &Presentation, gid: &str, cid: &str, self_bas
         body.push_str(&format!(
             "#EXT-X-STREAM-INF:{}\n{}\n",
             attrs.join(","),
-            media_url(self_base, gid, cid, &stream.name)
+            media_url(self_base, gid, cid, &stream.name, slice)
         ));
     }
     body
@@ -764,6 +774,8 @@ struct MediaOptions<'a> {
     gid: &'a str,
     cid: &'a str,
     self_base: &'a str,
+    /// 切片路径签名前缀；为空表示不签名。
+    slice: &'a str,
     keep_seconds: u64,
     pool_size: u32,
     formats: &'a [String],
@@ -783,6 +795,7 @@ fn render_media(
         gid,
         cid,
         self_base,
+        slice,
         keep_seconds,
         pool_size,
         formats,
@@ -843,7 +856,7 @@ fn render_media(
         ));
         body.push_str(&format!(
             "#EXT-X-MAP:URI=\"{}\"\n",
-            media_file_url(self_base, gid, cid, &path)
+            media_file_url(self_base, gid, cid, &path, slice)
         ));
     }
     for (index, segment) in picked.iter().enumerate() {
@@ -868,7 +881,7 @@ fn render_media(
         body.push_str(&format!(
             "#EXTINF:{:.6},\n{}\n",
             segment.duration.max(0.001),
-            media_file_url(self_base, gid, cid, &path)
+            media_file_url(self_base, gid, cid, &path, slice)
         ));
     }
     if !is_live {
@@ -995,16 +1008,21 @@ fn short_hash(url: &str) -> String {
     hex::encode(&digest[..8])
 }
 
-fn media_url(self_base: &str, gid: &str, cid: &str, track: &str) -> String {
-    media_file_url(self_base, gid, cid, &format!("{track}/index.txt"))
+fn media_url(self_base: &str, gid: &str, cid: &str, track: &str, slice: &str) -> String {
+    media_file_url(self_base, gid, cid, &format!("{track}/index.txt"), slice)
 }
 
-fn media_file_url(self_base: &str, gid: &str, cid: &str, rest: &str) -> String {
+fn media_file_url(self_base: &str, gid: &str, cid: &str, rest: &str, slice: &str) -> String {
     let base = self_base.trim_end_matches('/');
-    if base.is_empty() {
-        format!("/{gid}/{cid}/{rest}")
+    let dir = if slice.is_empty() {
+        String::new()
     } else {
-        format!("{base}/{gid}/{cid}/{rest}")
+        format!("/{slice}")
+    };
+    if base.is_empty() {
+        format!("/{gid}/{cid}{dir}/{rest}")
+    } else {
+        format!("{base}/{gid}/{cid}{dir}/{rest}")
     }
 }
 
@@ -1211,11 +1229,21 @@ mod tests {
 
     #[test]
     fn master_has_audio_and_video() {
-        let body = render_master(&presentation(), "g", "c", "http://self");
+        let body = render_master(&presentation(), "g", "c", "http://self", "");
         assert!(body.contains("#EXT-X-MEDIA:TYPE=AUDIO"));
         assert!(body.contains("video_720p/index.txt"));
         assert!(body.contains("audio-zh/index.txt"), "{body}");
         assert!(body.contains("RESOLUTION=1280x720"));
+
+        let signed = render_master(&presentation(), "g", "c", "http://self", "l/123/abc");
+        assert!(
+            signed.contains("http://self/g/c/l/123/abc/video_720p/index.txt"),
+            "{signed}"
+        );
+        assert!(
+            signed.contains("http://self/g/c/l/123/abc/audio-zh/index.txt"),
+            "{signed}"
+        );
     }
 
     #[test]
@@ -1229,6 +1257,7 @@ mod tests {
                 gid: "g",
                 cid: "c",
                 self_base: "http://self",
+                slice: "",
                 keep_seconds: 4,
                 pool_size: 1,
                 formats: &["webp".to_string()],
@@ -1272,6 +1301,7 @@ mod tests {
                     gid: "g",
                     cid: "c",
                     self_base: "http://self",
+                    slice: "",
                     keep_seconds: 0,
                     pool_size: pool,
                     formats: &["jpg".to_string()],
@@ -1322,6 +1352,7 @@ mod tests {
                 gid: "g",
                 cid: "c",
                 self_base: "",
+                slice: "",
                 keep_seconds: 30,
                 pool_size: 1,
                 formats: &["jpg".to_string()],
@@ -1362,6 +1393,7 @@ mod tests {
                     gid: "g",
                     cid: "c",
                     self_base: "",
+                    slice: "",
                     keep_seconds: 12,
                     pool_size: 1,
                     formats: &["jpg".to_string()],
@@ -1640,6 +1672,7 @@ mod tests {
                 gid: "g",
                 cid: "c",
                 self_base: "",
+                slice: "",
                 keep_seconds: 0,
                 pool_size: 1,
                 formats: &["jpg".to_string()],
@@ -1665,6 +1698,7 @@ mod tests {
                 gid: "g",
                 cid: "c",
                 self_base: "",
+                slice: "",
                 keep_seconds: 0,
                 pool_size: 1,
                 formats: &["jpg".to_string()],
@@ -1698,6 +1732,7 @@ mod tests {
                 gid: "g",
                 cid: "c",
                 self_base: "",
+                slice: "",
                 keep_seconds: 0,
                 pool_size: 1,
                 formats: &["jpg".to_string()],

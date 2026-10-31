@@ -91,7 +91,69 @@ pub async fn entry(
     if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
         return response;
     }
-    play_entry(&state, &gid, &cid, &ext, &query, &headers).await
+    play_entry(&state, &gid, &cid, &ext, &query, &headers, None, false).await
+}
+
+/// `GET /l/:token/:gid/:file`：订阅条目的路径令牌入口。
+pub async fn token_entry(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((token, gid, file)): Path<(String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let config = state.snapshot();
+    let Some((cid, ext)) = split_entry(&file) else {
+        return placeholder(&config);
+    };
+    if let Some(response) = rate_limit(&state, &config, &headers, Some(peer)) {
+        return response;
+    }
+    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
+        return response;
+    }
+    play_entry(
+        &state,
+        &gid,
+        &cid,
+        &ext,
+        &query,
+        &headers,
+        Some(&token),
+        false,
+    )
+    .await
+}
+
+/// `GET /l/:token/:gid/:cid/index.m3u8`：入口别名。
+pub async fn token_alias(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((token, gid, cid, rest)): Path<(String, String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let config = state.snapshot();
+    if rest.trim_start_matches('/') != "index.m3u8" {
+        return placeholder(&config);
+    }
+    if let Some(response) = rate_limit(&state, &config, &headers, Some(peer)) {
+        return response;
+    }
+    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
+        return response;
+    }
+    play_entry(
+        &state,
+        &gid,
+        &cid,
+        "m3u8",
+        &query,
+        &headers,
+        Some(&token),
+        false,
+    )
+    .await
 }
 
 /// 入口逻辑的实体：`/{gid}/{cid}.m3u8` 与子路径别名 `/{gid}/{cid}/index.m3u8` 共用。
@@ -105,25 +167,30 @@ async fn play_entry(
     ext: &str,
     query: &HashMap<String, String>,
     headers: &HeaderMap,
+    token: Option<&str>,
+    authorized: bool,
 ) -> Response {
     let config = state.snapshot();
     let self_base = self_base(&config, headers);
     let Some(group) = config.group(gid) else {
-        return unknown_endpoint(state, &config, query);
+        return unknown_endpoint(state, &config, query, token, authorized);
     };
     // 归档组停播（F-009）。
     if group.access == "archived" {
         return placeholder(&config);
     }
     let Some(channel) = group.channels.iter().find(|channel| channel.id == cid) else {
-        return unknown_endpoint(state, &config, query);
+        return unknown_endpoint(state, &config, query, token, authorized);
     };
-    if !token_ok(state, &config, group, channel, query) {
+    if !token_ok(state, &config, group, channel, query, token, authorized) {
         return redirect_asset(&config, &config.auth.token_failure_url);
     }
     // 在线观众：目标是「窗口内带播放 Token 的不同客户端 IP 数」（2026-10-26 实测：
     // 同 IP 重复播放不增；换 `X-Forwarded-For` 增 1；Token 关闭时恒 0）。
-    if config.auth.token_enabled && query.get("token").is_some_and(|value| !value.is_empty()) {
+    if config.auth.token_enabled
+        && (token.is_some_and(|value| !value.is_empty())
+            || query.get("token").is_some_and(|value| !value.is_empty()))
+    {
         state.metrics.viewer(
             &crate::http::ext::client_ip_with_peer(headers, None),
             &format!("{gid}/{cid}"),
@@ -157,6 +224,8 @@ async fn play_entry(
         return redirect(&upstream);
     }
 
+    // 切片路径签名前缀。关闭签名时为空串。
+    let slice = crate::sign::prefix(&config, gid, cid);
     match group.mode.as_str() {
         // 302 直连上游；缓存解析出的地址（S-MODE-08/13）。
         "redirect" => redirect_entry(state, &config, group, cid, &upstream).await,
@@ -165,7 +234,7 @@ async fn play_entry(
         // 连续流转封装：纯 Rust 切片；未产出前 503（S-MODE-16/18）。
         "remux" => {
             let session = state.remux.ensure(state, gid, cid, &upstream);
-            match session.playlist() {
+            match session.playlist(&slice) {
                 Some(body) => remux_playlist(body),
                 None => warming_up(),
             }
@@ -173,7 +242,7 @@ async fn play_entry(
         // 就绪门：30 秒内拿到上游主清单，否则 503（S-MODE-15）。
         "dash" => dash_entry(state, group, gid, cid, &upstream, &self_base).await,
         // 代理：上游是主清单则自造单变体主清单；上游是媒体清单则直接改写。
-        _ => proxy_entry(state, &config, gid, cid, &upstream, &self_base, ext).await,
+        _ => proxy_entry(state, &config, gid, cid, &upstream, &self_base, ext, &slice).await,
     }
 }
 
@@ -246,7 +315,7 @@ async fn rewrite_entry(
             return redirect_asset(config, &config.server.error_url);
         }
     };
-    let rendered = proxy::rewrite_media(&upstream, channel_url, &group.id, cid, &[], false, "");
+    let rendered = proxy::rewrite_media(&upstream, channel_url, &group.id, cid, &[], false, "", "");
     state.playlists.put(&key, rendered.body.clone());
     rewrite_response(rendered.body)
 }
@@ -363,10 +432,82 @@ pub async fn wildcard(
     if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
         return response;
     }
+    serve_rest(
+        &state,
+        &config,
+        &headers,
+        &gid,
+        &cid,
+        &rest,
+        raw_query.as_deref(),
+        None,
+        false,
+    )
+    .await
+}
+
+/// `GET /{gid}/{cid}/l/{exp}/{sig}/*path`：带时间窗签名的切片与子资源。
+///
+/// 签名校验通过后按授权请求处理，不再看用户令牌。
+pub async fn signed(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((gid, cid, exp, sig, rest)): Path<(String, String, String, String, String)>,
+    RawQuery(raw_query): RawQuery,
+) -> Response {
+    let config = state.snapshot();
+    if !crate::sign::verify(&config, &gid, &cid, &exp, &sig) {
+        return redirect_asset(&config, &config.auth.token_failure_url);
+    }
+    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
+        return response;
+    }
+    let rest = rest.trim_start_matches('/').to_string();
+    serve_rest(
+        &state,
+        &config,
+        &headers,
+        &gid,
+        &cid,
+        &rest,
+        raw_query.as_deref(),
+        None,
+        true,
+    )
+    .await
+}
+
+/// 通配子路径的实际分发。
+///
+/// `token` 是路径里的访问令牌；`authorized` 表示已通过签名校验。
+#[allow(clippy::too_many_arguments)]
+async fn serve_rest(
+    state: &Arc<AppState>,
+    config: &Config,
+    headers: &HeaderMap,
+    gid: &str,
+    cid: &str,
+    rest: &str,
+    raw_query: Option<&str>,
+    token: Option<&str>,
+    authorized: bool,
+) -> Response {
+    // 签名开启后，本地切片一律要求带签名。入口别名 `index.m3u8` 除外：
+    // 它自己会做令牌校验。
+    if crate::sign::enabled(config) && !authorized && rest != "index.m3u8" {
+        let local = matches!(
+            resolve(config, gid, cid).map(|(group, _)| group.mode),
+            Some(mode) if mode == "proxy" || mode == "remux" || mode == "dash"
+        );
+        if local {
+            return redirect_asset(config, &config.auth.token_failure_url);
+        }
+    }
     if let Some(name) = rest.strip_prefix("timeshift/") {
         return state
             .timeshift
-            .serve(&gid, &cid, name)
+            .serve(gid, cid, name)
             .unwrap_or_else(|| (StatusCode::NOT_FOUND, "Segment not found").into_response());
     }
     // DASH 时移：`dash-timeshift/{track}/{playlist,playlist.txt,playlist.m3u8,分片}`。
@@ -374,7 +515,6 @@ pub async fn wildcard(
     // 组、未点亮 `dash_timeshift` 都返回 `404` 文本，不落回 302 分流。
     if let Some(name) = rest.strip_prefix("dash-timeshift/") {
         let query: HashMap<String, String> = raw_query
-            .as_deref()
             .map(|raw| {
                 url::form_urlencoded::parse(raw.as_bytes())
                     .into_owned()
@@ -383,17 +523,17 @@ pub async fn wildcard(
             .unwrap_or_default();
         return state
             .dash_timeshift
-            .handle(&state, &gid, &cid, name, &query)
+            .handle(state, gid, cid, name, &query)
             .await;
     }
-    if let Some(response) = state.remux.serve(&gid, &cid, &rest) {
+    if let Some(response) = state.remux.serve(gid, cid, rest) {
         return response;
     }
-    if let Some((group, _)) = resolve(&config, &gid, &cid) {
+    if let Some((group, _)) = resolve(config, gid, cid) {
         if group.mode == "dash" {
             if let Some(response) = state
                 .dash_hls
-                .serve(&state, &gid, &cid, &rest, &self_base(&config, &headers))
+                .serve(state, gid, cid, rest, &self_base(config, headers))
                 .await
             {
                 return response;
@@ -401,37 +541,34 @@ pub async fn wildcard(
         }
     }
     if let Some(path) = rest.strip_prefix("mpd/") {
-        return mpd_segment(&state, &gid, &cid, path, raw_query.as_deref()).await;
+        return mpd_segment(state, gid, cid, path, raw_query).await;
     }
-    match rest.as_str() {
+    match rest {
         // 变体媒体清单：只有上游是主清单时存在（S-PROXY-07）。
-        "video/index.txt" => {
-            variant_playlist(&state, &gid, &cid, &self_base(&config, &headers)).await
-        }
+        "video/index.txt" => variant_playlist(state, gid, cid, &self_base(config, headers)).await,
         // 兼容别名：与入口同义（目标实测：`redirect` / `rewrite` 两条路径结果一致）。
         "index.m3u8" => {
             let query: HashMap<String, String> = raw_query
-                .as_deref()
                 .map(|raw| {
                     url::form_urlencoded::parse(raw.as_bytes())
                         .into_owned()
                         .collect()
                 })
                 .unwrap_or_default();
-            play_entry(&state, &gid, &cid, "m3u8", &query, &headers).await
+            play_entry(state, gid, cid, "m3u8", &query, headers, token, authorized).await
         }
         // 非 `proxy` 模式没有伪装切片面：目标实测（2026-10-25）`remux`/`rewrite`/
         // `passthrough`/`redirect` 下的任意子路径（含 `video/index.txt`、合法 remux 名、
         // 伪装切片形状）一律 `302 not_found_url`。只有 `proxy` 模式的切片分支才用
         // `error_url`，两者不能混。
         _ if !matches!(
-            resolve(&config, &gid, &cid).map(|(group, _)| group.mode),
+            resolve(config, gid, cid).map(|(group, _)| group.mode),
             Some(mode) if mode == "proxy"
         ) =>
         {
-            placeholder(&config)
+            placeholder(config)
         }
-        _ => segment(&state, &gid, &cid, &rest).await,
+        _ => segment(state, gid, cid, rest).await,
     }
 }
 
@@ -447,6 +584,7 @@ async fn proxy_entry(
     channel_url: &str,
     self_base: &str,
     ext: &str,
+    slice: &str,
 ) -> Response {
     let upstream = match upstream_playlist(state, channel_url, gid, cid).await {
         Ok(text) => text,
@@ -461,12 +599,31 @@ async fn proxy_entry(
             .group(gid)
             .map(|group| group.mpd_keep_seconds)
             .unwrap_or(0);
-        return proxy_mpd(&upstream, gid, cid, channel_url, self_base, keep);
+        return proxy_mpd(&upstream, gid, cid, channel_url, self_base, keep, slice);
     }
     if proxy::media::is_master(&upstream) {
-        return master_entry(&upstream, channel_url, gid, cid, self_base, ext);
+        return master_entry(&upstream, channel_url, gid, cid, self_base, ext, slice);
     }
-    media_entry(state, config, gid, cid, channel_url, &upstream, self_base)
+    media_entry(
+        state,
+        config,
+        gid,
+        cid,
+        channel_url,
+        &upstream,
+        self_base,
+        slice,
+    )
+}
+
+/// 频道在某个切片空间下的基址：`{self_base}/{gid}/{cid}[/{slice}]`。
+fn channel_base(self_base: &str, gid: &str, cid: &str, slice: &str) -> String {
+    let root = format!("{}/{gid}/{cid}", self_base.trim_end_matches('/'));
+    if slice.is_empty() {
+        root
+    } else {
+        format!("{root}/{slice}")
+    }
 }
 
 /// 自造主清单：保留最佳变体的属性，只指向本服务的变体媒体清单。
@@ -477,12 +634,14 @@ fn master_entry(
     cid: &str,
     self_base: &str,
     ext: &str,
+    slice: &str,
 ) -> Response {
     let attrs = proxy::media::best_variant(upstream, channel_url)
         .map(|(attrs, _)| proxy::media::normalize_variant_attrs(&attrs))
         .unwrap_or_else(|| "BANDWIDTH=1000000".to_string());
     let body = format!(
-        "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-STREAM-INF:{attrs}\n{self_base}/{gid}/{cid}/video/index.txt\n"
+        "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-STREAM-INF:{attrs}\n{}/video/index.txt\n",
+        channel_base(self_base, gid, cid, slice)
     );
     let mut response = Response::new(Body::from(body));
     response.headers_mut().insert(
@@ -505,6 +664,7 @@ fn media_entry(
     channel_url: &str,
     upstream: &str,
     self_base: &str,
+    slice: &str,
 ) -> Response {
     let disguise = config.cache.disguise.enabled && config.cache.disguise.playlist;
     let rendered = proxy::rewrite_media(
@@ -515,6 +675,7 @@ fn media_entry(
         &config.cache.disguise.formats,
         disguise,
         self_base,
+        slice,
     );
     state.segments.register(gid, cid, &rendered.segments);
     // 磁盘索引也要有界：不加限制时单频道 JSON 会随清单刷新无限增长。
@@ -674,7 +835,17 @@ async fn variant_playlist(
     if proxy::modes::looks_like_mpd(&text) {
         return dash_body(text);
     }
-    media_entry(state, &config, gid, cid, &variant_url, &text, self_base)
+    let slice = crate::sign::prefix(&config, gid, cid);
+    media_entry(
+        state,
+        &config,
+        gid,
+        cid,
+        &variant_url,
+        &text,
+        self_base,
+        &slice,
+    )
 }
 
 /// 上游清单：进程内短暂复用，减少突发请求（S-CACHE-02）。
@@ -704,9 +875,10 @@ fn proxy_mpd(
     mpd_url: &str,
     self_base: &str,
     keep_seconds: u64,
+    slice: &str,
 ) -> Response {
     let body = trim_mpd_window(body, keep_seconds);
-    let body = rewrite_mpd_base_urls(&body, gid, cid, mpd_url, self_base);
+    let body = rewrite_mpd_base_urls(&body, gid, cid, mpd_url, self_base, slice);
     let body = rewrite_minimum_update_period(&body);
     let body = rewrite_publish_time(&body);
     let mut response = Response::new(Body::from(body));
@@ -999,12 +1171,20 @@ fn format_mpd_number(value: f64) -> String {
     }
 }
 
-/// 本地 MPD 反代前缀。
-fn local_mpd_prefix(gid: &str, cid: &str, self_base: &str) -> String {
-    if self_base.is_empty() {
-        format!("/{gid}/{cid}/mpd/")
+/// 本地 MPD 反代前缀。`slice` 非空时插在频道段之后。
+fn local_mpd_prefix(gid: &str, cid: &str, self_base: &str, slice: &str) -> String {
+    let slice = if slice.is_empty() {
+        String::new()
     } else {
-        format!("{}/{gid}/{cid}/mpd/", self_base.trim_end_matches('/'))
+        format!("{slice}/")
+    };
+    if self_base.is_empty() {
+        format!("/{gid}/{cid}/{slice}mpd/")
+    } else {
+        format!(
+            "{}/{gid}/{cid}/{slice}mpd/",
+            self_base.trim_end_matches('/')
+        )
     }
 }
 
@@ -1021,12 +1201,12 @@ fn mpd_base_token(gid: &str, cid: &str, base: &str) -> String {
 }
 
 /// 把上游 BaseURL 编成本地路径：`mpd/{token}/{base64}/`。
-fn local_mpd_base(gid: &str, cid: &str, self_base: &str, base: &Url) -> String {
+fn local_mpd_base(gid: &str, cid: &str, self_base: &str, base: &Url, slice: &str) -> String {
     let token = mpd_base_token(gid, cid, base.as_str());
     let encoded = URL_SAFE_NO_PAD.encode(base.as_str());
     format!(
         "{}{token}/{encoded}/",
-        local_mpd_prefix(gid, cid, self_base)
+        local_mpd_prefix(gid, cid, self_base, slice)
     )
 }
 
@@ -1056,6 +1236,7 @@ fn rewrite_mpd_base_urls(
     cid: &str,
     mpd_url: &str,
     self_base: &str,
+    slice: &str,
 ) -> String {
     let Ok(document) = roxmltree::Document::parse(xml) else {
         return xml.to_string();
@@ -1069,7 +1250,7 @@ fn rewrite_mpd_base_urls(
         let Some(base) = resolve_mpd_base(mpd_url, value) else {
             continue;
         };
-        let local = local_mpd_base(gid, cid, self_base, &base);
+        let local = local_mpd_base(gid, cid, self_base, &base, slice);
         replacements.push((
             node.range(),
             format!("<BaseURL>{}</BaseURL>", xml_escape(&local)),
@@ -1079,7 +1260,7 @@ fn rewrite_mpd_base_urls(
         let Some(directory) = mpd_directory(mpd_url) else {
             return xml.to_string();
         };
-        let local = local_mpd_base(gid, cid, self_base, &directory);
+        let local = local_mpd_base(gid, cid, self_base, &directory, slice);
         let Some(insert_at) = xml
             .find("<MPD")
             .and_then(|start| xml[start..].find('>').map(|end| start + end + 1))
@@ -1506,11 +1687,17 @@ fn token_ok(
     group: &Group,
     channel: &Channel,
     query: &HashMap<String, String>,
+    token: Option<&str>,
+    authorized: bool,
 ) -> bool {
-    if !config.auth.token_enabled || group.access == "open" {
+    if authorized || !config.auth.token_enabled || group.access == "open" {
         return true;
     }
-    let Some(token) = query.get("token").filter(|value| !value.is_empty()) else {
+    let token = token
+        .filter(|value| !value.is_empty())
+        .or_else(|| query.get("token").map(String::as_str))
+        .filter(|value| !value.is_empty());
+    let Some(token) = token else {
         return false;
     };
     let Some(access) = state.users.find_token(token) else {
@@ -1531,10 +1718,14 @@ fn unknown_endpoint(
     state: &AppState,
     config: &Config,
     query: &HashMap<String, String>,
+    token: Option<&str>,
+    authorized: bool,
 ) -> Response {
-    let verified = !config.auth.token_enabled
-        || query
-            .get("token")
+    let verified = authorized
+        || !config.auth.token_enabled
+        || token
+            .filter(|value| !value.is_empty())
+            .or_else(|| query.get("token").map(String::as_str))
             .is_some_and(|token| state.users.find_token(token).is_some());
     if verified {
         placeholder(config)
@@ -1957,6 +2148,7 @@ mod tests {
             "c",
             "http://origin.example/dash/live.mpd",
             "http://self",
+            "",
         );
         assert!(!output.contains("http://cdn.example/a/"), "{output}");
         let (token, decoded) = decode_local(&output);
@@ -1973,6 +2165,7 @@ mod tests {
             "c",
             "http://origin.example/dash/live.mpd",
             "http://self",
+            "",
         );
         assert_eq!(decode_local(&output).1, "http://origin.example/dash/sub/");
 
@@ -1983,6 +2176,7 @@ mod tests {
             "c",
             "http://origin.example/dash/live.mpd",
             "http://self",
+            "",
         );
         assert_eq!(decode_local(&output).1, "http://origin.example/dash/");
     }

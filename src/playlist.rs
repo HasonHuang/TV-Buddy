@@ -120,23 +120,18 @@ fn header(config: &Config, base: &str, epg_path: &str) -> String {
 /// 一个频道的播放地址。
 ///
 /// `passthrough` 直接给上游原始地址，且不套 Token（S-URL-02、S-MODE-11）。
-/// `open` 组免 Token，地址不带参数（F-009）。
+/// `open` 组免 Token，地址不带令牌段（F-009）。
+/// 其余组用路径令牌：`/l/<token>/<gid>/<cid>.<ext>`。
 pub fn entry_url(group: &Group, channel: &Channel, base: &str, token: &str) -> String {
     if group.mode == "passthrough" {
         return channel.url.clone();
     }
     let ext = if group.format == "mpd" { "mpd" } else { "m3u8" };
-    let url = format!(
-        "{}/{}/{}.{}",
-        base.trim_end_matches('/'),
-        group.id,
-        channel.id,
-        ext
-    );
+    let root = base.trim_end_matches('/');
     if group.access == "open" {
-        url
+        format!("{root}/{}/{}.{ext}", group.id, channel.id)
     } else {
-        format!("{url}?token={token}")
+        format!("{root}/l/{token}/{}/{}.{ext}", group.id, channel.id)
     }
 }
 
@@ -249,7 +244,8 @@ mod tests {
             group("g4", "archived", "proxy"),
         ]);
         let body = render_user(&config, &admin(), "http://host", "tok");
-        assert!(body.contains("http://host/g1/c1.m3u8?token=tok"));
+        assert!(body.contains("http://host/l/tok/g1/c1.m3u8"));
+        assert!(!body.contains("?token="), "订阅条目不用查询参数");
         assert!(!body.contains("/g4/"), "归档组停播，不进订阅");
     }
 
@@ -314,7 +310,7 @@ mod tests {
         let mut config = config_with(vec![group("g6", "public", "dash")]);
         config.groups[0].format = "mpd".into();
         let body = render_user(&config, &admin(), "http://host", "tok");
-        assert!(body.contains("http://host/g6/c1.mpd?token=tok"));
+        assert!(body.contains("http://host/l/tok/g6/c1.mpd"));
     }
 
     #[test]
@@ -327,10 +323,7 @@ mod tests {
         let groups = user_view(&config, &plain(&["g1", "g2"]), "http://host", "tok");
         assert_eq!(groups.len(), 2, "归档组不进视图");
         assert_eq!(groups[0].id, "g1");
-        assert_eq!(
-            groups[0].channels[0].url,
-            "http://host/g1/c1.m3u8?token=tok"
-        );
+        assert_eq!(groups[0].channels[0].url, "http://host/l/tok/g1/c1.m3u8");
     }
 
     #[test]

@@ -707,6 +707,15 @@ pub struct AuthCfg {
     pub token_enabled: bool,
     pub token_ttl_hours: u64,
     pub token_failure_url: String,
+    /// 切片路径签名开关。只在 [`AuthCfg::token_enabled`] 为真时生效。
+    ///
+    /// 开启后清单里的切片地址带 `l/<exp>/<sig>` 前缀。同一时间窗内
+    /// 所有用户拿到相同地址，CDN 可以共享缓存。
+    pub slice_sign_enabled: bool,
+    /// 签名时间窗（秒）。窗口越短，撤销越快，缓存复用越低。
+    pub slice_sign_window_secs: u64,
+    /// 签名密钥（十六进制）。留空时保存配置会自动生成 32 字节。
+    pub slice_sign_secret: String,
     /// 导入 M3U 时忽略 `tvg-id`，每个新频道取随机 id（`r-<8hex>`）。
     ///
     /// 目标开启后已有频道与切片前缀不变（F-010 §4），所以它只影响新导入的频道。
@@ -773,6 +782,9 @@ impl Default for AuthCfg {
             token_enabled: false,
             token_ttl_hours: 24,
             token_failure_url: "https://material.yang-1989.eu.org/v/Failure.mp4".into(),
+            slice_sign_enabled: true,
+            slice_sign_window_secs: 300,
+            slice_sign_secret: String::new(),
             random_id_enabled: false,
             ip_guard_enabled: false,
             max_sessions_per_ip: 1,

@@ -78,6 +78,13 @@ const AUTH_LOCK: NumField[] = [
   },
 ];
 
+/** 32 字节随机密钥，十六进制小写。 */
+function randomSecret(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 function authNumber(auth: AuthCfg, key: string): string {
   const value = auth[key];
   return typeof value === 'number' ? String(value) : '';
@@ -229,6 +236,43 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
           value={authNumber(auth, 'token_ttl_hours')}
           onChange={(next) => setKey('token_ttl_hours', Number(next) || 0)}
         />
+      </div>
+
+      <h3>切片签名</h3>
+      <p className="muted">
+        开启后清单里的切片地址带时间窗签名。同一窗口内所有用户拿到相同地址，
+        CDN 只缓存一份。关闭「播放 Token」时本项不生效。
+        修改密钥会让当前窗口内的旧链接立即失效。
+      </p>
+      <div className="fields">
+        <label className="field">
+          <span>切片签名</span>
+          <select
+            value={auth.slice_sign_enabled === false ? 'off' : 'on'}
+            onChange={(event) => setKey('slice_sign_enabled', event.target.value === 'on')}
+          >
+            <option value="on">开启</option>
+            <option value="off">关闭</option>
+          </select>
+        </label>
+        <NumberField
+          field={{ key: 'slice_sign_window_secs', label: '签名时间窗', hint: '秒；30–3600' }}
+          value={authNumber(auth, 'slice_sign_window_secs')}
+          onChange={(next) => setKey('slice_sign_window_secs', Number(next) || 0)}
+        />
+        <label className="field">
+          <span>签名密钥</span>
+          <input
+            className="mono"
+            value={typeof auth.slice_sign_secret === 'string' ? auth.slice_sign_secret : ''}
+            placeholder="留空自动生成 32 字节"
+            onChange={(event) => setKey('slice_sign_secret', event.target.value.trim())}
+          />
+          <button type="button" onClick={() => setKey('slice_sign_secret', randomSecret())}>
+            生成随机
+          </button>
+          <div className="hint">十六进制，32–128 位。改动后需要保存。</div>
+        </label>
       </div>
 
       <h3>限流与会话</h3>

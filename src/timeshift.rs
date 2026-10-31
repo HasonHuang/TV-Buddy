@@ -66,7 +66,7 @@ impl Session {
     }
 
     /// 生成回看清单；无交集返回 `None`。
-    pub fn playlist(&self, start: i64, end: i64) -> Option<String> {
+    pub fn playlist(&self, start: i64, end: i64, slice: &str) -> Option<String> {
         self.touch();
         let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         let picked: Vec<&Entry> = entries
@@ -88,10 +88,15 @@ impl Session {
         let mut body = format!(
             "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-TARGETDURATION:{target}\n#EXT-X-MEDIA-SEQUENCE:0\n"
         );
+        let dir = if slice.is_empty() {
+            format!("/{}/{}/timeshift", self.gid, self.cid)
+        } else {
+            format!("/{}/{}/{slice}/timeshift", self.gid, self.cid)
+        };
         for entry in picked {
             body.push_str(&format!(
-                "#EXTINF:{:.3},\n/{}/{}/timeshift/{}\n",
-                entry.duration, self.gid, self.cid, entry.name
+                "#EXTINF:{:.3},\n{dir}/{}\n",
+                entry.duration, entry.name
             ));
         }
         body.push_str("#EXT-X-ENDLIST\n");
@@ -233,7 +238,8 @@ impl Manager {
         end: i64,
     ) -> Option<String> {
         let session = self.ensure(state, gid, cid)?;
-        session.playlist(start, end)
+        let slice = crate::sign::prefix(&state.snapshot(), gid, cid);
+        session.playlist(start, end, &slice)
     }
 
     /// 切片响应；名字不属于回看命名时返回 `None`。
@@ -524,12 +530,17 @@ mod tests {
             name: "2222222222222222.gif".into(),
             size: 1,
         });
-        let body = session.playlist(base + 2, base + 8).expect("清单");
+        let body = session.playlist(base + 2, base + 8, "").expect("清单");
         assert!(body.contains("#EXT-X-PLAYLIST-TYPE:VOD"));
         assert!(body.contains("#EXT-X-ENDLIST"));
         assert!(body.contains("/g/c/timeshift/1111111111111111.png"));
         assert!(body.contains("/g/c/timeshift/2222222222222222.gif"));
-        assert!(session.playlist(0, 50).is_none());
+        assert!(session.playlist(0, 50, "").is_none());
+
+        let signed = session
+            .playlist(base + 2, base + 8, "l/123/abc")
+            .expect("签名清单");
+        assert!(signed.contains("/g/c/l/123/abc/timeshift/"), "{signed}");
     }
 
     #[test]

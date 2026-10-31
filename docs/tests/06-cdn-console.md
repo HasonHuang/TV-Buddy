@@ -702,7 +702,10 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
 | 清单给 `http://` | 未下发 XFP；或 CDN 改写了 Host | `docs/design/06-low-spec-optimization.md:129` |
 | 源站命中返回 `private` | 只能「遵循源站头」的 CDN 不缓存。改用强制 TTL，或开 `[cdn].shared_cache_hits=true` | `src/http/routes/stream.rs:57-70` |
 | 上游失败被缓存成 200 空体 | 开 `[cdn].enabled=true`，设 `empty_status=502` | `src/http/routes/stream.rs:1579-1594` |
-| 订阅清单被缓存 | 该响应无 `Cache-Control`，只能靠规则 A | `src/http/routes/play.rs:123-136` |
+| 订阅清单被缓存 | 源站已发 `Cache-Control: private, no-store`。检查规则 A 是否仍 BYPASS `/sub/*` | `src/http/routes/sub.rs:60-66` |
+| 切片 URL 每 5 分钟变一次 | 正常。时间窗签名会让路径变。缓存键必须包含 URI 路径 | `src/sign.rs` |
+| 切片返回 `302` | 签名过期或密钥被改。播放器重拉清单即恢复 | `src/http/routes/stream.rs` |
+| 两个用户拿到不同切片 URL | 时间窗不同或密钥不同。检查系统时钟与 `slice_sign_window_secs` | `src/sign.rs` |
 | 面板 JS/CSS 被缓存 | `/__assets/*` 不在规则 A。补 BYPASS | `src/http/static_assets.rs:23-27` |
 | `/logo/api/*` 被缓存 | 该路径不是媒体，且不在规则 A。补 BYPASS | `src/http.rs:35` |
 | DASH 轨道清单被缓存 | 四段路径不在 `/*/*/index.txt`。补 BYPASS | `src/dash_hls.rs:998-1000` |

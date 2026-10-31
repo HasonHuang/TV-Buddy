@@ -64,6 +64,8 @@ pub async fn playlist(
                 header::CONTENT_DISPOSITION,
                 "inline; filename=\"playlist.m3u\"",
             ),
+            // 每个用户的清单都不同，CDN 不能共享。
+            (header::CACHE_CONTROL, "private, no-store"),
         ],
         body,
     )
@@ -176,12 +178,22 @@ fn user_epg(state: &Arc<AppState>, token: &str, gzip: bool) -> Response {
             return missing();
         }
         match encoder.finish() {
-            Ok(bytes) => ([(header::CONTENT_TYPE, "application/gzip")], bytes).into_response(),
+            Ok(bytes) => (
+                [
+                    (header::CONTENT_TYPE, "application/gzip"),
+                    (header::CACHE_CONTROL, "private, no-store"),
+                ],
+                bytes,
+            )
+                .into_response(),
             Err(_) => missing(),
         }
     } else {
         (
-            [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+            [
+                (header::CONTENT_TYPE, "application/xml; charset=utf-8"),
+                (header::CACHE_CONTROL, "private, no-store"),
+            ],
             xml,
         )
             .into_response()

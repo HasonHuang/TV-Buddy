@@ -264,6 +264,8 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 面板分权 | `guard::admin_gate`；`PanelUser` 每次请求重读角色 | 完成（`v2026.7`） |
 | 「我的订阅」页 | 普通用户登录后的唯一分区；订阅地址、EPG 地址、可见频道 | 完成（`v2026.7`） |
 | 令牌维护 | 启动清理过期令牌；每 60 秒把 `last_seen_at_ms` 落盘 | 完成（`v2026.7`） |
+| 订阅路径令牌 | 条目改为 `/l/<token>/<gid>/<cid>.<ext>`；旧 `?token=` 兼容 | 完成（`v2026.8`） |
+| 切片路径签名 | 时间窗共享签名；面板可改密钥；CDN 可共享缓存 | 完成（`v2026.8`） |
 
 ### 9.2 待办
 
@@ -273,7 +275,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 2 | 面板分权 | 完成（`v2026.7`）：`guard::admin_gate` 拦非管理员的 `/panel/api/*`；普通用户只见「我的订阅」 |
 | 3 | 管理 CLI | 完成：改为调用 `tv-buddy passwd` 写入 `users` 表，不再读 `panel username` / `password_sha256` |
 | 5 | Docker 集成冒烟 | `smoke-dash-timeshift-docker.sh` 在容器内起服务后清单请求无响应。待查 |
-| 6 | 切片级鉴权 | 切片、DASH、回看路径不校验令牌。撤销令牌只挡住入口，已开始的会话仍能拉切片 |
+| 6 | ~~切片级鉴权~~ | 完成（`v2026.8`）：切片路径带时间窗签名。令牌撤销仍只挡入口，签名按窗口过期 |
 
 ### 9.3 行为变化
 
@@ -287,3 +289,26 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 其余 `/panel/api/*` 返回 `403`。角色每次请求从库重读，降级立即生效。
 
 **归档组停播**：`access = "archived"` 的分组不出现在任何订阅与每用户 EPG 里。
+
+### 9.4 切片路径签名（v2026.8）
+
+**订阅条目改用路径令牌**：`/l/<token>/<gid>/<cid>.<ext>`。
+旧的 `?token=` 入口继续可用。
+
+**切片地址带时间窗签名**：`/<gid>/<cid>/l/<exp>/<sig>/<name>`。
+
+| 项 | 规则 |
+| --- | --- |
+| 签名内容 | `HMAC-SHA256(secret, "v1|gid|cid|exp")`，取前 16 字节十六进制 |
+| 时间窗 | `auth.slice_sign_window_secs`，默认 300 秒，范围 30–3600 |
+| 有效时长 | 1–2 个时间窗 |
+| 用户绑定 | 否。同一窗口内所有用户 URL 相同 |
+| 撤销 | 等窗口过期；改密钥立即全网失效 |
+| 开关 | `auth.slice_sign_enabled`，且 `auth.token_enabled` 为真时生效 |
+| 密钥 | `auth.slice_sign_secret`，十六进制；留空时保存配置自动生成 32 字节 |
+
+**CDN 规则**：缓存 Key 必须包含 URI 路径。切片 TTL 不大于时间窗。
+`/sub/*` 响应带 `Cache-Control: private, no-store`，CDN 不缓存。
+
+**已知限制**：签名不绑定用户。拿到 URL 的人在一个窗口内都能播。
+按用户撤销要等窗口过期。

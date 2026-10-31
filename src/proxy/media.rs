@@ -300,10 +300,17 @@ pub fn rewrite_media(
     formats: &[String],
     disguise: bool,
     self_base: &str,
+    slice: &str,
 ) -> Rendered {
     let is_master = is_master(body);
     let prefix = prefix(gid, cid);
     let offset = ext_offset(gid, cid);
+    let root = self_base.trim_end_matches('/');
+    let dir = if slice.is_empty() {
+        format!("{root}/{gid}/{cid}")
+    } else {
+        format!("{root}/{gid}/{cid}/{slice}")
+    };
     let mut out = String::with_capacity(body.len() + 256);
     let mut segments = Vec::new();
     let mut index = 0usize;
@@ -331,9 +338,7 @@ pub fn rewrite_media(
         }
         let ext = pick_ext(trimmed, formats, offset + index);
         let suffix = suffix(&absolute);
-        out.push_str(&format!(
-            "{self_base}/{gid}/{cid}/{prefix}_{suffix}.{ext}\n"
-        ));
+        out.push_str(&format!("{dir}/{prefix}_{suffix}.{ext}\n"));
         segments.push((suffix, absolute, ext));
         index += 1;
     }
@@ -462,6 +467,7 @@ mod tests {
             &formats(),
             true,
             "http://self",
+            "",
         );
         assert!(!rendered.is_master);
         assert_eq!(rendered.segments.len(), 2);
@@ -477,6 +483,26 @@ mod tests {
     }
 
     #[test]
+    fn slice_prefix_is_inserted_in_segment_urls() {
+        let body = "#EXTM3U\n#EXTINF:4.0,\nseg1.ts\n";
+        let rendered = rewrite_media(
+            body,
+            "http://up.example/live/a/index.m3u8",
+            "g1",
+            "c1",
+            &formats(),
+            true,
+            "http://self",
+            "l/123/abc",
+        );
+        assert!(
+            rendered.body.contains("http://self/g1/c1/l/123/abc/"),
+            "{}",
+            rendered.body
+        );
+    }
+
+    #[test]
     fn master_playlist_keeps_variants_absolute() {
         let body = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nv0/index.m3u8\n";
         let rendered = rewrite_media(
@@ -487,6 +513,7 @@ mod tests {
             &formats(),
             true,
             "http://self",
+            "",
         );
         assert!(rendered.is_master);
         assert!(rendered.segments.is_empty());
@@ -564,6 +591,7 @@ mod tests {
             &formats(),
             true,
             "http://self",
+            "",
         );
         assert!(rendered
             .body
@@ -581,6 +609,7 @@ mod tests {
             &formats(),
             false,
             "http://self",
+            "",
         );
         assert!(rendered.body.contains("http://up.example/live/a/seg1.ts"));
         assert!(rendered.segments.is_empty());
@@ -668,6 +697,7 @@ mod tests {
             &formats(),
             true,
             "http://self",
+            "",
         );
         let first = rendered.segments[0].2.clone();
         let second = rendered.segments[1].2.clone();
@@ -685,6 +715,7 @@ mod tests {
             &formats(),
             true,
             "http://self",
+            "",
         );
         assert_eq!(rendered.segments[0].2, "jpg");
         assert_eq!(rendered.segments[1].2, "jpg");
