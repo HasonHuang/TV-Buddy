@@ -305,6 +305,8 @@ export function Select({
   className = '',
   align = 'left',
   compact,
+  width,
+  title,
 }: {
   value: string;
   options: { value: string; label: string }[];
@@ -317,6 +319,10 @@ export function Select({
   align?: 'left' | 'right';
   /** 选项文字短时用固定窄宽，与紧凑数字框并列时不撑满整行。 */
   compact?: boolean;
+  /** 固定宽度，数字为 px。设置后不再随父容器伸展。 */
+  width?: number | string;
+  /** 悬停提示。内容长时用。 */
+  title?: string;
 }) {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -447,7 +453,8 @@ export function Select({
   return (
     <div
       ref={rootRef}
-      className={`select${compact ? ' compact' : ''}${open ? ' open' : ''}${className ? ` ${className}` : ''}`}
+      className={`select${compact || width !== undefined ? ' compact' : ''}${open ? ' open' : ''}${className ? ` ${className}` : ''}`}
+      style={width !== undefined ? { width } : undefined}
     >
       <button
         ref={btnRef}
@@ -458,6 +465,7 @@ export function Select({
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={ariaLabel}
+        title={title}
         disabled={disabled}
         onClick={() => (open ? close(true) : openMenu())}
         onKeyDown={(event) => {

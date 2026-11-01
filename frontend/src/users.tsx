@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
 import { Icon } from './icons';
-import { Badge, Confirm, Field, Modal, PageHead, Switch, Tip, useToast } from './ui';
+import { Badge, Confirm, Field, Modal, PageHead, Select, Switch, Tip, useToast } from './ui';
 
 type Role = 'admin' | 'user';
 
@@ -437,18 +437,18 @@ export function UsersPage() {
               label="角色"
               tip="管理员可管理所有分区。普通用户只能查看授权频道。"
             >
-              <select
+              <Select
+                ariaLabel="角色"
                 value={form.role}
-                onChange={(event) =>
-                  setEditing({
-                    ...editing,
-                    form: { ...form, role: event.target.value as Role },
-                  })
+                options={[
+                  { value: 'admin', label: '管理员' },
+                  { value: 'user', label: '普通用户' },
+                ]}
+                onChange={(next) =>
+                  setEditing({ ...editing, form: { ...form, role: next as Role } })
                 }
-              >
-                <option value="admin">管理员</option>
-                <option value="user">普通用户</option>
-              </select>
+                compact
+              />
             </Field>
           </div>
 
@@ -561,20 +561,17 @@ export function UsersPage() {
               value={tokenLabel}
               onChange={(event) => setTokenLabel(event.target.value)}
             />
-            <select
-              aria-label="令牌有效期"
+            <Select
+              ariaLabel="令牌有效期"
               title="到期后播放地址自动失效"
               value={tokenTtl === null ? 'forever' : String(tokenTtl)}
-              onChange={(event) =>
-                setTokenTtl(event.target.value === 'forever' ? null : Number(event.target.value))
-              }
-            >
-              {TTL_CHOICES.map((item) => (
-                <option key={item.label} value={item.secs === null ? 'forever' : String(item.secs)}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+              options={TTL_CHOICES.map((item) => ({
+                value: item.secs === null ? 'forever' : String(item.secs),
+                label: item.label,
+              }))}
+              onChange={(next) => setTokenTtl(next === 'forever' ? null : Number(next))}
+              compact
+            />
             <button
               title="为这个用户生成一个新的设备令牌"
               onClick={() => void createToken()}

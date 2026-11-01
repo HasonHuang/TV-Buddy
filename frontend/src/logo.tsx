@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken } from './api';
-import { Confirm, Empty, Modal, PageHead, Tip } from './ui';
+import { Confirm, Empty, Modal, PageHead, Select, Tip } from './ui';
 import './style.css';
 
 type Logo = {
@@ -519,20 +519,22 @@ export function LogosPage() {
             覆盖原图前会先备份到 <code className="mono">.orig/</code>。
           </p>
           <div className="row">
-            <label>
-              效果
-              <Tip text="选择台标进入与退出的动画方式。生成后覆盖原图，原图备份到 .orig。" />
-              <select
+            <div className="field" style={{ width: 260 }}>
+              <label>
+                效果
+                <Tip text="选择台标进入与退出的动画方式。生成后覆盖原图，原图备份到 .orig。" />
+              </label>
+              <Select
+                ariaLabel="效果"
+                title="选择台标进入与退出的动画方式"
                 value={animating.effect}
-                onChange={(event) => setAnimating({ ...animating, effect: event.target.value })}
-              >
-                {EFFECTS.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}（{item.value}）
-                  </option>
-                ))}
-              </select>
-            </label>
+                options={EFFECTS.map((item) => ({
+                  value: item.value,
+                  label: `${item.label}（${item.value}）`,
+                }))}
+                onChange={(next) => setAnimating({ ...animating, effect: next })}
+              />
+            </div>
             <button
               title="生成动画并覆盖当前台标，原图备份到 .orig"
               onClick={() => void generate(animating.file)}
@@ -576,21 +578,16 @@ export function LogosPage() {
                       <td className="mono">{channel.gid}</td>
                       <td>{channel.name}</td>
                       <td>
-                        <select
-                          aria-label={`为 ${channel.name} 选择台标`}
+                        <Select
+                          ariaLabel={`为 ${channel.name} 选择台标`}
                           title="选择要应用到该频道的台标文件"
                           value={picked[key] ?? suggestions[key] ?? ''}
-                          onChange={(event) =>
-                            setPicked({ ...picked, [key]: event.target.value })
-                          }
-                        >
-                          <option value="">（选择文件）</option>
-                          {logos.map((logo) => (
-                            <option key={logo.file} value={logo.file}>
-                              {logo.file}
-                            </option>
-                          ))}
-                        </select>
+                          options={[
+                            { value: '', label: '（选择文件）' },
+                            ...logos.map((logo) => ({ value: logo.file, label: logo.file })),
+                          ]}
+                          onChange={(next) => setPicked({ ...picked, [key]: next })}
+                        />
                       </td>
                       <td className="right">
                         <button

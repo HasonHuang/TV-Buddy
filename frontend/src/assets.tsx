@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
-import { Badge, Confirm, Empty, PageHead, Tip } from './ui';
+import { Badge, Confirm, Empty, PageHead, Select, Tip } from './ui';
 
 type Entry = {
   file: string;
@@ -214,18 +214,14 @@ function Library({
         </h2>
         <div className="row">
           {kind === 'subtitle' && translation?.enabled && translation.targets.length > 1 && (
-            <select
-              aria-label="翻译目标语言"
+            <Select
+              ariaLabel="翻译目标语言"
               title="翻译并生成对应语言的字幕文件"
               value={target}
-              onChange={(event) => setTarget(event.target.value)}
-            >
-              {translation.targets.map((code) => (
-                <option key={code} value={code}>
-                  {code}
-                </option>
-              ))}
-            </select>
+              options={translation.targets.map((code) => ({ value: code, label: code }))}
+              onChange={setTarget}
+              compact
+            />
           )}
           {kind === 'assets' && (
             <label className="tag" style={{ cursor: 'pointer' }}>

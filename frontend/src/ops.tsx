@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, apiText, getToken } from './api';
 import { Icon } from './icons';
-import { Confirm, Field, PageHead, Tip } from './ui';
+import { Confirm, Field, PageHead, Select, Tip } from './ui';
 
 type IpEntry = {
   ip: string;
@@ -217,28 +217,28 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
 
       <h3>会话与 Token</h3>
       <div className="fields">
-        <label className="field">
-          <span>IP 管控</span>
-          <select
-            title="开启后启用按 IP 的限流、封禁与并发会话上限"
+        <Field label="IP 管控" tip="开启后启用按 IP 的限流、封禁与并发会话上限">
+          <Select
+            ariaLabel="IP 管控"
             value={auth.ip_guard_enabled === true ? 'on' : 'off'}
-            onChange={(event) => setKey('ip_guard_enabled', event.target.value === 'on')}
-          >
-            <option value="off">关闭</option>
-            <option value="on">开启</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>播放 Token</span>
-          <select
-            title="开启后每个设备令牌只能播放自己的授权频道"
+            options={[
+              { value: 'off', label: '关闭' },
+              { value: 'on', label: '开启' },
+            ]}
+            onChange={(next) => setKey('ip_guard_enabled', next === 'on')}
+          />
+        </Field>
+        <Field label="播放 Token" tip="开启后每个设备令牌只能播放自己的授权频道">
+          <Select
+            ariaLabel="播放 Token"
             value={auth.token_enabled === true ? 'on' : 'off'}
-            onChange={(event) => setKey('token_enabled', event.target.value === 'on')}
-          >
-            <option value="off">关闭</option>
-            <option value="on">开启</option>
-          </select>
-        </label>
+            options={[
+              { value: 'off', label: '关闭' },
+              { value: 'on', label: '开启' },
+            ]}
+            onChange={(next) => setKey('token_enabled', next === 'on')}
+          />
+        </Field>
         <NumberField
           field={{ key: 'token_ttl_hours', label: 'Token 有效期', hint: '小时' }}
           value={authNumber(auth, 'token_ttl_hours')}
@@ -253,17 +253,17 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         修改密钥会让当前窗口内的旧链接立即失效。
       </p>
       <div className="fields">
-        <label className="field">
-          <span>切片签名</span>
-          <select
-            title="开启后切片地址带时间窗签名；关闭播放 Token 时本项不生效"
+        <Field label="切片签名" tip="开启后切片地址带时间窗签名；关闭播放 Token 时本项不生效">
+          <Select
+            ariaLabel="切片签名"
             value={auth.slice_sign_enabled === false ? 'off' : 'on'}
-            onChange={(event) => setKey('slice_sign_enabled', event.target.value === 'on')}
-          >
-            <option value="on">开启</option>
-            <option value="off">关闭</option>
-          </select>
-        </label>
+            options={[
+              { value: 'on', label: '开启' },
+              { value: 'off', label: '关闭' },
+            ]}
+            onChange={(next) => setKey('slice_sign_enabled', next === 'on')}
+          />
+        </Field>
         <NumberField
           field={{ key: 'slice_sign_window_secs', label: '签名时间窗', hint: '秒；30–3600' }}
           value={authNumber(auth, 'slice_sign_window_secs')}
@@ -596,19 +596,17 @@ export function LogsPage() {
         sub={`最近 ${shown.length} 行${level === 'all' ? '' : `（${level.toUpperCase()}）`}（共 ${total} 行）`}
       >
         <div className="row">
-          <select
-            aria-label="日志级别"
+          <Select
+            ariaLabel="日志级别"
             title="只显示所选级别的日志行"
             value={level}
-            style={{ width: 120 }}
-            onChange={(event) => setLevel(event.target.value as Level)}
-          >
-            {LEVELS.map((item) => (
-              <option key={item} value={item}>
-                {item === 'all' ? '全部级别' : item.toUpperCase()}
-              </option>
-            ))}
-          </select>
+            options={LEVELS.map((item) => ({
+              value: item,
+              label: item === 'all' ? '全部级别' : item.toUpperCase(),
+            }))}
+            onChange={(next) => setLevel(next as Level)}
+            width={120}
+          />
           <input
             aria-label="读取行数"
             title="从环形缓冲读取最近多少行"
@@ -730,16 +728,18 @@ export function BackupPage({
       <div className="card">
         <div className="section-title">导出</div>
         <div className="row">
-          <select
-            aria-label="备份范围"
+          <Select
+            ariaLabel="备份范围"
             title="选择备份包含的配置与资源"
             value={scope}
-            onChange={(event) => setScope(event.target.value)}
-          >
-            <option value="all">全部</option>
-            <option value="epg-scripts">仅 EPG 脚本</option>
-            <option value="resolver">仅解析脚本</option>
-          </select>
+            options={[
+              { value: 'all', label: '全部' },
+              { value: 'epg-scripts', label: '仅 EPG 脚本' },
+              { value: 'resolver', label: '仅解析脚本' },
+            ]}
+            onChange={setScope}
+            width={190}
+          />
           <button
             title="按所选范围下载备份包"
             onClick={() => void download()}
@@ -1019,26 +1019,28 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
       </div>
 
       <div className="fields">
-        <label className="field">
-          <span>启用</span>
-          <select
+        <Field label="启用" tip="开启后按下方设置翻译 EPG 节目信息">
+          <Select
+            ariaLabel="启用"
             value={translate.enabled === true ? 'on' : 'off'}
-            onChange={(event) => setKey('enabled', event.target.value === 'on')}
-          >
-            <option value="off">关闭</option>
-            <option value="on">开启</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>引擎</span>
-          <select
+            options={[
+              { value: 'off', label: '关闭' },
+              { value: 'on', label: '开启' },
+            ]}
+            onChange={(next) => setKey('enabled', next === 'on')}
+          />
+        </Field>
+        <Field label="引擎" tip="MTranServer 为本机或局域网部署；google 走 URL 的 HTTP 接口">
+          <Select
+            ariaLabel="引擎"
             value={text('engine') || 'mtran'}
-            onChange={(event) => setKey('engine', event.target.value)}
-          >
-            <option value="mtran">MTranServer</option>
-            <option value="google">google（目标键面；本实现仅走 URL 的 HTTP 接口）</option>
-          </select>
-        </label>
+            options={[
+              { value: 'mtran', label: 'MTranServer' },
+              { value: 'google', label: 'google（目标键面；本实现仅走 URL 的 HTTP 接口）' },
+            ]}
+            onChange={(next) => setKey('engine', next)}
+          />
+        </Field>
         <label className="field">
           <span>MTranServer 地址</span>
           <input
@@ -1091,16 +1093,17 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
             onChange={(event) => setTargets(event.target.value)}
           />
         </label>
-        <label className="field">
-          <span>译文位置</span>
-          <select
+        <Field label="译文位置" tip="译文放在节目名上方还是下方">
+          <Select
+            ariaLabel="译文位置"
             value={translate.translation_first === true ? 'first' : 'second'}
-            onChange={(event) => setKey('translation_first', event.target.value === 'first')}
-          >
-            <option value="first">译文在上（原文在下）</option>
-            <option value="second">原文在上</option>
-          </select>
-        </label>
+            options={[
+              { value: 'first', label: '译文在上（原文在下）' },
+              { value: 'second', label: '原文在上' },
+            ]}
+            onChange={(next) => setKey('translation_first', next === 'first')}
+          />
+        </Field>
       </div>
 
       <div className="row">

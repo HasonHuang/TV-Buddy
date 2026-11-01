@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, getToken } from './api';
 import type { Channel, Group } from './groups';
-import { Badge, Confirm, Field, PageHead, Tip, useToast } from './ui';
+import { Badge, Confirm, Field, PageHead, Select, Tip, useToast } from './ui';
 
 type Task = {
   id: string;
@@ -276,32 +276,34 @@ export function SchedulePage({
             </div>
             <div className="fields">
               <Field label="分组" tip="录制任务按频道所属分组查找上游。">
-                <select
+                <Select
+                  ariaLabel="分组"
                   value={form.group_id}
-                  onChange={(event) =>
-                    setForm({ ...form, group_id: event.target.value, channel_id: '' })
+                  options={[
+                    { value: '', label: '选择分组' },
+                    ...groups.map((group) => ({
+                      value: group.id,
+                      label: `${group.name}（${group.id}）`,
+                    })),
+                  ]}
+                  onChange={(next) =>
+                    setForm({ ...form, group_id: next, channel_id: '' })
                   }
-                >
-                  <option value="">选择分组</option>
-                  {groups.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name}（{group.id}）
-                    </option>
-                  ))}
-                </select>
+                />
               </Field>
               <Field label="频道" tip="只列出所选分组中的频道。">
-                <select
+                <Select
+                  ariaLabel="频道"
                   value={form.channel_id}
-                  onChange={(event) => setForm({ ...form, channel_id: event.target.value })}
-                >
-                  <option value="">选择频道</option>
-                  {channels.map((channel) => (
-                    <option key={channel.id} value={channel.id}>
-                      {channel.name}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: '', label: '选择频道' },
+                    ...channels.map((channel) => ({
+                      value: channel.id,
+                      label: channel.name,
+                    })),
+                  ]}
+                  onChange={(next) => setForm({ ...form, channel_id: next })}
+                />
               </Field>
               <Field label="任务名称" tip="留空时按频道与时间自动命名。">
                 <input
@@ -327,13 +329,15 @@ export function SchedulePage({
                 />
               </Field>
               <Field label="格式" tip="MKV 需要 ffmpeg；TS 直接保存原始流。">
-                <select
+                <Select
+                  ariaLabel="格式"
                   value={form.format}
-                  onChange={(event) => setForm({ ...form, format: event.target.value })}
-                >
-                  <option value="mkv">MKV（需 ffmpeg）</option>
-                  <option value="ts">TS</option>
-                </select>
+                  options={[
+                    { value: 'mkv', label: 'MKV（需 ffmpeg）' },
+                    { value: 'ts', label: 'TS' },
+                  ]}
+                  onChange={(next) => setForm({ ...form, format: next })}
+                />
               </Field>
             </div>
             <div className="row">

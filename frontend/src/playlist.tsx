@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api } from './api';
-import { PageHead, Tip, useToast } from './ui';
+import { Field, PageHead, Select, Tip, useToast } from './ui';
 
 type Source = {
   id: string;
@@ -226,17 +226,18 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
               }
             />
           </label>
-          <label>
-            合并位置
-            <Tip text="聚合条目插在每个用户订阅的顶部或底部。" />
-            <select
+          <Field label="合并位置" tip="聚合条目插在每个用户订阅的顶部或底部。">
+            <Select
+              ariaLabel="合并位置"
               value={cfg.merge_position}
-              onChange={(event) => setCfg({ ...cfg, merge_position: event.target.value })}
-            >
-              <option value="bottom">底部</option>
-              <option value="top">顶部</option>
-            </select>
-          </label>
+              options={[
+                { value: 'bottom', label: '底部' },
+                { value: 'top', label: '顶部' },
+              ]}
+              onChange={(next) => setCfg({ ...cfg, merge_position: next })}
+              compact
+            />
+          </Field>
         </div>
       </div>
 
@@ -359,20 +360,19 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
           <details key={source.id || index} style={{ marginTop: 12 }}>
             <summary>{source.name || source.id || `源 ${index + 1}`}</summary>
             <div className="row">
-              <label>
-                模式
-                <Tip text="keep 保留原分组名；map 按映射改名；merge 合并到同一个分组。" />
-                <select
+              <Field label="模式" tip="keep 保留原分组名；map 按映射改名；merge 合并到同一个分组。">
+                <Select
+                  ariaLabel="模式"
                   value={source.group_mode}
-                  onChange={(event) =>
-                    updateSource(index, { group_mode: event.target.value })
-                  }
-                >
-                  <option value="keep">keep</option>
-                  <option value="map">map</option>
-                  <option value="merge">merge</option>
-                </select>
-              </label>
+                  options={[
+                    { value: 'keep', label: 'keep' },
+                    { value: 'map', label: 'map' },
+                    { value: 'merge', label: 'merge' },
+                  ]}
+                  onChange={(next) => updateSource(index, { group_mode: next })}
+                  compact
+                />
+              </Field>
               <label>
                 合并分组
                 <Tip text="模式为 merge 时，所有频道并入这个分组。" />
@@ -383,19 +383,18 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
                   }
                 />
               </label>
-              <label>
-                未列出分组
-                <Tip text="没有出现在规则里的分组保留还是丢弃。" />
-                <select
+              <Field label="未列出分组" tip="没有出现在规则里的分组保留还是丢弃。">
+                <Select
+                  ariaLabel="未列出分组"
                   value={source.unlisted_groups}
-                  onChange={(event) =>
-                    updateSource(index, { unlisted_groups: event.target.value })
-                  }
-                >
-                  <option value="drop">drop</option>
-                  <option value="keep">keep</option>
-                </select>
-              </label>
+                  options={[
+                    { value: 'drop', label: 'drop' },
+                    { value: 'keep', label: 'keep' },
+                  ]}
+                  onChange={(next) => updateSource(index, { unlisted_groups: next })}
+                  compact
+                />
+              </Field>
             </div>
             <label>
               分组映射

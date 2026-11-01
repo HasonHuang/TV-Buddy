@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
 import { Icon } from './icons';
-import { Badge, Confirm, Field, Modal, PageHead, Switch, useToast } from './ui';
+import { Badge, Confirm, Field, Modal, PageHead, Select, Switch, useToast } from './ui';
 
 export type Channel = {
   id: string;
@@ -234,11 +234,17 @@ function NetworkBlock({
       </summary>
       <div className="fields">
         <Field label="代理类型" tip="上游请求使用的代理协议。代理地址留空时不启用代理。">
-          <select value={proxy.kind} onChange={(e) => onProxy({ ...proxy, kind: e.target.value })}>
-            <option value="http">http</option>
-            <option value="https">https</option>
-            <option value="socks5">socks5</option>
-          </select>
+          <Select
+            ariaLabel="代理类型"
+            value={proxy.kind}
+            options={[
+              { value: 'http', label: 'http' },
+              { value: 'https', label: 'https' },
+              { value: 'socks5', label: 'socks5' },
+            ]}
+            onChange={(next) => onProxy({ ...proxy, kind: next })}
+            compact
+          />
         </Field>
         <Field label="代理地址" tip="上游请求经过的代理。留空表示直连上游。">
           <input
@@ -280,16 +286,18 @@ function NetworkBlock({
         tip="覆盖上层的预取设置。留空表示继承分组或全局配置。"
         hint="留空继承上一级；数值留空表示不覆盖。"
       >
-        <select
+        <Select
+          ariaLabel="预取覆盖"
           value={prefetch.state}
-          onChange={(e) => onPrefetch({ ...prefetch, state: e.target.value as PrefetchForm['state'] })}
-        >
-          {PREFETCH_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          options={PREFETCH_OPTIONS.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          onChange={(next) =>
+            onPrefetch({ ...prefetch, state: next as PrefetchForm['state'] })
+          }
+          width={190}
+        />
       </Field>
       {numeric && (
         <div className="fields">
@@ -1092,59 +1100,50 @@ export function GroupsPage() {
           </Field>
           <div className="fields">
             <Field label="工作模式" tip="决定切片代理方式。PROXY 适合大多数 HLS 源；DASH 需要上游支持 MPD。">
-              <select
+              <Select
+                ariaLabel="工作模式"
                 value={groupForm.form.mode}
-                onChange={(event) =>
+                options={MODES}
+                onChange={(next) =>
                   setGroupForm({
                     ...groupForm,
-                    form: { ...groupForm.form, mode: event.target.value },
+                    form: { ...groupForm.form, mode: next },
                   })
                 }
-              >
-                {MODES.map((mode) => (
-                  <option key={mode.value} value={mode.value}>
-                    {mode.label}
-                  </option>
-                ))}
-              </select>
+                width={200}
+              />
             </Field>
             <Field label="内容格式" tip="决定下发的清单格式。HLS 使用 m3u8；DASH 使用 mpd。">
-              <select
+              <Select
+                ariaLabel="内容格式"
                 value={groupForm.form.format}
-                onChange={(event) =>
+                options={FORMATS}
+                onChange={(next) =>
                   setGroupForm({
                     ...groupForm,
-                    form: { ...groupForm.form, format: event.target.value },
+                    form: { ...groupForm.form, format: next },
                   })
                 }
-              >
-                {FORMATS.map((format) => (
-                  <option key={format.value} value={format.value}>
-                    {format.label}
-                  </option>
-                ))}
-              </select>
+                width={160}
+              />
             </Field>
           </div>
           <Field
             label="访问范围"
             tip="公开分组会出现在订阅列表。隐藏、归档或开放分组按对应规则处理。"
           >
-            <select
+            <Select
+              ariaLabel="访问范围"
               value={groupForm.form.access}
-              onChange={(event) =>
+              options={ACCESS}
+              onChange={(next) =>
                 setGroupForm({
                   ...groupForm,
-                  form: { ...groupForm.form, access: event.target.value },
+                  form: { ...groupForm.form, access: next },
                 })
               }
-            >
-              {ACCESS.map((access) => (
-                <option key={access.value} value={access.value}>
-                  {access.label}
-                </option>
-              ))}
-            </select>
+              width={200}
+            />
           </Field>
           <NetworkBlock
             summary="网络配置 · 分组级默认，频道可单独覆盖"
@@ -1259,21 +1258,24 @@ export function GroupsPage() {
             label="上游类型"
             tip="静态 URL 直接拉取；解析脚本先运行脚本，再使用脚本输出。"
           >
-            <select
+            <Select
+              ariaLabel="上游类型"
               value={channelForm.form.upstream}
-              onChange={(event) =>
+              options={[
+                { value: 'static', label: '静态 URL' },
+                { value: 'script', label: '解析脚本' },
+              ]}
+              onChange={(next) =>
                 setChannelForm({
                   ...channelForm,
                   form: {
                     ...channelForm.form,
-                    upstream: event.target.value as 'static' | 'script',
+                    upstream: next as 'static' | 'script',
                   },
                 })
               }
-            >
-              <option value="static">静态 URL</option>
-              <option value="script">解析脚本</option>
-            </select>
+              width={160}
+            />
           </Field>
           {channelForm.form.upstream === 'script' && (
             <div className="fields">
@@ -1282,22 +1284,20 @@ export function GroupsPage() {
                 tip="解析脚本放在缓存目录的 resolvers 下。脚本输出作为上游地址。"
                 hint="位于 <缓存目录>/resolvers/。"
               >
-                <select
+                <Select
+                  ariaLabel="脚本"
                   value={channelForm.form.script}
-                  onChange={(event) =>
+                  options={[
+                    { value: '', label: '（请选择）' },
+                    ...scripts.map((name) => ({ value: name, label: name })),
+                  ]}
+                  onChange={(next) =>
                     setChannelForm({
                       ...channelForm,
-                      form: { ...channelForm.form, script: event.target.value },
+                      form: { ...channelForm.form, script: next },
                     })
                   }
-                >
-                  <option value="">（请选择）</option>
-                  {scripts.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                />
               </Field>
               <Field label="脚本参数" tip="传给解析脚本的参数。不需要时留空。">
                 <input
@@ -1429,16 +1429,19 @@ export function GroupsPage() {
               label="同名分组处理"
               tip="append 跳过同名分组；merge 补齐频道；replace 整体替换。"
             >
-              <select
+              <Select
+                ariaLabel="M3U 导入模式"
                 value={m3uMode}
-                onChange={(event) =>
-                  setM3uMode(event.target.value as 'append' | 'merge' | 'replace')
+                options={[
+                  { value: 'append', label: 'append —— 同名分组跳过' },
+                  { value: 'merge', label: 'merge —— 同名分组补频道' },
+                  { value: 'replace', label: 'replace —— 同名分组整体替换' },
+                ]}
+                onChange={(next) =>
+                  setM3uMode(next as 'append' | 'merge' | 'replace')
                 }
-              >
-                <option value="append">append —— 同名分组跳过</option>
-                <option value="merge">merge —— 同名分组补频道</option>
-                <option value="replace">replace —— 同名分组整体替换</option>
-              </select>
+                width={260}
+              />
             </Field>
           ) : (
             <p className="muted">
