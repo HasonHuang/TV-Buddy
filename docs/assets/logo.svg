@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="96" height="96" role="img" aria-label="TV Buddy 台标">
+  <title>TV Buddy 台标</title>
+  <!-- 白色底板让图形在浅色与深色背景上都可读。 -->
+  <rect x="0.5" y="0.5" width="39" height="39" rx="8.5" fill="#ffffff" stroke="#e3e3e8" />
+  <g transform="translate(4 4)">
+    <defs>
+      <clipPath id="screen">
+        <rect x="7.4" y="12.2" width="17.2" height="11.6" rx="2.6" />
+      </clipPath>
+    </defs>
+    <!-- 丷 形天线与天线球 -->
+    <g fill="none" stroke="#1c1c21" stroke-width="2" stroke-linecap="round">
+      <path d="M12.9 9 10.2 3.7" />
+      <path d="M19.1 9 21.8 3.7" />
+    </g>
+    <circle cx="10.2" cy="3.7" r="1.5" fill="#1c1c21" />
+    <circle cx="21.8" cy="3.7" r="1.5" fill="#1c1c21" />
+    <!-- 三色屏 -->
+    <g clip-path="url(#screen)">
+      <rect x="7.4" y="12.2" width="5.74" height="11.6" fill="#0015ff" />
+      <rect x="13.14" y="12.2" width="5.72" height="11.6" fill="#35b606" />
+      <rect x="18.86" y="12.2" width="5.74" height="11.6" fill="#fd0102" />
+    </g>
+    <!-- 机身与两只脚 -->
+    <rect x="4" y="8.8" width="24" height="18.4" rx="5.2" fill="none" stroke="#1c1c21" stroke-width="2.2" />
+    <g fill="none" stroke="#1c1c21" stroke-width="2.2" stroke-linecap="round">
+      <path d="M11.2 27.2v2.2" />
+      <path d="M20.8 27.2v2.2" />
+    </g>
+  </g>
+</svg>
