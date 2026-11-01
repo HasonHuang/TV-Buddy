@@ -15,6 +15,10 @@ frontend/dist/
 
 # 运行时缓存（默认 [cache].disk_path = ./cache）
 /cache/
+# 本地运行产生的数据库（`./tv-buddy serve` 时的默认位置）
+/tv-buddy.db
+/tv-buddy.db-wal
+/tv-buddy.db-shm
 
 # 发布产物（由 scripts/build-release.sh 生成）
 /dist/

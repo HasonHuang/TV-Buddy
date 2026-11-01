@@ -16,7 +16,7 @@
   color-scheme: light;
 
   /* 中性灰阶（zinc） */
-  --bg: #fafafa;
+  --bg: #f7f7f8;
   --panel: #ffffff;
   --panel-2: #f4f4f5;
   --line: #e4e4e7;
@@ -44,12 +44,12 @@
   --info: #2563eb;
   --info-weak: #eff6ff;
 
-  /* 圆角与阴影：卡片 10 px，控件 8 px。 */
-  --radius: 10px;
+  /* 圆角与阴影：卡片 12 px，控件 8 px。 */
+  --radius: 12px;
   --radius-sm: 8px;
-  --ring: rgba(15, 143, 127, 0.28);
+  --ring: rgba(15, 143, 127, 0.22);
 
-  --shadow: 0 1px 2px rgba(24, 24, 27, 0.05);
+  --shadow: 0 1px 2px rgba(24, 24, 27, 0.04);
   --shadow-lg: 0 20px 48px rgba(24, 24, 27, 0.14);
 
   /* 过渡时长：全站统一。 */
@@ -64,7 +64,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 13.5px/1.6 system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font: 14px/1.6 system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -282,9 +282,9 @@ a {
 }
 
 .content {
-  padding: 22px 26px 48px;
-  max-width: 1220px;
+  width: 100%;
   min-width: 0;
+  padding: 24px 32px 56px;
 }
 
 /* --- 页面标题行 --- */
@@ -354,8 +354,39 @@ a {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 16px 18px;
-  margin-bottom: 12px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+}
+
+/* 卡片头：标题 + 说明在左，操作在右。 */
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.card-head-text {
+  min-width: 0;
+}
+
+.card-head h2 {
+  margin-bottom: 3px;
+}
+
+.card-head .muted {
+  display: block;
+  line-height: 1.5;
+}
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: none;
+  flex-wrap: wrap;
 }
 
 /* 无内边距卡片：用于分组卡这种自带分区的块。 */
@@ -378,6 +409,15 @@ a {
 }
 
 .row.between > .row {
+  min-width: 0;
+}
+
+/* 行内的表单控件按剩余宽度伸展，按钮保持自然宽度。 */
+.row > input:not([type='checkbox']):not([type='radio']):not([type='file']),
+.row > select,
+.row > textarea {
+  flex: 1 1 180px;
+  width: auto;
   min-width: 0;
 }
 
@@ -406,22 +446,67 @@ label {
   font-weight: 500;
 }
 
-/* 字段名后的“?”提示。 */
-label .q {
+/* 字段说明：`?` 与气泡都由伪元素绘制，不进入文本内容。
+ *
+ * 这样 `label.textContent` 仍是字段名，验收脚本与读屏都稳定。
+ */
+.tip {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 13px;
-  height: 13px;
-  margin-left: 4px;
+  width: 14px;
+  height: 14px;
+  margin-left: 5px;
   border-radius: 50%;
-  background: var(--panel-2);
   border: 1px solid var(--line-strong);
+  background: var(--panel-2);
   color: var(--text3);
   font-size: 9px;
   font-weight: 700;
+  line-height: 1;
   cursor: help;
+  flex: none;
   vertical-align: middle;
+  transition:
+    color var(--ease),
+    border-color var(--ease),
+    background var(--ease);
+}
+
+.tip::before {
+  content: '?';
+}
+
+.tip:hover,
+.tip:focus-visible {
+  color: var(--accent-dark);
+  border-color: var(--accent-line);
+  background: var(--accent-weak);
+  outline: none;
+}
+
+/* 气泡由 React 挂到 body，fixed 定位，不参与页面布局。 */
+.tip-bubble {
+  position: fixed;
+  z-index: 100;
+  width: max-content;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: #18181b;
+  color: #fafafa;
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+}
+
+.tip-bubble.bottom {
+  transform: translate(-50%, 0);
 }
 
 input,
@@ -442,7 +527,13 @@ select {
 
 input,
 select {
-  height: 34px;
+  height: 36px;
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='range']):hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--text3);
 }
 
 input::placeholder,
@@ -539,7 +630,7 @@ button {
   border-radius: var(--radius-sm);
   color: #fff;
   padding: 0 14px;
-  height: 34px;
+  height: 36px;
   font: inherit;
   font-size: 13px;
   font-weight: 500;
@@ -917,6 +1008,31 @@ dl > dd:last-of-type {
   color: var(--danger);
 }
 
+.msg.warn {
+  color: var(--warn);
+}
+
+.msg.info {
+  color: var(--text2);
+}
+
+/* 嵌入设置页的小节头（系统状态、备份与恢复）。 */
+.embedded-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 12px;
+}
+
+.embedded-head h2 {
+  margin-bottom: 2px;
+}
+
+.embedded-head .muted {
+  display: block;
+}
+
 /* --- 弹窗 --- */
 
 .modal-overlay {
@@ -1264,11 +1380,232 @@ pre.log .lv-trace {
   margin-top: 16px;
 }
 
+/* 自助解封页。 */
+.unban-card {
+  width: 420px;
+  text-align: center;
+}
+
+.unban-card .mark {
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.unban-card > button {
+  width: 100%;
+  height: 38px;
+  margin-top: 14px;
+}
+
+.unban-ip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.unban-note {
+  text-align: left;
+  margin: 0 0 4px;
+}
+
+.unban-tip {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
 /* 单页居中容器（公开页）。 */
 .page {
   max-width: 760px;
   margin: 0 auto;
   padding: 32px 20px 64px;
+}
+
+/* 公开页：节目单、解封与台标库。 */
+.public-page {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 32px 28px 64px;
+}
+
+.public-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.public-head-text h1 {
+  font-size: 22px;
+  margin-bottom: 4px;
+}
+
+.public-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 240px;
+}
+
+.public-search > span {
+  display: flex;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--text2);
+}
+
+.public-search input {
+  width: 280px;
+}
+
+/* 节目单：左侧频道列表 + 右侧节目表。 */
+.epg-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.epg-side {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 32px);
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.epg-side-title {
+  padding: 6px 10px;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.epg-channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.epg-channel {
+  display: block;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.epg-channel:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.epg-channel.active {
+  background: var(--accent-weak);
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+.epg-main {
+  min-width: 0;
+}
+
+.epg-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.epg-item {
+  display: flex;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.epg-item:last-child {
+  border-bottom: 0;
+}
+
+.epg-time {
+  flex: none;
+  width: 150px;
+  padding-top: 1px;
+  color: var(--text2);
+  font-size: 12px;
+}
+
+.epg-body {
+  min-width: 0;
+}
+
+.epg-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 600;
+}
+
+.epg-desc {
+  margin: 2px 0 0;
+}
+
+@media (max-width: 820px) {
+  .public-page {
+    padding: 20px 14px 48px;
+  }
+
+  .epg-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .epg-side {
+    position: static;
+    max-height: 260px;
+  }
+
+  .public-search {
+    width: 100%;
+  }
+
+  .public-search input {
+    width: 100%;
+  }
+
+  .epg-item {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .epg-time {
+    width: auto;
+  }
 }
 
 /* --- 分组卡 --- */
@@ -1588,6 +1925,180 @@ pre code {
   margin-bottom: 0;
 }
 
+/* --- 空状态与滚动容器 --- */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 28px 12px;
+  color: var(--text3);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.empty .icon {
+  color: var(--line-strong);
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+/* --- 系统设置页布局 --- */
+
+.settings-page .page-head.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  margin: -24px -32px 18px;
+  padding: 14px 32px;
+  background: rgba(247, 247, 248, 0.9);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-page .page-head.sticky .sub {
+  padding-right: 12px;
+}
+
+/* 两列独立堆叠：用多栏布局，卡片不会被拉成等高。
+ *
+ * 通栏卡片用 `column-span: all`，多栏在它前后自动重新平衡。
+ */
+.settings-page .settings-grid {
+  columns: 2;
+  column-gap: 16px;
+}
+
+.settings-page .settings-grid > .card {
+  break-inside: avoid;
+  margin-bottom: 16px;
+}
+
+.settings-page .settings-grid > .span-all {
+  column-span: all;
+  margin-bottom: 16px;
+}
+
+.settings-page .settings-full {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+/* 设置页卡片自己带 gap，不再叠加外边距。 */
+.settings-page .card {
+  margin-bottom: 0;
+  container-type: inline-size;
+}
+
+.settings-page .fields {
+  grid-template-columns: 1fr;
+  gap: 2px 18px;
+}
+
+@container (min-width: 540px) {
+  .settings-page .fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 1180px) {
+  .settings-page .fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* 横向字段行：标签 | 控件 | 后缀。 */
+.settings-page .field {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 10px;
+  margin-bottom: 9px;
+  min-width: 0;
+}
+
+.settings-page .field > label {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.settings-page .field > .hint {
+  grid-column: 2;
+  margin-top: 0;
+}
+
+.settings-page .field > .row {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.settings-page .field-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-page .field-control > input,
+.settings-page .field-control > select,
+.settings-page .field-control > textarea {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-page .field-unit {
+  color: var(--text2);
+  font-size: 12px;
+  white-space: nowrap;
+  flex: none;
+}
+
+/* 复选框类的字段占整行，不再拆成标签列与控件列。 */
+.settings-page .field.field-check {
+  display: block;
+}
+
+.settings-page .field.field-check > .check {
+  margin: 2px 0;
+}
+
+.settings-page .field.field-check > .hint {
+  margin-left: 23px;
+}
+
+.settings-page .field .checkboxes {
+  display: flex;
+  align-items: center;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+}
+
+.settings-page .field .checkboxes .check {
+  margin: 2px 0;
+}
+
+/* 设置页的动作按钮在卡片头右侧，不挤压标题。 */
+.settings-page .card-head {
+  align-items: center;
+}
+
+@media (max-width: 1200px) {
+  .settings-page .settings-grid {
+    columns: 1;
+  }
+}
+
 /* --- 小屏适配 --- */
 
 /* ≤1080 px：侧栏收成图标栏。 */
@@ -1699,6 +2210,29 @@ pre code {
 
   .content {
     padding: 16px 14px 40px;
+  }
+
+  .settings-page .page-head.sticky {
+    margin: -16px -14px 14px;
+    padding: 12px 14px;
+  }
+
+  /* 手机宽度下标签改到控件上方，给输入框留出整行宽度。 */
+  .settings-page .field {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .settings-page .field > .hint,
+  .settings-page .field > .row,
+  .settings-page .field > textarea,
+  .settings-page .field > .field-control,
+  .settings-page .field > .checkboxes {
+    grid-column: 1;
+  }
+
+  .settings-page .field.field-check > .hint {
+    margin-left: 0;
   }
 
   .page-head {

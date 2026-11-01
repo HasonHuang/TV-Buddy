@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
-import { Badge, PageHead } from './ui';
+import { Badge, Confirm, Empty, PageHead, Tip } from './ui';
 
 type Entry = {
   file: string;
@@ -108,6 +108,7 @@ function Library({
   const [busy, setBusy] = useState('');
   const [referenced, setReferenced] = useState<Set<string>>(new Set());
   const [onlyUnused, setOnlyUnused] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
 
   useEffect(() => {
     if (kind !== 'subtitle') {
@@ -165,9 +166,6 @@ function Library({
   }
 
   async function remove(file: string) {
-    if (!window.confirm(`删除 ${file}？`)) {
-      return;
-    }
     try {
       await api('POST', `/${kind}/remove`, { file });
       await load();
@@ -210,10 +208,18 @@ function Library({
   return (
     <div className="card">
       <div className="row between">
-        <h2>{LABEL[kind]}</h2>
+        <h2>
+          {LABEL[kind]}
+          <Tip text="素材保存在 cache 目录。上传后的文件名不能修改，引用它的频道会按文件名查找。" />
+        </h2>
         <div className="row">
           {kind === 'subtitle' && translation?.enabled && translation.targets.length > 1 && (
-            <select value={target} onChange={(event) => setTarget(event.target.value)}>
+            <select
+              aria-label="翻译目标语言"
+              title="翻译并生成对应语言的字幕文件"
+              value={target}
+              onChange={(event) => setTarget(event.target.value)}
+            >
               {translation.targets.map((code) => (
                 <option key={code} value={code}>
                   {code}
@@ -231,7 +237,7 @@ function Library({
               只看未被引用
             </label>
           )}
-          <label className="tag" style={{ cursor: 'pointer' }}>
+          <label className="tag" style={{ cursor: 'pointer' }} title="上传新文件">
             上传
             <input
               type="file"
@@ -241,6 +247,7 @@ function Library({
               onChange={(event) => void upload(event.target.files)}
             />
           </label>
+          <Tip text="同名文件会被覆盖。字幕支持常见文本格式，视频按 ffmpeg 能力转封装。" />
         </div>
       </div>
       {kind === 'assets' && !ffmpegReady && (
@@ -258,66 +265,86 @@ function Library({
           <code className="mono">/assets/&lt;文件名&gt;</code>（本实现自定，目标未观测）。
         </p>
       )}
-      <table className="table">
-        <thead>
-          <tr>
-            <th>文件</th>
-            <th className="right">大小</th>
-            <th className="right">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {shown.map((file) => (
-            <tr key={file.file}>
-              <td className="mono ellipsis">
-                {file.file}
-                {kind === 'assets' && !referenced.has(file.file) && (
-                  <Badge tone="muted">未被引用</Badge>
-                )}
-              </td>
-              <td className="right">{formatBytes(file.bytes)}</td>
-              <td className="right">
-                <a
-                  className="ghost"
-                  href={`/panel/api/${kind}/raw/${encodeURIComponent(file.file)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  打开
-                </a>
-                {kind === 'assets' && (
-                  <button className="icon-btn" onClick={() => void copyLink(file.file)}>
-                    复制外链
-                  </button>
-                )}
-                <button className="icon-btn" onClick={() => void remove(file.file)}>
-                  删除
-                </button>
-                {kind === 'subtitle' &&
-                  translation?.enabled &&
-                  ['.srt', '.vtt'].includes(`.${file.ext}`) && (
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>文件</th>
+              <th className="right">大小</th>
+              <th className="right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((file) => (
+              <tr key={file.file}>
+                <td className="mono ellipsis" title={file.file}>
+                  {file.file}
+                  {kind === 'assets' && !referenced.has(file.file) && (
+                    <Badge tone="muted">未被引用</Badge>
+                  )}
+                </td>
+                <td className="right">{formatBytes(file.bytes)}</td>
+                <td className="right">
+                  <a
+                    className="ghost"
+                    href={`/panel/api/${kind}/raw/${encodeURIComponent(file.file)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="在新标签页打开原文件"
+                  >
+                    打开
+                  </a>
+                  {kind === 'assets' && (
                     <button
                       className="icon-btn"
-                      disabled={busy === file.file}
-                      onClick={() => void translateFile(file)}
+                      title="复制这个素材的公网地址"
+                      onClick={() => void copyLink(file.file)}
                     >
-                      {busy === file.file ? '翻译中' : '翻译'}
+                      复制外链
                     </button>
                   )}
-              </td>
-            </tr>
-          ))}
-          {shown.length === 0 && (
-            <tr>
-              <td colSpan={3} className="muted">
-                暂无文件。
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+                  <button
+                    className="icon-btn"
+                    title="删除文件；引用它的频道会变成坏引用"
+                    onClick={() => setPendingRemove(file.file)}
+                  >
+                    删除
+                  </button>
+                  {kind === 'subtitle' &&
+                    translation?.enabled &&
+                    ['.srt', '.vtt'].includes(`.${file.ext}`) && (
+                      <button
+                        className="icon-btn"
+                        title="按所选语言生成翻译字幕"
+                        disabled={busy === file.file}
+                        onClick={() => void translateFile(file)}
+                      >
+                        {busy === file.file ? '翻译中' : '翻译'}
+                      </button>
+                    )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {shown.length === 0 ? <Empty text="暂无文件。" /> : null}
+      </div>
       {message && <div className="msg ok">{message}</div>}
       {error && <div className="msg err">{error}</div>}
+
+      {pendingRemove ? (
+        <Confirm
+          title="删除文件？"
+          text={`文件「${pendingRemove}」删除后，引用它的频道会变成坏引用。`}
+          confirmText="删除文件"
+          onCancel={() => setPendingRemove(null)}
+          onConfirm={() => {
+            const file = pendingRemove;
+            setPendingRemove(null);
+            void remove(file);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -355,14 +382,21 @@ function ConvertCard({ ready }: { ready: boolean }) {
       </p>
       <div className="row">
         <input
+          aria-label="要转换的上游地址"
+          title="转换结果会写入本地素材目录，并登记到 [assets].map"
           placeholder="http(s)://…/live.ts"
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           style={{ flex: 1 }}
         />
-        <button onClick={() => void run()} disabled={!ready || busy || url.trim() === ''}>
+        <button
+          title="用 ffmpeg 把远程流转换成本地 HLS"
+          onClick={() => void run()}
+          disabled={!ready || busy || url.trim() === ''}
+        >
           {busy ? '转换中…' : '转换'}
         </button>
+        <Tip text="转换会占用 CPU 与磁盘。完成后播放器改用本地 HLS 地址。" />
       </div>
       {!ready && <div className="msg err">未检测到 ffmpeg，无法转换。</div>}
       {result && (
@@ -441,7 +475,11 @@ function CandidatesCard({ ready }: { ready: boolean }) {
     <div className="card">
       <div className="row between">
         <h2>配置中的占位视频 URL</h2>
-        <button disabled={!ready || busy || pending.length === 0} onClick={() => void convertAll()}>
+        <button
+          title="逐个转换所有未处理的占位地址"
+          disabled={!ready || busy || pending.length === 0}
+          onClick={() => void convertAll()}
+        >
           一键转换（{pending.length}）
         </button>
       </div>
@@ -470,6 +508,7 @@ function CandidatesCard({ ready }: { ready: boolean }) {
               </td>
               <td className="right">
                 <button
+                  title={item.converted ? '重新转换这个地址' : '把这个地址转换成本地 HLS'}
                   disabled={!ready || busy || item.url === ''}
                   onClick={() => void convert(item.url)}
                 >

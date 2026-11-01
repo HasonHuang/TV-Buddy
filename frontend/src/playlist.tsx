@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api } from './api';
-import { PageHead, useToast } from './ui';
+import { PageHead, Tip, useToast } from './ui';
 
 type Source = {
   id: string;
@@ -206,7 +206,10 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
         sub="聚合条目追加到每个用户的订阅（/sub/<令牌>/playlist.m3u）"
       >
         <div className="row">
-            <button onClick={() => void save()}>保存</button>
+          <button title="保存聚合源与过滤规则" onClick={() => void save()}>
+            保存
+          </button>
+          <Tip text="所有改动先保存在页面草稿里。点保存后才写入配置。" />
         </div>
       </PageHead>
       <div className="card">
@@ -214,6 +217,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
         <div className="row">
           <label>
             缓存秒数
+            <Tip text="聚合结果缓存多久。缓存期内直接复用上次结果，减少上游请求。" />
             <input
               type="number"
               value={cfg.merge_ttl_secs}
@@ -224,6 +228,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
           </label>
           <label>
             合并位置
+            <Tip text="聚合条目插在每个用户订阅的顶部或底部。" />
             <select
               value={cfg.merge_position}
               onChange={(event) => setCfg({ ...cfg, merge_position: event.target.value })}
@@ -240,6 +245,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
           <h2>聚合源</h2>
           <button
             className="ghost"
+            title="追加一个聚合源"
             onClick={() => {
               setGroupList({});
               setCfg({ ...cfg, sources: [...cfg.sources, newSource()] });
@@ -248,6 +254,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
             添加源
           </button>
         </div>
+        <div className="table-wrap">
         <table className="table">
           <thead>
             <tr>
@@ -264,12 +271,15 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
                 <td>
                   <input
                     type="checkbox"
+                    aria-label={`启用源 ${source.name || index + 1}`}
                     checked={source.enabled}
                     onChange={(event) => updateSource(index, { enabled: event.target.checked })}
                   />
                 </td>
                 <td>
                   <input
+                    aria-label={`源 ${index + 1} 名称`}
+                    title="面板里显示的源名称"
                     value={source.name}
                     onChange={(event) => updateSource(index, { name: event.target.value })}
                   />
@@ -277,6 +287,8 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
                 </td>
                 <td>
                   <input
+                    aria-label={`源 ${index + 1} 地址`}
+                    title="聚合源清单的地址"
                     value={source.url}
                     placeholder="http(s)://…/playlist.m3u"
                     onChange={(event) => updateSource(index, { url: event.target.value })}
@@ -286,6 +298,8 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
                   <input
                     type="number"
                     min={0}
+                    aria-label={`源 ${index + 1} 缓存秒数`}
+                    title="0 表示使用全局缓存时长"
                     value={source.ttl_secs}
                     onChange={(event) =>
                       updateSource(index, { ttl_secs: Number(event.target.value) || 0 })
@@ -295,6 +309,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
                 <td>
                   <button
                     className="ghost"
+                    title="读取这个源的分组列表"
                     disabled={source.url.trim() === ''}
                     onClick={() => void readGroups(index, source)}
                   >
@@ -302,12 +317,14 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
                   </button>
                   <button
                     className="ghost"
+                    title="拉取清单并显示合并结果"
                     onClick={() => void runPreview(source)}
                   >
                     预检
                   </button>
                   <button
                     className="icon-btn"
+                    title="从聚合列表移除这个源"
                     onClick={() => {
                       setGroupList({});
                       setCfg({
@@ -330,6 +347,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="card">
@@ -343,6 +361,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
             <div className="row">
               <label>
                 模式
+                <Tip text="keep 保留原分组名；map 按映射改名；merge 合并到同一个分组。" />
                 <select
                   value={source.group_mode}
                   onChange={(event) =>
@@ -356,6 +375,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
               </label>
               <label>
                 合并分组
+                <Tip text="模式为 merge 时，所有频道并入这个分组。" />
                 <input
                   value={source.merge_group}
                   onChange={(event) =>
@@ -365,6 +385,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
               </label>
               <label>
                 未列出分组
+                <Tip text="没有出现在规则里的分组保留还是丢弃。" />
                 <select
                   value={source.unlisted_groups}
                   onChange={(event) =>
@@ -378,6 +399,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
             </div>
             <label>
               分组映射
+              <Tip text="每行一条「原分组=目标分组」。模式为 map 时生效。" />
               <textarea
                 value={mapText(source.group_map)}
                 onChange={(event) =>
@@ -395,6 +417,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
                 ) : (groupList[index] as { name: string; count: number }[]).length === 0 ? (
                   <p className="muted">该源没有解析到分组。</p>
                 ) : (
+                  <div className="table-wrap">
                   <table className="table">
                     <thead>
                       <tr>
@@ -411,6 +434,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
                           <td className="right">
                             <button
                               className="ghost"
+                              title="把这个分组加入映射表"
                               onClick={() =>
                                 updateSource(index, {
                                   group_map: {
@@ -427,12 +451,14 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             )}
             <div className="row">
               <label>
                 include
+                <Tip text="只保留匹配的行。支持 group: 与 id: 前缀。" />
                 <textarea
                   value={source.include.join('\n')}
                   onChange={(event) =>
@@ -442,6 +468,7 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
               </label>
               <label>
                 exclude
+                <Tip text="匹配的频道会被排除。支持 group: 与 id: 前缀。" />
                 <textarea
                   value={source.exclude.join('\n')}
                   onChange={(event) =>
@@ -456,9 +483,13 @@ export function PlaylistPage() {  const [cfg, setCfg] = useState<PlaylistCfg>(EM
       </div>
 
       <div className="card">
-        <h2>全局排除</h2>
+        <h2>
+          全局排除
+          <Tip text="匹配的频道不会出现在任何聚合结果里。每行一个关键词。" />
+        </h2>
         <p className="muted">每行一个关键词，匹配频道名。</p>
         <textarea
+          aria-label="全局排除关键词"
           value={excludeText}
           onChange={(event) => setExcludeText(event.target.value)}
           spellCheck={false}

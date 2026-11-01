@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api } from './api';
 import { Icon } from './icons';
-import { Badge, PageHead, useToast } from './ui';
+import { Badge, Confirm, PageHead, Tip, useToast } from './ui';
 
 type HealthEntry = {
   checked_at: number;
@@ -57,8 +57,9 @@ function uptime(seconds: number): string {
   return `${minutes} 分`;
 }
 
-export function SystemPage() {
+export function SystemPage({ embedded = false }: { embedded?: boolean }) {
   const [health, setHealth] = useState<Health | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
   const [ffmpeg, setFfmpeg] = useState<{ installed: boolean; version: string | null } | null>(null);
   const [resolvers, setResolvers] = useState<ResolverList | null>(null);
   const [timeshift, setTimeshift] = useState<Timeshift | null>(null);
@@ -90,7 +91,6 @@ export function SystemPage() {
 
   /** 删除解析脚本：`POST /resolver/remove {name}`。 */
   const removeResolver = async (name: string) => {
-    if (!window.confirm(`确认删除解析脚本「${name}」？`)) return;
     try {
       await api('POST', '/resolver/remove', { name });
       ok('解析脚本已删除');
@@ -128,12 +128,33 @@ export function SystemPage() {
 
   return (
     <>
-      <PageHead icon="overview" title="系统状态" sub="健康摘要、依赖与探测结果">
-        <button className="ghost" onClick={() => void load()}>
-          <Icon name="refresh" size={14} />
-          刷新
-        </button>
-      </PageHead>
+      {embedded ? (
+        <div className="embedded-head">
+          <div>
+            <h2>系统状态</h2>
+            <span className="muted">健康摘要、依赖与探测结果</span>
+          </div>
+          <button
+            className="ghost"
+            title="重新读取健康、依赖与会话状态"
+            onClick={() => void load()}
+          >
+            <Icon name="refresh" size={14} />
+            刷新
+          </button>
+        </div>
+      ) : (
+        <PageHead icon="overview" title="系统状态" sub="健康摘要、依赖与探测结果">
+          <button
+            className="ghost"
+            title="重新读取健康、依赖与会话状态"
+            onClick={() => void load()}
+          >
+            <Icon name="refresh" size={14} />
+            刷新
+          </button>
+        </PageHead>
+      )}
       <div className="card">
         {health ? (
           <dl>
@@ -193,7 +214,8 @@ export function SystemPage() {
                 </span>
                 <button
                   className="ghost danger-text"
-                  onClick={() => void removeResolver(script.name)}
+                  title="删除这个解析脚本"
+                  onClick={() => setPendingRemove(script.name)}
                 >
                   删除
                 </button>
@@ -242,14 +264,21 @@ export function SystemPage() {
         )}
         <div className="row" style={{ marginTop: 12 }}>
           <input
+            aria-label="MPD 地址"
+            title="只解析轨道信息，不写入配置"
             placeholder="MPD 地址，例如 https://host/live.mpd"
             value={scanUrl}
             onChange={(event) => setScanUrl(event.target.value)}
             style={{ flex: 1 }}
           />
-          <button className="ghost" onClick={() => void scanMpd()}>
+          <button
+            className="ghost"
+            title="解析 MPD 中的视频、音频与字幕轨道"
+            onClick={() => void scanMpd()}
+          >
             扫描轨道
           </button>
+          <Tip text="这里只做只读解析。结果不会保存，也不会改变频道配置。" />
         </div>
         {scan && (
           <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>
@@ -262,6 +291,8 @@ export function SystemPage() {
         <h2>频道探测</h2>
         {health?.enabled === false ? (
           <p className="muted">未启用（<code className="mono">[health].enabled = false</code>）。</p>
+        ) : Object.keys(health?.entries ?? {}).length === 0 ? (
+          <p className="muted">还没有探测结果。健康探测开启后会在这里显示。</p>
         ) : (
           <dl>
             {Object.entries(health?.entries ?? {}).map(([key, entry]) => (
@@ -284,6 +315,19 @@ export function SystemPage() {
         )}
       </div>
 
+      {pendingRemove ? (
+        <Confirm
+          title="删除解析脚本？"
+          text={`解析脚本「${pendingRemove}」删除后，引用它的频道需要改用静态 URL 或其他脚本。`}
+          confirmText="删除脚本"
+          onCancel={() => setPendingRemove(null)}
+          onConfirm={() => {
+            const name = pendingRemove;
+            setPendingRemove(null);
+            void removeResolver(name);
+          }}
+        />
+      ) : null}
       {node}
     </>
   );

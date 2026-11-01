@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { Icon } from './icons';
 import { RecommendCard, type Recommend } from './lowcfg';
-import { PageHead } from './ui';
+import { Confirm, Empty, PageHead, Tip } from './ui';
 
 type CacheStats = {
   backend: string;
@@ -73,6 +73,8 @@ export function CachePage() {
   const [stats, setStats] = useState<CacheStats | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [confirmFlush, setConfirmFlush] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -88,9 +90,7 @@ export function CachePage() {
   }, [load]);
 
   const flush = async () => {
-    if (!window.confirm('清空缓存会删除已落盘的清单与切片，继续？')) {
-      return;
-    }
+    setBusy(true);
     setMessage('');
     setError('');
     try {
@@ -99,6 +99,8 @@ export function CachePage() {
       await load();
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -111,40 +113,72 @@ export function CachePage() {
         title="缓存状态"
         sub={stats ? `${stats.backend} · ${formatBytes(stats.bytes)}` : '读取中…'}
       >
-        <button className="ghost" onClick={() => void load()}>
+        <button
+          className="ghost"
+          title="重新读取缓存占用与目录统计"
+          onClick={() => void load()}
+        >
           <Icon name="refresh" size={14} />
           刷新
         </button>
-        <button onClick={() => void flush()}>清空缓存</button>
+        <button
+          title="删除已落盘的清单与切片"
+          disabled={busy}
+          onClick={() => setConfirmFlush(true)}
+        >
+          {busy ? '清理中…' : '清空缓存'}
+        </button>
       </PageHead>
       {stats && <RecommendCard recommend={stats.recommend} />}
       <div className="card">
-        <h2>缓存目录</h2>
+        <h2>
+          缓存目录
+          <Tip text="缓存目录决定切片落盘位置。内存清单缓存只保存清单索引。" />
+        </h2>
         <dl>
           <dt>目录</dt>
-          <dd className="mono ellipsis">{stats?.disk_path ?? '—'}</dd>
+          <dd className="mono ellipsis" title={stats?.disk_path ?? ''}>
+            {stats?.disk_path ?? '—'}
+          </dd>
           <dt>内存清单缓存</dt>
           <dd>{stats?.playlist_cache_entries ?? 0} 项</dd>
         </dl>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>子目录</th>
-              <th className="right">文件数</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map(([name, files]) => (
-              <tr key={name}>
-                <td className="mono">{name}</td>
-                <td className="right">{files}</td>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>子目录</th>
+                <th className="right">文件数</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {entries.map(([name, files]) => (
+                <tr key={name}>
+                  <td className="mono">{name}</td>
+                  <td className="right">{files}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {entries.length === 0 ? <Empty text="缓存目录为空。" /> : null}
+        </div>
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}
       </div>
+
+      {confirmFlush ? (
+        <Confirm
+          title="清空缓存？"
+          text="会删除已落盘的清单与切片。正在播放的频道可能需要重新起播。"
+          confirmText="清空缓存"
+          busy={busy}
+          onCancel={() => setConfirmFlush(false)}
+          onConfirm={() => {
+            setConfirmFlush(false);
+            void flush();
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -172,7 +206,11 @@ export function StatsPage() {
   return (
     <>
       <PageHead icon="stats" title="频道热度" sub={`版本 ${stats?.version ?? '—'}`}>
-        <button className="ghost" onClick={() => void load()}>
+        <button
+          className="ghost"
+          title="重新读取频道热度统计"
+          onClick={() => void load()}
+        >
           <Icon name="refresh" size={14} />
           刷新
         </button>

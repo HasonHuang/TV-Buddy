@@ -8,6 +8,7 @@
 import { useState } from 'react';
 
 import { copyText } from './api';
+import { Tip } from './ui';
 
 
 /** `GET /panel/api/cache/stats` 的 `recommend` 块。 */
@@ -70,7 +71,10 @@ export function RecommendCard({ recommend }: { recommend: Recommend }) {
     <div className="card">
       <div className="row between">
         <div>
-          <h2>CDN 推荐值</h2>
+          <h2>
+            CDN 推荐值
+            <Tip text="按最近实测的切片工作集推算。把 TTL 填进 CDN 的强制缓存规则即可。" />
+          </h2>
           <span className={`badge ${recommend.source === 'fallback' ? 'warn' : 'ok'}`}>
             {SOURCE_LABEL[recommend.source] ?? recommend.source}
           </span>
@@ -78,7 +82,11 @@ export function RecommendCard({ recommend }: { recommend: Recommend }) {
             <span className="muted"> 尚未实测，先播放一个频道或点「立即估算」</span>
           )}
         </div>
-        <button className="ghost" onClick={() => void copyTtl()}>
+        <button
+          className="ghost"
+          title="复制推荐的切片 TTL 秒数"
+          onClick={() => void copyTtl()}
+        >
           {copied ? '已复制' : '复制 TTL'}
         </button>
       </div>

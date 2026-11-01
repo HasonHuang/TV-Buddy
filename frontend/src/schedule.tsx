@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, getToken } from './api';
 import type { Channel, Group } from './groups';
-import { Badge, PageHead, useToast } from './ui';
+import { Badge, Confirm, Field, PageHead, Tip, useToast } from './ui';
 
 type Task = {
   id: string;
@@ -86,6 +86,7 @@ export function SchedulePage({
   view?: 'all' | 'schedule' | 'livestream';
 } = {}) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<number | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [timeshift, setTimeshift] = useState<TimeshiftStatus | null>(null);
   const [form, setForm] = useState({
@@ -269,64 +270,85 @@ export function SchedulePage({
         <>
           <PageHead icon="schedule" title="定时录制" sub="按时间表用 ffmpeg 录制，产物为 MKV" />
           <div className="card">
-            <div className="section-title">新建录制任务</div>
-            <div className="row form-row">
-              <select
-                value={form.group_id}
-                onChange={(event) =>
-                  setForm({ ...form, group_id: event.target.value, channel_id: '' })
-                }
-              >
-                <option value="">选择分组</option>
-                {groups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {group.name}（{group.id}）
-                  </option>
-                ))}
-              </select>
-              <select
-                value={form.channel_id}
-                onChange={(event) => setForm({ ...form, channel_id: event.target.value })}
-              >
-                <option value="">选择频道</option>
-                {channels.map((channel) => (
-                  <option key={channel.id} value={channel.id}>
-                    {channel.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                placeholder="任务名（可空）"
-                value={form.name}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
-              />
+            <div className="section-title">
+              新建录制任务
+              <Tip text="录制按开始与结束时间执行。频道需要在录制开始时可用。" />
             </div>
-            <div className="row form-row">
-              <input
-                type="datetime-local"
-                value={form.start_time}
-                onChange={(event) => setForm({ ...form, start_time: event.target.value })}
-              />
-              <input
-                type="datetime-local"
-                value={form.end_time}
-                onChange={(event) => setForm({ ...form, end_time: event.target.value })}
-              />
-              <select
-                value={form.format}
-                onChange={(event) => setForm({ ...form, format: event.target.value })}
-              >
-                <option value="mkv">MKV（需 ffmpeg）</option>
-                <option value="ts">TS</option>
-              </select>
-              <button onClick={() => void create()}>创建任务</button>
+            <div className="fields">
+              <Field label="分组" tip="录制任务按频道所属分组查找上游。">
+                <select
+                  value={form.group_id}
+                  onChange={(event) =>
+                    setForm({ ...form, group_id: event.target.value, channel_id: '' })
+                  }
+                >
+                  <option value="">选择分组</option>
+                  {groups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}（{group.id}）
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="频道" tip="只列出所选分组中的频道。">
+                <select
+                  value={form.channel_id}
+                  onChange={(event) => setForm({ ...form, channel_id: event.target.value })}
+                >
+                  <option value="">选择频道</option>
+                  {channels.map((channel) => (
+                    <option key={channel.id} value={channel.id}>
+                      {channel.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="任务名称" tip="留空时按频道与时间自动命名。">
+                <input
+                  placeholder="任务名（可空）"
+                  value={form.name}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                />
+              </Field>
+            </div>
+            <div className="fields">
+              <Field label="开始时间" tip="录制在这个本地时间开始。">
+                <input
+                  type="datetime-local"
+                  value={form.start_time}
+                  onChange={(event) => setForm({ ...form, start_time: event.target.value })}
+                />
+              </Field>
+              <Field label="结束时间" tip="录制在这个本地时间结束。">
+                <input
+                  type="datetime-local"
+                  value={form.end_time}
+                  onChange={(event) => setForm({ ...form, end_time: event.target.value })}
+                />
+              </Field>
+              <Field label="格式" tip="MKV 需要 ffmpeg；TS 直接保存原始流。">
+                <select
+                  value={form.format}
+                  onChange={(event) => setForm({ ...form, format: event.target.value })}
+                >
+                  <option value="mkv">MKV（需 ffmpeg）</option>
+                  <option value="ts">TS</option>
+                </select>
+              </Field>
+            </div>
+            <div className="row">
+              <button title="按上面的时间创建录制任务" onClick={() => void create()}>
+                创建任务
+              </button>
               <button
                 className="ghost"
+                title="读取所选频道的节目，并使用节目开始与结束时间"
                 disabled={!form.channel_id || epgBusy}
                 onClick={() => void loadEpg()}
               >
                 {epgBusy ? '读取中…' : '从 EPG 加载节目'}
               </button>
+              <Tip text="EPG 节目自带补时。点「填入」只改表单，点「排期」会立即创建任务。" />
             </div>
             {programmes !== null && (
               <div className="field">
@@ -334,6 +356,7 @@ export function SchedulePage({
                 {programmes.length === 0 ? (
                   <p className="muted">{epgNote || '该频道暂无节目单。'}</p>
                 ) : (
+                  <div className="table-wrap">
                   <table className="table">
                     <thead>
                       <tr>
@@ -355,10 +378,18 @@ export function SchedulePage({
                             {item.desc && <div className="muted ellipsis">{item.desc}</div>}
                           </td>
                           <td className="right nowrap">
-                            <button className="ghost" onClick={() => applyProgramme(item)}>
+                            <button
+                              className="ghost"
+                              title="只把节目时段填入上方表单"
+                              onClick={() => applyProgramme(item)}
+                            >
                               填入
                             </button>
-                            <button className="ghost" onClick={() => void createFromProgramme(item)}>
+                            <button
+                              className="ghost"
+                              title="直接用这个节目创建录制任务"
+                              onClick={() => void createFromProgramme(item)}
+                            >
                               排期
                             </button>
                           </td>
@@ -366,6 +397,7 @@ export function SchedulePage({
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             )}
@@ -373,6 +405,7 @@ export function SchedulePage({
 
           <div className="card">
             <div className="section-title">录制任务</div>
+            <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
@@ -404,6 +437,7 @@ export function SchedulePage({
                       {task.output_file ? (
                         <button
                           className="ghost"
+                          title="下载录制产物"
                           onClick={() => void download(task.output_file).catch(() => err('下载失败'))}
                         >
                           {sizeText(task.file_size)}
@@ -414,11 +448,19 @@ export function SchedulePage({
                     </td>
                     <td>
                       {task.status === 'recording' && (
-                        <button className="ghost" onClick={() => void stop(index)}>
+                        <button
+                          className="ghost"
+                          title="停止当前录制"
+                          onClick={() => void stop(index)}
+                        >
                           停止
                         </button>
                       )}
-                      <button className="icon-btn" onClick={() => void remove(index)}>
+                      <button
+                        className="icon-btn"
+                        title="删除任务；已生成的产物不会被删除"
+                        onClick={() => setPendingDelete(index)}
+                      >
                         删除
                       </button>
                     </td>
@@ -433,6 +475,7 @@ export function SchedulePage({
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}
@@ -449,6 +492,7 @@ export function SchedulePage({
                 0,
               )} 条。`}
           </p>
+          <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
@@ -476,7 +520,11 @@ export function SchedulePage({
                         )}
                       </td>
                       <td>
-                        <button className="ghost" onClick={() => void toggle(group, channel)}>
+                        <button
+                          className="ghost"
+                          title="实时请求频道流并保留历史切片"
+                          onClick={() => void toggle(group, channel)}
+                        >
                           {channel.livestream ? '停止' : '点亮'}
                         </button>
                       </td>
@@ -486,10 +534,24 @@ export function SchedulePage({
               )}
             </tbody>
           </table>
+          </div>
         </div>
         </>
       )}
 
+      {pendingDelete !== null ? (
+        <Confirm
+          title="删除录制任务？"
+          text="任务会从列表移除。已经生成的录像文件不会被删除。"
+          confirmText="删除任务"
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => {
+            const index = pendingDelete;
+            setPendingDelete(null);
+            void remove(index);
+          }}
+        />
+      ) : null}
       {node}
     </>
   );

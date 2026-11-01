@@ -233,32 +233,41 @@ function NetworkBlock({
         {summary}
       </summary>
       <div className="fields">
-        <Field label="代理类型">
+        <Field label="代理类型" tip="上游请求使用的代理协议。代理地址留空时不启用代理。">
           <select value={proxy.kind} onChange={(e) => onProxy({ ...proxy, kind: e.target.value })}>
             <option value="http">http</option>
             <option value="https">https</option>
             <option value="socks5">socks5</option>
           </select>
         </Field>
-        <Field label="代理地址">
+        <Field label="代理地址" tip="上游请求经过的代理。留空表示直连上游。">
           <input
             placeholder="127.0.0.1:8080，留空表示不用"
             value={proxy.addr}
             onChange={(e) => onProxy({ ...proxy, addr: e.target.value })}
           />
         </Field>
-        <Field label="代理用户名">
-          <input value={proxy.user} onChange={(e) => onProxy({ ...proxy, user: e.target.value })} />
+        <Field label="代理用户名" tip="代理需要认证时使用。">
+          <input
+            value={proxy.user}
+            autoComplete="off"
+            onChange={(e) => onProxy({ ...proxy, user: e.target.value })}
+          />
         </Field>
-        <Field label="代理密码">
+        <Field label="代理密码" tip="代理需要认证时使用。密码只保存在本地数据库。">
           <input
             type="password"
+            autoComplete="new-password"
             value={proxy.pass}
             onChange={(e) => onProxy({ ...proxy, pass: e.target.value })}
           />
         </Field>
       </div>
-      <Field label="请求头" hint="每行一条，格式为「名称: 值」。留空表示不加。">
+      <Field
+        label="请求头"
+        tip="附加到每个上游请求。上游需要特定 User-Agent 或 Referer 时使用。"
+        hint="每行一条，格式为「名称: 值」。留空表示不加。"
+      >
         <textarea
           rows={3}
           placeholder="User-Agent: VLC/3.0"
@@ -266,7 +275,11 @@ function NetworkBlock({
           onChange={(e) => onHeaders(e.target.value)}
         />
       </Field>
-      <Field label="预取覆盖" hint="留空继承上一级；数值留空表示不覆盖。">
+      <Field
+        label="预取覆盖"
+        tip="覆盖上层的预取设置。留空表示继承分组或全局配置。"
+        hint="留空继承上一级；数值留空表示不覆盖。"
+      >
         <select
           value={prefetch.state}
           onChange={(e) => onPrefetch({ ...prefetch, state: e.target.value as PrefetchForm['state'] })}
@@ -280,7 +293,7 @@ function NetworkBlock({
       </Field>
       {numeric && (
         <div className="fields">
-          <Field label="单次上限（0 = 不限）">
+          <Field label="单次上限（0 = 不限）" tip="每个清单最多预取的切片数。0 表示抓满清单窗口。">
             <input
               type="number"
               min={0}
@@ -289,7 +302,7 @@ function NetworkBlock({
               onChange={(e) => onPrefetch({ ...prefetch, limit: e.target.value })}
             />
           </Field>
-          <Field label="并发数（1-32）">
+          <Field label="并发数（1-32）" tip="同时发出的预取请求数。过高会挤占带宽。">
             <input
               type="number"
               min={1}
@@ -333,6 +346,7 @@ export function GroupsPage() {
     prefetch: PrefetchForm;
     isNew: boolean;
   } | null>(null);
+  const [confirmBatch, setConfirmBatch] = useState(false);
   const [removing, setRemoving] = useState<
     { kind: 'group' | 'channel'; gid: string; cid?: string; label: string } | null
   >(null);
@@ -635,7 +649,6 @@ export function GroupsPage() {
 
   /** 批量删除：逐个 `DELETE /groups/{gid}`。 */
   const removeSelected = async () => {
-    if (!window.confirm(`确认删除选中的 ${selected.length} 个分组？此操作不可撤销。`)) return;
     try {
       for (const gid of selected) {
         await api('DELETE', `/groups/${gid}`);
@@ -735,12 +748,15 @@ export function GroupsPage() {
       <PageHead icon="groups" title="分组管理" sub="管理直播分组与频道">
         <input
           className="search"
+          aria-label="搜索分组或频道"
+          title="按分组名称、分组 ID 或频道名称筛选"
           placeholder="搜索分组或频道"
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
         />
         <button
           className="ghost"
+          title="从 M3U 文本导入分组与频道"
           onClick={() => {
             setImporting({ kind: 'm3u', force: false });
             setImportText('');
@@ -751,6 +767,7 @@ export function GroupsPage() {
         </button>
         <button
           className="ghost"
+          title="从 JSON 追加分组；同 ID 的分组会跳过"
           onClick={() => {
             setImporting({ kind: 'json', force: false });
             setImportText('');
@@ -761,6 +778,7 @@ export function GroupsPage() {
         </button>
         <button
           className="ghost"
+          title="从 JSON 覆盖分组；同 ID 的分组会整体替换"
           onClick={() => {
             setImporting({ kind: 'json', force: true });
             setImportText('');
@@ -769,12 +787,17 @@ export function GroupsPage() {
           <Icon name="folder" size={14} />
           JSON 覆盖
         </button>
-        <button className="ghost" onClick={() => void exportAll()}>
+        <button
+          className="ghost"
+          title="导出全部分组与频道为 JSON"
+          onClick={() => void exportAll()}
+        >
           <Icon name="download" size={14} />
           导出全部
         </button>
         <button
           className={multi ? '' : 'ghost'}
+          title="进入批量导出与批量删除模式"
           onClick={() => {
             setMulti(!multi);
             setSelected([]);
@@ -783,7 +806,7 @@ export function GroupsPage() {
           <Icon name="check" size={14} />
           多选
         </button>
-        <button onClick={() => openGroup()}>
+        <button title="新建一个分组" onClick={() => openGroup()}>
           <Icon name="plus" size={14} />
           新建分组
         </button>
@@ -794,10 +817,18 @@ export function GroupsPage() {
           <div className="row between">
             <span>已选 {selected.length} 个分组</span>
             <div className="row">
-              <button className="ghost" onClick={() => void exportSelected()}>
+              <button
+                className="ghost"
+                title="导出已选分组为 JSON"
+                onClick={() => void exportSelected()}
+              >
                 批量导出
               </button>
-              <button className="ghost danger-text" onClick={() => void removeSelected()}>
+              <button
+                className="ghost danger-text"
+                title="删除已选分组及其全部频道"
+                onClick={() => setConfirmBatch(true)}
+              >
                 批量删除
               </button>
             </div>
@@ -883,7 +914,11 @@ export function GroupsPage() {
                 >
                   <Icon name="down" size={12} />
                 </button>
-                <button className="chip" onClick={() => openGroup(group)}>
+                <button
+                  className="chip"
+                  aria-label="编辑分组"
+                  onClick={() => openGroup(group)}
+                >
                   编辑
                 </button>
                 <button
@@ -895,6 +930,7 @@ export function GroupsPage() {
                 </button>
                 <button
                   className="chip danger"
+                  aria-label="删除分组"
                   onClick={() =>
                     setRemoving({ kind: 'group', gid: group.id, label: group.name || group.id })
                   }
@@ -902,7 +938,10 @@ export function GroupsPage() {
                   删除
                 </button>
                 <button
-                  className="chip primary" onClick={() => openChannel(group.id)}>
+                  className="chip primary"
+                  aria-label="新增频道"
+                  onClick={() => openChannel(group.id)}
+                >
                   <Icon name="plus" size={13} />
                   频道
                 </button>
@@ -984,11 +1023,16 @@ export function GroupsPage() {
                         <Icon name="search" size={13} />
                       </button>
                     )}
-                    <button className="chip" onClick={() => openChannel(group.id, channel)}>
+                    <button
+                      className="chip"
+                      aria-label="编辑频道"
+                      onClick={() => openChannel(group.id, channel)}
+                    >
                       编辑
                     </button>
                     <button
                       className="chip danger"
+                      aria-label="删除频道"
                       onClick={() =>
                         setRemoving({
                           kind: 'channel',
@@ -1023,7 +1067,11 @@ export function GroupsPage() {
             </>
           }
         >
-          <Field label="分组 ID" hint="只用于地址与配置键，建成后不能改。">
+          <Field
+            label="分组 ID"
+            tip="用于订阅地址与配置键。建成后不能修改。"
+            hint="只用于地址与配置键，建成后不能改。"
+          >
             <input
               value={groupForm.form.id}
               disabled={!groupForm.isNew}
@@ -1033,7 +1081,7 @@ export function GroupsPage() {
               }
             />
           </Field>
-          <Field label="显示名称">
+          <Field label="显示名称" tip="面板与播放器里显示的分组名称。">
             <input
               value={groupForm.form.name}
               placeholder="如 央视频道"
@@ -1043,7 +1091,7 @@ export function GroupsPage() {
             />
           </Field>
           <div className="fields">
-            <Field label="工作模式">
+            <Field label="工作模式" tip="决定切片代理方式。PROXY 适合大多数 HLS 源；DASH 需要上游支持 MPD。">
               <select
                 value={groupForm.form.mode}
                 onChange={(event) =>
@@ -1060,7 +1108,7 @@ export function GroupsPage() {
                 ))}
               </select>
             </Field>
-            <Field label="内容格式">
+            <Field label="内容格式" tip="决定下发的清单格式。HLS 使用 m3u8；DASH 使用 mpd。">
               <select
                 value={groupForm.form.format}
                 onChange={(event) =>
@@ -1078,7 +1126,10 @@ export function GroupsPage() {
               </select>
             </Field>
           </div>
-          <Field label="访问范围">
+          <Field
+            label="访问范围"
+            tip="公开分组会出现在订阅列表。隐藏、归档或开放分组按对应规则处理。"
+          >
             <select
               value={groupForm.form.access}
               onChange={(event) =>
@@ -1125,7 +1176,7 @@ export function GroupsPage() {
           }
         >
           <div className="fields">
-            <Field label="频道 ID" hint="建成后不能改。">
+            <Field label="频道 ID" tip="用于订阅地址与配置键。建成后不能修改。" hint="建成后不能改。">
               <input
                 value={channelForm.form.id}
                 disabled={!channelForm.isNew}
@@ -1138,7 +1189,7 @@ export function GroupsPage() {
                 }
               />
             </Field>
-            <Field label="频道名称">
+            <Field label="频道名称" tip="面板与播放器里显示的频道名称。">
               <input
                 value={channelForm.form.name}
                 placeholder="如 CCTV-1"
@@ -1152,7 +1203,7 @@ export function GroupsPage() {
             </Field>
           </div>
           <div className="fields">
-            <Field label="上游 URL">
+            <Field label="上游 URL" tip="频道原始地址。系统从这里拉取清单与切片。">
               <input
                 value={channelForm.form.url}
                 placeholder="http://upstream/index.m3u8"
@@ -1164,7 +1215,7 @@ export function GroupsPage() {
                 }
               />
             </Field>
-            <Field label="频道 Logo URL">
+            <Field label="频道 Logo URL" tip="播放器列表里显示的台标地址。可以填站内路径或外部图片地址。">
               <input
                 value={channelForm.form.logo}
                 placeholder="/logo/x.png 或 https://…"
@@ -1178,7 +1229,7 @@ export function GroupsPage() {
             </Field>
           </div>
           <div className="fields">
-            <Field label="tvg-id" hint="留空则同频道 ID。">
+            <Field label="tvg-id" tip="用于匹配 EPG 的频道标识。留空时使用频道 ID。" hint="留空则同频道 ID。">
               <input
                 value={channelForm.form.tvgId}
                 onChange={(event) =>
@@ -1189,7 +1240,7 @@ export function GroupsPage() {
                 }
               />
             </Field>
-            <Field label="tvg-name" hint="留空则同频道名称。">
+            <Field label="tvg-name" tip="用于匹配 EPG 的频道名称。留空时使用频道名称。" hint="留空则同频道名称。">
               <input
                 value={channelForm.form.tvgName}
                 onChange={(event) =>
@@ -1204,7 +1255,10 @@ export function GroupsPage() {
 
           <hr className="divider" />
           <div className="section-title">上游解析</div>
-          <Field label="上游类型">
+          <Field
+            label="上游类型"
+            tip="静态 URL 直接拉取；解析脚本先运行脚本，再使用脚本输出。"
+          >
             <select
               value={channelForm.form.upstream}
               onChange={(event) =>
@@ -1223,7 +1277,11 @@ export function GroupsPage() {
           </Field>
           {channelForm.form.upstream === 'script' && (
             <div className="fields">
-              <Field label="脚本" hint="位于 <缓存目录>/resolvers/。">
+              <Field
+                label="脚本"
+                tip="解析脚本放在缓存目录的 resolvers 下。脚本输出作为上游地址。"
+                hint="位于 <缓存目录>/resolvers/。"
+              >
                 <select
                   value={channelForm.form.script}
                   onChange={(event) =>
@@ -1241,7 +1299,7 @@ export function GroupsPage() {
                   ))}
                 </select>
               </Field>
-              <Field label="脚本参数">
+              <Field label="脚本参数" tip="传给解析脚本的参数。不需要时留空。">
                 <input
                   value={channelForm.form.scriptArg}
                   onChange={(event) =>
@@ -1252,7 +1310,7 @@ export function GroupsPage() {
                   }
                 />
               </Field>
-              <Field label="缓存秒数">
+              <Field label="缓存秒数" tip="脚本结果的缓存时间。0 表示每次都重新运行脚本。">
                 <input
                   type="number"
                   min={0}
@@ -1290,6 +1348,7 @@ export function GroupsPage() {
             <div className="row between" style={{ marginBottom: 8 }}>
               <span className="muted">保留历史切片，支持 ?playseek= 回看。</span>
               <Switch
+                label="开启回看"
                 checked={channelForm.form.livestream}
                 onChange={(livestream) =>
                   setChannelForm({ ...channelForm, form: { ...channelForm.form, livestream } })
@@ -1298,7 +1357,7 @@ export function GroupsPage() {
             </div>
             {channelForm.form.livestream && (
               <div className="fields">
-                <Field label="保留小时数" hint="0 表示不限制。">
+                <Field label="保留小时数" tip="历史切片保留的时长。0 表示不按时间限制。" hint="0 表示不限制。">
                   <input
                     type="number"
                     min={0}
@@ -1355,14 +1414,21 @@ export function GroupsPage() {
               <button className="ghost" onClick={() => setImporting(null)}>
                 取消
               </button>
-              <button disabled={importText.trim() === ''} onClick={() => void submitImport()}>
+              <button
+                title="按当前文本导入分组"
+                disabled={importText.trim() === ''}
+                onClick={() => void submitImport()}
+              >
                 导入
               </button>
             </>
           }
         >
           {importing.kind === 'm3u' ? (
-            <Field label="同名分组处理">
+            <Field
+              label="同名分组处理"
+              tip="append 跳过同名分组；merge 补齐频道；replace 整体替换。"
+            >
               <select
                 value={m3uMode}
                 onChange={(event) =>
@@ -1381,7 +1447,10 @@ export function GroupsPage() {
                 : '按分组 ID 追加：已存在的分组跳过，其余新增。'}
             </p>
           )}
-          <Field label={importing.kind === 'm3u' ? 'M3U 文本' : '分组 JSON 数组'}>
+          <Field
+            label={importing.kind === 'm3u' ? 'M3U 文本' : '分组 JSON 数组'}
+            tip="导入会新增或覆盖分组。重复的频道 ID 按所选策略处理。"
+          >
             <textarea
               style={{ minHeight: 300 }}
               placeholder={
@@ -1411,6 +1480,19 @@ export function GroupsPage() {
           </pre>
         </Modal>
       )}
+
+      {confirmBatch ? (
+        <Confirm
+          title="批量删除分组？"
+          text={`将删除选中的 ${selected.length} 个分组及其全部频道。这个操作不能撤销。`}
+          confirmText="删除选中分组"
+          onCancel={() => setConfirmBatch(false)}
+          onConfirm={() => {
+            setConfirmBatch(false);
+            void removeSelected();
+          }}
+        />
+      ) : null}
 
       {removing && (
         <Confirm

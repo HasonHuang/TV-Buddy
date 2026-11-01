@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getRole, getToken, setRole, setToken, UNAUTHORIZED_EVENT } from './api';
 import { Icon, type IconName } from './icons';
-import { PageHead, useToast } from './ui';
+import { Confirm, PageHead, Tip, useToast } from './ui';
 import { GroupsPage } from './groups';
 import { EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
@@ -90,17 +90,25 @@ function Login({ onDone }: { onDone: () => void }) {
         <div className="name">TV Buddy</div>
         <div className="tagline">Management Console</div>
         <form onSubmit={submit}>
-          <label htmlFor="user">用户名</label>
+          <label htmlFor="user">
+            用户名
+            <Tip text="面板账号。首次安装的账号与初始口令在安装输出中。" />
+          </label>
           <input
             id="user"
+            autoComplete="username"
             placeholder="用户名"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
           />
-          <label htmlFor="pass">密码</label>
+          <label htmlFor="pass">
+            密码
+            <Tip text="登录口令。连续失败会触发临时锁定。" />
+          </label>
           <input
             id="pass"
             type="password"
+            autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -247,6 +255,7 @@ function Overview() {
         <div className="row">
           <button
             className="ghost"
+            title="删除已落盘的清单与切片，释放磁盘"
             disabled={busy !== ''}
             onClick={() => void action('flush', '/cache/flush', '本地缓存已清空')}
           >
@@ -255,18 +264,25 @@ function Overview() {
           </button>
           <button
             className="ghost"
+            title="从数据库重新读取配置并立即生效"
             disabled={busy !== ''}
             onClick={() => void action('reload', '/reload', '配置已热重载')}
           >
             <Icon name="refresh" size={14} />
             {busy === 'reload' ? '重载中…' : '热重载配置'}
           </button>
-          <button className="ghost" disabled={busy !== ''} onClick={() => void load()}>
+          <button
+            className="ghost"
+            title="重新读取运行状态与实时指标"
+            disabled={busy !== ''}
+            onClick={() => void load()}
+          >
             <Icon name="refresh" size={14} />
             刷新状态
           </button>
           <button
             className="ghost"
+            title="跳到我的订阅页，查看并复制订阅地址"
             onClick={() => window.dispatchEvent(new CustomEvent('tv-buddy:goto-my'))}
           >
             <Icon name="download" size={14} />
@@ -313,6 +329,9 @@ function Overview() {
 
 function Shell({ onLogout }: { onLogout: () => void }) {
   const [section, setSection] = useState<SectionId>('dashboard');
+  /** 设置页有没有未保存修改；离开前先确认。 */
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [pendingNav, setPendingNav] = useState<SectionId | null>(null);
   /** 侧栏与页脚用的版本与运行时长。 */
   const [meta, setMeta] = useState<{ version: string; uptime: number } | null>(null);
   /** `[features]` 的开关键。为 `false` 的分区不显示入口。 */
@@ -348,11 +367,20 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       .catch(() => setMeta(null));
   }, [isAdmin]);
 
+  /** 切分区。设置页有未保存修改时先弹确认。 */
+  const go = (next: SectionId) => {
+    if (section === 'settings' && settingsDirty) {
+      setPendingNav(next);
+      return;
+    }
+    setSection(next);
+  };
+
   useEffect(() => {
-    const gotoMy = () => setSection('my');
+    const gotoMy = () => go('my');
     window.addEventListener('tv-buddy:goto-my', gotoMy);
     return () => window.removeEventListener('tv-buddy:goto-my', gotoMy);
-  }, []);
+  });
 
   const logout = async () => {
     try {
@@ -388,7 +416,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               key={item.id}
               className={`nav-item${active === item.id ? ' active' : ''}`}
               title={item.label}
-              onClick={() => setSection(item.id)}
+              aria-label={item.label}
+              aria-current={active === item.id ? 'page' : undefined}
+              onClick={() => go(item.id)}
             >
               <Icon name={item.icon} size={15} />
               <span className="nav-label">{item.label}</span>
@@ -408,7 +438,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
         <div className="sidebar-foot">
-          <button className="ghost" onClick={() => void logout()}>
+          <button
+            className="ghost"
+            title="结束当前面板会话并回到登录页"
+            onClick={() => void logout()}
+          >
             <Icon name="close" size={13} />
             <span className="nav-label">退出登录</span>
           </button>
@@ -419,7 +453,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         {active === 'dashboard' && <Overview />}
         {active === 'cache' && <CachePage />}
         {active === 'groups' && <GroupsPage />}
-        {active === 'settings' && <SettingsPage />}
+        {active === 'settings' && <SettingsPage onDirtyChange={setSettingsDirty} />}
         {active === 'security' && <SecurityPage />}
         {active === 'users' && <UsersPage />}
         {active === 'stats' && <StatsPage />}
@@ -439,6 +473,21 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <span className="mono">{meta ? `v${meta.version}` : ''}</span>
         </footer>
       </main>
+
+      {pendingNav ? (
+        <Confirm
+          title="离开系统设置？"
+          text="当前有未保存的修改。离开后这些修改会丢失。"
+          confirmText="放弃修改并离开"
+          onCancel={() => setPendingNav(null)}
+          onConfirm={() => {
+            const next = pendingNav;
+            setPendingNav(null);
+            setSettingsDirty(false);
+            setSection(next);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

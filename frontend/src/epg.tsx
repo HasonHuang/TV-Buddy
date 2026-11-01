@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { Empty, Tip } from './ui';
 import './style.css';
 
 type Channel = {
@@ -45,6 +46,7 @@ function App() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Programme[] | null>(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   // 频道表：进入页面取一次。
   useEffect(() => {
@@ -60,7 +62,8 @@ function App() {
         setChannels(list);
         setActive(list[0]?.id ?? '');
       })
-      .catch(() => setError('节目单尚未生成。请稍后再试。'));
+      .catch(() => setError('节目单尚未生成。请稍后再试。'))
+      .finally(() => setLoading(false));
   }, []);
 
   // 选中频道的节目。
@@ -91,67 +94,113 @@ function App() {
   }, [query]);
 
   const names = new Map(channels.map((channel) => [channel.id, channelName(channel)]));
+  const shown = results ?? programmes;
 
   return (
-    <div className="page">
-      <div className="card">
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="public-page">
+      <header className="public-head">
+        <div className="public-head-text">
           <h1>节目单</h1>
+          <p className="muted">
+            按频道浏览节目。搜索会跨频道匹配节目名与简介。
+          </p>
+        </div>
+        <label className="public-search">
+          <span>
+            搜索节目
+            <Tip text="关键词会跨频道匹配节目名与简介，结果替换右侧列表。" />
+          </span>
           <input
-            className="field"
-            placeholder="搜索节目"
+            aria-label="搜索节目"
+            placeholder="输入节目名或关键词"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            style={{ maxWidth: 260 }}
           />
+        </label>
+      </header>
+
+      {error ? (
+        <div className="card">
+          <Empty text={error} icon="epg" />
         </div>
-        {error && <p className="danger-text">{error}</p>}
-        {!error && channels.length === 0 && <p className="muted">加载中…</p>}
-      </div>
-
-      <div className="shell" style={{ marginTop: 16 }}>
-        <aside className="sidebar" style={{ minWidth: 180 }}>
-          {channels.map((channel) => (
-            <button
-              key={channel.id}
-              className={`nav-item${channel.id === active ? ' active' : ''}`}
-              onClick={() => {
-                setQuery('');
-                setActive(channel.id);
-              }}
-              style={{ width: '100%', textAlign: 'left' }}
-            >
-              {channelName(channel)}
-            </button>
-          ))}
-        </aside>
-
-        <div className="content">
-          <div className="card">
-            <h2 style={{ fontSize: 16, marginTop: 0 }}>
-              {results ? `搜索结果（${results.length}）` : names.get(active) ?? ''}
-            </h2>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {(results ?? programmes).map((programme, index) => (
-                <li
-                  key={`${programme.channel}-${programme.start}-${index}`}
-                  style={{ padding: '8px 0', borderBottom: '1px solid var(--line, #2a2a2a)' }}
+      ) : (
+        <div className="epg-layout">
+          <aside className="epg-side">
+            <div className="epg-side-title">频道</div>
+            <div className="epg-channel-list">
+              {channels.map((channel) => (
+                <button
+                  key={channel.id}
+                  className={`epg-channel${channel.id === active ? ' active' : ''}`}
+                  title={channelName(channel)}
+                  onClick={() => {
+                    setQuery('');
+                    setActive(channel.id);
+                  }}
                 >
-                  <div className="row" style={{ gap: 12, alignItems: 'baseline' }}>
-                    <span className="mono muted nowrap">
-                      {formatTime(programme.start)} – {formatTime(programme.stop).slice(6)}
-                    </span>
-                    <span>{programme.title || '（无标题）'}</span>
-                    {results && <span className="tag">{names.get(programme.channel) ?? programme.channel}</span>}
-                  </div>
-                  {programme.desc && <p className="muted ellipsis" style={{ margin: '4px 0 0' }}>{programme.desc}</p>}
-                </li>
+                  {channelName(channel)}
+                </button>
               ))}
-            </ul>
-            {(results ?? programmes).length === 0 && <p className="muted">没有节目。</p>}
-          </div>
+              {channels.length === 0 && !loading ? (
+                <p className="muted">暂无频道。</p>
+              ) : null}
+            </div>
+          </aside>
+
+          <section className="epg-main">
+            <div className="card">
+              <div className="row between" style={{ marginBottom: 8 }}>
+                <h2 style={{ marginBottom: 0 }}>
+                  {results ? `搜索结果（${results.length}）` : names.get(active) ?? '节目单'}
+                </h2>
+                {query.trim() !== '' ? (
+                  <button
+                    className="ghost"
+                    title="清空搜索并返回频道节目"
+                    onClick={() => setQuery('')}
+                  >
+                    清除搜索
+                  </button>
+                ) : null}
+              </div>
+
+              {loading ? <p className="muted">加载中…</p> : null}
+              {!loading && shown.length === 0 ? (
+                <Empty
+                  text={results ? '没有匹配的节目。' : '该频道暂无节目。'}
+                  icon="epg"
+                />
+              ) : (
+                <ul className="epg-list">
+                  {shown.map((programme, index) => (
+                    <li
+                      key={`${programme.channel}-${programme.start}-${index}`}
+                      className="epg-item"
+                    >
+                      <div className="epg-time mono">
+                        {formatTime(programme.start)} – {formatTime(programme.stop).slice(6)}
+                      </div>
+                      <div className="epg-body">
+                        <div className="epg-title">
+                          {programme.title || '（无标题）'}
+                          {results ? (
+                            <span className="tag">
+                              {names.get(programme.channel) ?? programme.channel}
+                            </span>
+                          ) : null}
+                        </div>
+                        {programme.desc ? (
+                          <p className="muted epg-desc">{programme.desc}</p>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
         </div>
-      </div>
+      )}
     </div>
   );
 }

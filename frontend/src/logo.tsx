@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken } from './api';
-import { PageHead } from './ui';
+import { Confirm, Empty, Modal, PageHead, Tip } from './ui';
 import './style.css';
 
 type Logo = {
@@ -157,6 +157,10 @@ export function LogosPage() {
   const [animReport, setAnimReport] = useState<AnimateReport | null>(null);
   /** 批量操作进行中。为真时禁用批量与上传入口。 */
   const [busy, setBusy] = useState(false);
+  const [pendingAction, setPendingAction] = useState<
+    { kind: 'animate-all' } | { kind: 'restore-all' } | { kind: 'remove'; file: string } | null
+  >(null);
+  const [renaming, setRenaming] = useState<{ file: string; name: string } | null>(null);
 
   const load = useCallback(async () => {
     const response = await fetch('/logo/api/list');
@@ -252,9 +256,6 @@ export function LogosPage() {
       setMessage('没有需要生成动效的台标：只处理 .webp，且跳过已有动效的');
       return;
     }
-    if (!window.confirm(`给 ${targets.length} 个台标生成动效？原图会备份到 .orig/。`)) {
-      return;
-    }
     setBusy(true);
     let done = 0;
     const failed: string[] = [];
@@ -285,9 +286,6 @@ export function LogosPage() {
       setMessage('没有可还原的台标');
       return;
     }
-    if (!window.confirm(`还原 ${targets.length} 个台标的静态原图？`)) {
-      return;
-    }
     setBusy(true);
     let done = 0;
     const failed: string[] = [];
@@ -307,13 +305,11 @@ export function LogosPage() {
     await load();
   }
 
-  async function rename(file: string, current: string) {
-    const name = window.prompt('新名称（扩展名不变）', current);
-    if (!name) {
-      return;
-    }
+  async function submitRename() {
+    if (!renaming || renaming.name.trim() === '') return;
     try {
-      await api('POST', '/logo/rename', { file, name });
+      await api('POST', '/logo/rename', { file: renaming.file, name: renaming.name.trim() });
+      setRenaming(null);
       setMessage('已重命名');
       await load();
     } catch (error) {
@@ -322,9 +318,6 @@ export function LogosPage() {
   }
 
   async function remove(file: string) {
-    if (!window.confirm(`删除 ${file}？引用该文件的频道会变成坏引用。`)) {
-      return;
-    }
     try {
       await api('POST', '/logo/delete', { file });
       await load();
@@ -355,13 +348,27 @@ export function LogosPage() {
       <PageHead icon="logo" title="台标库" sub="上传、转码与匹配频道台标">
         {authed && (
           <>
-            <button className="ghost" disabled={busy} onClick={() => void animateAll()}>
+            <button
+              className="ghost"
+              title="给所有静态 WebP 台标生成动效"
+              disabled={busy}
+              onClick={() => setPendingAction({ kind: 'animate-all' })}
+            >
               一键全部动态化
             </button>
-            <button className="ghost" disabled={busy} onClick={() => void restoreAll()}>
+            <button
+              className="ghost"
+              title="用 .orig 备份还原所有动效台标"
+              disabled={busy}
+              onClick={() => setPendingAction({ kind: 'restore-all' })}
+            >
               全部还原静态
             </button>
-            <label className="ghost" style={{ cursor: 'pointer', height: 32, paddingTop: 7 }}>
+            <label
+              className="ghost"
+              title="选择图片上传；同名文件会被覆盖"
+              style={{ cursor: 'pointer', height: 32, paddingTop: 7 }}
+            >
               上传台标
               <input
                 type="file"
@@ -394,6 +401,7 @@ export function LogosPage() {
           <div className="row">
             <label>
               最大边
+              <Tip text="上传前按最长边等比缩放。超过这个值的图片会缩小，避免占用过多内存。" />
               <input
                 type="number"
                 min={16}
@@ -405,6 +413,7 @@ export function LogosPage() {
             </label>
             <label>
               质量
+              <Tip text="WebP 编码质量。数值越高越清晰，文件也越大。" />
               <input
                 type="number"
                 min={1}
@@ -421,6 +430,7 @@ export function LogosPage() {
                 onChange={(event) => setOpts({ ...opts, webp: event.target.checked })}
               />
               转 WebP
+              <Tip text="在浏览器里先转成 WebP 再上传。透明背景会保留。" />
             </label>
             <span className="muted">
               上载前在浏览器里按最长边等比缩放并转码（目标同：服务端上载不转码）。
@@ -437,11 +447,11 @@ export function LogosPage() {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
-        {logos.length === 0 && <p className="muted">台标库为空。</p>}
+        {logos.length === 0 && <Empty text="台标库为空。" icon="logo" />}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
             gap: 12,
           }}
         >
@@ -461,11 +471,16 @@ export function LogosPage() {
               </div>
               {authed && (
                 <div className="row" style={{ justifyContent: 'center' }}>
-                  <button className="ghost" onClick={() => void rename(logo.file, logo.name)}>
+                  <button
+                    className="ghost"
+                    title="修改显示名称，文件扩展名不变"
+                    onClick={() => setRenaming({ file: logo.file, name: logo.name })}
+                  >
                     重命名
                   </button>
                   <button
                     className="ghost"
+                    title="把静态台标生成为动画 WebP"
                     onClick={() => {
                       setAnimReport(null);
                       setAnimating({ file: logo.file, effect: EFFECTS[0].value });
@@ -474,11 +489,19 @@ export function LogosPage() {
                     动效
                   </button>
                   {logo.has_original && (
-                    <button className="ghost" onClick={() => void restore(logo.file)}>
+                    <button
+                      className="ghost"
+                      title="用 .orig 备份还原静态原图"
+                      onClick={() => void restore(logo.file)}
+                    >
                       还原
                     </button>
                   )}
-                  <button className="icon-btn" onClick={() => void remove(logo.file)}>
+                  <button
+                    className="icon-btn"
+                    title="删除台标；引用它的频道会变成坏引用"
+                    onClick={() => setPendingAction({ kind: 'remove', file: logo.file })}
+                  >
                     删除
                   </button>
                 </div>
@@ -498,6 +521,7 @@ export function LogosPage() {
           <div className="row">
             <label>
               效果
+              <Tip text="选择台标进入与退出的动画方式。生成后覆盖原图，原图备份到 .orig。" />
               <select
                 value={animating.effect}
                 onChange={(event) => setAnimating({ ...animating, effect: event.target.value })}
@@ -509,7 +533,12 @@ export function LogosPage() {
                 ))}
               </select>
             </label>
-            <button onClick={() => void generate(animating.file)}>生成</button>
+            <button
+              title="生成动画并覆盖当前台标，原图备份到 .orig"
+              onClick={() => void generate(animating.file)}
+            >
+              生成
+            </button>
             <button className="ghost" onClick={() => setAnimating(null)}>
               取消
             </button>
@@ -525,50 +554,126 @@ export function LogosPage() {
 
       {authed && report && report.missing_channels.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
-          <h2>缺台标的频道</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>分组</th>
-                <th>频道</th>
-                <th>台标</th>
-                <th className="right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.missing_channels.slice(0, 100).map((channel) => {
-                const key = channelKey(channel);
-                return (
-                  <tr key={key}>
-                    <td className="mono">{channel.gid}</td>
-                    <td>{channel.name}</td>
-                    <td>
-                      <select
-                        value={picked[key] ?? suggestions[key] ?? ''}
-                        onChange={(event) =>
-                          setPicked({ ...picked, [key]: event.target.value })
-                        }
-                      >
-                        <option value="">（选择文件）</option>
-                        {logos.map((logo) => (
-                          <option key={logo.file} value={logo.file}>
-                            {logo.file}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="right">
-                      <button className="ghost" onClick={() => void apply(channel)}>
-                        应用
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <h2>
+            缺台标的频道
+            <Tip text="选好文件后点「应用」，频道配置会写入对应的台标地址。" />
+          </h2>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>分组</th>
+                  <th>频道</th>
+                  <th>台标</th>
+                  <th className="right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.missing_channels.slice(0, 100).map((channel) => {
+                  const key = channelKey(channel);
+                  return (
+                    <tr key={key}>
+                      <td className="mono">{channel.gid}</td>
+                      <td>{channel.name}</td>
+                      <td>
+                        <select
+                          aria-label={`为 ${channel.name} 选择台标`}
+                          title="选择要应用到该频道的台标文件"
+                          value={picked[key] ?? suggestions[key] ?? ''}
+                          onChange={(event) =>
+                            setPicked({ ...picked, [key]: event.target.value })
+                          }
+                        >
+                          <option value="">（选择文件）</option>
+                          {logos.map((logo) => (
+                            <option key={logo.file} value={logo.file}>
+                              {logo.file}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="right">
+                        <button
+                          className="ghost"
+                          title="把所选台标写入频道配置"
+                          onClick={() => void apply(channel)}
+                        >
+                          应用
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
+
+      {pendingAction ? (
+        <Confirm
+          title={
+            pendingAction.kind === 'animate-all'
+              ? '批量生成动效？'
+              : pendingAction.kind === 'restore-all'
+                ? '批量还原静态？'
+                : '删除台标？'
+          }
+          text={
+            pendingAction.kind === 'animate-all'
+              ? '所有静态 WebP 台标会生成动画。原图先备份到 .orig，完成后可还原。'
+              : pendingAction.kind === 'restore-all'
+                ? '所有带备份的台标会恢复为静态原图。动效会被覆盖。'
+                : `删除「${pendingAction.file}」后，引用它的频道会变成坏引用。`
+          }
+          confirmText={
+            pendingAction.kind === 'animate-all'
+              ? '生成动效'
+              : pendingAction.kind === 'restore-all'
+                ? '还原静态'
+                : '删除台标'
+          }
+          busy={busy}
+          onCancel={() => setPendingAction(null)}
+          onConfirm={() => {
+            const action = pendingAction;
+            setPendingAction(null);
+            if (action.kind === 'animate-all') void animateAll();
+            else if (action.kind === 'restore-all') void restoreAll();
+            else void remove(action.file);
+          }}
+        />
+      ) : null}
+
+      {renaming ? (
+        <Modal
+          title="重命名台标"
+          onClose={() => setRenaming(null)}
+          footer={
+            <>
+              <button className="ghost" onClick={() => setRenaming(null)}>
+                取消
+              </button>
+              <button
+                disabled={renaming.name.trim() === ''}
+                onClick={() => void submitRename()}
+              >
+                保存
+              </button>
+            </>
+          }
+        >
+          <label>
+            新名称
+            <Tip text="只改显示名称，文件扩展名保持不变。" />
+          </label>
+          <input
+            autoFocus
+            value={renaming.name}
+            onChange={(event) => setRenaming({ ...renaming, name: event.target.value })}
+          />
+        </Modal>
+      ) : null}
     </>
   );
 }

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
 import { Icon } from './icons';
-import { PageHead, useToast } from './ui';
+import { Empty, PageHead, Tip, useToast } from './ui';
 
 type Channel = { id: string; name: string; url: string };
 type Group = { id: string; name: string; channels: Channel[] };
@@ -60,30 +60,61 @@ export function MySubsPage() {
         title="我的订阅"
         sub={`${groups.length} 个分组 · ${total} 个频道`}
       >
-        <button className="ghost" onClick={() => void load()} disabled={loading}>
+        <button
+          className="ghost"
+          title="重新读取你的订阅地址与授权频道"
+          onClick={() => void load()}
+          disabled={loading}
+        >
           <Icon name="refresh" size={14} />
           {loading ? '刷新中…' : '刷新'}
         </button>
       </PageHead>
 
       <div className="card">
-        <h2>订阅地址</h2>
+        <h2>
+          订阅地址
+          <Tip text="地址内带你的专属令牌。任何人拿到它都能播放你可见的频道。" />
+        </h2>
         <p className="muted">
           把这个地址填进播放器的 M3U 订阅。地址里带你的专属令牌，不要外传。
         </p>
         <div className="row form-row">
-          <input readOnly value={me?.playlist_link ?? ''} className="mono" />
-          <button className="chip" onClick={() => void copy(me?.playlist_link, '订阅地址')}>
+          <input
+            readOnly
+            aria-label="订阅地址"
+            title={me?.playlist_link ?? ''}
+            value={me?.playlist_link ?? ''}
+            className="mono"
+          />
+          <button
+            className="chip"
+            title="复制完整订阅地址"
+            onClick={() => void copy(me?.playlist_link, '订阅地址')}
+          >
             复制
           </button>
         </div>
         {me?.epg_link && (
           <>
-            <h2>EPG 地址</h2>
+            <h2>
+              EPG 地址
+              <Tip text="节目单只包含你可见的频道。播放器支持时填这里。" />
+            </h2>
             <p className="muted">只含你可见频道的节目单。播放器支持时填这里。</p>
             <div className="row form-row">
-              <input readOnly value={me.epg_link} className="mono" />
-              <button className="chip" onClick={() => void copy(me.epg_link, 'EPG 地址')}>
+              <input
+                readOnly
+                aria-label="EPG 地址"
+                title={me.epg_link}
+                value={me.epg_link}
+                className="mono"
+              />
+              <button
+                className="chip"
+                title="复制完整 EPG 地址"
+                onClick={() => void copy(me.epg_link, 'EPG 地址')}
+              >
                 复制
               </button>
             </div>
@@ -92,7 +123,9 @@ export function MySubsPage() {
       </div>
 
       {groups.length === 0 && !loading && (
-        <div className="card muted">还没有授权任何频道。请联系管理员。</div>
+        <div className="card">
+          <Empty text="还没有授权任何频道，请联系管理员。" icon="subs" />
+        </div>
       )}
 
       {groups.map((group) => (
@@ -114,6 +147,7 @@ export function MySubsPage() {
                   <td className="right">
                     <button
                       className="chip"
+                      title="复制这个频道的播放地址"
                       onClick={() => void copyText(channel.url).then((done) =>
                         done ? ok('播放地址已复制') : err('复制失败'),
                       )}

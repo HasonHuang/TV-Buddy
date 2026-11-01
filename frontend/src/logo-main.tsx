@@ -6,7 +6,7 @@ import { LogosPage } from './logo';
 import './style.css';
 
 createRoot(document.getElementById('root')!).render(
-  <div className="page">
+  <div className="public-page">
     <LogosPage />
   </div>,
 );

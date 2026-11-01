@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
 import { Icon } from './icons';
-import { Badge, Field, Modal, PageHead, Switch, useToast } from './ui';
+import { Badge, Confirm, Field, Modal, PageHead, Switch, Tip, useToast } from './ui';
 
 type Role = 'admin' | 'user';
 
@@ -121,6 +121,10 @@ export function UsersPage() {
   const [tokenLabel, setTokenLabel] = useState('');
   const [tokenTtl, setTokenTtl] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [passwordFor, setPasswordFor] = useState<User | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmRemove, setConfirmRemove] = useState<User | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState<AccessToken | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -176,25 +180,31 @@ export function UsersPage() {
     }
   };
 
-  const resetPassword = async (user: User) => {
-    const password = window.prompt(`给 ${user.username} 设置新密码`, '');
-    if (!password) return;
+  const resetPassword = async () => {
+    if (!passwordFor || newPassword === '') return;
+    setBusy(true);
     try {
-      await api('PUT', `/users/${user.id}/password`, { password });
+      await api('PUT', `/users/${passwordFor.id}/password`, { password: newPassword });
       ok('密码已重置，该用户需要重新登录');
+      setPasswordFor(null);
+      setNewPassword('');
     } catch (error) {
       err(errorText(error));
+    } finally {
+      setBusy(false);
     }
   };
 
   const removeUser = async (user: User) => {
-    if (!window.confirm(`删除用户 ${user.username}？其全部设备令牌同时失效。`)) return;
+    setBusy(true);
     try {
       await api('DELETE', `/users/${user.id}`);
       ok('用户已删除');
       await load();
     } catch (error) {
       err(errorText(error));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -223,7 +233,6 @@ export function UsersPage() {
 
   const revokeToken = async (token: AccessToken) => {
     if (!tokenFor) return;
-    if (!window.confirm('撤销这个设备令牌？用它生成的播放地址会立刻失效。')) return;
     try {
       await api('DELETE', `/users/${tokenFor.id}/tokens/${token.token}`);
       await loadTokens(tokenFor.id);
@@ -286,7 +295,10 @@ export function UsersPage() {
     <>
       {node}
       <PageHead icon="users" title="用户与设备" sub="管理员与普通观众账户，下发可见分组范围">
-        <button onClick={() => setEditing({ form: emptyForm(), id: null })}>
+        <button
+          title="创建面板账号并设置可见范围"
+          onClick={() => setEditing({ form: emptyForm(), id: null })}
+        >
           <Icon name="plus" size={14} />
           新建用户
         </button>
@@ -328,19 +340,35 @@ export function UsersPage() {
                 <td>{user.web_ui_access || user.role === 'admin' ? '允许' : '禁止'}</td>
                 <td className="muted">{formatDate(user.created_at_ms)}</td>
                 <td className="right">
-                  <button className="chip" onClick={() => void openTokens(user)}>
+                  <button
+                    className="chip"
+                    title="管理这个用户的设备令牌"
+                    onClick={() => void openTokens(user)}
+                  >
                     设备
                   </button>
                   <button
                     className="chip"
+                    title="修改用户名、角色与可见范围"
                     onClick={() => setEditing({ form: formOf(user), id: user.id })}
                   >
                     编辑
                   </button>
-                  <button className="chip" onClick={() => void resetPassword(user)}>
+                  <button
+                    className="chip"
+                    title="设置新密码，旧会话会失效"
+                    onClick={() => {
+                      setPasswordFor(user);
+                      setNewPassword('');
+                    }}
+                  >
                     重置密码
                   </button>
-                  <button className="chip danger" onClick={() => void removeUser(user)}>
+                  <button
+                    className="chip danger"
+                    title="删除用户，同时撤销其全部设备令牌"
+                    onClick={() => setConfirmRemove(user)}
+                  >
                     删除
                   </button>
                 </td>
@@ -378,18 +406,26 @@ export function UsersPage() {
               : '修改用户名、角色或可见分组。密码请通过「重置密码」按钮修改。'}
           </p>
           <div className="fields">
-            <Field label="用户名">
+            <Field
+              label="用户名"
+              tip="登录面板时使用。同一实例内不能重名。"
+            >
               <input
                 value={form.username}
+                autoComplete="off"
                 onChange={(event) =>
                   setEditing({ ...editing, form: { ...form, username: event.target.value } })
                 }
               />
             </Field>
             {isNew && (
-              <Field label="密码">
+              <Field
+                label="密码"
+                tip="初始登录口令。用户登录后可以自行修改。"
+              >
                 <input
                   type="password"
+                  autoComplete="new-password"
                   value={form.password}
                   onChange={(event) =>
                     setEditing({ ...editing, form: { ...form, password: event.target.value } })
@@ -397,7 +433,10 @@ export function UsersPage() {
                 />
               </Field>
             )}
-            <Field label="角色">
+            <Field
+              label="角色"
+              tip="管理员可管理所有分区。普通用户只能查看授权频道。"
+            >
               <select
                 value={form.role}
                 onChange={(event) =>
@@ -415,7 +454,11 @@ export function UsersPage() {
 
           {form.role === 'user' && (
             <>
-              <Field label="可见分组" hint="普通用户至少选一个。管理员不受限制。">
+              <Field
+                label="可见分组"
+                tip="普通用户只能看到选中的分组。管理员不受分组限制。"
+                hint="普通用户至少选一个。管理员不受限制。"
+              >
                 <div className="checkbox-list">
                   {options.map((group) => (
                     <label key={group.id} className="check">
@@ -440,6 +483,7 @@ export function UsersPage() {
                   </p>
                 </div>
                 <Switch
+                  label="只开放指定频道"
                   checked={form.channel_filter_enabled}
                   onChange={(next) =>
                     setEditing({
@@ -484,6 +528,7 @@ export function UsersPage() {
               </p>
             </div>
             <Switch
+              label="允许登录 WebUI"
               checked={form.web_ui_access}
               disabled={form.role === 'admin'}
               onChange={(next) =>
@@ -510,11 +555,15 @@ export function UsersPage() {
           </p>
           <div className="row form-row">
             <input
+              aria-label="设备名称"
+              title="只用于区分设备，可以留空"
               placeholder="设备名称（可选）"
               value={tokenLabel}
               onChange={(event) => setTokenLabel(event.target.value)}
             />
             <select
+              aria-label="令牌有效期"
+              title="到期后播放地址自动失效"
               value={tokenTtl === null ? 'forever' : String(tokenTtl)}
               onChange={(event) =>
                 setTokenTtl(event.target.value === 'forever' ? null : Number(event.target.value))
@@ -526,7 +575,13 @@ export function UsersPage() {
                 </option>
               ))}
             </select>
-            <button onClick={() => void createToken()}>添加设备</button>
+            <button
+              title="为这个用户生成一个新的设备令牌"
+              onClick={() => void createToken()}
+            >
+              添加设备
+            </button>
+            <Tip text="每个设备一个独立令牌。撤销某个令牌只会让该设备的播放地址失效。" />
           </div>
 
           <table className="table">
@@ -545,12 +600,17 @@ export function UsersPage() {
                   <td className="mono ellipsis">{token.playlist_url}</td>
                   <td className="muted">{ttlText(token)}</td>
                   <td className="right">
-                    <button className="chip" onClick={() => void copy(token.playlist_url, '订阅地址')}>
+                    <button
+                      className="chip"
+                      title="复制这个设备的完整订阅地址"
+                      onClick={() => void copy(token.playlist_url, '订阅地址')}
+                    >
                       复制
                     </button>
                     <button
                       className="chip danger"
-                      onClick={() => void revokeToken(token)}
+                      title="让这个设备的播放地址立即失效"
+                      onClick={() => setConfirmRevoke(token)}
                     >
                       撤销
                     </button>
@@ -568,6 +628,67 @@ export function UsersPage() {
           </table>
         </Modal>
       )}
+
+      {passwordFor ? (
+        <Modal
+          title={`重置密码 · ${passwordFor.username}`}
+          onClose={() => setPasswordFor(null)}
+          footer={
+            <>
+              <button className="ghost" onClick={() => setPasswordFor(null)}>
+                取消
+              </button>
+              <button
+                disabled={busy || newPassword === ''}
+                onClick={() => void resetPassword()}
+              >
+                {busy ? '保存中…' : '重置密码'}
+              </button>
+            </>
+          }
+        >
+          <Field
+            label="新密码"
+            tip="保存后该用户的旧会话失效，需要用新密码重新登录。"
+          >
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+            />
+          </Field>
+        </Modal>
+      ) : null}
+
+      {confirmRemove ? (
+        <Confirm
+          title="删除用户？"
+          text={`用户「${confirmRemove.username}」及其全部设备令牌会一起删除。这个操作不能撤销。`}
+          confirmText="删除用户"
+          busy={busy}
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={() => {
+            const user = confirmRemove;
+            setConfirmRemove(null);
+            void removeUser(user);
+          }}
+        />
+      ) : null}
+
+      {confirmRevoke ? (
+        <Confirm
+          title="撤销设备令牌？"
+          text="使用这个令牌的播放地址会立即失效。其他设备不受影响。"
+          confirmText="撤销令牌"
+          onCancel={() => setConfirmRevoke(null)}
+          onConfirm={() => {
+            const token = confirmRevoke;
+            setConfirmRevoke(null);
+            void revokeToken(token);
+          }}
+        />
+      ) : null}
     </>
   );
 }

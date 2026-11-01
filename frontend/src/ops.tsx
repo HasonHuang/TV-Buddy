@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, apiText, getToken } from './api';
 import { Icon } from './icons';
-import { PageHead } from './ui';
+import { Confirm, Field, PageHead, Tip } from './ui';
 
 type IpEntry = {
   ip: string;
@@ -190,7 +190,11 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
             写 <code className="mono">[auth]</code> 段：改完点保存，整份配置原子替换（与设置页同一机制）。
           </p>
         </div>
-        <button disabled={saving} onClick={() => void save()}>
+        <button
+          disabled={saving}
+          title="保存 [auth] 段的访问控制设置"
+          onClick={() => void save()}
+        >
           {saving ? '保存中…' : '保存访问控制'}
         </button>
       </div>
@@ -204,6 +208,8 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
       </p>
       <textarea
         rows={4}
+        aria-label="白名单地址"
+        title="名单内的地址豁免封禁与并发会话上限；只在 IP 管控开启时生效"
         placeholder="203.0.113.7&#10;10.0.0.0/8&#10;*"
         value={whitelist}
         onChange={(event) => setWhitelist(event.target.value)}
@@ -214,6 +220,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         <label className="field">
           <span>IP 管控</span>
           <select
+            title="开启后启用按 IP 的限流、封禁与并发会话上限"
             value={auth.ip_guard_enabled === true ? 'on' : 'off'}
             onChange={(event) => setKey('ip_guard_enabled', event.target.value === 'on')}
           >
@@ -224,6 +231,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         <label className="field">
           <span>播放 Token</span>
           <select
+            title="开启后每个设备令牌只能播放自己的授权频道"
             value={auth.token_enabled === true ? 'on' : 'off'}
             onChange={(event) => setKey('token_enabled', event.target.value === 'on')}
           >
@@ -248,6 +256,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         <label className="field">
           <span>切片签名</span>
           <select
+            title="开启后切片地址带时间窗签名；关闭播放 Token 时本项不生效"
             value={auth.slice_sign_enabled === false ? 'off' : 'on'}
             onChange={(event) => setKey('slice_sign_enabled', event.target.value === 'on')}
           >
@@ -262,15 +271,22 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         />
         <label className="field">
           <span>签名密钥</span>
-          <input
-            className="mono"
-            value={typeof auth.slice_sign_secret === 'string' ? auth.slice_sign_secret : ''}
-            placeholder="留空自动生成 32 字节"
-            onChange={(event) => setKey('slice_sign_secret', event.target.value.trim())}
-          />
-          <button type="button" onClick={() => setKey('slice_sign_secret', randomSecret())}>
-            生成随机
-          </button>
+          <div className="input-group">
+            <input
+              className="mono"
+              title="改动后当前窗口内的旧签名链接会立即失效"
+              value={typeof auth.slice_sign_secret === 'string' ? auth.slice_sign_secret : ''}
+              placeholder="留空自动生成 32 字节"
+              onChange={(event) => setKey('slice_sign_secret', event.target.value.trim())}
+            />
+            <button
+              type="button"
+              title="生成一个新的十六进制密钥"
+              onClick={() => setKey('slice_sign_secret', randomSecret())}
+            >
+              生成随机
+            </button>
+          </div>
           <div className="hint">十六进制，32–128 位。改动后需要保存。</div>
         </label>
       </div>
@@ -296,6 +312,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         <label className="field">
           <span>限流跳转地址</span>
           <input
+            title="触发限流时跳转的地址"
             value={typeof auth.limit_url === 'string' ? auth.limit_url : ''}
             onChange={(event) => setKey('limit_url', event.target.value)}
           />
@@ -303,6 +320,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         <label className="field">
           <span>封禁跳转地址</span>
           <input
+            title="地址被封禁时跳转的地址"
             value={typeof auth.ban_url === 'string' ? auth.ban_url : ''}
             onChange={(event) => setKey('ban_url', event.target.value)}
           />
@@ -414,7 +432,11 @@ export function SecurityPage() {
   return (
     <>
       <PageHead icon="security" title="安全管控" sub="访问控制、IP 封禁与限流">
-        <button className="ghost" onClick={() => void load()}>
+        <button
+          className="ghost"
+          title="重新读取访问控制与 IP 统计"
+          onClick={() => void load()}
+        >
           <Icon name="refresh" size={14} />
           刷新
         </button>
@@ -439,23 +461,37 @@ export function SecurityPage() {
         </p>
         <div className="row">
           <input
+            aria-label="要封禁的地址"
+            title="可一次填写多个地址，用逗号或换行分隔"
             placeholder="地址，可用逗号或换行分隔多个"
             value={ip}
             onChange={(event) => setIp(event.target.value)}
             style={{ flex: 2 }}
           />
           <input
+            aria-label="封禁时长（秒）"
+            title="留空使用默认封禁时长"
             placeholder="秒"
             value={seconds}
             onChange={(event) => setSeconds(event.target.value)}
             style={{ flex: 1 }}
           />
-          <button onClick={() => void ban()} disabled={ip.trim() === ''}>
+          <button
+            title="按上面的地址与时长封禁"
+            onClick={() => void ban()}
+            disabled={ip.trim() === ''}
+          >
             封禁
           </button>
-          <button className="ghost" onClick={() => void unbanBatch()} disabled={ip.trim() === ''}>
+          <button
+            className="ghost"
+            title="立即解除这些地址的封禁"
+            onClick={() => void unbanBatch()}
+            disabled={ip.trim() === ''}
+          >
             批量解封
           </button>
+          <Tip text="封禁只作用于非面板路径，不影响面板登录。" />
         </div>
         <table className="table" style={{ marginTop: 12 }}>
           <thead>
@@ -476,7 +512,11 @@ export function SecurityPage() {
                 <td>{entry.banned ? `封禁中（${entry.remaining_secs} 秒）` : '正常'}</td>
                 <td className="right">
                   {entry.banned && (
-                    <button className="ghost" onClick={() => void unban(entry.ip)}>
+                    <button
+                      className="ghost"
+                      title="立即解除这个地址的封禁"
+                      onClick={() => void unban(entry.ip)}
+                    >
                       解封
                     </button>
                   )}
@@ -557,6 +597,8 @@ export function LogsPage() {
       >
         <div className="row">
           <select
+            aria-label="日志级别"
+            title="只显示所选级别的日志行"
             value={level}
             style={{ width: 120 }}
             onChange={(event) => setLevel(event.target.value as Level)}
@@ -568,14 +610,21 @@ export function LogsPage() {
             ))}
           </select>
           <input
+            aria-label="读取行数"
+            title="从环形缓冲读取最近多少行"
             value={limit}
             onChange={(event) => setLimit(event.target.value)}
             style={{ width: 80 }}
           />
-          <button className="ghost" onClick={() => void load()}>
+          <button
+            className="ghost"
+            title="重新读取日志缓冲"
+            onClick={() => void load()}
+          >
             <Icon name="refresh" size={14} />
             刷新
           </button>
+          <Tip text="级别与行数只影响本页显示，不改变服务端日志配置。" />
         </div>
       </PageHead>
       <div className="card">
@@ -599,11 +648,19 @@ export function LogsPage() {
   );
 }
 
-/** 备份与恢复。 */
-export function BackupPage() {
+/** 备份与恢复。`embedded` 用于设置页，不再渲染独立页头。 */
+export function BackupPage({
+  embedded = false,
+  onRestored,
+}: {
+  embedded?: boolean;
+  onRestored?: () => void;
+}) {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [scope, setScope] = useState('all');
+  const [pending, setPending] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
   const file = useRef<HTMLInputElement>(null);
 
   const download = async () => {
@@ -631,11 +688,8 @@ export function BackupPage() {
     }
   };
 
-  const restore = async (input: HTMLInputElement) => {
-    const selected = input.files?.[0];
-    if (!selected) {
-      return;
-    }
+  const restore = async (selected: File) => {
+    setBusy(true);
     setMessage('');
     setError('');
     try {
@@ -652,41 +706,87 @@ export function BackupPage() {
         throw new Error(data.error ?? `HTTP ${response.status}`);
       }
       setMessage(`已恢复 ${data.report?.files.length ?? 0} 个文件，配置已重载`);
+      onRestored?.();
     } catch (err) {
       setError(errorText(err));
     } finally {
-      input.value = '';
+      setBusy(false);
+      if (file.current) file.current.value = '';
     }
   };
 
   return (
     <>
-      <PageHead icon="download" title="备份与恢复" sub="导出与回滚配置、脚本与资源" />
+      {embedded ? (
+        <div className="embedded-head">
+          <div>
+            <h2>备份与恢复</h2>
+            <span className="muted">导出与回滚配置、脚本与资源</span>
+          </div>
+        </div>
+      ) : (
+        <PageHead icon="download" title="备份与恢复" sub="导出与回滚配置、脚本与资源" />
+      )}
       <div className="card">
         <div className="section-title">导出</div>
         <div className="row">
-        <select value={scope} onChange={(event) => setScope(event.target.value)}>
-          <option value="all">全部</option>
-          <option value="epg-scripts">仅 EPG 脚本</option>
-          <option value="resolver">仅解析脚本</option>
-        </select>
-        <button onClick={() => void download()}>下载备份</button>
-      </div>
+          <select
+            aria-label="备份范围"
+            title="选择备份包含的配置与资源"
+            value={scope}
+            onChange={(event) => setScope(event.target.value)}
+          >
+            <option value="all">全部</option>
+            <option value="epg-scripts">仅 EPG 脚本</option>
+            <option value="resolver">仅解析脚本</option>
+          </select>
+          <button
+            title="按所选范围下载备份包"
+            onClick={() => void download()}
+          >
+            下载备份
+          </button>
+          <Tip text="备份包包含配置与所选资源。下载后在异地保存一份。" />
+        </div>
         <div className="section-title" style={{ marginTop: 20 }}>
           恢复
         </div>
         <p className="muted">
-          恢复会覆盖当前配置，旧配置另存为 <code className="mono">tv-buddy.db.bak.json</code>。非法内容不会落盘。
+          恢复会覆盖当前配置，旧配置另存为 <code className="mono">tv-buddy.db.bak.json</code>。
+          非法内容不会落盘。恢复成功后配置会重新读取。
         </p>
         <input
           ref={file}
           type="file"
           accept=".gz,application/gzip"
-          onChange={(event) => void restore(event.target)}
+          aria-label="选择备份包"
+          title="选择 .tar.gz 备份包"
+          onChange={(event) => {
+            const selected = event.target.files?.[0];
+            if (selected) setPending(selected);
+          }}
         />
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}
       </div>
+
+      {pending ? (
+        <Confirm
+          title="恢复备份？"
+          text={`备份包「${pending.name}」会覆盖当前配置与同名资源。旧配置会另存为 tv-buddy.db.bak.json。`}
+          confirmText="恢复备份"
+          busy={busy}
+          onCancel={() => {
+            setPending(null);
+            if (file.current) file.current.value = '';
+          }}
+          onConfirm={() => {
+            const selected = pending;
+            setPending(null);
+            void restore(selected);
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -882,20 +982,37 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
     <div className="card">
       <div className="row between">
         <div>
-          <h2>EPG 翻译</h2>
+          <h2>
+            EPG 翻译
+            <Tip text="译文按目标语言写进 XMLTV。保存后用于下一次翻译。" />
+          </h2>
           <p className="muted">
             引擎负责把节目名/简介翻成目标语言，译文按 <code className="mono">lang</code> 写进 XMLTV。
             本实现只实现 MTranServer 的 HTTP 批量接口（<code className="mono">/translate/batch</code>，失败回退单条）。
           </p>
         </div>
         <div className="row">
-          <button className="ghost" disabled={busy} onClick={() => void testMtran()}>
+          <button
+            className="ghost"
+            title="用已保存的配置探测 MTranServer"
+            disabled={busy}
+            onClick={() => void testMtran()}
+          >
             测试连接
           </button>
-          <button className="ghost" disabled={busy} onClick={() => void clearCache()}>
+          <button
+            className="ghost"
+            title="删除已生成的 EPG 译文缓存"
+            disabled={busy}
+            onClick={() => void clearCache()}
+          >
             清空译文缓存
           </button>
-          <button disabled={busy} onClick={() => void save()}>
+          <button
+            title="保存 EPG 翻译设置"
+            disabled={busy}
+            onClick={() => void save()}
+          >
             {busy ? '处理中…' : '保存翻译设置'}
           </button>
         </div>
@@ -987,7 +1104,12 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
       </div>
 
       <div className="row">
-        <button className="ghost" disabled={busy} onClick={() => void runNow()}>
+        <button
+          className="ghost"
+          title="按当前翻译设置立即翻译已有节目"
+          disabled={busy}
+          onClick={() => void runNow()}
+        >
           立即翻译
         </button>
         <span className="muted">
@@ -1079,16 +1201,27 @@ function EpgCronCard({ onChanged }: { onChanged: () => void }) {
       <div className="row">
         <input
           className="mono"
+          aria-label="cron 表达式"
+          title="5 段 cron：分 时 日 月 周。改动后需重启才重新排程"
           style={{ flex: 2 }}
           value={expr}
           onChange={(event) => setExpr(event.target.value)}
         />
-        <button className="ghost" onClick={() => void preview()}>
+        <button
+          className="ghost"
+          title="校验表达式并显示接下来的执行时间"
+          onClick={() => void preview()}
+        >
           预览
         </button>
-        <button disabled={busy || expr.trim() === saved} onClick={() => void save()}>
+        <button
+          title="保存采集节奏；[epg] 段需重启后生效"
+          disabled={busy || expr.trim() === saved}
+          onClick={() => void save()}
+        >
           {busy ? '保存中…' : '保存'}
         </button>
+        <Tip text="采集节奏决定自动更新的频率。手动「立即采集」不受影响。" />
       </div>
       {next.length > 0 && (
         <ul className="muted">
@@ -1241,17 +1374,36 @@ export function EpgPanelPage() {
         title="节目指南"
         sub={status?.enabled ? '已开启' : '已关闭'}
       >
-        <a className="ghost" href="/epg" target="_blank" rel="noreferrer">
+        <a
+          className="ghost"
+          href="/epg"
+          target="_blank"
+          rel="noreferrer"
+          title="在新标签页打开公开节目单"
+        >
           浏览页面
         </a>
-        <button className="ghost" onClick={() => void load()}>
+        <button
+          className="ghost"
+          title="重新读取采集状态与映射"
+          onClick={() => void load()}
+        >
           <Icon name="refresh" size={14} />
           刷新状态
         </button>
-        <button className="ghost" onClick={() => void regenerate()} disabled={busy}>
+        <button
+          className="ghost"
+          title="按当前映射重新生成 XMLTV"
+          onClick={() => void regenerate()}
+          disabled={busy}
+        >
           重新生成
         </button>
-        <button onClick={() => void refresh()} disabled={busy || !status?.enabled}>
+        <button
+          title="立即运行一次全部节目源采集"
+          onClick={() => void refresh()}
+          disabled={busy || !status?.enabled}
+        >
           {busy ? '采集中…' : '立即采集'}
         </button>
       </PageHead>
@@ -1284,31 +1436,45 @@ export function EpgPanelPage() {
       <EpgViewerCard />
       <div className="card">
         <h2>手工映射</h2>
-        <div className="row">
-          <input
-            placeholder="gid"
-            value={mapping.gid}
-            onChange={(event) => setMapping({ ...mapping, gid: event.target.value })}
-          />
-          <input
-            placeholder="cid"
-            value={mapping.cid}
-            onChange={(event) => setMapping({ ...mapping, cid: event.target.value })}
-          />
-          <input
-            placeholder="source_id"
-            value={mapping.source_id}
-            onChange={(event) => setMapping({ ...mapping, source_id: event.target.value })}
-          />
-          <input
-            placeholder="source_channel_id"
-            value={mapping.source_channel_id}
-            onChange={(event) =>
-              setMapping({ ...mapping, source_channel_id: event.target.value })
-            }
-          />
-          <button onClick={() => void saveMapping()}>保存映射</button>
+        <div className="fields">
+          <Field label="本地分组 ID" tip="要匹配的本地分组。">
+            <input
+              placeholder="gid"
+              value={mapping.gid}
+              onChange={(event) => setMapping({ ...mapping, gid: event.target.value })}
+            />
+          </Field>
+          <Field label="本地频道 ID" tip="要匹配的本地频道。">
+            <input
+              placeholder="cid"
+              value={mapping.cid}
+              onChange={(event) => setMapping({ ...mapping, cid: event.target.value })}
+            />
+          </Field>
+          <Field label="节目源 ID" tip="节目源的标识。">
+            <input
+              placeholder="source_id"
+              value={mapping.source_id}
+              onChange={(event) => setMapping({ ...mapping, source_id: event.target.value })}
+            />
+          </Field>
+          <Field label="源频道 ID" tip="节目源中的频道标识。">
+            <input
+              placeholder="source_channel_id"
+              value={mapping.source_channel_id}
+              onChange={(event) =>
+                setMapping({ ...mapping, source_channel_id: event.target.value })
+              }
+            />
+          </Field>
         </div>
+        <div className="row">
+          <button title="保存这条频道与节目源的对应关系" onClick={() => void saveMapping()}>
+            保存映射
+          </button>
+          <Tip text="映射决定本地频道读取哪个节目源的节目单。" />
+        </div>
+        <div className="table-wrap">
         <table className="table">
           <thead>
             <tr>
@@ -1327,7 +1493,11 @@ export function EpgPanelPage() {
                 <td className="mono">{item.source_channel_id}</td>
                 <td>{item.source_display_name || item.source_name || '—'}</td>
                 <td className="right">
-                  <button className="icon-btn" onClick={() => void removeMapping(key)}>
+                  <button
+                    className="icon-btn"
+                    title="删除这条手工映射"
+                    onClick={() => void removeMapping(key)}
+                  >
                     清除
                   </button>
                 </td>
@@ -1342,35 +1512,53 @@ export function EpgPanelPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       <EpgMatchToolsCard onPick={(pick) => setMapping(pick)} />
 
       <div className="card">
         <h2>额外频道</h2>
-        <div className="row">
-          <input
-            placeholder="source_id"
-            value={extra.source_id}
-            onChange={(event) => setExtra({ ...extra, source_id: event.target.value })}
-          />
-          <input
-            placeholder="source_channel_id"
-            value={extra.source_channel_id}
-            onChange={(event) => setExtra({ ...extra, source_channel_id: event.target.value })}
-          />
-          <input
-            placeholder="out_id（可空）"
-            value={extra.out_id}
-            onChange={(event) => setExtra({ ...extra, out_id: event.target.value })}
-          />
-          <input
-            placeholder="out_name（可空）"
-            value={extra.out_name}
-            onChange={(event) => setExtra({ ...extra, out_name: event.target.value })}
-          />
-          <button onClick={() => void addExtra()}>添加额外频道</button>
+        <div className="fields">
+          <Field label="节目源 ID" tip="节目源的标识。">
+            <input
+              placeholder="source_id"
+              value={extra.source_id}
+              onChange={(event) => setExtra({ ...extra, source_id: event.target.value })}
+            />
+          </Field>
+          <Field label="源频道 ID" tip="节目源中的频道标识。">
+            <input
+              placeholder="source_channel_id"
+              value={extra.source_channel_id}
+              onChange={(event) => setExtra({ ...extra, source_channel_id: event.target.value })}
+            />
+          </Field>
+          <Field label="输出 ID" tip="留空时使用源频道 ID。">
+            <input
+              placeholder="out_id（可空）"
+              value={extra.out_id}
+              onChange={(event) => setExtra({ ...extra, out_id: event.target.value })}
+            />
+          </Field>
+          <Field label="输出名称" tip="留空时使用源频道名称。">
+            <input
+              placeholder="out_name（可空）"
+              value={extra.out_name}
+              onChange={(event) => setExtra({ ...extra, out_name: event.target.value })}
+            />
+          </Field>
         </div>
+        <div className="row">
+          <button
+            title="把源频道加入节目单，不需要本地频道"
+            onClick={() => void addExtra()}
+          >
+            添加额外频道
+          </button>
+          <Tip text="额外频道只出现在公开节目单里，不生成播放地址。" />
+        </div>
+        <div className="table-wrap">
         <table className="table">
           <thead>
             <tr>
@@ -1389,7 +1577,11 @@ export function EpgPanelPage() {
                 <td className="mono">{item.out_id || '—'}</td>
                 <td>{item.out_name || '—'}</td>
                 <td className="right">
-                  <button className="icon-btn" onClick={() => void removeExtra(item)}>
+                  <button
+                    className="icon-btn"
+                    title="从节目单移除这个额外频道"
+                    onClick={() => void removeExtra(item)}
+                  >
                     删除
                   </button>
                 </td>
@@ -1404,6 +1596,7 @@ export function EpgPanelPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </>
   );
@@ -1417,6 +1610,7 @@ function EpgScriptsCard() {
   const [content, setContent] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -1451,7 +1645,6 @@ function EpgScriptsCard() {
   };
 
   const remove = async (target: string) => {
-    if (!window.confirm(`确认删除脚本「${target}」？`)) return;
     setMessage('');
     setError('');
     try {
@@ -1469,50 +1662,62 @@ function EpgScriptsCard() {
         <h2>采集脚本</h2>
         <span className="muted">{python ? `Python ${python}` : 'Python —'}</span>
       </div>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>文件</th>
-            <th className="right">大小</th>
-            <th className="right">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {scripts.map((script) => (
-            <tr key={script.name}>
-              <td className="mono">{script.name}</td>
-              <td className="right">{Math.max(1, Math.round(script.size / 1024))} KB</td>
-              <td className="right">
-                <button
-                  className="icon-btn danger-text"
-                  onClick={() => void remove(script.name)}
-                >
-                  删除
-                </button>
-              </td>
-            </tr>
-          ))}
-          {scripts.length === 0 && (
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
             <tr>
-              <td colSpan={3} className="muted">
-                暂无脚本。
-              </td>
+              <th>文件</th>
+              <th className="right">大小</th>
+              <th className="right">操作</th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {scripts.map((script) => (
+              <tr key={script.name}>
+                <td className="mono">{script.name}</td>
+                <td className="right">{Math.max(1, Math.round(script.size / 1024))} KB</td>
+                <td className="right">
+                  <button
+                    className="icon-btn danger-text"
+                    title="删除这个采集脚本"
+                    onClick={() => setPendingDelete(script.name)}
+                  >
+                    删除
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {scripts.length === 0 && (
+              <tr>
+                <td colSpan={3} className="muted">
+                  暂无脚本。
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
       <div className="row" style={{ marginTop: 8 }}>
         <input
+          aria-label="脚本文件名"
+          title="以 .py 结尾。同名文件会被覆盖"
           placeholder="脚本名，例如 mysource.py"
           value={name}
           onChange={(event) => setName(event.target.value)}
           style={{ flex: 1 }}
         />
-        <button onClick={() => void save()} disabled={name.trim() === ''}>
+        <button
+          title="保存脚本文件；同名文件直接覆盖"
+          onClick={() => void save()}
+          disabled={name.trim() === ''}
+        >
           上传/覆盖
         </button>
+        <Tip text="脚本在服务端以 Python 运行。只上传可信脚本。" />
       </div>
       <textarea
+        aria-label="脚本正文"
+        title="Python 脚本正文。保存后按采集计划运行"
         placeholder="脚本正文"
         value={content}
         onChange={(event) => setContent(event.target.value)}
@@ -1521,6 +1726,20 @@ function EpgScriptsCard() {
       />
       {message && <div className="msg ok">{message}</div>}
       {error && <div className="msg err">{error}</div>}
+
+      {pendingDelete ? (
+        <Confirm
+          title="删除采集脚本？"
+          text={`脚本「${pendingDelete}」删除后，引用它的 EPG 源会采集失败。`}
+          confirmText="删除脚本"
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => {
+            const name = pendingDelete;
+            setPendingDelete(null);
+            void remove(name);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1721,21 +1940,26 @@ function EpgMatchToolsCard({
   return (
     <div className="card">
       <h2>匹配工具</h2>
+      <div className="fields">
+        <Field label="本地分组 ID" tip="要匹配的本地分组。">
+          <input
+            placeholder="gid"
+            value={gid}
+            onChange={(event) => setGid(event.target.value)}
+          />
+        </Field>
+        <Field label="本地频道 ID" tip="要匹配的本地频道。">
+          <input
+            placeholder="cid"
+            value={cid}
+            onChange={(event) => setCid(event.target.value)}
+          />
+        </Field>
+      </div>
       <div className="row">
-        <input
-          placeholder="gid"
-          value={gid}
-          onChange={(event) => setGid(event.target.value)}
-          style={{ flex: 1 }}
-        />
-        <input
-          placeholder="cid"
-          value={cid}
-          onChange={(event) => setCid(event.target.value)}
-          style={{ flex: 1 }}
-        />
         <button
           className="ghost"
+          title="按名称相似度查找可用的节目源频道"
           onClick={() => void runSuggest()}
           disabled={gid.trim() === '' || cid.trim() === ''}
         >
@@ -1743,7 +1967,8 @@ function EpgMatchToolsCard({
         </button>
       </div>
       {suggestions.length > 0 && (
-        <table className="table" style={{ marginTop: 8 }}>
+        <div className="table-wrap" style={{ marginTop: 8 }}>
+        <table className="table" style={{ marginTop: 0 }}>
           <thead>
             <tr>
               <th>源</th>
@@ -1763,6 +1988,7 @@ function EpgMatchToolsCard({
                 <td className="right">
                   <button
                     className="icon-btn"
+                    title="把这条建议写入手工映射表单"
                     onClick={() =>
                       onPick({
                         gid: gid.trim(),
@@ -1779,22 +2005,31 @@ function EpgMatchToolsCard({
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
-      <div className="row" style={{ marginTop: 12 }}>
-        <input
-          placeholder="source_id（__all__ = 全部）"
-          value={sourceId}
-          onChange={(event) => setSourceId(event.target.value)}
-          style={{ flex: 1 }}
-        />
-        <input
-          placeholder="搜索词"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          style={{ flex: 1 }}
-        />
-        <button className="ghost" onClick={() => void runSource()}>
+      <div className="fields" style={{ marginTop: 12 }}>
+        <Field label="节目源 ID" tip="__all__ 表示查看全部节目源。">
+          <input
+            placeholder="source_id（__all__ = 全部）"
+            value={sourceId}
+            onChange={(event) => setSourceId(event.target.value)}
+          />
+        </Field>
+        <Field label="搜索词" tip="按频道名过滤源频道。">
+          <input
+            placeholder="搜索词"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </Field>
+      </div>
+      <div className="row">
+        <button
+          className="ghost"
+          title="列出节目源中的频道"
+          onClick={() => void runSource()}
+        >
           浏览源频道
         </button>
       </div>
@@ -1811,14 +2046,21 @@ function EpgMatchToolsCard({
         </>
       )}
 
-      <div className="row" style={{ marginTop: 12 }}>
-        <input
-          placeholder="偏移分钟"
-          value={shift}
-          onChange={(event) => setShift(event.target.value)}
-          style={{ flex: 1 }}
-        />
-        <button className="ghost" onClick={() => void runTz()}>
+      <div className="fields" style={{ marginTop: 12 }}>
+        <Field label="时区偏移" tip="正数向后移，负数向前移，单位是分钟。">
+          <input
+            placeholder="偏移分钟"
+            value={shift}
+            onChange={(event) => setShift(event.target.value)}
+          />
+        </Field>
+      </div>
+      <div className="row">
+        <button
+          className="ghost"
+          title="按偏移量预览节目时间"
+          onClick={() => void runTz()}
+        >
           时区预览
         </button>
       </div>
