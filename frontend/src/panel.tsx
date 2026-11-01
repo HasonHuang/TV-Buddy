@@ -90,15 +90,32 @@ function Login({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="login-wrap">
-      <ThemeToggle className="login-theme" showLabel />
-      <div className="login-card">
-        <div className="mark">
-          <BrandMark size={44} />
+    <div className="login">
+      <div className="login-brand">
+        <div className="rings" aria-hidden="true" />
+        <div className="brandline">
+          <span className="mark-tile" aria-hidden="true">
+            <BrandMark size={24} />
+          </span>
+          <span>TV Buddy</span>
         </div>
-        <div className="name">TV Buddy</div>
-        <div className="tagline">IPTV 代理与管理面板</div>
-        <form onSubmit={submit}>
+        <div className="brand-copy">
+          <h1>
+            把频道，<span>留在自己手里。</span>
+          </h1>
+          <p>自托管的 IPTV 代理。缓存、转码、回看与订阅，都在本机。</p>
+          <div className="login-mark" aria-hidden="true">
+            <BrandMark size={92} />
+          </div>
+        </div>
+        <div className="login-foot">SELF-HOSTED · 本地部署</div>
+      </div>
+
+      <div className="login-form-wrap">
+        <ThemeToggle className="login-theme" showLabel />
+        <form className="login-form" onSubmit={submit}>
+          <h2>登录面板</h2>
+          <div className="sub">使用管理员账号进入控制台。</div>
           <label htmlFor="user">用户名</label>
           <input
             id="user"
@@ -118,8 +135,9 @@ function Login({ onDone }: { onDone: () => void }) {
           <button type="submit" disabled={busy}>
             {busy ? '登录中…' : '登 录'}
           </button>
+          {error && <div className="msg err">{error}</div>}
+          <div className="hint">会话保存在本机浏览器。公共设备请在使用后退出。</div>
         </form>
-        {error && <div className="msg err">{error}</div>}
       </div>
     </div>
   );

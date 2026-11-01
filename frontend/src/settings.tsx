@@ -22,7 +22,7 @@ import { Icon } from './icons';
 import { RecommendCard, type Recommend } from './lowcfg';
 import { BackupPage } from './ops';
 import { SystemPage } from './system';
-import { Card, Confirm, PageHead, Tip, useToast } from './ui';
+import { Card, Confirm, PageHead, Select, Tip, useToast } from './ui';
 
 type Cfg = Record<string, unknown>;
 
@@ -99,6 +99,7 @@ function Num({
       </label>
       <div className="field-control">
         <input
+          className="num"
           type="number"
           min={0}
           step={step ?? 1}
@@ -163,6 +164,8 @@ function Pick({
   options: { value: string; label: string }[];
 }) {
   const { draft, update } = useDraft();
+  // 最短选项也短时收窄下拉，避免「开启 / 关闭」占满整行。
+  const compact = options.every((option) => option.label.length <= 8);
   return (
     <div className="field">
       <label>
@@ -170,13 +173,13 @@ function Pick({
         {tip ? <Tip text={tip} /> : null}
       </label>
       <div className="field-control">
-        <select value={asText(draft, path)} onChange={(event) => update(path, event.target.value)}>
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <Select
+          value={asText(draft, path)}
+          options={options}
+          onChange={(next) => update(path, next)}
+          ariaLabel={label}
+          compact={compact}
+        />
       </div>
       {hint ? <div className="hint">{hint}</div> : null}
     </div>
@@ -207,13 +210,16 @@ function BoolPick({
         {tip ? <Tip text={tip} /> : null}
       </label>
       <div className="field-control">
-        <select
+        <Select
           value={asBool(draft, path) ? 'on' : 'off'}
-          onChange={(event) => update(path, event.target.value === 'on')}
-        >
-          <option value="on">{onLabel}</option>
-          <option value="off">{offLabel}</option>
-        </select>
+          options={[
+            { value: 'on', label: onLabel },
+            { value: 'off', label: offLabel },
+          ]}
+          onChange={(next) => update(path, next === 'on')}
+          ariaLabel={label}
+          compact
+        />
       </div>
       {hint ? <div className="hint">{hint}</div> : null}
     </div>

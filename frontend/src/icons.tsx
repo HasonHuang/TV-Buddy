@@ -4,7 +4,7 @@
  * 只在界面里用；不引入第三方图标库，避免打包体积与许可问题。
  */
 
-import { useId, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 export type IconName =
   | 'overview'
@@ -231,65 +231,44 @@ export function Icon({
   );
 }
 
-/** 品牌台标：带天线的卡通电视。
+/** 品牌台标：丷 天线 + 空心机身 + 三色条。
  *
- * 两根天线分开、向上张开，取「丷」形。电视有机身、圆角屏幕和两只脚。
- * 屏幕从左到右分三块色带：蓝、绿、红（`--brand-1/2/3`）。
- * 描边取 `currentColor`，随所在文字颜色变化。
+ * 64 栅格。描边取 `currentColor`，随所在文字颜色变化。
+ * 三色条取 `--brand-1/2/3`，深浅主题各一套。
  * 图形是装饰，旁边的文字承担无障碍名称。
  */
 export function BrandMark({ size = 24, className }: { size?: number; className?: string }) {
-  // 多个实例同页时，裁剪路径的 id 不能重复。
-  const clipId = `tv-screen-${useId().replace(/:/g, '')}`;
   return (
     <svg
       className={className}
       width={size}
       height={size}
-      viewBox="0 0 32 32"
+      viewBox="0 0 64 64"
       aria-hidden="true"
       focusable="false"
     >
-      <defs>
-        <clipPath id={clipId}>
-          <rect x="7.4" y="12.2" width="17.2" height="11.6" rx="2.6" />
-        </clipPath>
-      </defs>
       <g
         fill="none"
         stroke="currentColor"
-        strokeWidth={2}
+        strokeWidth={3}
         strokeLinecap="round"
       >
-        <path d="M12.9 9 10.2 3.7" />
-        <path d="M19.1 9 21.8 3.7" />
-      </g>
-      <circle cx="10.2" cy="3.7" r="1.5" fill="currentColor" />
-      <circle cx="21.8" cy="3.7" r="1.5" fill="currentColor" />
-      <g clipPath={`url(#${clipId})`}>
-        <rect x="7.4" y="12.2" width="5.74" height="11.6" fill="var(--brand-1)" />
-        <rect x="13.14" y="12.2" width="5.72" height="11.6" fill="var(--brand-2)" />
-        <rect x="18.86" y="12.2" width="5.74" height="11.6" fill="var(--brand-3)" />
+        <path d="M24 15 20.5 7.5" />
+        <path d="M40 15 43.5 7.5" />
       </g>
       <rect
-        x="4"
-        y="8.8"
-        width="24"
-        height="18.4"
-        rx="5.2"
+        x="10"
+        y="15"
+        width="44"
+        height="32"
+        rx="9"
         fill="none"
         stroke="currentColor"
-        strokeWidth={2.2}
+        strokeWidth={3}
       />
-      <g
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2.2}
-        strokeLinecap="round"
-      >
-        <path d="M11.2 27.2v2.2" />
-        <path d="M20.8 27.2v2.2" />
-      </g>
+      <rect x="16" y="21" width="8" height="20" rx="2.6" fill="var(--brand-1)" />
+      <rect x="28" y="21" width="8" height="20" rx="2.6" fill="var(--brand-2)" />
+      <rect x="40" y="21" width="8" height="20" rx="2.6" fill="var(--brand-3)" />
     </svg>
   );
 }

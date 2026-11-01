@@ -1,6 +1,6 @@
 /** 通用界面组件：页头、弹窗、确认框、提示条、徽章、字段。 */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Icon, type IconName } from './icons';
@@ -284,6 +284,222 @@ export function Field({
       </label>
       {children}
       {hint && <div className="hint">{hint}</div>}
+    </div>
+  );
+}
+
+/** 自绘下拉框。
+ *
+ * 原生 `<select>` 的样式受系统限制，各平台外观不一。这里用按钮 + 列表实现，
+ * 换来统一的圆角、字重与明暗配色。键盘可用：方向键、Home、End、Enter、Esc。
+ *
+ * 选项列表不是输入框，值由调用方持有；本组件只负责显示与回调。
+ */
+export function Select({
+  value,
+  options,
+  onChange,
+  disabled,
+  ariaLabel,
+  placeholder = '请选择',
+  className = '',
+  align = 'left',
+  compact,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (next: string) => void;
+  disabled?: boolean;
+  ariaLabel?: string;
+  placeholder?: string;
+  className?: string;
+  /** 菜单相对按钮的对齐方向。右侧字段用 `right`，避免贴边溢出。 */
+  align?: 'left' | 'right';
+  /** 选项文字短时用固定窄宽，与紧凑数字框并列时不撑满整行。 */
+  compact?: boolean;
+}) {
+  const id = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const typed = useRef({ text: '', at: 0 });
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const [dropUp, setDropUp] = useState(false);
+
+  const selected = options.findIndex((option) => option.value === value);
+
+  const close = (focusButton = false) => {
+    setOpen(false);
+    if (focusButton) btnRef.current?.focus();
+  };
+
+  const openMenu = () => {
+    if (disabled) return;
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (rect) setDropUp(window.innerHeight - rect.bottom < 268 && rect.top > 268);
+    setActive(selected >= 0 ? selected : 0);
+    setOpen(true);
+  };
+
+  // 打开后把焦点移到当前选项。用 `open` 作依赖即可：列表刚挂载，ref 已就位。
+  useEffect(() => {
+    if (!open) return;
+    optionRefs.current[active]?.focus();
+  }, [open]);
+
+  // 点击外部关闭。用 pointerdown，早于焦点转移，避免菜单先失焦再点不中。
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
+
+  // 页面滚动或窗口改尺寸时关闭，菜单不跟着按钮偏移。
+  // 菜单自身滚动不算：长列表要能滚到底。
+  useEffect(() => {
+    if (!open) return;
+    const onMove = (event?: Event) => {
+      if (event && rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onMove, true);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onMove, true);
+    };
+  }, [open]);
+
+  const move = (next: number) => {
+    const count = options.length;
+    if (!count) return;
+    const index = ((next % count) + count) % count;
+    setActive(index);
+    optionRefs.current[index]?.focus();
+  };
+
+  const choose = (index: number) => {
+    const option = options[index];
+    if (!option) return;
+    onChange(option.value);
+    close(true);
+  };
+
+  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        move(active + 1);
+        return;
+      case 'ArrowUp':
+        event.preventDefault();
+        move(active - 1);
+        return;
+      case 'Home':
+        event.preventDefault();
+        move(0);
+        return;
+      case 'End':
+        event.preventDefault();
+        move(options.length - 1);
+        return;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        choose(active);
+        return;
+      case 'Escape':
+        event.preventDefault();
+        event.stopPropagation();
+        close(true);
+        return;
+      case 'Tab':
+        close();
+        return;
+      default:
+        break;
+    }
+
+    // 键入首字跳转。中文与英文都用 `startsWith`，700 ms 内连续输入算一次查询。
+    if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const now = Date.now();
+      typed.current.text =
+        now - typed.current.at > 700 ? event.key : typed.current.text + event.key;
+      typed.current.at = now;
+      const query = typed.current.text.toLowerCase();
+      const start = active >= 0 ? active : 0;
+      for (let step = 0; step < options.length; step += 1) {
+        const index = (start + step) % options.length;
+        if (options[index].label.toLowerCase().startsWith(query)) {
+          event.preventDefault();
+          move(index);
+          return;
+        }
+      }
+    }
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      className={`select${compact ? ' compact' : ''}${open ? ' open' : ''}${className ? ` ${className}` : ''}`}
+    >
+      <button
+        ref={btnRef}
+        type="button"
+        className="select-btn"
+        role="combobox"
+        aria-controls={`${id}-menu`}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={ariaLabel}
+        disabled={disabled}
+        onClick={() => (open ? close(true) : openMenu())}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            openMenu();
+          }
+        }}
+      >
+        <span className={`select-value${selected < 0 ? ' placeholder' : ''}`}>
+          {selected >= 0 ? options[selected].label : placeholder}
+        </span>
+        <Icon name="down" size={14} className="chev" />
+      </button>
+
+      {open && (
+        <ul
+          id={`${id}-menu`}
+          className={`select-menu${dropUp ? ' drop-up' : ''}${align === 'right' ? ' right' : ''}`}
+          role="listbox"
+          aria-label={ariaLabel}
+          onKeyDown={onMenuKeyDown}
+        >
+          {options.map((option, index) => (
+            <li
+              key={option.value}
+              ref={(node) => {
+                optionRefs.current[index] = node;
+              }}
+              role="option"
+              aria-selected={option.value === value}
+              tabIndex={-1}
+              className={`select-option${option.value === value ? ' selected' : ''}`}
+              onFocus={() => setActive(index)}
+              onClick={() => choose(index)}
+            >
+              <span>{option.label}</span>
+              {option.value === value ? <Icon name="check" size={14} /> : null}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

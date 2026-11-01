@@ -13,7 +13,7 @@ export type Theme = 'light' | 'dark';
 
 const KEY = 'tv_buddy_theme';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
-const THEME_COLOR: Record<Theme, string> = { light: '#f4f4f6', dark: '#0b0b0d' };
+const THEME_COLOR: Record<Theme, string> = { light: '#f2f5fa', dark: '#0a0e16' };
 
 function systemTheme(): Theme {
   return window.matchMedia(DARK_QUERY).matches ? 'dark' : 'light';
