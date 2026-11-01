@@ -222,8 +222,9 @@ export function Icon({
   );
 }
 
-/** 品牌台标：三色电视。
+/** 品牌台标：带天线的卡通电视。
  *
+ * 两根天线分开、向上张开，取「丷」形。电视有机身、圆角屏幕和两只脚。
  * 屏幕从左到右分三块色带：蓝、绿、红（`--brand-1/2/3`）。
  * 描边取 `currentColor`，随所在文字颜色变化。
  * 图形是装饰，旁边的文字承担无障碍名称。
@@ -236,38 +237,50 @@ export function BrandMark({ size = 24, className }: { size?: number; className?:
       className={className}
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox="0 0 32 32"
       aria-hidden="true"
       focusable="false"
     >
       <defs>
         <clipPath id={clipId}>
-          <rect x="2.5" y="7.3" width="19" height="12.6" rx="2.2" />
+          <rect x="7.4" y="12.2" width="17.2" height="11.6" rx="2.6" />
         </clipPath>
       </defs>
-      <path
-        d="m7.8 2.4 4.2 3 4.2-3"
+      <g
         fill="none"
         stroke="currentColor"
-        strokeWidth={1.8}
+        strokeWidth={2}
         strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      >
+        <path d="M12.9 9 10.2 3.7" />
+        <path d="M19.1 9 21.8 3.7" />
+      </g>
+      <circle cx="10.2" cy="3.7" r="1.5" fill="currentColor" />
+      <circle cx="21.8" cy="3.7" r="1.5" fill="currentColor" />
       <g clipPath={`url(#${clipId})`}>
-        <rect x="2.5" y="7.3" width="6.13" height="12.6" fill="var(--brand-1)" />
-        <rect x="8.93" y="7.3" width="6.13" height="12.6" fill="var(--brand-2)" />
-        <rect x="15.37" y="7.3" width="6.13" height="12.6" fill="var(--brand-3)" />
+        <rect x="7.4" y="12.2" width="5.74" height="11.6" fill="var(--brand-1)" />
+        <rect x="13.14" y="12.2" width="5.72" height="11.6" fill="var(--brand-2)" />
+        <rect x="18.86" y="12.2" width="5.74" height="11.6" fill="var(--brand-3)" />
       </g>
       <rect
-        x="1.6"
-        y="6.4"
-        width="20.8"
-        height="14.4"
-        rx="3"
+        x="4"
+        y="8.8"
+        width="24"
+        height="18.4"
+        rx="5.2"
         fill="none"
         stroke="currentColor"
-        strokeWidth={1.8}
+        strokeWidth={2.2}
       />
+      <g
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      >
+        <path d="M11.2 27.2v2.2" />
+        <path d="M20.8 27.2v2.2" />
+      </g>
     </svg>
   );
 }
