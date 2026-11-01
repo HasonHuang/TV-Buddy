@@ -1,8 +1,7 @@
-<p align="center">
+<div align="center">
   <img src="docs/assets/logo.svg" alt="TV Buddy 台标" width="88" height="88" />
-</p>
-
-# TV Buddy
+  <h1>TV Buddy</h1>
+</div>
 
 > 自托管的 IPTV 代理服务。带网页管理面板，单二进制部署，静态 musl 编译。
 
