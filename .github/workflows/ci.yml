@@ -89,6 +89,9 @@ jobs:
     env:
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+      # 版本号直接取 tag。不靠 build.rs 里的 git describe：浅克隆下标签可能取不到，
+      # 会退回到 Cargo.toml 的 0.1.0。build.rs 会去掉前导 v。
+      TV_BUDDY_VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

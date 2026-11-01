@@ -24,13 +24,8 @@ pub async fn backup(
 ) -> Result<Response, ApiError> {
     let config = state.snapshot();
     let include = params.get("include").map(String::as_str).unwrap_or("all");
-    let data = backup::create(
-        &config,
-        &config.cache.disk_path,
-        include,
-        crate::VERSION,
-    )
-    .map_err(|error| ApiError::internal(format!("{error:#}")))?;
+    let data = backup::create(&config, &config.cache.disk_path, include, crate::VERSION)
+        .map_err(|error| ApiError::internal(format!("{error:#}")))?;
     let name = backup::file_name();
     let mut response = ([(header::CONTENT_TYPE, "application/gzip")], data).into_response();
     let disposition = HeaderValue::from_str(&format!("attachment; filename=\"{name}\""))

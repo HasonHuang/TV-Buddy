@@ -10,11 +10,7 @@
 //!
 //! 结果写入 `TV_BUDDY_VERSION`，源码用 `env!` 读取。
 
-use std::{
-    env, fs,
-    path::Path,
-    process::Command,
-};
+use std::{env, fs, path::Path, process::Command};
 
 const PLACEHOLDER: &str = r#"<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>TV Buddy</title>
