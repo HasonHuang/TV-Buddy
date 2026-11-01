@@ -10,9 +10,12 @@ command_args="/opt/tv-buddy/tv-buddy.db"
 # 必须设工作目录。`cache.disk_path` 默认 `./cache` 是相对路径，
 # 不设时继承 `/`，所有缓存会落到 `/cache`。
 directory="/opt/tv-buddy"
-command_background=true
 command_user="root"
 pidfile="/run/${RC_SVCNAME}.pid"
+# 必须用 supervise-daemon 才有 respawn_*。默认的 start-stop-daemon 只把进程
+# 放到后台，`respawn_delay` / `respawn_max` 被忽略：进程被杀后停在 stopped，
+# 不会自动拉起。
+supervisor="supervise-daemon"
 respawn_delay=3
 respawn_max=0
 
