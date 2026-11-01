@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getRole, getToken, setRole, setToken, UNAUTHORIZED_EVENT } from './api';
 import { BrandMark, Icon, type IconName } from './icons';
-import { Confirm, PageHead, useToast } from './ui';
+import { Confirm, PageHead, ThemeToggle, useToast } from './ui';
 import { GroupsPage } from './groups';
 import { EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
@@ -54,6 +54,14 @@ const NAV: { id: SectionId; label: string; icon: IconName; feature?: string; adm
   { id: 'logs', label: '运行日志', icon: 'logs', adminOnly: true },
 ];
 
+/** 搜索框里的快捷键提示：Mac 显示 ⌘K，其余显示 Ctrl K。 */
+const SHORTCUT = /Macintosh|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl K';
+
+/** `[features]` 的开关名到分区名。概览用它在系统信息里列出已启用的模块。 */
+const FEATURE_LABELS: [string, string][] = NAV.flatMap((item) =>
+  item.feature ? [[item.feature, item.label] as [string, string]] : [],
+);
+
 type Status = Record<string, unknown>;
 
 function Login({ onDone }: { onDone: () => void }) {
@@ -83,12 +91,13 @@ function Login({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="login-wrap">
+      <ThemeToggle className="login-theme" showLabel />
       <div className="login-card">
         <div className="mark">
-          <BrandMark size={40} />
+          <BrandMark size={44} />
         </div>
         <div className="name">TV Buddy</div>
-        <div className="tagline">Management Console</div>
+        <div className="tagline">IPTV 代理与管理面板</div>
         <form onSubmit={submit}>
           <label htmlFor="user">用户名</label>
           <input
@@ -138,15 +147,17 @@ function uptime(secs: number): string {
   return `${minutes} 分钟`;
 }
 
-/** 单个指标卡。`icon` 显示在标签左侧。 */
+/** 单个指标卡。`icon` 显示在标签左侧，`unit` 用小一号字接在数值后。 */
 function Stat({
   label,
   value,
+  unit,
   tone,
   icon,
 }: {
   label: string;
   value: string;
+  unit?: string;
   tone?: string;
   icon?: IconName;
 }) {
@@ -156,12 +167,15 @@ function Stat({
         {icon && <Icon name={icon} size={13} />}
         {label}
       </div>
-      <div className={`v${tone ? ` ${tone}` : ''}`}>{value}</div>
+      <div className={`v${tone ? ` ${tone}` : ''}`}>
+        {value}
+        {unit ? <small>{unit}</small> : null}
+      </div>
     </div>
   );
 }
 
-function Overview() {
+function Overview({ features }: { features: Record<string, boolean> | null }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -206,6 +220,10 @@ function Overview() {
   const backend = text('cache_backend');
   // 版本号在接口里不带前缀，界面统一显示 `v`。
   const version = status?.version ? `v${status.version}` : '—';
+  // 与侧栏同一口径：缺少键也算启用，只有显式 false 才隐藏。
+  const enabledFeatures = features
+    ? FEATURE_LABELS.filter(([key]) => features[key] !== false)
+    : [];
 
   return (
     <>
@@ -213,108 +231,113 @@ function Overview() {
         <span className="badge ok">● 运行 {uptime(num('uptime_secs'))}</span>
       </PageHead>
 
-      <div className="stats">
-        <Stat label="分组数" value={text('group_count')} tone="accent" icon="groups" />
-        <Stat label="频道数" value={text('channel_count')} tone="accent" icon="livestream" />
-        <Stat
-          label="缓存后端"
-          value={backend}
-          tone={backend === 'disk' ? 'danger' : 'accent'}
-          icon="cache"
-        />
-        <Stat label="在线观众" value={text('online_viewers')} tone="accent" icon="stats" />
-        <Stat
-          label="缓存磁盘占用"
-          value={`${text('disk_cache_mb')} MB`}
-          tone="accent"
-          icon="file"
-        />
+      <div className="stats kpi">
+        <Stat label="分组数" value={text('group_count')} icon="groups" />
+        <Stat label="频道数" value={text('channel_count')} icon="livestream" />
+        <Stat label="在线观众" value={text('online_viewers')} unit="人" icon="stats" />
+        <Stat label="缓存磁盘占用" value={text('disk_cache_mb')} unit="MB" icon="file" />
       </div>
 
-      <div className="card">
-        <div className="section-title">实时指标</div>
-        <div className="stats">
-          <Stat label="下行 · 回源" value={bytes(num('traffic_in_bytes'))} icon="download" />
-          <Stat label="上行 · 出网" value={bytes(num('traffic_out_bytes'))} icon="upload" />
-          <Stat label="进程内存" value={`${text('mem_rss_mb')} MB`} icon="cache" />
-          <Stat label="CPU 占用" value={`${text('cpu_seconds')} 秒`} icon="stats" />
-          <Stat
-            label="整盘内存峰值"
-            value={`${bytes(num('whole_file_peak'))} / ${bytes(num('whole_file_budget'))}`}
-            icon="file"
-          />
+      <div className="dash-grid">
+        <div className="dash-main">
+          <section className="card">
+            <div className="section-title">实时指标</div>
+            <div className="metric-strip">
+              <Stat label="下行 · 回源" value={bytes(num('traffic_in_bytes'))} icon="download" />
+              <Stat label="上行 · 出网" value={bytes(num('traffic_out_bytes'))} icon="upload" />
+              <Stat label="进程内存" value={text('mem_rss_mb')} unit="MB" icon="cache" />
+              <Stat label="CPU 占用" value={text('cpu_seconds')} unit="秒" icon="stats" />
+              <Stat
+                label="整盘内存峰值"
+                value={bytes(num('whole_file_peak'))}
+                unit={`/ ${bytes(num('whole_file_budget'))}`}
+                icon="file"
+              />
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="section-title">快速操作</div>
+            <div className="quick-grid">
+              <button
+                className="ghost"
+                title="删除已落盘的清单与切片，释放磁盘"
+                disabled={busy !== ''}
+                onClick={() => void action('flush', '/cache/flush', '本地缓存已清空')}
+              >
+                <Icon name="trash" size={14} />
+                {busy === 'flush' ? '清理中…' : '清空缓存'}
+              </button>
+              <button
+                className="ghost"
+                title="从数据库重新读取配置并立即生效"
+                disabled={busy !== ''}
+                onClick={() => void action('reload', '/reload', '配置已热重载')}
+              >
+                <Icon name="refresh" size={14} />
+                {busy === 'reload' ? '重载中…' : '热重载配置'}
+              </button>
+              <button
+                className="ghost"
+                title="重新读取运行状态与实时指标"
+                disabled={busy !== ''}
+                onClick={() => void load()}
+              >
+                <Icon name="refresh" size={14} />
+                刷新状态
+              </button>
+              <button
+                className="ghost"
+                title="跳到我的订阅页，查看并复制订阅地址"
+                onClick={() => window.dispatchEvent(new CustomEvent('tv-buddy:goto-my'))}
+              >
+                <Icon name="download" size={14} />
+                我的订阅地址
+              </button>
+            </div>
+          </section>
         </div>
-      </div>
 
-      <div className="card">
-        <div className="section-title">快速操作</div>
-        <div className="row">
-          <button
-            className="ghost"
-            title="删除已落盘的清单与切片，释放磁盘"
-            disabled={busy !== ''}
-            onClick={() => void action('flush', '/cache/flush', '本地缓存已清空')}
-          >
-            <Icon name="trash" size={14} />
-            {busy === 'flush' ? '清理中…' : '清空缓存'}
-          </button>
-          <button
-            className="ghost"
-            title="从数据库重新读取配置并立即生效"
-            disabled={busy !== ''}
-            onClick={() => void action('reload', '/reload', '配置已热重载')}
-          >
-            <Icon name="refresh" size={14} />
-            {busy === 'reload' ? '重载中…' : '热重载配置'}
-          </button>
-          <button
-            className="ghost"
-            title="重新读取运行状态与实时指标"
-            disabled={busy !== ''}
-            onClick={() => void load()}
-          >
-            <Icon name="refresh" size={14} />
-            刷新状态
-          </button>
-          <button
-            className="ghost"
-            title="跳到我的订阅页，查看并复制订阅地址"
-            onClick={() => window.dispatchEvent(new CustomEvent('tv-buddy:goto-my'))}
-          >
-            <Icon name="download" size={14} />
-            我的订阅地址
-          </button>
+        <div className="dash-rail">
+          <section className="card">
+            <div className="section-title">系统信息</div>
+            <div className="kv-list">
+              <div className="kv">
+                <span>版本</span>
+                <b>{version}</b>
+              </div>
+              <div className="kv">
+                <span>运行时长</span>
+                <b>{uptime(num('uptime_secs'))}</b>
+              </div>
+              <div className="kv">
+                <span>缓存后端</span>
+                <b className="mono">{backend}</b>
+              </div>
+              <div className="kv">
+                <span>监听地址</span>
+                <b className="mono">{text('bind')}</b>
+              </div>
+            </div>
+            <div className="feature-block">
+              <div className="feature-title">已启用功能</div>
+              <div className="feature-list">
+                {enabledFeatures.length === 0 ? (
+                  <span className="muted">{features ? '全部关闭' : '—'}</span>
+                ) : (
+                  enabledFeatures.map(([key, label], index) => (
+                    <span key={key}>
+                      {label}
+                      {index < enabledFeatures.length - 1 ? (
+                        <span className="sep"> · </span>
+                      ) : null}
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+          </section>
         </div>
-      </div>
-
-      <div className="card">
-        <div className="section-title">系统信息</div>
-        <dl>
-          <div style={{ display: 'contents' }}>
-            <dt>版本</dt>
-            <dd>{version}</dd>
-          </div>
-          <div style={{ display: 'contents' }}>
-            <dt>运行时长</dt>
-            <dd>{uptime(num('uptime_secs'))}</dd>
-          </div>
-          <div style={{ display: 'contents' }}>
-            <dt>缓存后端</dt>
-            <dd>{backend}</dd>
-          </div>
-          <div style={{ display: 'contents' }}>
-            <dt>进程内存（RSS）</dt>
-            <dd>{text('mem_rss_mb')} MB</dd>
-          </div>
-          <div style={{ display: 'contents' }}>
-            <dt>缓存磁盘占用</dt>
-            <dd>{text('disk_cache_mb')} MB</dd>
-          </div>
-          <div style={{ display: 'contents' }}>
-            <dt>监听地址</dt>
-            <dd className="mono">{text('bind')}</dd>
-          </div>
-        </dl>
       </div>
 
       {error && <div className="msg err">{error}</div>}
@@ -328,12 +351,33 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   /** 设置页有没有未保存修改；离开前先确认。 */
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [pendingNav, setPendingNav] = useState<SectionId | null>(null);
+  /** 侧栏分区搜索。只过滤导航，不触达接口。 */
+  const [navQuery, setNavQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
   /** 侧栏与页脚用的版本与运行时长。 */
   const [meta, setMeta] = useState<{ version: string; uptime: number } | null>(null);
   /** `[features]` 的开关键。为 `false` 的分区不显示入口。 */
   const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
   /** 当前账号是否为管理员。服务端每次请求都会复核，这里只决定显示。 */
   const [isAdmin, setIsAdmin] = useState(getRole() === 'admin');
+
+  // Cmd/Ctrl+K 聚焦分区搜索；Esc 清空并退出搜索。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        return;
+      }
+      if (event.key === 'Escape' && document.activeElement === searchRef.current) {
+        setNavQuery('');
+        searchRef.current?.blur();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     void api<{ user?: { role?: string } }>('GET', '/me')
@@ -395,6 +439,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   });
   const fallback: SectionId = isAdmin ? 'dashboard' : 'my';
   const active = visibleNav.some((item) => item.id === section) ? section : fallback;
+  const query = navQuery.trim().toLowerCase();
+  const shownNav = query
+    ? visibleNav.filter((item) => item.label.toLowerCase().includes(query))
+    : visibleNav;
 
   return (
     <div className="shell">
@@ -406,20 +454,38 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <span>管理面板</span>
           </div>
         </div>
+        <label className="nav-search">
+          <Icon name="search" size={13} />
+          <input
+            ref={searchRef}
+            type="text"
+            value={navQuery}
+            placeholder="搜索分区"
+            aria-label="搜索分区"
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => setNavQuery(event.target.value)}
+          />
+          <kbd>{SHORTCUT}</kbd>
+        </label>
         <nav>
-          {visibleNav.map((item) => (
+          {shownNav.map((item) => (
             <button
               key={item.id}
               className={`nav-item${active === item.id ? ' active' : ''}`}
               title={item.label}
               aria-label={item.label}
               aria-current={active === item.id ? 'page' : undefined}
-              onClick={() => go(item.id)}
+              onClick={() => {
+                setNavQuery('');
+                go(item.id);
+              }}
             >
               <Icon name={item.icon} size={15} />
               <span className="nav-label">{item.label}</span>
             </button>
           ))}
+          {query && shownNav.length === 0 ? <div className="nav-empty">没有匹配的分区</div> : null}
         </nav>
         {isAdmin && (
           <div className="sidebar-meta">
@@ -436,6 +502,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
         <div className="sidebar-foot">
+          <ThemeToggle showLabel />
           <button
             className="ghost"
             title="结束当前面板会话并回到登录页"
@@ -448,7 +515,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       </aside>
       <main className="content">
         {active === 'my' && <MySubsPage />}
-        {active === 'dashboard' && <Overview />}
+        {active === 'dashboard' && <Overview features={features} />}
         {active === 'cache' && <CachePage />}
         {active === 'groups' && <GroupsPage />}
         {active === 'settings' && <SettingsPage onDirtyChange={setSettingsDirty} />}

@@ -4,6 +4,43 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Icon, type IconName } from './icons';
+import { currentTheme, toggleTheme, watchSystemTheme, type Theme } from './theme';
+
+/** 明暗主题开关。
+ *
+ * 显示当前主题的反向图标：深色时给太阳，浅色时给月亮。
+ * `showLabel` 在侧栏显示目标主题的文字，便于发现。
+ * 点一次即固定用户的选择，之后不再跟随系统。
+ */
+export function ThemeToggle({
+  className = '',
+  showLabel = false,
+}: {
+  className?: string;
+  showLabel?: boolean;
+}) {
+  const [theme, setTheme] = useState<Theme>(() => currentTheme());
+
+  useEffect(
+    () => watchSystemTheme((next) => setTheme(next)),
+    [],
+  );
+
+  const label = theme === 'dark' ? '切换到浅色主题' : '切换到深色主题';
+  return (
+    <button
+      type="button"
+      className={`ghost icon-btn theme-toggle${className ? ` ${className}` : ''}`}
+      title={label}
+      aria-label={label}
+      onClick={() => setTheme(toggleTheme())}
+    >
+      <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
+      {showLabel ? <span className="nav-label">{theme === 'dark' ? '浅色' : '深色'}</span> : null}
+    </button>
+  );
+}
+
 
 /** 提示气泡。`?` 由伪元素绘制，不污染父元素文本内容。
  *

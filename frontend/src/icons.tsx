@@ -31,6 +31,8 @@ export type IconName =
   | 'more'
   | 'up'
   | 'down'
+  | 'sun'
+  | 'moon'
   | 'search'
   | 'refresh'
   | 'check'
@@ -151,6 +153,13 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   up: <path d="m4.7 9.7 3.3-3.4 3.3 3.4" />,
   down: <path d="m4.7 6.3 3.3 3.4 3.3-3.4" />,
+  sun: (
+    <>
+      <circle cx="8" cy="8" r="2.9" />
+      <path d="M8 1.7v1.5M8 12.8v1.5M14.3 8h-1.5M3.2 8H1.7M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6 3.5 3.5" />
+    </>
+  ),
+  moon: <path d="M13.2 9.7A5.5 5.5 0 0 1 6.3 2.8a5.5 5.5 0 1 0 6.9 6.9z" />,
   search: (
     <>
       <circle cx="7.2" cy="7.2" r="4.35" />

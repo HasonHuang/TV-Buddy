@@ -3,8 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f4f6" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0b0d" />
+    <meta name="theme-color" content="#f4f4f6" />
+    <script>
+      // 首屏绘制前定好主题：先读用户选择，没有就跟系统。
+      (function () {
+        try {
+          var saved = localStorage.getItem('tv_buddy_theme');
+          var theme =
+            saved === 'light' || saved === 'dark'
+              ? saved
+              : window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light';
+          document.documentElement.dataset.theme = theme;
+          document
+            .querySelector('meta[name="theme-color"]')
+            .setAttribute('content', theme === 'dark' ? '#0b0b0d' : '#f4f4f6');
+        } catch (error) {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2032%2032%22%3E%3Cdefs%3E%3CclipPath%20id=%22s%22%3E%3Crect%20x=%227.4%22%20y=%2212.2%22%20width=%2217.2%22%20height=%2211.6%22%20rx=%222.6%22/%3E%3C/clipPath%3E%3C/defs%3E%3Crect%20x=%224%22%20y=%228.8%22%20width=%2224%22%20height=%2218.4%22%20rx=%225.2%22%20fill=%22%23fff%22/%3E%3Cg%20clip-path=%22url(%23s)%22%3E%3Crect%20x=%227.4%22%20y=%2212.2%22%20width=%225.74%22%20height=%2211.6%22%20fill=%22%230015ff%22/%3E%3Crect%20x=%2213.14%22%20y=%2212.2%22%20width=%225.72%22%20height=%2211.6%22%20fill=%22%2335b606%22/%3E%3Crect%20x=%2218.86%22%20y=%2212.2%22%20width=%225.74%22%20height=%2211.6%22%20fill=%22%23fd0102%22/%3E%3C/g%3E%3Cg%20fill=%22none%22%20stroke=%22%231c1c21%22%20stroke-width=%222%22%20stroke-linecap=%22round%22%3E%3Cpath%20d=%22M12.9%209%2010.2%203.7%22/%3E%3Cpath%20d=%22M19.1%209%2021.8%203.7%22/%3E%3C/g%3E%3Ccircle%20cx=%2210.2%22%20cy=%223.7%22%20r=%221.5%22%20fill=%22%231c1c21%22/%3E%3Ccircle%20cx=%2221.8%22%20cy=%223.7%22%20r=%221.5%22%20fill=%22%231c1c21%22/%3E%3Crect%20x=%224%22%20y=%228.8%22%20width=%2224%22%20height=%2218.4%22%20rx=%225.2%22%20fill=%22none%22%20stroke=%22%231c1c21%22%20stroke-width=%222.2%22/%3E%3Cg%20fill=%22none%22%20stroke=%22%231c1c21%22%20stroke-width=%222.2%22%20stroke-linecap=%22round%22%3E%3Cpath%20d=%22M11.2%2027.2v2.2%22/%3E%3Cpath%20d=%22M20.8%2027.2v2.2%22/%3E%3C/g%3E%3C/svg%3E" />
     <title>节目单</title>
   </head>

@@ -7,7 +7,8 @@
  * 强调色只用在会动的东西上：选中的导航、链接、焦点环、开关。
  * 主按钮取近黑，不占强调色。
  *
- * 主题：浅色为默认；深色跟随系统（`prefers-color-scheme: dark`）。
+ * 主题：浅色为默认；深色由 `<html data-theme="dark">` 打开。
+ * 入口 HTML 的内联脚本在首屏前写入选择：默认跟随系统，手动切换后记住。
  * 两套主题共用同一组变量，只换取值。新增颜色先加变量，不要写死。
  *
  * 结构约定：
@@ -25,6 +26,7 @@
   --side: #ffffff;
   --panel-2: #f6f6f8;
   --panel-3: #ececf1;
+  --field: #ffffff;
   --line: #e3e3e8;
   --line-strong: #d6d6dd;
 
@@ -61,9 +63,9 @@
   --info: #1d3fd8;
   --info-weak: #eef1fd;
 
-  /* 圆角与阴影：卡片 14 px，控件 9 px。 */
-  --radius: 14px;
-  --radius-sm: 9px;
+  /* 圆角与阴影：卡片 12 px，控件 8 px。 */
+  --radius: 12px;
+  --radius-sm: 8px;
   --ring: rgba(29, 63, 216, 0.18);
 
   --shadow: 0 1px 2px rgba(20, 20, 26, 0.04);
@@ -81,63 +83,63 @@
   --ease: 0.14s ease;
 }
 
-/* 深色主题：跟随系统。
+/* 深色主题：`data-theme="dark"`。
  *
  * 底色取近黑，卡片亮一档，线更细；强调色提亮，主按钮转为靛蓝。
- * `color-scheme: dark` 让原生控件（下拉、勾选、滚动条）一起变深。
+ * 输入框比卡片再暗一档，让可编辑区与容器分开。
+ * `color-scheme` 让原生控件（下拉、勾选、滚动条）一起变深。
  */
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
+:root[data-theme='dark'] {
+  color-scheme: dark;
 
-    --bg: #0b0b0d;
-    --panel: #111114;
-    --side: #08080a;
-    --panel-2: #0e0e11;
-    --panel-3: #17171b;
-    --line: #1f1f24;
-    --line-strong: #2a2a31;
+  --bg: #0b0b0d;
+  --panel: #111114;
+  --side: #08080a;
+  --panel-2: #0e0e11;
+  --panel-3: #17171b;
+  --field: #0d0d10;
+  --line: #1f1f24;
+  --line-strong: #2a2a31;
 
-    --text: #ededef;
-    --text2: #9a9aa2;
-    --text3: #6b6b73;
+  --text: #ededef;
+  --text2: #9a9aa2;
+  --text3: #6b6b73;
 
-    --accent: #8b8bff;
-    --accent-dark: #b9b9ff;
-    --accent-weak: #191932;
-    --accent-line: #2e2e55;
+  --accent: #8b8bff;
+  --accent-dark: #b9b9ff;
+  --accent-weak: #191932;
+  --accent-line: #2e2e55;
 
-    --btn: #5b5bd6;
-    --btn-hover: #6e6ee0;
-    --btn-ink: #ffffff;
+  --btn: #5b5bd6;
+  --btn-hover: #6e6ee0;
+  --btn-ink: #ffffff;
 
-    --brand-1: #3a55ff;
-    --brand-2: #35b606;
-    --brand-3: #fd0102;
+  --brand-1: #3a55ff;
+  --brand-2: #35b606;
+  --brand-3: #fd0102;
 
-    --danger: #f87171;
-    --danger-dark: #fca5a5;
-    --danger-weak: #2a1618;
-    --danger-ink: #2a0d0d;
-    --ok: #4ade80;
-    --ok-weak: #10251a;
-    --warn: #f0b429;
-    --warn-weak: #2a2213;
-    --info: #8b8bff;
-    --info-weak: #191932;
+  --danger: #f87171;
+  --danger-dark: #fca5a5;
+  --danger-weak: #2a1618;
+  --danger-ink: #2a0d0d;
+  --ok: #4ade80;
+  --ok-weak: #10251a;
+  --warn: #f0b429;
+  --warn-weak: #2a2213;
+  --info: #8b8bff;
+  --info-weak: #191932;
 
-    --ring: rgba(124, 124, 255, 0.28);
+  --ring: rgba(124, 124, 255, 0.28);
 
-    --shadow: none;
-    --shadow-xs: none;
-    --shadow-lg:
-      0 24px 60px rgba(0, 0, 0, 0.6),
-      0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow: none;
+  --shadow-xs: none;
+  --shadow-lg:
+    0 24px 60px rgba(0, 0, 0, 0.6),
+    0 2px 8px rgba(0, 0, 0, 0.4);
 
-    --tip-bg: #ededef;
-    --tip-ink: #111114;
-    --overlay: rgba(0, 0, 0, 0.62);
-  }
+  --tip-bg: #ededef;
+  --tip-ink: #111114;
+  --overlay: rgba(0, 0, 0, 0.62);
 }
 
 * {
@@ -296,6 +298,71 @@ a {
   color: var(--text3);
 }
 
+/* 分区搜索：只过滤导航。占位文字与快捷键提示都不可点。 */
+.nav-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  margin: 0 2px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text3);
+  cursor: text;
+  transition: border-color var(--ease), background var(--ease);
+}
+
+.nav-search:focus-within {
+  border-color: var(--accent);
+  background: var(--field);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.nav-search .icon {
+  flex: none;
+}
+
+.nav-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.nav-search input:hover,
+.nav-search input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.nav-search input::placeholder {
+  color: var(--text3);
+}
+
+.nav-search kbd {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--text3);
+  font: inherit;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.nav-empty {
+  padding: 10px 10px;
+  color: var(--text3);
+  font-size: 12px;
+}
+
 .sidebar nav {
   display: flex;
   flex-direction: column;
@@ -363,7 +430,7 @@ a {
 .content {
   width: 100%;
   min-width: 0;
-  padding: 24px 32px 56px;
+  padding: 26px 32px 56px;
 }
 
 /* --- 页面标题行 --- */
@@ -386,7 +453,7 @@ a {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 650;
   letter-spacing: -0.012em;
 }
@@ -428,7 +495,7 @@ a {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 18px 20px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 /* 卡片头：标题 + 说明在左，操作在右。 */
 .card-head {
@@ -585,7 +652,7 @@ input,
 textarea,
 select {
   width: 100%;
-  background: var(--panel);
+  background: var(--field);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   color: var(--text);
@@ -729,6 +796,24 @@ button:active:not(:disabled) {
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* 只有图标的方形按钮。 */
+button.icon-btn {
+  width: 34px;
+  padding: 0;
+  flex: none;
+}
+
+.sidebar-foot .icon-btn {
+  flex: 0 0 34px;
+}
+
+/* 侧栏里的主题按钮带文字，按内容取宽。 */
+.sidebar-foot .theme-toggle {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0 10px;
 }
 
 button.ghost,
@@ -1363,14 +1448,14 @@ pre.log .lv-trace {
 .stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
 .stat {
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  border-radius: var(--radius);
+  padding: 12px 14px;
   background: var(--panel);
 }
 
@@ -1380,13 +1465,21 @@ pre.log .lv-trace {
 }
 
 .stat .v {
-  font-size: 21px;
+  font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--text);
-  margin-top: 2px;
-  line-height: 1.3;
+  margin-top: 3px;
+  line-height: 1.25;
   font-variant-numeric: tabular-nums;
+}
+
+.stat .v small {
+  margin-left: 2px;
+  color: var(--text3);
+  font-size: 11.5px;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .stat .v.accent {
@@ -1395,6 +1488,122 @@ pre.log .lv-trace {
 
 .stat .v.danger {
   color: var(--warn);
+}
+
+/* 概览：主列 + 侧栏。主列放实时指标与快速操作，侧栏放系统信息。 */
+.dash-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 12px;
+  align-items: start;
+}
+
+.dash-main,
+.dash-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dash-main .card,
+.dash-rail .card {
+  margin-bottom: 0;
+}
+
+/* 实时指标：一张卡里的五列数字，不再套一层小卡片。 */
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 18px;
+}
+
+.metric-strip .stat {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.metric-strip .stat:hover {
+  border-color: transparent;
+}
+
+.metric-strip .v {
+  font-size: 20px;
+}
+
+/* 快速操作：两列按钮，保持单手可达与整齐的行高。 */
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quick-grid button {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+/* 系统信息：右栏的键值列表。 */
+.kv-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.kv-list .kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+
+.kv-list .kv:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.kv-list .kv:first-child {
+  padding-top: 0;
+}
+
+.kv-list .kv > span {
+  color: var(--text2);
+  flex: none;
+}
+
+.kv-list .kv > b {
+  color: var(--text);
+  font-weight: 500;
+  text-align: right;
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 已启用功能：系统信息卡底部的文字清单，补齐右栏高度。 */
+.feature-block {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.feature-block .feature-title {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.feature-block .feature-list {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.feature-block .sep {
+  color: var(--text3);
 }
 
 /* --- 登录页 --- */
@@ -1406,11 +1615,30 @@ pre.log .lv-trace {
   justify-content: center;
   padding: 24px;
   background: var(--bg);
-  background-image: radial-gradient(
-    64% 58% at 50% 0%,
-    color-mix(in srgb, var(--accent) 8%, transparent),
-    transparent 70%
-  );
+  background-image:
+    radial-gradient(
+      circle at 1px 1px,
+      color-mix(in srgb, var(--text) 5%, transparent) 1px,
+      transparent 0
+    ),
+    radial-gradient(
+      64% 58% at 50% 0%,
+      color-mix(in srgb, var(--accent) 8%, transparent),
+      transparent 70%
+    );
+  background-size:
+    22px 22px,
+    auto;
+}
+
+/* 登录页也提供主题开关，位置固定在右上角。 */
+.login-theme {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 5;
+  width: auto;
+  padding: 0 10px;
 }
 
 .login-card {
@@ -1420,7 +1648,7 @@ pre.log .lv-trace {
   border: 1px solid var(--line);
   border-radius: 16px;
   box-shadow: var(--shadow-lg);
-  padding: 34px 32px 28px;
+  padding: 36px 32px 30px;
   text-align: center;
 }
 
@@ -1428,7 +1656,7 @@ pre.log .lv-trace {
   display: flex;
   justify-content: center;
   color: var(--text);
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .login-card .name {
@@ -1438,15 +1666,22 @@ pre.log .lv-trace {
 }
 
 .login-card .tagline {
-  font-size: 10.5px;
-  letter-spacing: 0.18em;
-  color: var(--text3);
-  text-transform: uppercase;
-  margin: 5px 0 24px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--text2);
+  margin: 6px 0 26px;
 }
 
 .login-card form {
   text-align: left;
+}
+
+.login-card form input {
+  margin-bottom: 14px;
+}
+
+.login-card form input:last-of-type {
+  margin-bottom: 0;
 }
 
 .login-card button[type='submit'] {
@@ -2186,6 +2421,13 @@ pre code {
   }
 }
 
+/* 概览右栏在中等宽度收起，避免主列被压窄。 */
+@media (max-width: 1100px) {
+  .dash-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* --- 小屏适配 --- */
 
 /* ≤1080 px：侧栏收成图标栏。 */
@@ -2207,7 +2449,8 @@ pre code {
 
   .brand-text,
   .nav-label,
-  .sidebar-meta {
+  .sidebar-meta,
+  .nav-search {
     display: none;
   }
 
@@ -2217,7 +2460,17 @@ pre code {
     width: 46px;
   }
 
+  .sidebar-foot {
+    flex-direction: column;
+    align-items: center;
+  }
+
   .sidebar-foot button {
+    width: 46px;
+    padding: 0;
+  }
+
+  .sidebar-foot .theme-toggle {
     width: 46px;
     padding: 0;
   }
@@ -2286,11 +2539,18 @@ pre code {
 
   .sidebar-foot {
     flex: none;
+    flex-direction: row;
+    align-items: center;
     border-top: 0;
     padding-top: 0;
   }
 
   .sidebar-foot button {
+    width: 34px;
+    padding: 0;
+  }
+
+  .sidebar-foot .theme-toggle {
     width: 34px;
     padding: 0;
   }
