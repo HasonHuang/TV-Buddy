@@ -62,6 +62,7 @@ cat > "$WORK/config.json" <<JSON
     "log_level": "warn",
     "timezone_offset_hours": 8
   },
+  "auth": { "token_enabled": false },
   "cache": {
     "disk_path": "$WORK/cache"
   },

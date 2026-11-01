@@ -29,12 +29,6 @@ fn list_body(cache: &str) -> Value {
     })
 }
 
-/// `GET /logo/api/list`——公开台标列表。
-pub async fn public_list(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let config = state.snapshot();
-    Json(list_body(&config.cache.disk_path))
-}
-
 /// `GET /logo/<file>`——公开取图，`public, max-age=86400`。
 pub async fn file(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
     let Some(file) = logo::sanitize(&name) else {

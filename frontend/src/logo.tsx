@@ -1,7 +1,7 @@
 /**
- * 台标库页；可独立挂载（`/logo`），也可嵌入管理面板。
+ * 台标库页。嵌入管理面板。
  *
- * 公开浏览；登录后可上传、重命名、删除，并把台标应用到频道。
+ * 列表、上传、重命名、删除与应用都走面板会话。
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -163,12 +163,7 @@ export function LogosPage() {
   const [renaming, setRenaming] = useState<{ file: string; name: string } | null>(null);
 
   const load = useCallback(async () => {
-    const response = await fetch('/logo/api/list');
-    if (!response.ok) {
-      setMessage(`读取台标库失败：HTTP ${response.status}`);
-      return;
-    }
-    const data = (await response.json()) as { logos?: Logo[] };
+    const data = await api<{ logos?: Logo[] }>('GET', '/logo/list');
     setLogos(data.logos ?? []);
     if (!getToken()) {
       return;

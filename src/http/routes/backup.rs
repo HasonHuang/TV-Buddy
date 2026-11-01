@@ -57,7 +57,7 @@ pub async fn restore(
         }
     }
     state
-        .save_config(restored.clone())
+        .save_config(restored.clone(), None)
         .map_err(|error| ApiError::internal(format!("写入配置失败: {error:#}")))?;
     Ok(Json(json!({
         "ok": true,

@@ -135,8 +135,10 @@ check "白名单已落盘" "3" \
   "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["auth"]["whitelist"]))' "$WORK/after.json")"
 check "IP 管控已开启" "True" \
   "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["auth"]["ip_guard_enabled"])' "$WORK/after.json")"
+check "未登录 /unban/whoami 401" "401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 203.0.113.7' "$B/unban/whoami")"
 check "开启 IP 管控后 /unban/whoami 可用" "True" \
-  "$(curl -s -H 'X-Forwarded-For: 203.0.113.7' "$B/unban/whoami" | \
+  "$(curl -s -H "$AUTH" -H 'X-Forwarded-For: 203.0.113.7' "$B/unban/whoami" | \
     python3 -c 'import json,sys;print(json.load(sys.stdin).get("enabled"))')"
 
 # 前端已内嵌访问控制卡片（ASCII needle：esbuild 会转义中文）。

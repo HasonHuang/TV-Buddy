@@ -196,10 +196,10 @@ check "用户订阅首行带 EPG 头" \
   "#EXTM3U x-tvg-url=\"http://127.0.0.1:$PORT/sub/$PTOK/epg.xml.gz\"" \
   "$(head -n1 "$WORK/body")"
 check "用户订阅头行" "#EXTVLCOPT:http-user-agent=ReaTest/1.0" "$(sed -n '2p' "$WORK/body")"
-check "含公开组" "1" "$(grep -c "http://127.0.0.1:$PORT/pub/c1.m3u8?token=$PTOK" "$WORK/body")"
-check "含隐藏组" "1" "$(grep -c "http://127.0.0.1:$PORT/hid/c2.m3u8?token=$PTOK" "$WORK/body")"
+check "含公开组" "1" "$(grep -c "http://127.0.0.1:$PORT/l/$PTOK/pub/c1.m3u8" "$WORK/body")"
+check "含隐藏组" "1" "$(grep -c "http://127.0.0.1:$PORT/l/$PTOK/hid/c2.m3u8" "$WORK/body")"
 check "含直通组" "1" "$(grep -c 'http://example.invalid/live.m3u8' "$WORK/body")"
-check "开放组不带 Token" "0" "$(grep -c '/op/c3.m3u8?token=' "$WORK/body" || true)"
+check "开放组已归一并带 Token" "1" "$(grep -c "http://127.0.0.1:$PORT/l/$PTOK/op/c3.m3u8" "$WORK/body")"
 check "排归档组" "0" "$(grep -c '/arc/' "$WORK/body")"
 check "条目数" "4" "$(grep -c '^#EXTINF' "$WORK/body")"
 
@@ -214,8 +214,8 @@ json.dump(cfg, open("'"$WORK"'/put.json", "w"))
 check "开启 Token 200" "200" \
   "$(code -X PUT "${A[@]}" --data-binary "@$WORK/put.json" "$B/panel/api/config")"
 curl -s -o "$WORK/body" "$SUB"
-check "订阅下发令牌" "2" "$(grep -c "?token=$PTOK" "$WORK/body" || true)"
-check "开放组不带 Token" "0" "$(grep -c '/op/c3.m3u8?token=' "$WORK/body" || true)"
+check "订阅下发路径令牌" "3" "$(grep -c "/l/$PTOK/" "$WORK/body" || true)"
+check "开放组带 Token" "1" "$(grep -c "/l/$PTOK/op/c3.m3u8" "$WORK/body" || true)"
 check "直通组不带 Token" "0" "$(grep -c 'example.invalid/live.m3u8?token' "$WORK/body" || true)"
 check "坏令牌 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/nope/playlist.m3u")"
 check "坏令牌 EPG 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/nope/epg.xml")"

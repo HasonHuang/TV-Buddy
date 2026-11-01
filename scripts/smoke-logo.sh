@@ -53,10 +53,13 @@ fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 header() { curl -s -o /dev/null -D - "$1" | awk -v k="$2" 'BEGIN{IGNORECASE=1}index($0,k":")==1{sub(/\r$/,"");print substr($0,length(k)+3)}'; }
 
-check "初始列表为空" "0" "$(curl -s "$B/logo/api/list" | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])')"
-
 TOKEN=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
+A="Authorization: Bearer $TOKEN"
+
+check "初始列表为空" "0" "$(curl -s -H "$A" "$B/panel/api/logo/list" | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])')"
+check "公开台标列表已删除" "1" \
+  "$(test "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/api/list")" != "200" && echo 1 || echo 0)"
 
 PNG='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 BODY="{\"items\":[{\"name\":\"cctv1.png\",\"data\":\"data:image/png;base64,$PNG\"}]}"
@@ -69,13 +72,12 @@ check "取图 200" "200" "$(curl -s -o "$WORK/logo.png" -w '%{http_code}' "$B/lo
 check "取图类型" "image/png" "$(header "$B/logo/cctv1.png" content-type)"
 check "取图缓存头" "public, max-age=86400" "$(header "$B/logo/cctv1.png" cache-control)"
 check "取图魔数" "89504e47" "$(od -An -tx1 -N4 "$WORK/logo.png" | tr -d ' ')"
-check "列表计数" "1" "$(curl -s "$B/logo/api/list" | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])')"
+check "列表计数" "1" "$(curl -s -H "$A" "$B/panel/api/logo/list" | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])')"
 check "缺文件 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/missing.png")"
 check "越界名 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/..%2F..%2Fconfig.json")"
 check "越界扩展 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/evil.exe")"
 
-check "台标页 200" "200" "$(curl -s -o "$WORK/page.html" -w '%{http_code}' "$B/logo")"
-check "页面含资源" "yes" "$(grep -q '/assets/logo-' "$WORK/page.html" && echo yes || echo no)"
+check "公开台标页已删除" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo")"
 
 DEL=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/delete" \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"file":"cctv1.png"}')
@@ -162,13 +164,10 @@ check "还原回原图大小" "70" \
   "$(curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/logo/list" | \
     python3 -c 'import json,sys;print(next(l["bytes"] for l in json.load(sys.stdin)["logos"] if l["file"]=="anim.png"))')"
 
-# --- 前端接线（A2）：动效与浏览器侧转码参数已内嵌 ---
-# 台标页的实现在 modulepreload 的第二个 chunk（入口只做挂载），所以把所有 logo-*.js 拼起来查。
-check "台标页引用 logo 资源" "yes" \
-  "$(curl -s "$B/logo" | grep -q '/__assets/assets/logo-' && echo yes || echo no)"
-LJS=$(for asset in $(curl -s "$B/logo" | grep -oE '/__assets/assets/logo-[A-Za-z0-9_.-]+\.js'); do
-  curl -s "$B$asset"
-done)
+# --- 前端接线（A2）：动效与浏览器侧转码参数已内嵌在面板包 ---
+ASSET=$(curl -s "$B/panel" | grep -oE '/__assets/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+check "面板引用入口资源" "yes" "$([ -n "$ASSET" ] && echo yes || echo no)"
+LJS=$(curl -s "$B$ASSET")
 for needle in 'logo/animate' 'logo/restore' 'toBlob' 'image/webp'; do
   case "$LJS" in
     *"$needle"*) printf 'ok   %s\n' "台标页包含 $needle" ;;

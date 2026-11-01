@@ -105,39 +105,49 @@ check() { # 名称 期望 实际
 }
 header() { curl -s -o /dev/null -D - "$1" | awk -v k="$2" 'BEGIN{IGNORECASE=1}index($0,k":")==1{sub(/\r$/,"");print substr($0,length(k)+3)}' ; }
 
-# 启动采集是异步的，等产物出现。
+# 先登录。公开 EPG 面已删除，节目单只经用户订阅与面板接口。
+COOKIE=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"admin"}' -D - -o "$WORK/login.json" | awk 'BEGIN{IGNORECASE=1}/^set-cookie:/{sub(/\r$/,"");print substr($0,13)}')
+TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$WORK/login.json")
+A="Authorization: Bearer $TOKEN"
+ADMIN_ID=$(curl -s -H "$A" "$B/panel/api/users" |
+  python3 -c 'import sys,json;print(json.load(sys.stdin)["users"][0]["id"])')
+PTOK=$(curl -s -X POST -H "$A" -H 'content-type: application/json' -d '{}' \
+  "$B/panel/api/users/$ADMIN_ID/tokens" |
+  python3 -c 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
+SUB="$B/sub/$PTOK"
+
+check "公开 EPG XML 已删除" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/epg.xml")"
+check "公开 EPG 页已删除" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/epg")"
+
+# 启动采集是异步的，等用户节目单出现。
 for _ in $(seq 1 60); do
-  [ "$(curl -s -o /dev/null -w '%{http_code}' "$B/epg.xml")" = "200" ] && break
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$SUB/epg.xml")" = "200" ] && break
   sleep 0.2
 done
 
-check "EPG XML 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$B/epg.xml")"
-check "EPG XML 类型" "application/xml; charset=utf-8" "$(header "$B/epg.xml" content-type)"
+check "EPG XML 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$SUB/epg.xml")"
+check "EPG XML 类型" "application/xml; charset=utf-8" "$(header "$SUB/epg.xml" content-type)"
 check "EPG 生成者" "1" "$(grep -c 'generator-info-name="tv-buddy"' "$WORK/body")"
 check "EPG 含匹配频道" "1" "$(grep -c '<channel id="c1">' "$WORK/body")"
 check "EPG 含窗口内节目" "1" "$(grep -c '新闻' "$WORK/body")"
 check "EPG 过滤旧节目" "0" "$(grep -c '老节目' "$WORK/body")"
 
-check "EPG gzip 200" "200" "$(curl -s -o "$WORK/body.gz" -w '%{http_code}' "$B/epg.xml.gz")"
-check "EPG gzip 类型" "application/gzip" "$(header "$B/epg.xml.gz" content-type)"
+check "EPG gzip 200" "200" "$(curl -s -o "$WORK/body.gz" -w '%{http_code}' "$SUB/epg.xml.gz")"
+check "EPG gzip 类型" "application/gzip" "$(header "$SUB/epg.xml.gz" content-type)"
 check "EPG gzip 魔数" "1f8b" "$(od -An -tx1 -N2 "$WORK/body.gz" | tr -d ' ')"
 
-check "EPG 浏览页 200" "200" "$(curl -s -o "$WORK/page.html" -w '%{http_code}' "$B/epg")"
-check "EPG 浏览页含前端资源" "1" "$(grep -c '/assets/epg-' "$WORK/page.html")"
+check "面板频道接口 200" "200" "$(curl -s -o "$WORK/channels.json" -w '%{http_code}' -H "$A" "$B/panel/api/epg/viewer-channels")"
+check "面板频道接口计数" "1" \
+  "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));rows=d.get("channels") or [];print(1 if len(rows)==1 and rows[0]["id"]=="c1" else 0)' "$WORK/channels.json")"
+check "面板节目接口 200" "200" "$(curl -s -o "$WORK/prog.json" -w '%{http_code}' -H "$A" "$B/panel/api/epg/programmes/c1")"
+check "面板节目含标题" "1" \
+  "$(python3 -c 'import json,sys;rows=json.load(open(sys.argv[1])).get("programmes") or [];print(1 if any(r["title"]=="新闻" for r in rows) else 0)' "$WORK/prog.json")"
+curl -s -H "$A" "$B/panel/api/epg/search?q=%E6%96%B0%E9%97%BB" > "$WORK/search.json"
+check "面板搜索命中" "1" \
+  "$(python3 -c 'import json,sys;rows=json.load(open(sys.argv[1])).get("programmes") or [];print(1 if len(rows)==1 and rows[0]["title"]=="新闻" else 0)' "$WORK/search.json")"
 
-check "EPG 频道接口 200" "200" "$(curl -s -o "$WORK/channels.json" -w '%{http_code}' "$B/epg/api/channels")"
-# 公开 EPG API 的字段以 F-023 为准：`channels` 用 `total`，`programmes`/`search` 没有 `count`。
-check "EPG 频道接口计数" "1" "$(python3 scripts/epg_assert.py "$WORK/channels.json" channels)"
-check "EPG 节目接口 200" "200" "$(curl -s -o "$WORK/prog.json" -w '%{http_code}' "$B/epg/api/programmes/c1")"
-check "EPG 节目含标题" "1" "$(python3 scripts/epg_assert.py "$WORK/prog.json" programmes)"
-curl -s "$B/epg/api/search?q=%E6%96%B0%E9%97%BB" > "$WORK/search.json"
-check "EPG 搜索命中" "1" "$(python3 scripts/epg_assert.py "$WORK/search.json" search)"
-
-COOKIE=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
-  -d '{"username":"admin","password":"admin"}' -D - -o "$WORK/login.json" | awk 'BEGIN{IGNORECASE=1}/^set-cookie:/{sub(/\r$/,"");print substr($0,13)}')
-TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$WORK/login.json")
-
-check "EPG 状态 200" "200" "$(curl -s -o "$WORK/status.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/status")"
+check "EPG 状态 200" "200" "$(curl -s -o "$WORK/status.json" -w '%{http_code}' -H "$A" "$B/panel/api/epg/status")"
 check "EPG 状态已匹配频道" "1" "$(python3 -c 'import json,sys;print(1 if json.load(open(sys.argv[1]))["channels"]>=1 else 0)' "$WORK/status.json")"
 check "EPG 刷新 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/refresh")"
 

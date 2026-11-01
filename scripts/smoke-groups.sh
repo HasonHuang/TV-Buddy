@@ -140,7 +140,7 @@ check "订阅顺序随排序" "ga,gc,gb" \
 import re, sys
 order = []
 for line in open(sys.argv[1]):
-    match = re.search(r"127\.0\.0\.1:\d+/([a-z]{2})/[a-z0-9]+\.(m3u8|mpd)", line)
+    match = re.search(r"127\.0\.0\.1:\d+/l/[^/]+/([a-zA-Z0-9]{2})/[a-z0-9]+\.(m3u8|mpd)", line)
     if match and match.group(1) not in order:
         order.append(match.group(1))
 print(",".join(order))

@@ -1675,8 +1675,7 @@ fn session_limit(
     }
 }
 
-/// Token 仅校验入口；`open` 组免校验（F-007、F-009）。
-/// 播放令牌校验。
+/// 播放令牌校验。只校验入口，切片不校验。
 ///
 /// 令牌来自 `users.db` 的 `access_tokens`，属于某个用户。
 /// 校验两件事：令牌有效，且该用户可见这个频道
@@ -1690,7 +1689,7 @@ fn token_ok(
     token: Option<&str>,
     authorized: bool,
 ) -> bool {
-    if authorized || !config.auth.token_enabled || group.access == "open" {
+    if authorized || !config.auth.token_enabled {
         return true;
     }
     let token = token

@@ -36,17 +36,29 @@ impl ConfigStore {
         let Some(raw) = raw else {
             return Ok(None);
         };
-        let config: Config = serde_json::from_str(&raw).context("配置记录解析失败")?;
+        let mut config: Config = serde_json::from_str(&raw).context("配置记录解析失败")?;
+        config.normalize();
         Ok(Some(config))
     }
 
     /// 写配置。先补空密钥、校验，再整条替换。
-    pub fn save(&self, config: &Config) -> Result<()> {
+    ///
+    /// 每次写入自增 `revision`，并返回新值。调用方用它更新内存快照。
+    pub fn save(&self, config: &Config) -> Result<u64> {
         let mut config = config.clone();
+        config.normalize();
         crate::sign::ensure_secret(&mut config);
         super::validate(&config)?;
-        let text = serde_json::to_string(&config).context("序列化配置失败")?;
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let current: Option<Option<i64>> = conn
+            .query_row(
+                "SELECT json_extract(value, '$.revision') FROM settings WHERE key = ?1",
+                params![CONFIG_KEY],
+                |row| row.get(0),
+            )
+            .optional()?;
+        config.revision = current.flatten().unwrap_or(0).max(0) as u64 + 1;
+        let text = serde_json::to_string(&config).context("序列化配置失败")?;
         conn.execute(
             "INSERT INTO settings (key, value, updated_at_ms)
              VALUES (?1, ?2, ?3)
@@ -55,13 +67,13 @@ impl ConfigStore {
                updated_at_ms = excluded.updated_at_ms",
             params![CONFIG_KEY, text, now_ms()],
         )?;
-        Ok(())
+        Ok(config.revision)
     }
 
     /// 恢复默认配置。用户不受影响。
     pub fn reset(&self) -> Result<Config> {
-        let config = Config::default();
-        self.save(&config)?;
+        let mut config = Config::default();
+        config.revision = self.save(&config)?;
         Ok(config)
     }
 }
@@ -124,6 +136,51 @@ mod tests {
         config.server.bind = "  ".into();
         assert!(store.save(&config).is_err());
         assert!(store.load().expect("读取").is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn save_increments_revision_and_normalizes_open() {
+        let (store, dir) = temp_store("revision");
+        let mut config = Config::default();
+        config.groups.push(super::super::model::Group {
+            id: "g".into(),
+            access: "open".into(),
+            ..Default::default()
+        });
+        assert_eq!(store.save(&config).expect("首次保存"), 1);
+
+        let loaded = store.load().expect("读取").expect("有配置");
+        assert_eq!(loaded.revision, 1);
+        assert_eq!(loaded.groups[0].access, "public", "load 应归一 open");
+
+        assert_eq!(store.save(&loaded).expect("再次保存"), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn legacy_config_without_revision_loads() {
+        let dir = std::env::temp_dir().join("tv-buddy-config-legacy");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("tv-buddy.db");
+        let conn = crate::db::connect(&path).expect("打开库");
+        let raw = serde_json::json!({
+            "server": { "bind": "127.0.0.1:9000" },
+            "groups": [{ "id": "g", "name": "旧组", "mode": "proxy", "access": "open" }]
+        });
+        conn.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .execute(
+                "INSERT INTO settings (key, value, updated_at_ms) VALUES (?1, ?2, 0)",
+                params![CONFIG_KEY, raw.to_string()],
+            )
+            .expect("写入旧配置");
+        let store = ConfigStore::new(conn);
+
+        let loaded = store.load().expect("读取").expect("有配置");
+        assert_eq!(loaded.revision, 0);
+        assert_eq!(loaded.groups[0].access, "public");
+        assert_eq!(store.save(&loaded).expect("保存"), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

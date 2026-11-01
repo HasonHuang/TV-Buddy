@@ -24,6 +24,7 @@ cat > "$WORK/config.json" <<JSON
     "log_level": "warn",
     "error_url": "http://placeholder.test/mistake.mp4"
   },
+  "auth": { "token_enabled": false },
   "cache": {
     "disk_path": "$WORK/cache"
   },

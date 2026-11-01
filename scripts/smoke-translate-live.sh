@@ -104,8 +104,19 @@ curl -fsS --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null || {
     exit 1
 }
 
+TOKEN_JSON=$(curl -fsS --max-time 10 -X POST "http://127.0.0.1:$PORT/panel/api/login" \
+    -H 'Content-Type: application/json' --data '{"username":"admin","password":"admin"}')
+SESSION=$(printf '%s' "$TOKEN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+ADMIN_ID=$(curl -fsS -H "Authorization: Bearer $SESSION" "http://127.0.0.1:$PORT/panel/api/users" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["users"][0]["id"])')
+PTOK=$(curl -fsS --max-time 10 -X POST -H "Authorization: Bearer $SESSION" \
+    -H 'Content-Type: application/json' --data '{}' \
+    "http://127.0.0.1:$PORT/panel/api/users/$ADMIN_ID/tokens" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["token"]["token"])')
+
 echo "==> MTranServer 自检：$URL"
 curl -sS --max-time 90 -X POST "http://127.0.0.1:$PORT/subtitle/mtran/test" \
+    -H "Authorization: Bearer $SESSION" \
     -H 'Content-Type: application/json' --data '{"text":"Hello world"}' >"$WORK/test.json"
 python3 - "$WORK/test.json" <<'PY'
 import json, sys
@@ -115,13 +126,9 @@ if not body.get("ok") or not body.get("result"):
     raise SystemExit("MTranServer 自检失败")
 PY
 
-TOKEN_JSON=$(curl -fsS --max-time 10 -X POST "http://127.0.0.1:$PORT/panel/api/login" \
-    -H 'Content-Type: application/json' --data '{"username":"admin","password":"admin"}')
-SESSION=$(printf '%s' "$TOKEN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-
 echo "==> EPG 采集与翻译"
 for _ in $(seq 1 90); do
-    [ "$(curl -s -o "$WORK/epg.xml" -w '%{http_code}' "http://127.0.0.1:$PORT/epg.xml")" = "200" ] && break
+    [ "$(curl -s -o "$WORK/epg.xml" -w '%{http_code}' "http://127.0.0.1:$PORT/sub/$PTOK/epg.xml")" = "200" ] && break
     sleep 0.5
 done
 grep -q '你好' "$WORK/epg.xml" || {

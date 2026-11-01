@@ -56,7 +56,6 @@ const MODES: { value: string; label: string }[] = [
 const ACCESS: { value: string; label: string }[] = [
   { value: 'public', label: '公开' },
   { value: 'hidden', label: '隐藏' },
-  { value: 'open', label: '开放（免 Token）' },
   { value: 'archived', label: '归档' },
 ];
 
@@ -75,12 +74,12 @@ function entryUrl(group: Group, channel: Channel): string {
 }
 
 /**
- * 播放地址。`open` 组免令牌，其余组附上当前账号的播放令牌。
+ * 播放地址。附上当前账号的播放令牌。
  *
  * 与订阅里的地址同规则（`src/playlist.rs::entry_url`）。
  */
 function playUrl(group: Group, channel: Channel, token: string): string {
-  if (group.access === 'open' || token === '') return entryUrl(group, channel);
+  if (token === '') return entryUrl(group, channel);
   return `${location.origin}/l/${token}/${group.id}/${channel.id}.${entryExt(group)}`;
 }
 

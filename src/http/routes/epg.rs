@@ -3,11 +3,11 @@
 //! 公开面：`/epg.xml`、`/epg.xml.gz`、`/epg`。EPG 关闭时三者都 `404`（S-EP-05）。
 //! 私有面：`/panel/api/epg/{status,refresh,mappings,mapping,match-report}`。
 
-use std::{collections::HashMap, path::Path as FsPath, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     extract::{Path, Query, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -15,13 +15,9 @@ use serde_json::{json, Value};
 
 use crate::{
     epg,
-    http::{error::ApiError, ext::PanelAuth, static_assets},
+    http::{error::ApiError, ext::PanelAuth},
     state::AppState,
 };
-
-fn not_found() -> Response {
-    (StatusCode::NOT_FOUND, "not found").into_response()
-}
 
 /// EPG 关闭时公开接口的统一错误。
 fn epg_closed() -> Response {
@@ -30,43 +26,6 @@ fn epg_closed() -> Response {
         Json(json!({ "error": "EPG 功能已关闭" })),
     )
         .into_response()
-}
-
-async fn document(state: &Arc<AppState>, gzip: bool) -> Response {
-    let config = state.snapshot();
-    if !config.epg.enabled {
-        return not_found();
-    }
-    let name = if gzip { "epg.xml.gz" } else { "epg.xml" };
-    let path = epg::output_dir(FsPath::new(&config.cache.disk_path)).join(name);
-    let Ok(body) = tokio::fs::read(&path).await else {
-        return not_found();
-    };
-    let mime = if gzip {
-        "application/gzip"
-    } else {
-        "application/xml; charset=utf-8"
-    };
-    ([(header::CONTENT_TYPE, mime)], body).into_response()
-}
-
-/// `GET /epg.xml`。
-pub async fn xml(State(state): State<Arc<AppState>>) -> Response {
-    document(&state, false).await
-}
-
-/// `GET /epg.xml.gz`。
-pub async fn xml_gz(State(state): State<Arc<AppState>>) -> Response {
-    document(&state, true).await
-}
-
-/// `GET /epg`——公开浏览页。EPG 关闭时 `404`。
-pub async fn viewer(State(state): State<Arc<AppState>>) -> Response {
-    let config = state.snapshot();
-    if !config.epg.enabled || !config.epg.public_viewer_enabled {
-        return not_found();
-    }
-    static_assets::epg_page().await
 }
 
 /// `GET /panel/api/epg/status`。
@@ -421,73 +380,6 @@ pub async fn tz_preview(
     Json(epg::tz_preview(&config, &source_id, shift_mins * 60))
 }
 
-/// `GET /panel/api/epg/search?q=`——面板侧标题搜索。
-pub async fn search(
-    PanelAuth(_): PanelAuth,
-    State(state): State<Arc<AppState>>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Response {
-    api_search(State(state), Query(params)).await
-}
-
-/// `GET /panel/api/epg/viewer-channels`——公开浏览页可见频道。
-pub async fn viewer_channels(
-    PanelAuth(_): PanelAuth,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    let config = state.snapshot();
-    if !config.epg.enabled {
-        return epg_closed();
-    }
-    let viewer = epg::load_viewer(&config).unwrap_or_default();
-    let channels: Vec<Value> = viewer.channels.iter().map(viewer_channel_json).collect();
-    Json(json!({ "channels": channels })).into_response()
-}
-
-/// 公开接口的前置条件：EPG 开启且公开浏览开启。
-fn public_ready(config: &crate::config::Config) -> Option<Response> {
-    if !config.epg.enabled {
-        return Some(
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "EPG 功能已关闭" })),
-            )
-                .into_response(),
-        );
-    }
-    if !config.epg.public_viewer_enabled {
-        return Some(
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "公开节目单查看器已关闭" })),
-            )
-                .into_response(),
-        );
-    }
-    None
-}
-
-fn cached_json(value: Value, cache: &'static str) -> Response {
-    let mut response = Json(value).into_response();
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
-    response
-}
-
-fn viewer_channel_json(channel: &epg::ViewerChannel) -> Value {
-    json!({
-        "icon": channel.icon,
-        "id": channel.id,
-        "kind": channel.kind,
-        "last_stop": channel.last_stop,
-        "name": channel.name,
-        "programme_count": channel.programme_count,
-        "source_id": channel.source_id,
-        "source_name": channel.source_name,
-    })
-}
-
 fn title_of(programme: &epg::Programme) -> String {
     programme
         .texts
@@ -497,26 +389,8 @@ fn title_of(programme: &epg::Programme) -> String {
         .unwrap_or_default()
 }
 
-fn desc_of(programme: &epg::Programme) -> String {
-    programme
-        .texts
-        .iter()
-        .find(|(name, _, _)| name == "desc")
-        .map(|(_, _, text)| text.clone())
-        .unwrap_or_default()
-}
-
 fn time_of(value: &str) -> i64 {
     epg::parse_time(value).unwrap_or(0)
-}
-
-fn programme_body_json(programme: &epg::Programme) -> Value {
-    json!({
-        "desc": desc_of(programme),
-        "start": time_of(&programme.start),
-        "stop": time_of(&programme.stop),
-        "title": title_of(programme),
-    })
 }
 
 fn search_programme_json(programme: &epg::Programme, channel_name: &str) -> Value {
@@ -529,60 +403,15 @@ fn search_programme_json(programme: &epg::Programme, channel_name: &str) -> Valu
     })
 }
 
-/// `GET /epg/api/channels`——公开频道表。
-pub async fn api_channels(State(state): State<Arc<AppState>>) -> Response {
-    let config = state.snapshot();
-    if let Some(response) = public_ready(&config) {
-        return response;
-    }
-    let viewer = epg::load_viewer(&config).unwrap_or_default();
-    let channels: Vec<Value> = viewer.channels.iter().map(viewer_channel_json).collect();
-    cached_json(
-        json!({
-            "channels": channels,
-            "generated_at": viewer.generated_at,
-            "total": channels.len(),
-            "tz_offset_hours": config.server.timezone_offset_hours,
-        }),
-        "public, max-age=300",
-    )
-}
-
-/// `GET /epg/api/programmes/{channel}`——单个频道的节目。
-pub async fn api_programmes(
-    State(state): State<Arc<AppState>>,
-    Path(channel): Path<String>,
-) -> Response {
-    let config = state.snapshot();
-    if let Some(response) = public_ready(&config) {
-        return response;
-    }
-    let data = epg::load_generated(&config).unwrap_or_default();
-    let mut programmes: Vec<&epg::Programme> = data
-        .programmes
-        .iter()
-        .filter(|programme| programme.channel == channel)
-        .collect();
-    programmes.sort_by_key(|programme| time_of(&programme.start));
-    let programmes: Vec<Value> = programmes.into_iter().map(programme_body_json).collect();
-    cached_json(
-        json!({
-            "channel": channel,
-            "programmes": programmes,
-            "tz_offset_hours": config.server.timezone_offset_hours,
-        }),
-        "public, max-age=120",
-    )
-}
-
-/// `GET /epg/api/search?q=`——按频道名/节目标题搜索，最多 200 条。
-pub async fn api_search(
+/// `GET /panel/api/epg/search?q=`——面板侧标题搜索。
+pub async fn search(
+    PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let config = state.snapshot();
-    if let Some(response) = public_ready(&config) {
-        return response;
+    if !config.epg.enabled {
+        return epg_closed();
     }
     let viewer = epg::load_viewer(&config).unwrap_or_default();
     let data = epg::load_generated(&config).unwrap_or_default();
@@ -628,18 +457,46 @@ pub async fn api_search(
             search_programme_json(programme, name)
         })
         .collect();
-    cached_json(
-        json!({
-            "channels": channels,
-            "programmes": programmes,
-            "tz_offset_hours": config.server.timezone_offset_hours,
-        }),
-        "public, max-age=30",
-    )
+    Json(json!({
+        "channels": channels,
+        "programmes": programmes,
+        "tz_offset_hours": config.server.timezone_offset_hours,
+    }))
+    .into_response()
+}
+
+/// `GET /panel/api/epg/viewer-channels`——公开浏览页可见频道。
+pub async fn viewer_channels(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let config = state.snapshot();
+    if !config.epg.enabled {
+        return epg_closed();
+    }
+    let viewer = epg::load_viewer(&config).unwrap_or_default();
+    let channels: Vec<Value> = viewer.channels.iter().map(viewer_channel_json).collect();
+    Json(json!({ "channels": channels })).into_response()
+}
+
+fn viewer_channel_json(channel: &epg::ViewerChannel) -> Value {
+    json!({
+        "icon": channel.icon,
+        "id": channel.id,
+        "kind": channel.kind,
+        "last_stop": channel.last_stop,
+        "name": channel.name,
+        "programme_count": channel.programme_count,
+        "source_id": channel.source_id,
+        "source_name": channel.source_name,
+    })
 }
 
 /// `GET /epg/translate/status`——翻译能力与缓存状态。
-pub async fn translate_status(State(state): State<Arc<AppState>>) -> Json<Value> {
+pub async fn translate_status(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
     let config = state.snapshot();
     let translate = epg::translate_config(&config);
     Json(json!({
@@ -655,7 +512,10 @@ pub async fn translate_status(State(state): State<Arc<AppState>>) -> Json<Value>
 }
 
 /// `GET /epg/translate/models`——可用翻译目标语言。
-pub async fn translate_models(State(state): State<Arc<AppState>>) -> Json<Value> {
+pub async fn translate_models(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
     let config = state.snapshot();
     let translate = epg::translate_config(&config);
     Json(json!({
@@ -732,6 +592,7 @@ pub async fn translate_probe(
 
 /// `POST /epg/translate/mtran/test`——机翻自检。
 pub async fn translate_mtran(
+    PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Response {
@@ -791,12 +652,18 @@ fn translate_credentials(config: &crate::config::Config) -> (String, String) {
 }
 
 /// `POST /epg/translate/clear`——清空翻译结果缓存。
-pub async fn translate_clear_results(State(state): State<Arc<AppState>>) -> Json<Value> {
-    translate_clear(State(state)).await
+pub async fn translate_clear_results(
+    PanelAuth(token): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    translate_clear(PanelAuth(token), State(state)).await
 }
 
 /// `POST /epg/translate/clear-engine`——清空翻译缓存。
-pub async fn translate_clear(State(state): State<Arc<AppState>>) -> Json<Value> {
+pub async fn translate_clear(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
     let dir = state.cache_dir.join("epg").join(".translate");
     let mut cleared = 0usize;
     if let Ok(read) = std::fs::read_dir(&dir) {

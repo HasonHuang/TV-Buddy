@@ -42,14 +42,6 @@ pub async fn panel_page() -> Response {
     page("panel.html")
 }
 
-pub async fn epg_page() -> Response {
-    page("epg.html")
-}
-
-pub async fn logo_page() -> Response {
-    page("logo.html")
-}
-
 pub async fn unban_page() -> Response {
     page("unban.html")
 }

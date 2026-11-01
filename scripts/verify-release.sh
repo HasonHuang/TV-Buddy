@@ -82,10 +82,12 @@ wget -qO /tmp/panel.js "http://127.0.0.1:9900$asset"
 grep -q "security/token" /tmp/panel.js || { echo "面板资源不含安全分区"; kill $pid 2>/dev/null || true; exit 1; }
 echo "面板资源 = $asset"
 
-# 台标接口可用。
-logos=$(wget -qO- http://127.0.0.1:9900/logo/api/list)
-printf "%s" "$logos" | grep -q count || { echo "台标列表异常：$logos"; kill $pid 2>/dev/null || true; exit 1; }
-echo "/logo/api/list = ok"
+# 公开台标列表已删除；面板列表需要会话。
+wget -q --server-response -O /dev/null http://127.0.0.1:9900/logo/api/list 2>/tmp/logo-public.txt || true
+grep -q " 200 " /tmp/logo-public.txt && { echo "公开台标列表未删除"; kill $pid 2>/dev/null || true; exit 1; }
+wget -q --server-response -O /dev/null http://127.0.0.1:9900/panel/api/logo/list 2>/tmp/logo-panel.txt || true
+grep -q " 401 " /tmp/logo-panel.txt || { echo "台标面板列表未鉴权"; cat /tmp/logo-panel.txt; kill $pid 2>/dev/null || true; exit 1; }
+echo "/logo/api/list = removed"
 
 # 面板健康接口需要会话；未登录应为 401。
 wget -q --server-response -O /dev/null http://127.0.0.1:9900/panel/api/health 2>/tmp/head.txt || true
@@ -97,13 +99,10 @@ wget -q --server-response -O /dev/null "http://127.0.0.1:9900/api/share/pull?key
 grep -q " 404 " /tmp/share.txt || { echo "分享端点异常"; cat /tmp/share.txt; kill $pid 2>/dev/null || true; exit 1; }
 echo "/api/share/pull = disabled"
 
-# 台标页脚本必须含新端点。
-lpage=$(wget -qO- http://127.0.0.1:9900/logo)
-lasset=$(printf "%s" "$lpage" | grep -o "/__assets/[^\"]*logo-[^\"]*\.js" | head -1)
-[ -n "$lasset" ] || { echo "台标页缺少脚本引用"; kill $pid 2>/dev/null || true; exit 1; }
-wget -qO /tmp/logo.js "http://127.0.0.1:9900$lasset"
-grep -q "match-report" /tmp/logo.js || { echo "台标资源不含匹配报告"; kill $pid 2>/dev/null || true; exit 1; }
-echo "台标资源 = $lasset"
+# 公开台标页已删除。
+wget -q --server-response -O /dev/null http://127.0.0.1:9900/logo 2>/tmp/logo-page.txt || true
+grep -q " 404 " /tmp/logo-page.txt || { echo "公开台标页未删除"; cat /tmp/logo-page.txt; kill $pid 2>/dev/null || true; exit 1; }
+echo "/logo = 404"
 
 kill $pid 2>/dev/null || true
 '

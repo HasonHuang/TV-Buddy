@@ -15,8 +15,12 @@ use crate::{
     subs::{self, PreviewSource},
 };
 
-/// `GET /subs/status`——列出聚合源最近一次抓取状态。
-pub async fn status(State(state): State<Arc<AppState>>) -> Json<Value> {
+/// `GET /subs/status`——列出聚合源最近一次抓取状态。需要管理员会话。
+pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
+    status_body(state).await
+}
+
+async fn status_body(state: Arc<AppState>) -> Json<Value> {
     let config = state.snapshot();
     let statuses = state.sources.statuses();
     let sources: Vec<Value> = config
@@ -40,11 +44,16 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({ "sources": sources }))
 }
 
-/// `POST /subs/groups`——抓取源并列出分组。
+/// `POST /subs/groups`——抓取源并列出分组。需要管理员会话。
 pub async fn groups(
+    PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
+    groups_body(state, body).await
+}
+
+async fn groups_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, ApiError> {
     let url = body
         .get("url")
         .and_then(Value::as_str)
@@ -62,11 +71,16 @@ pub async fn groups(
     Ok(Json(json!({ "groups": groups, "total": total })))
 }
 
-/// `POST /subs/preview`——按映射与过滤规则预检源。
+/// `POST /subs/preview`——按映射与过滤规则预检源。需要管理员会话。
 pub async fn preview(
+    PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
+    preview_body(state, body).await
+}
+
+async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, ApiError> {
     let input = body.get("source").cloned().unwrap_or_else(|| body.clone());
     let config = state.snapshot();
 
@@ -179,7 +193,7 @@ pub async fn panel_status(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
 ) -> Json<Value> {
-    status(State(state)).await
+    status_body(state).await
 }
 
 /// `POST /panel/api/subs/groups`——目标面板路径，需要会话。
@@ -188,7 +202,7 @@ pub async fn panel_groups(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
-    groups(State(state), Json(body)).await
+    groups_body(state, body).await
 }
 
 /// `POST /panel/api/subs/preview`——目标面板路径，需要会话。
@@ -197,7 +211,7 @@ pub async fn panel_preview(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
-    preview(State(state), Json(body)).await
+    preview_body(state, body).await
 }
 
 /// 抽样条数上限。

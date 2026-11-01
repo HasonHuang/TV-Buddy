@@ -11,6 +11,11 @@ use anyhow::bail;
 pub use model::Config;
 pub use store::ConfigStore;
 
+/// 全量保存时，调用方持有的版本已过期。
+#[derive(Debug, thiserror::Error)]
+#[error("配置已被更新，当前版本 {0}")]
+pub struct StaleRevision(pub u64);
+
 /// 基本校验。只拦会破坏运行的值。
 pub fn validate(config: &Config) -> anyhow::Result<()> {
     if config.server.bind.trim().is_empty() {

@@ -35,6 +35,8 @@ pub struct Config {
     pub features: FeaturesCfg,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<Group>,
+    /// 并发令牌。每次保存自增。旧配置缺失时为 0。
+    pub revision: u64,
     /// 未建模的段与键。
     #[serde(flatten)]
     pub extra: Extra,
@@ -49,6 +51,18 @@ impl Config {
     /// 按 id 找可变分组。
     pub fn group_mut(&mut self, gid: &str) -> Option<&mut Group> {
         self.groups.iter_mut().find(|group| group.id == gid)
+    }
+
+    /// 规范化旧取值。
+    ///
+    /// `open` 不再免令牌。加载与保存时改为 `public`。
+    /// 数据层保留四档，兼容导入与备份。
+    pub fn normalize(&mut self) {
+        for group in &mut self.groups {
+            if group.access == "open" {
+                group.access = "public".to_string();
+            }
+        }
     }
 
     /// `[assets].map`：原始 URL → 本地 HLS 入口。
@@ -779,7 +793,7 @@ pub struct AuthCfg {
 impl Default for AuthCfg {
     fn default() -> Self {
         Self {
-            token_enabled: false,
+            token_enabled: true,
             token_ttl_hours: 24,
             token_failure_url: "https://material.yang-1989.eu.org/v/Failure.mp4".into(),
             slice_sign_enabled: true,
@@ -934,7 +948,9 @@ pub struct Group {
     pub name: String,
     /// `proxy` / `remux` / `dash` / `redirect` / `rewrite` / `passthrough`。
     pub mode: String,
-    /// `public` / `hidden` / `archived` / `open`。
+    /// `public` / `hidden` / `archived`。
+    ///
+    /// 旧值 `open` 在加载与保存时归一为 `public`。
     pub access: String,
     /// `hls` / `mpd`。
     pub format: String,
@@ -1230,6 +1246,30 @@ impl Default for ShareCfg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn token_check_is_on_by_default() {
+        assert!(AuthCfg::default().token_enabled);
+        assert!(Config::default().auth.token_enabled);
+    }
+
+    #[test]
+    fn normalize_maps_open_to_public() {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "open".into(),
+            access: "open".into(),
+            ..Group::default()
+        });
+        config.groups.push(Group {
+            id: "hidden".into(),
+            access: "hidden".into(),
+            ..Group::default()
+        });
+        config.normalize();
+        assert_eq!(config.groups[0].access, "public");
+        assert_eq!(config.groups[1].access, "hidden", "其它档位不变");
+    }
 
     #[test]
     fn channel_proxy_overrides_group_proxy() {

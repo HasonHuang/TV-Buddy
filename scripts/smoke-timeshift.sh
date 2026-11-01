@@ -25,6 +25,7 @@ cat > "$WORK/config.json" <<JSON
     "bind": "127.0.0.1:$PORT",
     "log_level": "warn"
   },
+  "auth": { "token_enabled": false },
   "cache": {
     "disk_path": "$WORK/cache"
   },

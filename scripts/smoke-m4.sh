@@ -46,6 +46,7 @@ write_config() { # 参数 1：DASH 频道地址
     "bind": "127.0.0.1:$PORT",
     "log_level": "info"
   },
+  "auth": { "token_enabled": false },
   "cache": {
     "disk_path": "$CACHE"
   },

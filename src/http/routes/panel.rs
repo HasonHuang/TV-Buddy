@@ -208,15 +208,25 @@ pub async fn put_config(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
+    let expected = body.get("revision").and_then(Value::as_u64);
     let config: config::Config = serde_json::from_value(body)
         .map_err(|err| ApiError::bad_request(format!("配置格式错误: {err}")))?;
 
-    state
-        .save_config(config)
-        .map_err(|err| ApiError::internal(format!("保存失败: {err}")))?;
+    let revision = match state.save_config(config, expected) {
+        Ok(revision) => revision,
+        Err(err) => {
+            if let Some(stale) = err.downcast_ref::<config::StaleRevision>() {
+                return Err(ApiError::conflict(format!(
+                    "配置已被更新，当前版本 {}",
+                    stale.0
+                )));
+            }
+            return Err(ApiError::internal(format!("保存失败: {err}")));
+        }
+    };
 
     tracing::info!("配置已保存并生效");
-    Ok(Json(json!({ "ok": true })))
+    Ok(Json(json!({ "ok": true, "revision": revision })))
 }
 
 /// `POST /panel/api/reload`——从数据库重读配置。

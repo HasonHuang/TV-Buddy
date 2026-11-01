@@ -572,7 +572,11 @@ pub async fn translate_raw(
 }
 
 /// `POST /subtitle/mtran/test`——字幕机翻自检（S-SUB-03）。
-pub async fn mtran_test(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> Response {
+pub async fn mtran_test(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Response {
     let text = body
         .get("text")
         .and_then(Value::as_str)
@@ -623,7 +627,10 @@ pub async fn mtran_test(State(state): State<Arc<AppState>>, Json(body): Json<Val
 }
 
 /// `POST /subtitle/translate/clear`——清空字幕翻译缓存。
-pub async fn translate_clear(State(state): State<Arc<AppState>>) -> Json<Value> {
+pub async fn translate_clear(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
     let cleared = remove_files(&state.cache_dir.join("subtitles").join(".translate"));
     Json(json!({ "ok": true, "cleared": cleared }))
 }

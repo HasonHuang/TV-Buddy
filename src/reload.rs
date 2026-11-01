@@ -12,8 +12,9 @@ pub fn reload(state: &AppState) {
         Ok(Some(mut config)) => {
             if crate::sign::needs_secret(&config) {
                 crate::sign::ensure_secret(&mut config);
-                if let Err(error) = state.config_store.save(&config) {
-                    tracing::warn!(%error, "补写签名密钥失败");
+                match state.config_store.save(&config) {
+                    Ok(revision) => config.revision = revision,
+                    Err(error) => tracing::warn!(%error, "补写签名密钥失败"),
                 }
             }
             state.replace(config);

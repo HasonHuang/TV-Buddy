@@ -24,15 +24,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         // 公开面
         .route("/health", get(routes::public::health))
         .route("/", get(routes::public::home))
-        .route("/epg.xml", get(routes::epg::xml))
-        .route("/epg.xml.gz", get(routes::epg::xml_gz))
-        .route("/epg/api/channels", get(routes::epg::api_channels))
-        .route(
-            "/epg/api/programmes/:channel",
-            get(routes::epg::api_programmes),
-        )
-        .route("/epg/api/search", get(routes::epg::api_search))
-        .route("/logo/api/list", get(routes::logo::public_list))
         .route("/logo/:file", get(routes::logo::file))
         .route("/unban/whoami", get(routes::public::whoami))
         .route("/api/share/pull", get(routes::share::pull))
@@ -62,9 +53,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         // 内嵌页面（免登录）
         .route("/panel", get(static_assets::panel_page))
         .route("/panel/", get(static_assets::panel_page))
-        .route("/panel/epg", get(routes::epg::viewer))
-        .route("/epg", get(routes::epg::viewer))
-        .route("/logo", get(static_assets::logo_page))
         .route(
             "/unban",
             get(static_assets::unban_page).post(routes::public::unban),
@@ -377,5 +365,4 @@ pub fn router(state: Arc<AppState>) -> Router {
             guard::admin_gate,
         ))
         .with_state(state)
-        .layer(tower_http::cors::CorsLayer::permissive())
 }

@@ -111,8 +111,9 @@ check "面板页 200" "200" "$code"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$B/definitely/missing")
 check "未知路径 302" "302" "$code"
 
+# 未知面板接口先被管理员门拦下：未登录 401。登录后的 404 由契约测试覆盖。
 code=$(curl -s -o /dev/null -w '%{http_code}' "$B/panel/api/nope")
-check "未知接口 404" "404" "$code"
+check "未知接口未登录 401" "401" "$code"
 
 # 类型错必须被拒绝。JSON 重复键由 serde_json 取最后一个，不报错。
 printf '{"server":{"bind":123}}\n' > "$WORK/bad.json"

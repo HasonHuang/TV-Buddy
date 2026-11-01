@@ -63,7 +63,7 @@ TOKEN=$(login admin)
 AUTH="Authorization: Bearer $TOKEN"
 check "登录拿到 token" "yes" "$([ -n "$TOKEN" ] && echo yes || echo no)"
 
-canon() { python3 -c 'import json,sys;print(json.dumps(json.load(open(sys.argv[1])),sort_keys=True,ensure_ascii=False))' "$1"; }
+canon() { python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));d.pop("revision",None);print(json.dumps(d,sort_keys=True,ensure_ascii=False))' "$1"; }
 getcfg() { curl -s -H "$AUTH" "$B/panel/api/config" > "$1"; }
 putcfg() {
   curl -s -o "$WORK/put.out" -w '%{http_code}' -X PUT "$B/panel/api/config" \

@@ -58,7 +58,7 @@ pub struct UserGroup {
 /// 面板「我的订阅」用的可见范围。
 ///
 /// 与 [`render_user`] 共用同一套判定（归档组跳过、分组可见、频道可见、
-/// `open` 组不带令牌、`passthrough` 给上游地址），避免两处规则漂移。
+/// 非 `passthrough` 都带令牌、`passthrough` 给上游地址），避免两处规则漂移。
 pub fn user_view(
     config: &Config,
     user: &crate::users::User,
@@ -120,7 +120,6 @@ fn header(config: &Config, base: &str, epg_path: &str) -> String {
 /// 一个频道的播放地址。
 ///
 /// `passthrough` 直接给上游原始地址，且不套 Token（S-URL-02、S-MODE-11）。
-/// `open` 组免 Token，地址不带令牌段（F-009）。
 /// 其余组用路径令牌：`/l/<token>/<gid>/<cid>.<ext>`。
 pub fn entry_url(group: &Group, channel: &Channel, base: &str, token: &str) -> String {
     if group.mode == "passthrough" {
@@ -128,11 +127,7 @@ pub fn entry_url(group: &Group, channel: &Channel, base: &str, token: &str) -> S
     }
     let ext = if group.format == "mpd" { "mpd" } else { "m3u8" };
     let root = base.trim_end_matches('/');
-    if group.access == "open" {
-        format!("{root}/{}/{}.{ext}", group.id, channel.id)
-    } else {
-        format!("{root}/l/{token}/{}/{}.{ext}", group.id, channel.id)
-    }
+    format!("{root}/l/{token}/{}/{}.{ext}", group.id, channel.id)
 }
 
 fn push_entry(
@@ -261,11 +256,10 @@ mod tests {
     }
 
     #[test]
-    fn open_group_entry_has_no_token() {
+    fn open_group_entry_has_token() {
         let config = config_with(vec![group("g3", "open", "proxy")]);
         let body = render_user(&config, &admin(), "http://host", "tok");
-        assert!(body.contains("http://host/g3/c1.m3u8\n"));
-        assert!(!body.contains("token="));
+        assert!(body.contains("http://host/l/tok/g3/c1.m3u8\n"));
     }
 
     #[test]

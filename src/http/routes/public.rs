@@ -10,7 +10,11 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use crate::{auth::unban::MONTHLY_LIMIT, http::ext::client_ip_with_peer, state::AppState};
+use crate::{
+    auth::unban::MONTHLY_LIMIT,
+    http::ext::{client_ip_with_peer, PanelAuth},
+    state::AppState,
+};
 
 /// `302 Found`。目标用 302 做占位跳转（S-DIS-15）。
 fn found(url: &str) -> Response {
@@ -60,6 +64,7 @@ pub async fn fallback(State(_): State<Arc<AppState>>, uri: Uri) -> Response {
 ///
 /// 目标在 IP 管控关闭时只返回 `enabled` 与 `ip`。
 pub async fn whoami(
+    PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
@@ -84,6 +89,7 @@ pub async fn whoami(
 /// 免登录（S-EP-07）。每个 IP 每月最多 3 次（S-AUTH-07）。
 /// 配额用完时目标仍返回 `200`，正文 `ok=false`。
 pub async fn unban(
+    PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,

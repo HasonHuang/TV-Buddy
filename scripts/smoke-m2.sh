@@ -266,6 +266,8 @@ python3 -c '
 import json
 cfg = json.load(open("'"$WORK"'/cfg.json"))
 cfg["auth"]["token_enabled"] = True
+# 本段只测令牌校验。关掉切片签名，否则切片会按签名规则拒绝。
+cfg["auth"]["slice_sign_enabled"] = False
 json.dump(cfg, open("'"$WORK"'/put.json", "w"))
 '
 check "开启 Token 200" "200" \
@@ -286,7 +288,7 @@ check "错 Token 入口 302" "302" "$(status "$B/p1/c1.m3u8?token=deadbeef")"
 check "未知频道带 Token 跳占位" "http://placeholder.test/404.mp4" "$(location "$B/p1/ghost.m3u8?token=$PLAYTOKEN")"
 check "未知分组带 Token 跳占位" "http://placeholder.test/404.mp4" "$(location "$B/ghost/c1.m3u8?token=$PLAYTOKEN")"
 check "未知频道无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/p1/ghost.m3u8")"
-check "开放组免 Token" "200" "$(status "$B/op/c8.m3u8")"
+check "开放组不再免 Token" "302" "$(status "$B/op/c8.m3u8")"
 check "切片不校验 Token" "200" "$(status "$B$FIRST")"
 
 if [ "$fail" = "0" ]; then

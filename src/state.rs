@@ -114,6 +114,9 @@ impl AppState {
         }
         // `save` 可能补了密钥；以库里的版本进快照。
         let config = config_store.load()?.unwrap_or(config);
+        if !config.auth.token_enabled {
+            tracing::warn!("auth.token_enabled=false：播放地址不校验令牌。建议在面板安全页开启。");
+        }
         let users = crate::users::UserStore::attach(conn)?;
         let offset_hours = config.server.timezone_offset_hours as i64;
         ensure_cache_dirs(&cache_dir);
@@ -236,12 +239,27 @@ impl AppState {
     }
 
     /// 保存整份配置。与 [`AppState::mutate`] 共用写锁，避免并发丢更新。
-    pub fn save_config(&self, mut config: Config) -> anyhow::Result<()> {
+    ///
+    /// `expected` 非零且与库中版本不同时返回 [`crate::config::StaleRevision`]。
+    /// 每次成功写入都自增版本，并返回新值。
+    pub fn save_config(&self, mut config: Config, expected: Option<u64>) -> anyhow::Result<u64> {
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        config.normalize();
+        let current = self
+            .config_store
+            .load()?
+            .map(|from_db| from_db.revision)
+            .unwrap_or(0);
+        if let Some(expected) = expected.filter(|value| *value != 0) {
+            if expected != current {
+                return Err(anyhow::Error::new(crate::config::StaleRevision(current)));
+            }
+        }
         crate::sign::ensure_secret(&mut config);
-        self.config_store.save(&config)?;
+        let revision = self.config_store.save(&config)?;
+        config.revision = revision;
         self.replace(config);
-        Ok(())
+        Ok(revision)
     }
 
     /// 改配置：读库 → 改 → 落库 → 替换快照。
@@ -259,8 +277,10 @@ impl AppState {
             None => (*self.snapshot()).clone(),
         };
         change(&mut config)?;
+        config.normalize();
         crate::sign::ensure_secret(&mut config);
-        self.config_store.save(&config)?;
+        let revision = self.config_store.save(&config)?;
+        config.revision = revision;
         self.replace(config);
         Ok(())
     }

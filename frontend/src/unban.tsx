@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { getToken } from './api';
 import { Icon } from './icons';
 import { Tip } from './ui';
 import './style.css';
 
-/** 自助解封页（`/unban`）。免登录（S-EP-07）。 */
+/** 自助解封页（`/unban`）。页面可公开加载，动作需要面板会话。 */
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 function App() {
   const [ip, setIp] = useState('读取中…');
   const [message, setMessage] = useState('');
@@ -13,9 +19,21 @@ function App() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    fetch('/unban/whoami')
-      .then((response) => response.json())
-      .then((body) => setIp(body.ip ?? 'unknown'))
+    fetch('/unban/whoami', { headers: authHeaders() })
+      .then(async (response) => {
+        if (response.status === 401) {
+          setIp('未登录');
+          setTone('info');
+          setMessage('请先在面板登录后再解封。');
+          return null;
+        }
+        return response.json();
+      })
+      .then((body) => {
+        if (body) {
+          setIp(body.ip ?? 'unknown');
+        }
+      })
       .catch(() => setIp('unknown'));
   }, []);
 
@@ -23,7 +41,15 @@ function App() {
     setBusy(true);
     setMessage('');
     try {
-      const response = await fetch('/unban', { method: 'POST' });
+      const response = await fetch('/unban', {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      if (response.status === 401) {
+        setTone('err');
+        setMessage('请先在面板登录后再解封。');
+        return;
+      }
       const body = await response.json();
       if (!response.ok) {
         setTone('err');
@@ -74,6 +100,11 @@ function App() {
         </div>
 
         {message ? <p className={`msg ${tone}`}>{message}</p> : null}
+        {!getToken() ? (
+          <p className="muted">
+            <a href="/panel">前往面板登录</a>
+          </p>
+        ) : null}
       </div>
     </div>
   );

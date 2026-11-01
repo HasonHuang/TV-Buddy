@@ -39,12 +39,12 @@ pub async fn ip_guard(
     next.run(request).await
 }
 
-/// 管理员校验：非管理员访问管理接口时返回 `403`。
+/// 管理员校验：未登录返回 `401`，非管理员返回 `403`。
 ///
 /// 只有「我的订阅」相关的几个端点对普通用户开放：
 /// `login`、`logout`、`me`、`my/*`。
 ///
-/// 未登录的请求放行，让处理器给出 `401`。这样错误语义不变。
+/// 公开管理路径也在管理员范围内。见 [`needs_admin`]。
 pub async fn admin_gate(
     State(state): State<Arc<AppState>>,
     request: Request,
@@ -54,12 +54,11 @@ pub async fn admin_gate(
     if !needs_admin(path) {
         return next.run(request).await;
     }
-    let token = session_token(request.headers());
-    let Some(token) = token else {
-        return next.run(request).await;
+    let Some(token) = session_token(request.headers()) else {
+        return need_login();
     };
     let Some(info) = state.sessions.lookup(&token) else {
-        return next.run(request).await;
+        return need_login();
     };
     // 角色从库里重读，不信任登录快照：降级管理员立即失去权限。
     let admin = state
@@ -76,8 +75,27 @@ pub async fn admin_gate(
         .into_response()
 }
 
+fn need_login() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        axum::Json(serde_json::json!({ "error": "未登录或登录已失效" })),
+    )
+        .into_response()
+}
+
 /// 该路径是否只允许管理员。
 fn needs_admin(path: &str) -> bool {
+    // 非面板路径里的公开管理端点。
+    const PUBLIC_ADMIN: [&str; 5] = [
+        "/subs/status",
+        "/subs/groups",
+        "/subs/preview",
+        "/subtitle/mtran/test",
+        "/subtitle/translate/clear",
+    ];
+    if PUBLIC_ADMIN.contains(&path) || path.starts_with("/epg/translate/") {
+        return true;
+    }
     if !path.starts_with("/panel/api") {
         return false;
     }
@@ -142,11 +160,20 @@ fn feature_of(path: &str, config: &crate::config::Config) -> Option<bool> {
     if path.starts_with("/panel/api/logo") {
         return Some(config.features.logo);
     }
-    if path.starts_with("/panel/api/assets") || path.starts_with("/panel/api/subtitle") {
+    if path.starts_with("/panel/api/assets")
+        || path.starts_with("/panel/api/subtitle")
+        || path.starts_with("/subtitle/")
+    {
         return Some(config.features.assets);
     }
-    if path.starts_with("/panel/api/playlist") || path.starts_with("/panel/api/subs") {
+    if path.starts_with("/panel/api/playlist")
+        || path.starts_with("/panel/api/subs")
+        || path.starts_with("/subs/")
+    {
         return Some(config.features.playlist);
+    }
+    if path.starts_with("/panel/api/epg/translate") || path.starts_with("/epg/translate/") {
+        return Some(config.epg.enabled);
     }
     if path.starts_with("/panel/api/users") {
         return Some(config.features.users);
