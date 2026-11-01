@@ -12,12 +12,12 @@
 | 系统 | Debian 12，或 Ubuntu 22.04 / 24.04 |
 | 权限 | `sudo` |
 | 磁盘 | 可用空间 ≥ 2 GB |
-| 端口 | `19899/tcp` 与 `18080/tcp` 空闲 |
+| 端口 | `9900/tcp` 与 `18080/tcp` 空闲 |
 | 二进制 | `/opt/tv-buddy/tv-buddy`。来自 `v*` tag 的发布产物 |
 | 工具 | `curl`、`python3`、`ffmpeg` |
 | ffmpeg | 带 `libx264` 编码器与 `dash` 复用器 |
 | 播放器 | 本机有 `ffplay` 或 VLC。可选 |
-| 网络 | 本机能用 SSH 隧道访问 VPS 的 `19899` 与 `18080` |
+| 网络 | 本机能用 SSH 隧道访问 VPS 的 `9900` 与 `18080` |
 
 先确认工具。执行：
 
@@ -201,7 +201,7 @@ sudo /opt/tv-buddy/tv-buddy config import /etc/tv-buddy/config.json --db /etc/tv
 ```json
 {
   "server": {
-    "bind": "127.0.0.1:19899",
+    "bind": "127.0.0.1:9900",
     "not_found_url": "http://127.0.0.1:18080/not-found.mp4",
     "error_url": "http://127.0.0.1:18080/error.mp4",
     "log_level": "info"
@@ -391,10 +391,10 @@ curl -fsS http://127.0.0.1:18080/live.m3u8 >/dev/null && echo upstream-ok
 nohup /opt/tv-buddy/tv-buddy /etc/tv-buddy/tv-buddy.db >/tmp/tv-buddy.out 2>&1 &
 echo $! > /tmp/tv-buddy.pid
 for i in $(seq 1 50); do
-  curl -fsS http://127.0.0.1:19899/health >/dev/null 2>&1 && break
+  curl -fsS http://127.0.0.1:9900/health >/dev/null 2>&1 && break
   sleep 0.2
 done
-curl -fsS http://127.0.0.1:19899/health
+curl -fsS http://127.0.0.1:9900/health
 ```
 
 预期：输出 `ok`。健康检查见 `src/http.rs:25`。
@@ -402,7 +402,7 @@ curl -fsS http://127.0.0.1:19899/health
 登录面板。执行：
 
 ```
-TOKEN=$(curl -s -X POST http://127.0.0.1:19899/panel/api/login \
+TOKEN=$(curl -s -X POST http://127.0.0.1:9900/panel/api/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
@@ -421,12 +421,12 @@ loc() { tr -d '\r' < "$1" | awk 'BEGIN{IGNORECASE=1} /^location:/ {print substr(
 ### 3.10 proxy：媒体清单入口
 
 ```
-code=$(curl -s -o /tmp/pg.m3u8 -D /tmp/pg.h -w '%{http_code}' http://127.0.0.1:19899/pg/c1.m3u8)
+code=$(curl -s -o /tmp/pg.m3u8 -D /tmp/pg.h -w '%{http_code}' http://127.0.0.1:9900/pg/c1.m3u8)
 echo "$code"
 hdr /tmp/pg.h content-type
 hdr /tmp/pg.h cache-control
 head -n 5 /tmp/pg.m3u8
-grep -oE 'http://127\.0\.0\.1:19899/pg/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+' /tmp/pg.m3u8 | head -n 1
+grep -oE 'http://127\.0\.0\.1:9900/pg/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+' /tmp/pg.m3u8 | head -n 1
 ```
 
 预期输出：
@@ -440,7 +440,7 @@ no-cache, no-store
 #EXT-X-TARGETDURATION:2
 #EXT-X-MEDIA-SEQUENCE:0
 #EXTINF:2.000000,
-http://127.0.0.1:19899/pg/c1/<16 位小写 hex>_<32 位小写 hex>.<扩展名>
+http://127.0.0.1:9900/pg/c1/<16 位小写 hex>_<32 位小写 hex>.<扩展名>
 ```
 
 入口形状见 `src/http/routes/stream.rs:1403-1421`。媒体清单响应头见 `src/http/routes/stream.rs:606-629`。切片地址改写见 `src/proxy/media.rs:295-343`。
@@ -448,14 +448,14 @@ http://127.0.0.1:19899/pg/c1/<16 位小写 hex>_<32 位小写 hex>.<扩展名>
 ### 3.11 proxy：切片与缓存命中
 
 ```
-SEG=$(grep -oE 'http://127\.0\.0\.1:19899/pg/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+' /tmp/pg.m3u8 | head -n 1)
+SEG=$(grep -oE 'http://127\.0\.0\.1:9900/pg/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+' /tmp/pg.m3u8 | head -n 1)
 curl -s -o /tmp/pg-seg1 -D /tmp/pg-seg1.h -w '%{http_code}\n' "$SEG"
 hdr /tmp/pg-seg1.h content-type
 hdr /tmp/pg-seg1.h cache-control
 wc -c < /tmp/pg-seg1
 curl -s -o /tmp/pg-seg2 -D /tmp/pg-seg2.h -w '%{http_code}\n' "$SEG"
 hdr /tmp/pg-seg2.h cache-control
-curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:19899/panel/api/stats \
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9900/panel/api/stats \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["segments"], d["segment_hits"])'
 ```
 
@@ -476,13 +476,13 @@ private, max-age=300
 ### 3.12 proxy：主清单与变体清单
 
 ```
-curl -s -o /tmp/pm.m3u8 -D /tmp/pm.h -w '%{http_code}\n' http://127.0.0.1:19899/pm/c1.m3u8
+curl -s -o /tmp/pm.m3u8 -D /tmp/pm.h -w '%{http_code}\n' http://127.0.0.1:9900/pm/c1.m3u8
 hdr /tmp/pm.h content-type
 hdr /tmp/pm.h cache-control
 cat /tmp/pm.m3u8
-curl -s -o /tmp/pm-media.m3u8 -D /tmp/pm-media.h -w '%{http_code}\n' http://127.0.0.1:19899/pm/c1/video/index.txt
+curl -s -o /tmp/pm-media.m3u8 -D /tmp/pm-media.h -w '%{http_code}\n' http://127.0.0.1:9900/pm/c1/video/index.txt
 hdr /tmp/pm-media.h content-type
-grep -oE 'http://127\.0\.0\.1:19899/pm/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+' /tmp/pm-media.m3u8 | head -n 1
+grep -oE 'http://127\.0\.0\.1:9900/pm/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+' /tmp/pm-media.m3u8 | head -n 1
 ```
 
 预期输出：
@@ -495,10 +495,10 @@ no-cache, no-store
 #EXT-X-VERSION:6
 #EXT-X-INDEPENDENT-SEGMENTS
 #EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720
-http://127.0.0.1:19899/pm/c1/video/index.txt
+http://127.0.0.1:9900/pm/c1/video/index.txt
 200
 text/plain; charset=utf-8
-http://127.0.0.1:19899/pm/c1/<16 位小写 hex>_<32 位小写 hex>.<扩展名>
+http://127.0.0.1:9900/pm/c1/<16 位小写 hex>_<32 位小写 hex>.<扩展名>
 ```
 
 主清单见 `src/http/routes/stream.rs:469-493`。变体清单路径见 `src/http/routes/stream.rs:404-406` 与 `src/http/routes/stream.rs:637-674`。
@@ -506,7 +506,7 @@ http://127.0.0.1:19899/pm/c1/<16 位小写 hex>_<32 位小写 hex>.<扩展名>
 ### 3.13 proxy：MPD 反代
 
 ```
-curl -s -o /tmp/pmp.mpd -D /tmp/pmp.h -w '%{http_code}\n' http://127.0.0.1:19899/pmp/c1.mpd
+curl -s -o /tmp/pmp.mpd -D /tmp/pmp.h -w '%{http_code}\n' http://127.0.0.1:9900/pmp/c1.mpd
 hdr /tmp/pmp.h content-type
 hdr /tmp/pmp.h cache-control
 grep -o '<BaseURL>[^<]*</BaseURL>' /tmp/pmp.mpd
@@ -523,8 +523,8 @@ wc -c < /tmp/pmp-seg
 200
 application/dash+xml; charset=utf-8
 public, max-age=1, s-maxage=1
-<BaseURL>http://127.0.0.1:19899/pmp/c1/mpd/<32 位 hex>/<Base64URL>/</BaseURL>
-http://127.0.0.1:19899/pmp/c1/mpd/<32 位 hex>/<Base64URL>/
+<BaseURL>http://127.0.0.1:9900/pmp/c1/mpd/<32 位 hex>/<Base64URL>/</BaseURL>
+http://127.0.0.1:9900/pmp/c1/mpd/<32 位 hex>/<Base64URL>/
 200
 video/mp4
 2048
@@ -534,7 +534,7 @@ video/mp4
 
 ```
 curl -s -o /dev/null -D /tmp/pmp-bad.h -w '%{http_code}\n' \
-  http://127.0.0.1:19899/pmp/c1/mpd/00000000000000000000000000000000/AAAA/dash-1.m4s
+  http://127.0.0.1:9900/pmp/c1/mpd/00000000000000000000000000000000/AAAA/dash-1.m4s
 loc /tmp/pmp-bad.h
 ```
 
@@ -547,7 +547,7 @@ MPD 响应头见 `src/http/routes/stream.rs:32-35` 与 `src/http/routes/stream.r
 上游返回 404。执行：
 
 ```
-curl -s -o /tmp/pg-bad.body -D /tmp/pg-bad.h -w '%{http_code}\n' http://127.0.0.1:19899/pg/c2.m3u8
+curl -s -o /tmp/pg-bad.body -D /tmp/pg-bad.h -w '%{http_code}\n' http://127.0.0.1:9900/pg/c2.m3u8
 loc /tmp/pg-bad.h
 ```
 
@@ -556,7 +556,7 @@ loc /tmp/pg-bad.h
 切片名形状错误。执行：
 
 ```
-curl -s -o /dev/null -D /tmp/pg-badseg.h -w '%{http_code}\n' http://127.0.0.1:19899/pg/c1/not-a-segment.ts
+curl -s -o /dev/null -D /tmp/pg-badseg.h -w '%{http_code}\n' http://127.0.0.1:9900/pg/c1/not-a-segment.ts
 loc /tmp/pg-badseg.h
 ```
 
@@ -565,7 +565,7 @@ loc /tmp/pg-badseg.h
 非 `proxy` 模式访问子路径。执行：
 
 ```
-curl -s -o /dev/null -D /tmp/rd-sub.h -w '%{http_code}\n' http://127.0.0.1:19899/rd/c1/video/index.txt
+curl -s -o /dev/null -D /tmp/rd-sub.h -w '%{http_code}\n' http://127.0.0.1:9900/rd/c1/video/index.txt
 loc /tmp/rd-sub.h
 ```
 
@@ -577,7 +577,7 @@ loc /tmp/rd-sub.h
 
 ```
 before=$(grep -c 'GET /live.m3u8' /tmp/upstream.log || true)
-curl -s -o /dev/null -D /tmp/rd.h -w '%{http_code}\n' http://127.0.0.1:19899/rd/c1.m3u8
+curl -s -o /dev/null -D /tmp/rd.h -w '%{http_code}\n' http://127.0.0.1:9900/rd/c1.m3u8
 loc /tmp/rd.h
 after=$(grep -c 'GET /live.m3u8' /tmp/upstream.log || true)
 echo "$before $after"
@@ -597,10 +597,10 @@ http://127.0.0.1:18080/live.m3u8
 
 ```
 before=$(grep -c 'GET /master.m3u8' /tmp/upstream.log || true)
-curl -s -o /dev/null -D /tmp/rb1.h -w '%{http_code}\n' http://127.0.0.1:19899/rb/c1.m3u8
+curl -s -o /dev/null -D /tmp/rb1.h -w '%{http_code}\n' http://127.0.0.1:9900/rb/c1.m3u8
 loc /tmp/rb1.h
 mid=$(grep -c 'GET /master.m3u8' /tmp/upstream.log || true)
-curl -s -o /dev/null -D /tmp/rb2.h -w '%{http_code}\n' http://127.0.0.1:19899/rb/c1.m3u8
+curl -s -o /dev/null -D /tmp/rb2.h -w '%{http_code}\n' http://127.0.0.1:9900/rb/c1.m3u8
 loc /tmp/rb2.h
 after=$(grep -c 'GET /master.m3u8' /tmp/upstream.log || true)
 echo "$before $mid $after"
@@ -622,12 +622,12 @@ http://127.0.0.1:18080/720/index.m3u8
 
 ```
 before=$(grep -c 'GET /live.m3u8' /tmp/upstream.log || true)
-curl -s -o /tmp/rw.m3u8 -D /tmp/rw.h -w '%{http_code}\n' http://127.0.0.1:19899/rw/c1.m3u8
+curl -s -o /tmp/rw.m3u8 -D /tmp/rw.h -w '%{http_code}\n' http://127.0.0.1:9900/rw/c1.m3u8
 hdr /tmp/rw.h content-type
 hdr /tmp/rw.h cache-control
 grep -c '^http://127.0.0.1:18080/seg0.ts$' /tmp/rw.m3u8
 grep -c '/rw/c1/' /tmp/rw.m3u8
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/rw/c1.m3u8
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9900/rw/c1.m3u8
 after=$(grep -c 'GET /live.m3u8' /tmp/upstream.log || true)
 echo "$before $after"
 ```
@@ -650,11 +650,11 @@ no-cache, must-revalidate
 
 ```
 before=$(grep -c 'GET /master.m3u8' /tmp/upstream.log || true)
-curl -s -o /dev/null -D /tmp/pt.h -w '%{http_code}\n' http://127.0.0.1:19899/pt/c1.m3u8
+curl -s -o /dev/null -D /tmp/pt.h -w '%{http_code}\n' http://127.0.0.1:9900/pt/c1.m3u8
 loc /tmp/pt.h
 after=$(grep -c 'GET /master.m3u8' /tmp/upstream.log || true)
 echo "$before $after"
-curl -s "http://127.0.0.1:19899/sub/$PTOK/playlist.m3u" | grep -A1 '直通'
+curl -s "http://127.0.0.1:9900/sub/$PTOK/playlist.m3u" | grep -A1 '直通'
 ```
 
 预期输出：
@@ -675,7 +675,7 @@ http://127.0.0.1:18080/master.m3u8
 第一次请求必须返回 `503`。
 
 ```
-curl -s -o /tmp/rx.body -D /tmp/rx.h -w '%{http_code}\n' http://127.0.0.1:19899/rx/c1.m3u8
+curl -s -o /tmp/rx.body -D /tmp/rx.h -w '%{http_code}\n' http://127.0.0.1:9900/rx/c1.m3u8
 cat /tmp/rx.body
 hdr /tmp/rx.h retry-after
 hdr /tmp/rx.h cache-control
@@ -694,7 +694,7 @@ no-store
 
 ```
 for i in $(seq 1 60); do
-  code=$(curl -s -o /tmp/rx.m3u8 -D /tmp/rx-ready.h -w '%{http_code}' http://127.0.0.1:19899/rx/c1.m3u8)
+  code=$(curl -s -o /tmp/rx.m3u8 -D /tmp/rx-ready.h -w '%{http_code}' http://127.0.0.1:9900/rx/c1.m3u8)
   [ "$code" = "200" ] && break
   sleep 0.5
 done
@@ -719,7 +719,7 @@ no-cache, must-revalidate
 
 ```
 RSEG=$(grep -oE '/rx/c1/seg_[0-9]{12}\.[a-z]+' /tmp/rx.m3u8 | head -n 1)
-curl -s -o /tmp/rx-seg -D /tmp/rx-seg.h -w '%{http_code}\n' "http://127.0.0.1:19899$RSEG"
+curl -s -o /tmp/rx-seg -D /tmp/rx-seg.h -w '%{http_code}\n' "http://127.0.0.1:9900$RSEG"
 hdr /tmp/rx-seg.h content-type
 hdr /tmp/rx-seg.h cache-control
 wc -c < /tmp/rx-seg
@@ -730,7 +730,7 @@ wc -c < /tmp/rx-seg
 未知切片。执行：
 
 ```
-curl -s -o /dev/null -D /tmp/rx-miss.h -w '%{http_code}\n' http://127.0.0.1:19899/rx/c1/seg_999999999999.png
+curl -s -o /dev/null -D /tmp/rx-miss.h -w '%{http_code}\n' http://127.0.0.1:9900/rx/c1/seg_999999999999.png
 loc /tmp/rx-miss.h
 ```
 
@@ -741,7 +741,7 @@ loc /tmp/rx-miss.h
 ### 3.20 dash：主清单
 
 ```
-curl -s -o /tmp/dh.m3u8 -D /tmp/dh.h -w '%{http_code}\n' http://127.0.0.1:19899/dh/c1.m3u8
+curl -s -o /tmp/dh.m3u8 -D /tmp/dh.h -w '%{http_code}\n' http://127.0.0.1:9900/dh/c1.m3u8
 hdr /tmp/dh.h content-type
 hdr /tmp/dh.h cache-control
 grep -c '^#EXT-X-VERSION:7$' /tmp/dh.m3u8
@@ -771,7 +771,7 @@ no-cache, no-store
 ### 3.21 dash：媒体清单与切片
 
 ```
-curl -s -o /tmp/dh-media.m3u8 -D /tmp/dh-media.h -w '%{http_code}\n' http://127.0.0.1:19899/dh/c1/video_240p/index.txt
+curl -s -o /tmp/dh-media.m3u8 -D /tmp/dh-media.h -w '%{http_code}\n' http://127.0.0.1:9900/dh/c1/video_240p/index.txt
 hdr /tmp/dh-media.h content-type
 hdr /tmp/dh-media.h cache-control
 grep -c '^#EXT-X-VERSION:7$' /tmp/dh-media.m3u8
@@ -781,7 +781,7 @@ grep -c '^#EXT-X-MAP:URI=' /tmp/dh-media.m3u8
 grep -c '^#EXT-X-ENDLIST$' /tmp/dh-media.m3u8
 DSEG=$(grep -oE '/dh/c1/video_240p/[0-9]+_[0-9a-f]{8}\.[a-z]+' /tmp/dh-media.m3u8 | head -n 1)
 echo "$DSEG"
-curl -s -o /tmp/dh-seg -D /tmp/dh-seg.h -w '%{http_code}\n' "http://127.0.0.1:19899$DSEG"
+curl -s -o /tmp/dh-seg -D /tmp/dh-seg.h -w '%{http_code}\n' "http://127.0.0.1:9900$DSEG"
 hdr /tmp/dh-seg.h content-type
 hdr /tmp/dh-seg.h cache-control
 wc -c < /tmp/dh-seg
@@ -811,7 +811,7 @@ public, max-age=300
 
 ```
 curl -s -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:19899/panel/api/dash/status -o /tmp/dash-status.json
+  http://127.0.0.1:9900/panel/api/dash/status -o /tmp/dash-status.json
 python3 - <<'PY'
 import json
 data = json.load(open('/tmp/dash-status.json'))
@@ -837,7 +837,7 @@ names ['audio-...', 'video_240p']
 未知轨道。执行：
 
 ```
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/dh/c1/video/index.txt
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9900/dh/c1/video/index.txt
 ```
 
 预期：`404`。这里不能返回 `302`。见 `src/http/routes/stream.rs:388-397` 与 `src/dash_hls.rs:490-496`。
@@ -845,7 +845,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/dh/c1/video/inde
 坏 MPD。执行：
 
 ```
-curl -s -o /tmp/dh-bad.body -D /tmp/dh-bad.h -w '%{http_code}\n' http://127.0.0.1:19899/dh/c2.m3u8
+curl -s -o /tmp/dh-bad.body -D /tmp/dh-bad.h -w '%{http_code}\n' http://127.0.0.1:9900/dh/c2.m3u8
 cat /tmp/dh-bad.body
 ```
 
@@ -863,21 +863,21 @@ Upstream Error
 订阅只从用户令牌进入。先从面板取令牌，再取订阅：
 
 ```
-TOK=$(curl -s -X POST http://127.0.0.1:19899/panel/api/login \
+TOK=$(curl -s -X POST http://127.0.0.1:9900/panel/api/login \
   -H 'content-type: application/json' \
   -d '{"username":"admin","password":"<口令>"}' \
   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 PTOK=$(curl -s -H "Authorization: Bearer $TOK" \
-  http://127.0.0.1:19899/panel/api/me \
+  http://127.0.0.1:9900/panel/api/me \
   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-curl -s "http://127.0.0.1:19899/sub/$PTOK/playlist.m3u"
+curl -s "http://127.0.0.1:9900/sub/$PTOK/playlist.m3u"
 ```
 
 预期一：全局订阅已停用。
 
 ```
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/playlist.m3u
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/pg/playlist.m3u
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9900/playlist.m3u
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9900/pg/playlist.m3u
 ```
 
 两次都是 `404`。见 `src/http/routes/sub.rs` 的 `gone`。
@@ -887,7 +887,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/pg/playlist.m3u
 ```
 #EXTM3U
 #EXTINF:-1 tvg-id="c1" tvg-name="HLS 媒体清单" tvg-logo="" group-title="proxy 媒体",HLS 媒体清单
-http://127.0.0.1:19899/pg/c1.m3u8?token=<PTOK>
+http://127.0.0.1:9900/pg/c1.m3u8?token=<PTOK>
 ```
 
 预期三：透传组条目直接给上游原始地址，且不带令牌，见 3.18。
@@ -901,14 +901,14 @@ http://127.0.0.1:19899/pg/c1.m3u8?token=<PTOK>
 在带图形界面的本机执行。先建 SSH 隧道。执行：
 
 ```
-ssh -N -L 19899:127.0.0.1:19899 -L 18080:127.0.0.1:18080 <用户名>@<VPS 地址>
+ssh -N -L 9900:127.0.0.1:9900 -L 18080:127.0.0.1:18080 <用户名>@<VPS 地址>
 ```
 
 保持这条命令运行。另开一个本机终端。先预热 remux 会话。执行：
 
 ```
 for i in $(seq 1 30); do
-  code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:19899/rx/c1.m3u8)
+  code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9900/rx/c1.m3u8)
   [ "$code" = "200" ] && break
   sleep 0.5
 done
@@ -918,13 +918,13 @@ echo "$code"
 预期：输出 `200`。然后逐个执行：
 
 ```
-ffplay -autoexit -t 10 http://127.0.0.1:19899/pg/c1.m3u8
-ffplay -autoexit -t 10 http://127.0.0.1:19899/pm/c1.m3u8
-ffplay -autoexit -t 10 http://127.0.0.1:19899/rd/c1.m3u8
-ffplay -autoexit -t 10 http://127.0.0.1:19899/rw/c1.m3u8
-ffplay -autoexit -t 10 http://127.0.0.1:19899/pt/c1.m3u8
-ffplay -autoexit -t 10 http://127.0.0.1:19899/rx/c1.m3u8
-ffplay -autoexit -t 10 http://127.0.0.1:19899/dh/c1.m3u8
+ffplay -autoexit -t 10 http://127.0.0.1:9900/pg/c1.m3u8
+ffplay -autoexit -t 10 http://127.0.0.1:9900/pm/c1.m3u8
+ffplay -autoexit -t 10 http://127.0.0.1:9900/rd/c1.m3u8
+ffplay -autoexit -t 10 http://127.0.0.1:9900/rw/c1.m3u8
+ffplay -autoexit -t 10 http://127.0.0.1:9900/pt/c1.m3u8
+ffplay -autoexit -t 10 http://127.0.0.1:9900/rx/c1.m3u8
+ffplay -autoexit -t 10 http://127.0.0.1:9900/dh/c1.m3u8
 ```
 
 观察目标：
@@ -955,7 +955,7 @@ sleep 1
 | 编号 | 检查项 | 通过标准 | 不通过标准 |
 | --- | --- | --- | --- |
 | P-01 | proxy 媒体入口 | `200`；`text/plain; charset=utf-8`；`no-cache, no-store` | 非 `200`；类型或缓存头不符 |
-| P-02 | proxy 切片地址 | 每条切片行匹配 `http://127.0.0.1:19899/pg/c1/<16hex>_<32hex>.<ext>` | 出现上游地址；形状不符 |
+| P-02 | proxy 切片地址 | 每条切片行匹配 `http://127.0.0.1:9900/pg/c1/<16hex>_<32hex>.<ext>` | 出现上游地址；形状不符 |
 | P-03 | proxy 首次切片 | `200`；`image/*`；`public, max-age=300`；正文非空 | 非 `200`；类型不是 `image/*`；缓存头不是 `public` |
 | P-04 | proxy 切片命中 | 第二次 `private, max-age=300`；统计为 `2 1` | 第二次仍是 `public`；统计不是 `2 1` |
 | P-05 | proxy 主清单 | `200`；`application/vnd.apple.mpegurl`；`no-cache, no-store`；只有一条 `STREAM-INF`，`BANDWIDTH=2800000` | 多条变体；类型或缓存头不符 |
@@ -986,7 +986,7 @@ sleep 1
 | D-06 | dash 未知轨道 | `404` | 返回 `302` 或 `200` |
 | D-07 | dash 坏 MPD | `502`；正文 `Upstream Error` | 返回 `503` 或 `200` |
 | S-01 | 总订阅过滤 | 总订阅只有 `#EXTM3U` | 出现 `open` 分组条目 |
-| S-02 | 分组订阅入口 | `pg` 条目是 `http://127.0.0.1:19899/pg/c1.m3u8` | 出现上游地址；扩展名不符 |
+| S-02 | 分组订阅入口 | `pg` 条目是 `http://127.0.0.1:9900/pg/c1.m3u8` | 出现上游地址；扩展名不符 |
 
 ## 5. 记录模板
 
@@ -1035,18 +1035,18 @@ tail -n 300 /tmp/upstream.log > /tmp/report-upstream.log
 
 ```
 curl -s -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:19899/panel/api/logs?limit=500' > /tmp/report-panel-logs.json
+  'http://127.0.0.1:9900/panel/api/logs?limit=500' > /tmp/report-panel-logs.json
 curl -s -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:19899/panel/api/stats > /tmp/report-stats.json
+  http://127.0.0.1:9900/panel/api/stats > /tmp/report-stats.json
 curl -s -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:19899/panel/api/cache/stats > /tmp/report-cache-stats.json
+  http://127.0.0.1:9900/panel/api/cache/stats > /tmp/report-cache-stats.json
 ```
 
 4. 收集磁盘与进程信息。执行：
 
 ```
 find /var/lib/tv-buddy/cache -maxdepth 4 -type f -printf '%p %s\n' | sort > /tmp/report-cache-files.txt
-ss -ltnp | grep -E ':(19899|18080)\b' > /tmp/report-ports.txt
+ss -ltnp | grep -E ':(9900|18080)\b' > /tmp/report-ports.txt
 ps -o pid,etime,cmd -p "$(cat /tmp/tv-buddy.pid)" "$(cat /tmp/upstream.pid)" > /tmp/report-procs.txt
 ```
 

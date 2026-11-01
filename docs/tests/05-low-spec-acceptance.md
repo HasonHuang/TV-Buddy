@@ -180,7 +180,7 @@ sudo grep -m1 'config' /opt/tv-buddy/tv-buddy.log
 ### 3.3 取面板 Token
 
 ```bash
-TOKEN=$(curl -s -X POST http://127.0.0.1:19899/panel/api/login \
+TOKEN=$(curl -s -X POST http://127.0.0.1:9900/panel/api/login \
   -H 'content-type: application/json' \
   -d '{"username":"admin","password":"NEWPASS"}' \
   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
@@ -195,7 +195,7 @@ echo "${#TOKEN}"
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' -H "X-Token: $TOKEN" \
-  http://127.0.0.1:19899/panel/api/cache/stats
+  http://127.0.0.1:9900/panel/api/cache/stats
 ```
 
 预期：`200`。面板接受 `X-Token` 与 `Authorization: Bearer`（`src/http/ext.rs:23-38`）。
@@ -203,7 +203,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "X-Token: $TOKEN" \
 ### 3.4 读取当前磁盘上限
 
 ```bash
-curl -s -H "X-Token: $TOKEN" http://127.0.0.1:19899/panel/api/cache/stats
+curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/cache/stats
 ```
 
 预期：JSON 含 `"recommend":{...,"disk_cap_mb":<整数>,"source":"fallback",...}`。
@@ -211,7 +211,7 @@ curl -s -H "X-Token: $TOKEN" http://127.0.0.1:19899/panel/api/cache/stats
 取值：
 
 ```bash
-CAP_MB=$(curl -s -H "X-Token: $TOKEN" http://127.0.0.1:19899/panel/api/cache/stats \
+CAP_MB=$(curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/cache/stats \
   | sed -n 's/.*"disk_cap_mb":\([0-9]*\).*/\1/p')
 echo "CAP_MB=$CAP_MB"
 ```
@@ -271,7 +271,7 @@ find /opt/tv-buddy/cache/seg_bytes /opt/tv-buddy/cache/seg_url -type f -printf '
 步骤 6：确认面板统计同步下降：
 
 ```bash
-curl -s -H "X-Token: $TOKEN" http://127.0.0.1:19899/panel/api/cache/stats \
+curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/cache/stats \
   | sed -n 's/.*"seg_bytes":\([0-9]*\).*/\1/p'
 ```
 
@@ -395,7 +395,7 @@ echo "$PID"
 ```bash
 sudo setsid sh -c "pidstat -p $PID 1 180 > /root/s4-gc-pidstat.txt 2>&1" &
 sudo setsid sh -c "mpstat 1 180 > /root/s4-gc-mpstat.txt 2>&1" &
-sudo setsid sh -c 'for n in $(seq 1 180); do curl -s -o /dev/null -w "%{http_code} %{time_total}\n" http://127.0.0.1:19899/health; sleep 1; done > /root/s4-gc-latency.txt' &
+sudo setsid sh -c 'for n in $(seq 1 180); do curl -s -o /dev/null -w "%{http_code} %{time_total}\n" http://127.0.0.1:9900/health; sleep 1; done > /root/s4-gc-latency.txt' &
 ```
 
 步骤 4：在采集窗口内制造一次回收。另开一个终端，重复 3.5 的步骤 2。等 60 秒后确认日志出现「磁盘回收完成」。
@@ -463,17 +463,17 @@ date -Is
 步骤 3：取播放入口地址：
 
 ```bash
-TOK=$(curl -s -X POST http://127.0.0.1:19899/panel/api/login \
+TOK=$(curl -s -X POST http://127.0.0.1:9900/panel/api/login \
   -H 'content-type: application/json' \
   -d '{"username":"admin","password":"<口令>"}' \
   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 PTOK=$(curl -s -H "Authorization: Bearer $TOK" \
-  http://127.0.0.1:19899/panel/api/me \
+  http://127.0.0.1:9900/panel/api/me \
   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-curl -s "http://127.0.0.1:19899/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1
+curl -s "http://127.0.0.1:9900/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1
 ```
 
-预期：`http://127.0.0.1:19899/<分组 id>/<频道 id>.m3u8?token=<12 位令牌>`。
+预期：`http://127.0.0.1:9900/<分组 id>/<频道 id>.m3u8?token=<12 位令牌>`。
 
 订阅会自动带该用户自己的令牌（`src/playlist.rs` 的 `entry_url`）。
 `access = "open"` 的分组不带令牌，且免校验。
@@ -484,7 +484,7 @@ curl -s "http://127.0.0.1:19899/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v
 sudo tee /root/s6-load.sh >/dev/null <<'EOF'
 #!/bin/sh
 GID=main
-ENTRY=$(curl -s "http://127.0.0.1:19899/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1)
+ENTRY=$(curl -s "http://127.0.0.1:9900/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1)
 echo "ENTRY=$ENTRY" > /root/s6-load.log
 while :; do
   curl -s --max-time 20 "$ENTRY" -o /tmp/s6-pl.m3u8
@@ -511,14 +511,14 @@ while [ "$n" -lt 25 ]; do
   {
     date -Is
     printf 'health '
-    curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/health
+    curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9900/health
     printf 'seg_total_bytes '
     find /opt/tv-buddy/cache/seg_bytes /opt/tv-buddy/cache/seg_url -type f -printf '%s\n' \
       | awk '{s+=$1} END{print s+0}'
     printf 'avail_bytes '
     stat -f -c '%a %S' /opt/tv-buddy/cache | awk '{printf "%d\n", $1*$2}'
     printf 'disk_cap_mb '
-    curl -s -H "X-Token: $TOKEN" http://127.0.0.1:19899/panel/api/cache/stats \
+    curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/cache/stats \
       | sed -n 's/.*"disk_cap_mb":\([0-9]*\).*/\1/p'
     PID=$(systemctl show -p MainPID --value tv-buddy)
     grep -E 'VmRSS|VmHWM' /proc/"$PID"/status 2>/dev/null
@@ -589,12 +589,12 @@ journalctl -u tv-buddy --since '24 hours ago' --no-pager | grep -iE 'oom|killed 
 查存活与运行时长。会话可能在 24 小时边界过期，先重新登录：
 
 ```bash
-TOKEN=$(curl -s -X POST http://127.0.0.1:19899/panel/api/login \
+TOKEN=$(curl -s -X POST http://127.0.0.1:9900/panel/api/login \
   -H 'content-type: application/json' \
   -d '{"username":"admin","password":"NEWPASS"}' \
   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 systemctl is-active tv-buddy
-curl -s -H "X-Token: $TOKEN" http://127.0.0.1:19899/panel/api/stats \
+curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/stats \
   | sed -n 's/.*"uptime_secs":\([0-9]*\).*/\1/p'
 ```
 
@@ -757,8 +757,8 @@ df -B1 > "$D/df.txt"
 stat -f -c '%a %S %b' /opt/tv-buddy/cache > "$D/statvfs.txt"
 find /opt/tv-buddy/cache/seg_bytes /opt/tv-buddy/cache/seg_url -type f -printf '%p %s %TY-%Tm-%Td %TH:%TM\n' \
   > "$D/cache-files.txt" 2>&1
-curl -s -H "X-Token: $TOKEN" http://127.0.0.1:19899/panel/api/cache/stats > "$D/cache-stats.json"
-curl -s -H "X-Token: $TOKEN" http://127.0.0.1:19899/panel/api/stats > "$D/stats.json"
+curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/cache/stats > "$D/cache-stats.json"
+curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/stats > "$D/stats.json"
 CG=$(systemctl show -p ControlGroup --value tv-buddy)
 cp "/sys/fs/cgroup$CG/memory.events" "$D"/ 2>/dev/null
 cp "/sys/fs/cgroup$CG/memory.max" "$D"/ 2>/dev/null

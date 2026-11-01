@@ -1,6 +1,6 @@
 {
   "server": {
-    "bind": "[::]:19899",
+    "bind": "[::]:9900",
     "log_level": "info"
   },
   "panel": {

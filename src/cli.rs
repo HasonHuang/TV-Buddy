@@ -255,10 +255,10 @@ mod tests {
 
     #[test]
     fn set_and_get_dotted_path() {
-        let mut root = json!({ "server": { "bind": "[::]:19899" } });
+        let mut root = json!({ "server": { "bind": "[::]:9900" } });
         set_path(&mut root, "cache.gc.max_disk_mb", json!(120)).expect("写入");
         assert_eq!(get_path(&root, "cache.gc.max_disk_mb"), Some(&json!(120)));
-        assert_eq!(get_path(&root, "server.bind"), Some(&json!("[::]:19899")));
+        assert_eq!(get_path(&root, "server.bind"), Some(&json!("[::]:9900")));
     }
 
     #[test]
@@ -282,6 +282,6 @@ mod tests {
         assert_eq!(parse_value("true"), json!(true));
         assert_eq!(parse_value("200"), json!(200));
         assert_eq!(parse_value("0.8"), json!(0.8));
-        assert_eq!(parse_value("[::]:19899"), json!("[::]:19899"));
+        assert_eq!(parse_value("[::]:9900"), json!("[::]:9900"));
     }
 }

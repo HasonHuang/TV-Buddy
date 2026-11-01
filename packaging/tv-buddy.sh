@@ -32,7 +32,7 @@ SERVICE_NAME=tv-buddy
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 OPENRC_FILE="/etc/init.d/$SERVICE_NAME"
 CLI_LINK=${CLI_LINK:-/usr/local/bin/tv-buddy}
-DEFAULT_PORT=19899
+DEFAULT_PORT=9900
 DEFAULT_USER=admin
 DEFAULT_PASS=admin
 # 版本号从已安装的二进制读取（`tv-buddy version`）。可用 TV_BUDDY_CLI_VERSION 覆盖。

@@ -15,7 +15,7 @@ DIR=$(find "$WORK" -maxdepth 1 -type d -name 'tv-buddy-*' | head -1)
 cat > "$DIR/config.json" <<'EOF'
 {
   "server": {
-    "bind": "127.0.0.1:19899",
+    "bind": "127.0.0.1:9900",
     "log_level": "warn"
   },
   "cache": {
@@ -67,7 +67,7 @@ set -e
 pid=$!
 ok=0
 for _ in $(seq 1 50); do
-  if body=$(wget -qO- http://127.0.0.1:19899/health 2>/dev/null); then ok=1; break; fi
+  if body=$(wget -qO- http://127.0.0.1:9900/health 2>/dev/null); then ok=1; break; fi
   sleep 0.1
 done
 [ "$ok" = "1" ] || { echo "健康检查失败"; cat /w/run.log; kill $pid 2>/dev/null || true; exit 1; }
@@ -75,33 +75,33 @@ done
 echo "/health = ok"
 
 # 内嵌前端：面板页引用的脚本必须含新分区。
-page=$(wget -qO- http://127.0.0.1:19899/panel)
+page=$(wget -qO- http://127.0.0.1:9900/panel)
 asset=$(printf "%s" "$page" | grep -o "/__assets/[^\"]*panel-[^\"]*\.js" | head -1)
 [ -n "$asset" ] || { echo "面板缺少脚本引用"; kill $pid 2>/dev/null || true; exit 1; }
-wget -qO /tmp/panel.js "http://127.0.0.1:19899$asset"
+wget -qO /tmp/panel.js "http://127.0.0.1:9900$asset"
 grep -q "security/token" /tmp/panel.js || { echo "面板资源不含安全分区"; kill $pid 2>/dev/null || true; exit 1; }
 echo "面板资源 = $asset"
 
 # 台标接口可用。
-logos=$(wget -qO- http://127.0.0.1:19899/logo/api/list)
+logos=$(wget -qO- http://127.0.0.1:9900/logo/api/list)
 printf "%s" "$logos" | grep -q count || { echo "台标列表异常：$logos"; kill $pid 2>/dev/null || true; exit 1; }
 echo "/logo/api/list = ok"
 
 # 面板健康接口需要会话；未登录应为 401。
-wget -q --server-response -O /dev/null http://127.0.0.1:19899/panel/api/health 2>/tmp/head.txt || true
+wget -q --server-response -O /dev/null http://127.0.0.1:9900/panel/api/health 2>/tmp/head.txt || true
 grep -q " 401 " /tmp/head.txt || { echo "健康接口未鉴权"; cat /tmp/head.txt; kill $pid 2>/dev/null || true; exit 1; }
 echo "/panel/api/health = 401"
 
 # 分享默认关闭 → 404。
-wget -q --server-response -O /dev/null "http://127.0.0.1:19899/api/share/pull?key=x" 2>/tmp/share.txt || true
+wget -q --server-response -O /dev/null "http://127.0.0.1:9900/api/share/pull?key=x" 2>/tmp/share.txt || true
 grep -q " 404 " /tmp/share.txt || { echo "分享端点异常"; cat /tmp/share.txt; kill $pid 2>/dev/null || true; exit 1; }
 echo "/api/share/pull = disabled"
 
 # 台标页脚本必须含新端点。
-lpage=$(wget -qO- http://127.0.0.1:19899/logo)
+lpage=$(wget -qO- http://127.0.0.1:9900/logo)
 lasset=$(printf "%s" "$lpage" | grep -o "/__assets/[^\"]*logo-[^\"]*\.js" | head -1)
 [ -n "$lasset" ] || { echo "台标页缺少脚本引用"; kill $pid 2>/dev/null || true; exit 1; }
-wget -qO /tmp/logo.js "http://127.0.0.1:19899$lasset"
+wget -qO /tmp/logo.js "http://127.0.0.1:9900$lasset"
 grep -q "match-report" /tmp/logo.js || { echo "台标资源不含匹配报告"; kill $pid 2>/dev/null || true; exit 1; }
 echo "台标资源 = $lasset"
 

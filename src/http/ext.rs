@@ -104,7 +104,7 @@ pub(crate) fn base_url(headers: &axum::http::HeaderMap) -> String {
     let host = headers
         .get(header::HOST)
         .and_then(|value| value.to_str().ok())
-        .unwrap_or("127.0.0.1:19899");
+        .unwrap_or("127.0.0.1:9900");
     let scheme = headers
         .get("x-forwarded-proto")
         .and_then(|value| value.to_str().ok())

@@ -32,7 +32,7 @@ cp packaging/tv-buddy.sh "$WORK/tv-buddy.sh"
 chmod +x "$WORK/tv-buddy" "$WORK/tv-buddy.sh"
 mkdir -p "$WORK/bin"
 
-# 先建库并把端口挪到空闲段，避免与默认 19899 冲突。
+# 先建库并把端口挪到空闲段，避免与默认 9900 冲突。
 "$WORK/tv-buddy" config set server.bind "[::]:$PORT" --db "$DB" >/dev/null
 
 CLI="$WORK/tv-buddy.sh"

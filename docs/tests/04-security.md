@@ -23,14 +23,14 @@
 | 服务 | `tv-buddy` 已安装并在运行（版本见 `tv-buddy version`） |
 | 二进制 | `/opt/tv-buddy/tv-buddy`（`packaging/tv-buddy.service:10`） |
 | 配置 | `/opt/tv-buddy/tv-buddy.db`（`packaging/tv-buddy.service:10`） |
-| 监听 | `[::]:19899`（`src/config/model.rs:130`） |
+| 监听 | `[::]:9900`（`src/config/model.rs:139`） |
 | 服务单元 | `tv-buddy`（`packaging/tv-buddy.sh:29`） |
 | 面板账号 | `admin`，口令由 `TV_BUDDY_INITIAL_PASSWORD` 指定 |
 | 工具 | `curl`、`jq` |
 | 测试分组 | 至少 2 个频道。分组 id 与频道 id 只用 ASCII 字母、数字、`_`、`-` |
 | 分组访问级别 | `access` 不是 `open`。否则 Token 校验被跳过（`src/http/routes/stream.rs:1500`） |
 | 上游 | 可播放，或至少能返回响应。判分只看状态码与响应头 |
-| 本机访问 | 能访问 `127.0.0.1:19899` |
+| 本机访问 | 能访问 `127.0.0.1:9900` |
 
 安装工具：
 
@@ -50,11 +50,11 @@ systemctl is-active tv-buddy
 确认版本。程序不认 `--version`，改用面板接口：
 
 ```bash
-T=$(curl -sS -X POST http://127.0.0.1:19899/panel/api/login \
+T=$(curl -sS -X POST http://127.0.0.1:9900/panel/api/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-curl -sS -H "Authorization: Bearer $T" http://127.0.0.1:19899/panel/api/status \
+curl -sS -H "Authorization: Bearer $T" http://127.0.0.1:9900/panel/api/status \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["version"])'
 ```
 
@@ -67,7 +67,7 @@ curl -sS -H "Authorization: Bearer $T" http://127.0.0.1:19899/panel/api/status \
 #### 步骤 1：登录面板并备份 `[auth]`
 
 ```bash
-BASE=http://127.0.0.1:19899
+BASE=http://127.0.0.1:9900
 LOGIN=$(curl -s -X POST "$BASE/panel/api/login" \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}')

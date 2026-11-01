@@ -1,0 +1,26 @@
+# Docker 构建上下文（仓库根 Dockerfile）。
+# 只保留构建需要的源码、清单与打包文件。
+
+# Rust 构建产物与本地缓存
+target/
+cache/
+dist/
+samples/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# 前端依赖与产物：构建阶段会重新生成
+frontend/node_modules/
+frontend/dist/
+
+# 版本库与工具数据
+.git/
+.github/
+.codegraph/
+.opencode/
+tests/manual/.opencode/
+
+# 文档不参与构建
+docs/

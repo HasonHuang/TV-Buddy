@@ -15,9 +15,9 @@
 | 校验工具 | 建议有 `sha256sum` 或 `shasum`。两者都没有时安装脚本跳过校验 | `install.sh:163-170` |
 | 解包工具 | `tar` | `install.sh:280` |
 | HTTP 检查工具 | `curl`。步骤 8 至 14 使用它 | 本文档 |
-| 端口 | 本机 19899/TCP 空闲 | `ServerCfg::default`（`src/config/model.rs`） |
+| 端口 | 本机 9900/TCP 空闲 | `ServerCfg::default`（`src/config/model.rs`） |
 | 服务管理器 | systemd 或 OpenRC。两者都没有时走 PID 文件模式 | `install.sh:372-386` |
-| 外网访问 | VPS 安全组与防火墙放行 19899/TCP | 仓库无防火墙配置依据，未验证。本测试不依赖 |
+| 外网访问 | VPS 安全组与防火墙放行 9900/TCP | 仓库无防火墙配置依据，未验证。本测试不依赖 |
 
 本文档全部命令以 root 执行。当前不是 root 时，先执行 `sudo -i`。
 
@@ -86,7 +86,7 @@ echo "exit=$?"
 安装完成：/opt/tv-buddy
 数据：/opt/tv-buddy/tv-buddy.db
 初始口令：/opt/tv-buddy/cache/admin_initial_credentials.txt
-面板：http://<主机>:19899/panel（账号 admin；初始口令见下）
+面板：http://<主机>:9900/panel（账号 admin；初始口令见下）
 状态：服务已启动
 exit=0
 ```
@@ -97,10 +97,10 @@ exit=0
 - `初始口令：` 行按 `$PREFIX/cache/` 拼接（`install.sh:433`）。程序写入的路径固定是「数据库所在目录 + `/cache/admin_initial_credentials.txt`」（`src/main.rs:106-117`），数据库路径又是 `$PREFIX/tv-buddy.db`，两者一致。改过 `cache.disk_path` 不影响该文件。
 - `下载：` 行的 URL 可能来自 Release 资产列表，也可能由 tag 拼接（`install.sh:212-270`）。仓库只有预发布版本时，脚本先打印 `未找到正式版，改用最新 Release：<asset>`（`install.sh:253`）。
 - `校验通过：pkg.tar.gz` 打印的是临时文件名，不是 Release 资产名（`install.sh:172`、`install.sh:293`、`install.sh:326`）。Release 缺少同名 `.sha256` 时不打印该行（`install.sh:160`、`install.sh:294-298`）。
-- 输出 `状态：服务已启动` 表示重启命令返回 0（`install.sh:394`、`install.sh:399`、`install.sh:404`、`install.sh:414-415`）。
+- 输出 `状态：服务已启动` 表示重启命令返回 0（`install.sh:413`、`install.sh:418`、`install.sh:423`）。
 - systemd 的 `Type=simple` 在进程刚拉起时就返回成功（`packaging/tv-buddy.service:8`）。配置错误时进程会退出，随后每 3 秒重启一次（`packaging/tv-buddy.service:11-12`）。因此 `is-active` 可能短暂报告 active。判定以第 8 步的健康检查为准。
 - 首次安装不再下发配置文件。首次启动创建 `tv-buddy.db`，写入默认配置，并创建管理员 `admin`（口令随机，见 `admin_initial_credentials.txt`）。
-- 面板行固定写 `19899` 与 `<主机>` 占位符（`install.sh:413`）。它不是最后一行。最后一行是 `状态：服务已启动`，或 `启动：...`。实际地址以第 12 步的 `tv-buddy url` 为准。
+- 面板行固定写 `9900` 与 `<主机>` 占位符（`install.sh:432`）。它不是最后一行。最后一行是 `状态：服务已启动`，或 `启动：...`。实际地址以第 12 步的 `tv-buddy url` 为准。
 - 没有任何服务管理器时，脚本先打印 `未发现 systemd/OpenRC；用 /opt/tv-buddy/tv-buddy.sh start 启动`（`install.sh:385`），再走 PID 文件模式。
 
 ### 5. 核对安装文件与软链
@@ -131,9 +131,9 @@ sudo tv-buddy config get server.bind
 sudo tv-buddy config get panel.enabled
 ```
 
-预期：`bind = "[::]:19899"`。第二条输出 `无 [panel] 段`。
+预期：`bind = "[::]:9900"`。第二条输出 `无 [panel] 段`。
 
-预期：第一条输出 `[::]:19899`，第二条输出 `true`。账号 `admin` 与随机口令由首次启动创建，登录结果在第 10 步验证。
+预期：第一条输出 `[::]:9900`，第二条输出 `true`。账号 `admin` 与随机口令由首次启动创建，登录结果在第 10 步验证。
 
 ### 7. 核对服务状态
 
@@ -170,9 +170,9 @@ rc-update show default | grep tv-buddy
 ### 8. 核对健康检查
 
 ```bash
-curl -sS -o /tmp/tv-health.txt -w '%{http_code}\n' http://127.0.0.1:19899/health
+curl -sS -o /tmp/tv-health.txt -w '%{http_code}\n' http://127.0.0.1:9900/health
 cat /tmp/tv-health.txt; echo
-curl -sS -D - -o /dev/null http://127.0.0.1:19899/health | tr -d '\r' | head -n 5
+curl -sS -D - -o /dev/null http://127.0.0.1:9900/health | tr -d '\r' | head -n 5
 ```
 
 预期：
@@ -186,12 +186,12 @@ content-type: text/plain; charset=utf-8
 
 正文 `ok` 没有换行，`echo` 用于换行显示（`src/http.rs:25`、`src/http/routes/public.rs:29-35`）。
 
-说明：默认绑定位是 `[::]`。Linux 默认接受 IPv4 映射地址，`127.0.0.1` 可用。若 `127.0.0.1` 连接失败而 `curl 'http://[::1]:19899/health'` 成功，检查 `sysctl net.ipv6.bindv6only`。
+说明：默认绑定位是 `[::]`。Linux 默认接受 IPv4 映射地址，`127.0.0.1` 可用。若 `127.0.0.1` 连接失败而 `curl 'http://[::1]:9900/health'` 成功，检查 `sysctl net.ipv6.bindv6only`。
 
 ### 9. 核对面板页面
 
 ```bash
-curl -sS -o /tmp/tv-panel.html -w '%{http_code}\n' http://127.0.0.1:19899/panel
+curl -sS -o /tmp/tv-panel.html -w '%{http_code}\n' http://127.0.0.1:9900/panel
 wc -c /tmp/tv-panel.html
 ```
 
@@ -200,7 +200,7 @@ wc -c /tmp/tv-panel.html
 ### 10. 核对默认账号登录
 
 ```bash
-curl -sS -X POST http://127.0.0.1:19899/panel/api/login \
+curl -sS -X POST http://127.0.0.1:9900/panel/api/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}'
 ```
@@ -212,7 +212,7 @@ curl -sS -X POST http://127.0.0.1:19899/panel/api/login \
 ### 11. 核对错误口令被拒绝
 
 ```bash
-curl -sS -o /tmp/tv-login-bad.json -w '%{http_code}\n' -X POST http://127.0.0.1:19899/panel/api/login \
+curl -sS -o /tmp/tv-login-bad.json -w '%{http_code}\n' -X POST http://127.0.0.1:9900/panel/api/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"not-the-password"}'
 cat /tmp/tv-login-bad.json; echo
@@ -234,7 +234,7 @@ grep -a -n 'tv-buddy 启动' /opt/tv-buddy/tv-buddy.log | tail -n 1
 
 预期：
 
-- `tv-buddy url` 输出三行：`面板地址：http://<host>:19899/panel`、`账号：admin`、`初始口令：/opt/tv-buddy/cache/admin_initial_credentials.txt`。绑定位为 `[::]` 时自动探测本机 IP。
+- `tv-buddy url` 输出三行：`面板地址：http://<host>:9900/panel`、`账号：admin`、`初始口令：/opt/tv-buddy/cache/admin_initial_credentials.txt`。绑定位为 `[::]` 时自动探测本机 IP。
 - `tv-buddy status` 退出码 `0`（`packaging/tv-buddy.sh:649-663`）。
 - 日志中出现启动记录 `tv-buddy 启动`（`src/main.rs:90-97`）。
 
@@ -259,7 +259,7 @@ grep -a -c 'tv-buddy 启动' /opt/tv-buddy/tv-buddy.log
 ```bash
 tv-buddy restart; echo "restart=$?"
 sleep 2
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/health
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9900/health
 ```
 
 预期：`restart=0`，随后状态码 `200`。
@@ -277,14 +277,14 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19899/health
 | 5 | 安装文件 | 存在 `tv-buddy`、`tv-buddy.sh`；首次启动后存在 `tv-buddy.db` | 缺任一文件 |
 | 6 | 文件权限 | `tv-buddy` 与 `tv-buddy.sh` 为 `0755`，`tv-buddy.db` 为 `0600` | 权限不符 |
 | 7 | 命令软链 | `readlink -f /usr/local/bin/tv-buddy` 输出 `/opt/tv-buddy/tv-buddy.sh` | 软链不存在或指向别的文件 |
-| 8 | 配置端口 | `bind = "[::]:19899"` | 其他值 |
+| 8 | 配置端口 | `bind = "[::]:9900"` | 其他值 |
 | 9 | 服务状态 | 第 7 步所选分支的退出码为 `0` | 非 0 |
 | 10 | 开机自启 | systemd 下 `is-enabled` 输出 `enabled`；OpenRC 下 `rc-update` 列出 `tv-buddy` | 未启用 |
 | 11 | 健康检查 | `/health` 返回 `200`，正文 `ok`，`content-type` 为 `text/plain; charset=utf-8` | 非 200 或正文不符 |
 | 12 | 面板页面 | `/panel` 返回 `200`，字节数大于 0 | 非 200 或空正文 |
 | 13 | 默认账号 | 登录返回 `200` 且正文含 `token` | 401 或 429 |
 | 14 | 错误口令 | 返回 `401`，正文为 `{"error":"用户名或密码错误"}` | 返回 200 或其他正文 |
-| 15 | CLI 地址 | `tv-buddy url` 输出三行，端口为 19899，末行是凭据文件绝对路径 | 行数不符、端口不符，或末行不是绝对路径 |
+| 15 | CLI 地址 | `tv-buddy url` 输出三行，端口为 9900，末行是凭据文件绝对路径 | 行数不符、端口不符，或末行不是绝对路径 |
 | 16 | CLI 状态 | `tv-buddy status` 退出码为 `0` | 非 0 |
 | 17 | 日志文件 | `/opt/tv-buddy/tv-buddy.log` 存在，且含 `tv-buddy 启动` | 文件缺失或不含该行 |
 | 18 | 重启 | `restart=0`，重启后 `/health` 返回 `200` | 非 0 或健康检查失败 |

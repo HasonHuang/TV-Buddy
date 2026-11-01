@@ -136,7 +136,7 @@ pub struct ServerCfg {
 impl Default for ServerCfg {
     fn default() -> Self {
         Self {
-            bind: "[::]:19899".into(),
+            bind: "[::]:9900".into(),
             not_found_url: "https://material.yang-1989.eu.org/v/404.mp4".into(),
             error_url: "https://material.yang-1989.eu.org/v/mistake.mp4".into(),
             home_url: "https://yang-1989.eu.org/".into(),

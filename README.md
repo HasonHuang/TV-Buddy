@@ -10,7 +10,7 @@
 
 TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、缓存、再分发 HLS/DASH 流，并提供工程单、录制、回看、台标库、安全管控与备份恢复。
 
-服务只用一个静态链接的二进制运行。前端资源内嵌在二进制中，不需要 Node 或数据库。默认监听 `19899` 端口。
+服务只用一个静态链接的二进制运行。前端资源内嵌在二进制中，不需要 Node 或数据库。默认监听 `9900` 端口。
 
 - **行为兼容**：配置键面、面板接口与播放链路对齐闭源 IPTV Proxy v0.8.2。可直接替换运行。
 - **低配置可跑**：1 vCPU / 128 MB 内存 / 1 GB 磁盘即可运行，配合前置 CDN 承载多观众。见 [低配置部署](#低配置部署)。
@@ -179,6 +179,43 @@ sudo ./install.sh
 
 服务单元按系统自动选择 systemd 或 OpenRC。
 
+### Docker 镜像
+
+仓库根目录的 `Dockerfile` 构建运行镜像。镜像内是静态 musl 二进制，不含 Node 与 Rust。
+
+```bash
+docker build -t tv-buddy .
+docker run -d --name tv-buddy \
+  -p 9900:9900 \
+  -v tv-buddy-data:/data \
+  tv-buddy
+```
+
+| 项 | 值 |
+| --- | --- |
+| 数据目录 | `/data`（数据库、缓存、初始口令文件） |
+| 端口 | `9900` |
+| 运行用户 | `tvbuddy`，UID/GID `10001` |
+| 健康检查 | `GET http://127.0.0.1:9900/health` |
+| 版本号 | `--build-arg TV_BUDDY_VERSION=<版本>`，默认 `dev` |
+| ffmpeg | 默认不装。需要 DASH 录制或素材转换时加 `--build-arg WITH_FFMPEG=1` |
+
+首次启动后读取初始口令：
+
+```bash
+docker exec tv-buddy cat /data/cache/admin_initial_credentials.txt
+```
+
+用绑定挂载代替命名卷时，先让目录归 `10001:10001`：
+
+```bash
+sudo mkdir -p /srv/tv-buddy
+sudo chown -R 10001:10001 /srv/tv-buddy
+docker run -d --name tv-buddy -p 9900:9900 -v /srv/tv-buddy:/data tv-buddy
+```
+
+`tests/manual/local/docker-compose.yml` 复用同一份 `Dockerfile` 的 `local-test` 目标，验证安装流程。
+
 ---
 
 ## 首次使用
@@ -193,7 +230,7 @@ sudo tv-buddy start   # 启动服务（未加 --start 时）
 打开面板：
 
 ```text
-http://<host>:19899/panel
+http://<host>:9900/panel
 ```
 
 首次启动生成账号 `admin`，口令随机，写在：
@@ -224,8 +261,8 @@ TV_BUDDY_INITIAL_PASSWORD='你的口令' sudo -E sh install.sh
 订阅地址只有一个入口，在面板「我的订阅」页复制：
 
 ```text
-http://<host>:19899/sub/<令牌>/playlist.m3u   # 该用户的订阅
-http://<host>:19899/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
+http://<host>:9900/sub/<令牌>/playlist.m3u   # 该用户的订阅
+http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 ```
 
 每个用户在「用户与设备」里单独授权分组与频道，令牌在同一个弹窗里管理。
@@ -242,7 +279,7 @@ http://<host>:19899/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 
 ```json
 {
-  "server": { "bind": "[::]:19899", "log_level": "info" },
+  "server": { "bind": "[::]:9900", "log_level": "info" },
   "auth": { "token_enabled": false },
   "cache": { "disk_path": "./cache" },
   "groups": [
@@ -334,7 +371,7 @@ TV Buddy 可在 **1 vCPU / 128 MB 内存 / 1 GB 磁盘** 的实例上运行。�
 
 ```json
 {
-  "server": { "bind": "[::]:19899", "log_level": "info" },
+  "server": { "bind": "[::]:9900", "log_level": "info" },
   "panel": { "enabled": true },
   "auth": { "token_enabled": true, "ip_guard_enabled": true },
   "cache": {
@@ -413,7 +450,7 @@ TTL 与磁盘上限不能写死。片源窗口在 48–100 秒，单片 1.1–9 
 也可以直接调接口：
 
 ```bash
-curl -X POST http://127.0.0.1:19899/panel/api/cdn/estimate
+curl -X POST http://127.0.0.1:9900/panel/api/cdn/estimate
 ```
 
 ### 验收

@@ -722,7 +722,7 @@ export function SettingsPage({
                 <Text
                   label="监听地址"
                   path="server.bind"
-                  tip="服务监听的地址与端口，例如 [::]:19899。保存后需重启进程。"
+                  tip="服务监听的地址与端口，例如 [::]:9900。保存后需重启进程。"
                   hint="改后需重启"
                 />
                 <Num

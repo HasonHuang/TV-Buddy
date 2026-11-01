@@ -14,7 +14,7 @@
 | 服务 | `tv-buddy` 已安装并运行 |
 | 默认安装目录 | `/opt/tv-buddy`（`install.sh:17`） |
 | 默认数据库路径 | `/opt/tv-buddy/tv-buddy.db`（`packaging/tv-buddy.service`） |
-| 默认监听 | `[::]:19899`（`src/config/model.rs:130`） |
+| 默认监听 | `[::]:9900`（`src/config/model.rs:139`） |
 | 日志文件 | `/opt/tv-buddy/tv-buddy.log`（`src/logging.rs:163`） |
 | 面板 | `[panel].enabled = true`，默认成立（`src/config/model.rs:158-169`） |
 | 缓存后端 | `[cache].backend = "disk"`（`src/config/model.rs:251-270`） |
@@ -25,11 +25,11 @@
 
 ```bash
 systemctl status tv-buddy --no-pager
-ss -lntp | grep 19899
+ss -lntp | grep 9900
 tail -n 20 /opt/tv-buddy/tv-buddy.log
 ```
 
-预期：`active (running)`。19899 在监听。日志无 `监听失败`。
+预期：`active (running)`。9900 在监听。日志无 `监听失败`。
 
 ### 2.2 测试分组
 
@@ -87,7 +87,7 @@ VPS 上必须有：
 ### 3.1 取得面板会话
 
 ```bash
-BASE=http://127.0.0.1:19899
+BASE=http://127.0.0.1:9900
 PANEL_USER=admin
 PANEL_PASS=admin
 ADMIN=$(curl -sS -X POST "$BASE/panel/api/login" \
