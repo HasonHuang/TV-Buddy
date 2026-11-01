@@ -20,7 +20,7 @@
 | --- | --- |
 | 操作系统 | Linux。amd64 或 arm64 |
 | 权限 | `root`，或可执行 `sudo` 的账号 |
-| 服务 | `tv-buddy` 0.1.0 已安装并在运行 |
+| 服务 | `tv-buddy` 已安装并在运行（版本见 `tv-buddy version`） |
 | 二进制 | `/opt/tv-buddy/tv-buddy`（`packaging/tv-buddy.service:10`） |
 | 配置 | `/opt/tv-buddy/tv-buddy.db`（`packaging/tv-buddy.service:10`） |
 | 监听 | `[::]:19899`（`src/config/model.rs:130`） |
@@ -58,7 +58,7 @@ curl -sS -H "Authorization: Bearer $T" http://127.0.0.1:19899/panel/api/status \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["version"])'
 ```
 
-预期输出 `0.1.0`。
+预期输出本次构建的版本号。取值来自最近的 `v*` 标签，例如 `2026.9`。
 
 默认配置下 `ip_guard_enabled = false`（`src/config/model.rs:733`）。此时限流与会话上限立即返回 `None`（`src/http/routes/stream.rs:1433`、`src/http/routes/stream.rs:1478`）。步骤 3 打开开关。
 
@@ -889,7 +889,7 @@ systemctl is-active tv-buddy
 - 日期：YYYY-MM-DD
 - 执行人：
 - 主机：<VPS 主机名> / <系统版本>
-- tv-buddy 版本：0.1.0
+- tv-buddy 版本：<`tv-buddy version` 的输出>
 - 分组：GID=... CID=... CID2=...
 - 服务状态：active / 其他
 

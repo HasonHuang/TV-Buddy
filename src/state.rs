@@ -266,7 +266,7 @@ impl AppState {
     }
 
     pub fn version(&self) -> &'static str {
-        env!("CARGO_PKG_VERSION")
+        crate::VERSION
     }
 
     pub fn uptime_secs(&self) -> u64 {

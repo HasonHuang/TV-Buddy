@@ -3,6 +3,12 @@
 //! 模块划分见 [`docs/design/02-architecture.md`](../docs/design/02-architecture.md)。
 //! 可执行入口在 `src/main.rs`，只负责启动。
 
+/// 程序版本，不含前导 `v`。
+///
+/// 由 `build.rs` 写入：优先取环境变量 `TV_BUDDY_VERSION`，其次取 git 标签，
+/// 最后取 `Cargo.toml` 的版本。面板显示时自己加 `v` 前缀。
+pub const VERSION: &str = env!("TV_BUDDY_VERSION");
+
 pub mod assets;
 pub mod auth;
 pub mod backup;

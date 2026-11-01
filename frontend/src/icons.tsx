@@ -4,7 +4,7 @@
  * 只在界面里用；不引入第三方图标库，避免打包体积与许可问题。
  */
 
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 export type IconName =
   | 'overview'
@@ -218,6 +218,56 @@ export function Icon({
       focusable="false"
     >
       {PATHS[name]}
+    </svg>
+  );
+}
+
+/** 品牌台标：三色电视。
+ *
+ * 屏幕从左到右分三块色带：蓝、绿、红（`--brand-1/2/3`）。
+ * 描边取 `currentColor`，随所在文字颜色变化。
+ * 图形是装饰，旁边的文字承担无障碍名称。
+ */
+export function BrandMark({ size = 24, className }: { size?: number; className?: string }) {
+  // 多个实例同页时，裁剪路径的 id 不能重复。
+  const clipId = `tv-screen-${useId().replace(/:/g, '')}`;
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <clipPath id={clipId}>
+          <rect x="2.5" y="7.3" width="19" height="12.6" rx="2.2" />
+        </clipPath>
+      </defs>
+      <path
+        d="m7.8 2.4 4.2 3 4.2-3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <g clipPath={`url(#${clipId})`}>
+        <rect x="2.5" y="7.3" width="6.13" height="12.6" fill="var(--brand-1)" />
+        <rect x="8.93" y="7.3" width="6.13" height="12.6" fill="var(--brand-2)" />
+        <rect x="15.37" y="7.3" width="6.13" height="12.6" fill="var(--brand-3)" />
+      </g>
+      <rect
+        x="1.6"
+        y="6.4"
+        width="20.8"
+        height="14.4"
+        rx="3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+      />
     </svg>
   );
 }

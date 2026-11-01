@@ -28,7 +28,7 @@ pub async fn backup(
         &config,
         &config.cache.disk_path,
         include,
-        env!("CARGO_PKG_VERSION"),
+        crate::VERSION,
     )
     .map_err(|error| ApiError::internal(format!("{error:#}")))?;
     let name = backup::file_name();

@@ -87,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("监听失败: {bind}"))?;
     tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
+        version = tv_buddy::VERSION,
         bind = %bind,
         cache = %std::path::absolute(&state.cache_dir)
             .unwrap_or_else(|_| state.cache_dir.clone())

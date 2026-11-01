@@ -78,7 +78,8 @@ check "登录返回 token" "1" "$([ -n "$T" ] && echo 1 || echo 0)"
 
 V=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/status" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("version",""))')
-check "状态版本" "0.1.0" "$V"
+EXPECTV=$("$BIN" version | awk '{print $2}')
+check "状态版本" "$EXPECTV" "$V"
 
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Token: $T" "$B/panel/api/status")
 check "X-Token 可用" "200" "$code"

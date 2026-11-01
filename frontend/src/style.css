@@ -33,6 +33,11 @@
   --accent-weak: #e8f5f3;
   --accent-line: #b6e0d9;
 
+  /* 品牌三色（台标左、中、右）：蓝、绿、红。 */
+  --brand-1: #2563eb;
+  --brand-2: #16a34a;
+  --brand-3: #dc2626;
+
   /* 语义色 */
   --danger: #dc2626;
   --danger-dark: #b91c1c;
@@ -196,7 +201,7 @@ a {
 }
 
 .brand-mark {
-  color: var(--accent);
+  color: var(--text);
   flex: none;
 }
 
@@ -1352,7 +1357,7 @@ pre.log .lv-trace {
 }
 
 .login-card .mark {
-  color: var(--accent);
+  color: var(--text);
   margin-bottom: 10px;
 }
 
@@ -1817,11 +1822,23 @@ pre.log .lv-trace {
   display: flex;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
+}
+
+/* 标签不折行；版本号过长时省略，完整值见 title。 */
+.sidebar-meta .kv > span:first-child {
+  flex: none;
+  white-space: nowrap;
 }
 
 .sidebar-meta .v {
   color: var(--text2);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: right;
 }
 
 /* --- 页面页脚 --- */

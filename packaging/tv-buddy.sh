@@ -35,7 +35,12 @@ CLI_LINK=${CLI_LINK:-/usr/local/bin/tv-buddy}
 DEFAULT_PORT=19899
 DEFAULT_USER=admin
 DEFAULT_PASS=admin
-VERSION=${TV_BUDDY_CLI_VERSION:-0.1.0}
+# 版本号从已安装的二进制读取（`tv-buddy version`）。可用 TV_BUDDY_CLI_VERSION 覆盖。
+# 未安装时留空，菜单横幅不显示版本。
+VERSION=${TV_BUDDY_CLI_VERSION:-}
+if [ -z "$VERSION" ] && [ -x "$BIN" ]; then
+    VERSION=$("$BIN" version 2>/dev/null | awk '{print $2}') || VERSION=
+fi
 # 默认发布源，与 install.sh 一致；可用 TV_BUDDY_REPO / TV_BUDDY_VERSION 覆盖。
 GITHUB_REPO=${TV_BUDDY_REPO:-HasonHuang/TV-Buddy}
 TV_BUDDY_VERSION=${TV_BUDDY_VERSION:-latest}
@@ -854,7 +859,9 @@ main_menu() {
             clear 2>/dev/null || true
         fi
         printf '%s=============================================%s\n' "$BLUE" "$RESET"
-        printf '       tv-buddy 安装 · 管理   %sv%s%s\n' "$DIM" "$VERSION" "$RESET"
+        printf '       tv-buddy 安装 · 管理'
+        [ -n "$VERSION" ] && printf '   %sv%s%s' "$DIM" "$VERSION" "$RESET"
+        printf '\n'
         printf '%s=============================================%s\n' "$BLUE" "$RESET"
         printf '  状态: %s\n' "$(state_line)"
         if is_installed; then

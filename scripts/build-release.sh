@@ -10,7 +10,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION=$(python3 -c 'import json,subprocess;print(json.loads(subprocess.check_output(["cargo","metadata","--no-deps","--format-version","1"]))["packages"][0]["version"])')
+# 版本取最近的 v* 标签（v2026.9 → 2026.9），与 Release 页一致。
+# 没有标签时退回 Cargo.toml 的版本。可用环境变量 VERSION 覆盖。
+VERSION=${VERSION:-$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null | sed 's/^v//' || true)}
+VERSION=${VERSION:-$(python3 -c 'import json,subprocess;print(json.loads(subprocess.check_output(["cargo","metadata","--no-deps","--format-version","1"]))["packages"][0]["version"])')}
 IMAGE=${IMAGE:-rust:1-alpine}
 OUT=dist
 mkdir -p "$OUT"
@@ -41,6 +44,7 @@ package() { # 参数：架构（amd64/arm64）
     -e CARGO_HOME=/usr/local/cargo \
     -e CARGO_TARGET_DIR=/src/target/pack-$platform \
     -e RUSTUP_TOOLCHAIN="$toolchain" \
+    -e TV_BUDDY_VERSION="$VERSION" \
     "$IMAGE" cargo build --release --offline
 
   local stage="$OUT/tv-buddy-$VERSION-$platform"

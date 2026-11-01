@@ -159,7 +159,7 @@
 | 前端构建 | `pnpm install && pnpm build` → `dist/` 嵌入 |
 | 发布物 | `tv-buddy` 二进制（arm64/amd64）+ 安装脚本 |
 | 服务单元 | systemd（Alpine 用 OpenRC），`/opt/tv-buddy` 布局 | 
-| 版本上报 | `/panel/api/status.version` 输出**本实现版本**（首发 `0.1.0`）；字段名不变 |
+| 版本上报 | `/panel/api/status.version` 输出**本次构建版本**：取最近的 `v*` 标签（`build.rs`），无标签时取 `Cargo.toml`；字段名不变 |
 
 ## 9. 阶段范围
 

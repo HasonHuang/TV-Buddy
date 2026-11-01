@@ -9,6 +9,7 @@
 //! | `config set <a.b.c> <值>` | 写一个配置值 |
 //! | `config reset` | 配置恢复默认，保留用户 |
 //! | `passwd <用户名>` | 重设用户口令 |
+//! | `version` | 显示版本 |
 //!
 //! 路径按 `.` 分段。纯数字段按数组下标，其余按对象键，例如
 //! `groups.0.channels.1.url`。
@@ -72,6 +73,7 @@ pub fn run_if_subcommand() -> Result<Option<i32>> {
     match command.as_str() {
         "config" => config_command(&args[1..])?,
         "passwd" => passwd(&args[1..])?,
+        "version" | "--version" | "-V" => println!("tv-buddy {}", crate::VERSION),
         "--help" | "-h" | "help" => print_help(),
         _ => return Ok(None),
     }
@@ -88,6 +90,7 @@ fn print_help() {
          \x20 config set <a.b.c> <值> [--db <路径>]                  写配置值\n\
          \x20 config reset [--db <路径>] [--force]                   配置恢复默认\n\
          \x20 passwd <用户名> [--db <路径>] [--stdin]                重设口令\n\
+         \x20 version | --version                                   显示版本\n\
          \n\
          默认数据库：{DEFAULT_DB}"
     );

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getRole, getToken, setRole, setToken, UNAUTHORIZED_EVENT } from './api';
-import { Icon, type IconName } from './icons';
-import { Confirm, PageHead, Tip, useToast } from './ui';
+import { BrandMark, Icon, type IconName } from './icons';
+import { Confirm, PageHead, useToast } from './ui';
 import { GroupsPage } from './groups';
 import { EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
@@ -85,15 +85,12 @@ function Login({ onDone }: { onDone: () => void }) {
     <div className="login-wrap">
       <div className="login-card">
         <div className="mark">
-          <Icon name="tv" size={40} />
+          <BrandMark size={40} />
         </div>
         <div className="name">TV Buddy</div>
         <div className="tagline">Management Console</div>
         <form onSubmit={submit}>
-          <label htmlFor="user">
-            用户名
-            <Tip text="面板账号。首次安装的账号与初始口令在安装输出中。" />
-          </label>
+          <label htmlFor="user">用户名</label>
           <input
             id="user"
             autoComplete="username"
@@ -101,10 +98,7 @@ function Login({ onDone }: { onDone: () => void }) {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
           />
-          <label htmlFor="pass">
-            密码
-            <Tip text="登录口令。连续失败会触发临时锁定。" />
-          </label>
+          <label htmlFor="pass">密码</label>
           <input
             id="pass"
             type="password"
@@ -210,6 +204,8 @@ function Overview() {
   };
 
   const backend = text('cache_backend');
+  // 版本号在接口里不带前缀，界面统一显示 `v`。
+  const version = status?.version ? `v${status.version}` : '—';
 
   return (
     <>
@@ -296,7 +292,7 @@ function Overview() {
         <dl>
           <div style={{ display: 'contents' }}>
             <dt>版本</dt>
-            <dd>{text('version')}</dd>
+            <dd>{version}</dd>
           </div>
           <div style={{ display: 'contents' }}>
             <dt>运行时长</dt>
@@ -404,7 +400,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <Icon name="tv" size={24} className="brand-mark" />
+          <BrandMark size={24} className="brand-mark" />
           <div className="brand-text">
             <strong>TV Buddy</strong>
             <span>管理面板</span>
@@ -429,7 +425,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <div className="sidebar-meta">
             <div className="kv">
               <span>版本</span>
-              <span className="v">{meta ? `v${meta.version}` : '—'}</span>
+              <span className="v" title={meta ? `v${meta.version}` : undefined}>
+                {meta ? `v${meta.version}` : '—'}
+              </span>
             </div>
             <div className="kv">
               <span>已运行</span>
@@ -465,7 +463,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         {active === 'assets' && <AssetsPage />}
         {active === 'logs' && <LogsPage />}
         <footer className="app-foot">
-          <Icon name="tv" size={13} />
+          <BrandMark size={13} />
           <span>TV Buddy</span>
           <span className="dot-sep">·</span>
           <span>IPTV 代理与管理面板</span>
