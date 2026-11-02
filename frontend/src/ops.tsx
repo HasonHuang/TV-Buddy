@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { api, apiText, getToken } from './api';
+import { api, apiText, getToken, putConfig } from './api';
 import { Icon } from './icons';
 import { Confirm, Field, PageHead, Select, Tip } from './ui';
 
@@ -152,6 +152,10 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
   }
 
   const auth = config.auth ?? {};
+  const configGroups = Array.isArray((config as { groups?: unknown }).groups)
+    ? ((config as { groups: { id: string; name?: string; mode?: string }[] }).groups ?? [])
+    : [];
+  const passthroughGroups = configGroups.filter((group) => group.mode === 'passthrough');
   const setKey = (key: string, value: unknown) =>
     setConfig({ ...config, auth: { ...auth, [key]: value } });
 
@@ -170,7 +174,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
             .filter(Boolean),
         },
       };
-      await api('PUT', '/config', next);
+      await putConfig(next);
       setNote('访问控制已保存并生效');
       await load();
       onSaved();
@@ -245,6 +249,27 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
           onChange={(next) => setKey('token_ttl_hours', Number(next) || 0)}
         />
       </div>
+      {auth.token_enabled === false ? (
+        <div className="msg warn">
+          播放令牌已关闭：任何拿到地址的人都能播放，且无法按用户收回。{' '}
+          <button className="ghost" onClick={() => setKey('token_enabled', true)}>
+            开启令牌校验
+          </button>
+        </div>
+      ) : (
+        <p className="msg ok">播放令牌已开启。旧版「开放」分组不再生成免令牌直链。</p>
+      )}
+      {passthroughGroups.length > 0 && (
+        <div className="msg warn">
+          有 {passthroughGroups.length} 个手工分组使用 passthrough（
+          {passthroughGroups
+            .slice(0, 3)
+            .map((group) => group.name || group.id)
+            .join('、')}
+          {passthroughGroups.length > 3 ? '…' : ''}
+          ）。这些分组绕过代理与令牌，建议改为 rewrite。
+        </div>
+      )}
 
       <h3>切片签名</h3>
       <p className="muted">
@@ -912,7 +937,7 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
           },
         },
       };
-      await api('PUT', '/config', next);
+      await putConfig(next);
       setNote('EPG 翻译配置已保存');
       await load();
       onChanged();
@@ -1181,7 +1206,7 @@ function EpgCronCard({ onChanged }: { onChanged: () => void }) {
       const config = await api<Record<string, unknown>>('GET', '/config');
       const epg = (config.epg ?? {}) as Record<string, unknown>;
       // `[epg]` 段（含源列表）在启动时读取，改 cron 也不会立刻换调度；界面上写明。
-      await api('PUT', '/config', { ...config, epg: { ...epg, cron: expr.trim() } });
+      await putConfig({ ...config, epg: { ...epg, cron: expr.trim() } });
       setSaved(expr.trim());
       setNote('采集节奏已保存；[epg] 段需重启后重新排程');
       onChanged();

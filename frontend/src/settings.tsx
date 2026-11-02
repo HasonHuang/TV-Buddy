@@ -17,7 +17,7 @@ import {
   useState,
 } from 'react';
 
-import { api } from './api';
+import { api, putConfig } from './api';
 import { Icon } from './icons';
 import { RecommendCard, type Recommend } from './lowcfg';
 import { BackupPage } from './ops';
@@ -571,7 +571,7 @@ export function SettingsPage({
     setBusy('save');
     try {
       const next = draft;
-      await api('PUT', '/config', next);
+      await putConfig(next);
       setDraft(next);
       setBaseline(next);
       ok('设置已保存');
@@ -1648,7 +1648,7 @@ function RawCard({ draft, onSaved }: { draft: Cfg; onSaved: (next: Cfg) => void 
     setBusy(true);
     try {
       const parsed = JSON.parse(text) as Cfg;
-      await api('PUT', '/config', parsed);
+      await putConfig(parsed);
       onSaved(parsed);
       setEdited(false);
       setRaw(null);

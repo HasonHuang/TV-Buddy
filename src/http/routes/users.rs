@@ -282,6 +282,8 @@ pub async fn channel_options(
             json!({
                 "id": group.id,
                 "name": group.name,
+                "origin": group.origin,
+                "source_id": group.source_id,
                 "channels": group.channels.iter()
                     .map(|channel| json!({
                         "id": channel.id,

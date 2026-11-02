@@ -3,10 +3,10 @@
 //! 契约见 [`docs/design/03-http-contract.md`](../../../docs/design/03-http-contract.md) §6.2。
 //! 局部更新语义：把请求体字段合并到当前对象，再整体校验。
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -17,6 +17,7 @@ use crate::{
     http::{error::ApiError, ext::PanelAuth},
     m3u,
     state::AppState,
+    subscription,
 };
 
 /// 把补丁对象的字段合并到基础对象。
@@ -104,12 +105,18 @@ pub async fn delete_group(
     State(state): State<Arc<AppState>>,
     Path(gid): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    if state.snapshot().group(&gid).is_none() {
+    let group = state.snapshot().group(&gid).cloned();
+    let Some(group) = group else {
         return Err(ApiError::not_found("Group not found"));
-    }
+    };
     state
         .mutate(|config| {
-            config.groups.retain(|group| group.id != gid);
+            // 同步分组删除：把现有频道的键写入源排除。不写 `group:`，
+            // 避免同组的新频道被永久排除。
+            for channel in &group.channels {
+                subscription::exclude_channel(config, channel);
+            }
+            config.groups.retain(|item| item.id != gid);
             Ok(())
         })
         .map_err(|err| ApiError::internal(err.to_string()))?;
@@ -181,7 +188,14 @@ pub async fn update_channel(
         .group(&gid)
         .and_then(|group| group.channels.iter().find(|channel| channel.id == cid))
         .ok_or_else(|| ApiError::not_found("Channel not found"))?;
-    let updated: Channel = merge_into(channel, &body)?;
+    let mut updated: Channel = merge_into(channel, &body)?;
+    // 改上游字段后固定。请求体显式带 `sync_follow` 时以请求为准。
+    if !channel.source_id.is_empty()
+        && body.get("sync_follow").is_none()
+        && subscription::upstream_differs(channel, &updated)
+    {
+        updated.sync_follow = false;
+    }
 
     state
         .mutate(|config| {
@@ -206,16 +220,18 @@ pub async fn delete_channel(
     State(state): State<Arc<AppState>>,
     Path((gid, cid)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
-    let exists = state
+    let channel = state
         .snapshot()
         .group(&gid)
-        .map(|group| group.channels.iter().any(|channel| channel.id == cid))
-        .unwrap_or(false);
-    if !exists {
+        .and_then(|group| group.channels.iter().find(|channel| channel.id == cid))
+        .cloned();
+    let Some(channel) = channel else {
         return Err(ApiError::not_found("Channel not found"));
-    }
+    };
     state
         .mutate(|config| {
+            // 删除同步频道时写入源排除，防止下次同步回流。
+            subscription::exclude_channel(config, &channel);
             let group = config
                 .group_mut(&gid)
                 .ok_or_else(|| anyhow::anyhow!("Group not found"))?;
@@ -227,8 +243,53 @@ pub async fn delete_channel(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// `POST /panel/api/groups/:gid/detach`——分组转为手工。
+pub async fn detach_group(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path(gid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let mut found = false;
+    state
+        .mutate(|config| {
+            found = subscription::detach_group(config, &gid);
+            Ok(())
+        })
+        .map_err(|err| ApiError::internal(format!("{err:#}")))?;
+    if !found {
+        return Err(ApiError::not_found("Group not found"));
+    }
+    tracing::info!(group = %gid, "分组转为手工");
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// `POST /panel/api/groups/:gid/channels/:cid/detach`——频道转为手工。
+pub async fn detach_channel(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path((gid, cid)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let mut found = false;
+    state
+        .mutate(|config| {
+            found = subscription::detach_channel(config, &gid, &cid);
+            Ok(())
+        })
+        .map_err(|err| ApiError::internal(format!("{err:#}")))?;
+    if !found {
+        return Err(ApiError::not_found("Channel not found"));
+    }
+    tracing::info!(group = %gid, channel = %cid, "频道转为手工");
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// 导入分组：`force = false` 跳过已存在的 id，`true` 覆盖。
-fn import(state: Arc<AppState>, body: Value, force: bool) -> Result<Json<Value>, ApiError> {
+fn import(
+    state: Arc<AppState>,
+    body: Value,
+    force: bool,
+    include_synced: bool,
+) -> Result<Json<Value>, ApiError> {
     let items = body
         .as_array()
         .ok_or_else(|| ApiError::bad_request("请求体必须是分组数组"))?;
@@ -247,12 +308,21 @@ fn import(state: Arc<AppState>, body: Value, force: bool) -> Result<Json<Value>,
     state
         .mutate(|config| {
             for group in &groups {
+                // 同步分组默认跳过。`include_synced=true` 才允许覆盖。
+                if !include_synced && !group.source_id.is_empty() {
+                    skipped += 1;
+                    continue;
+                }
                 match config
                     .groups
                     .iter()
                     .position(|existing| existing.id == group.id)
                 {
                     Some(index) if force => {
+                        if !include_synced && !config.groups[index].source_id.is_empty() {
+                            skipped += 1;
+                            continue;
+                        }
                         config.groups[index] = group.clone();
                         imported += 1;
                     }
@@ -278,18 +348,27 @@ fn import(state: Arc<AppState>, body: Value, force: bool) -> Result<Json<Value>,
 pub async fn import_groups(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
-    import(state, body, false)
+    import(state, body, false, include_synced(&params))
 }
 
 /// `POST /panel/api/groups/import/force`——导入分组数组，id 重复的覆盖。
 pub async fn import_groups_force(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
-    import(state, body, true)
+    import(state, body, true, include_synced(&params))
+}
+
+fn include_synced(params: &HashMap<String, String>) -> bool {
+    params
+        .get("include_synced")
+        .map(|value| value != "0" && value != "false")
+        .unwrap_or(false)
 }
 
 /// 导入中的分组草稿。
@@ -307,8 +386,10 @@ struct Draft {
 pub async fn import_m3u(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
+    let include_synced = include_synced(&params);
     let text = body
         .get("text")
         .and_then(Value::as_str)
@@ -459,6 +540,10 @@ pub async fn import_m3u(
                 let existing = config.groups.iter().position(|group| group.id == draft.id);
                 match existing {
                     Some(index) if mode == "replace" => {
+                        if !include_synced && !config.groups[index].source_id.is_empty() {
+                            skipped_groups += 1;
+                            continue;
+                        }
                         config.groups[index] = Group {
                             id: draft.id,
                             name: draft.name,

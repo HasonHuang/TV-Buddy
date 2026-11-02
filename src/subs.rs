@@ -61,12 +61,38 @@ impl GroupRules<'_> {
 }
 
 /// 聚合源最近一次抓取状态。
+///
+/// 旧 `subs/status.json` 没有新字段，靠 `#[serde(default)]` 兼容。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SourceStatus {
     pub channels: usize,
     pub error: Option<String>,
     pub last_ok: u64,
     pub last_try: u64,
+    /// `aggregate` 或 `sync`。
+    pub mode: String,
+    /// 该源当前物化分组数。
+    pub groups: usize,
+    /// 最近一次成功同步时间。
+    pub last_sync: u64,
+    pub added: usize,
+    pub updated: usize,
+    pub removed: usize,
+    /// 因 `sync_follow=false` 保留的数量。
+    pub skipped_removals: usize,
+    /// 空清单拦截等待确认。
+    pub needs_review: bool,
+    /// 最近一次因空清单未应用。
+    pub zero_blocked: bool,
+    /// 移除比例，千分比。
+    pub shrink_permille: u64,
+    pub duration_ms: u64,
+    /// 下次计划时间。0 表示不自动。
+    pub next_sync: u64,
+    /// 正在同步。不落盘。
+    #[serde(skip)]
+    pub syncing: bool,
 }
 
 /// `ttl_secs = 0` 时目标按 1 小时展示与缓存。
@@ -131,6 +157,53 @@ pub fn preview(
     global_exclude: &[String],
     sample_limit: usize,
 ) -> PreviewResult {
+    let selected = select_entries(entries, source, global_exclude);
+
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for item in &selected.kept {
+        *counts.entry(item.group.clone()).or_insert(0) += 1;
+    }
+    let out_groups = counts
+        .into_iter()
+        .map(|(name, count)| Count { name, count })
+        .collect();
+
+    let sample = selected
+        .kept
+        .iter()
+        .take(sample_limit)
+        .map(|item| Sample {
+            name: item.entry.name.clone(),
+            group: item.group.clone(),
+            tvg_id: item.entry.tvg_id.clone().unwrap_or_default(),
+        })
+        .collect();
+
+    PreviewResult {
+        kept: selected.kept.len(),
+        sample,
+        trace: selected.trace,
+        dropped_groups: selected.dropped_groups,
+        out_groups,
+    }
+}
+
+/// 选择结果。预检与同步共用。
+#[derive(Debug, Clone)]
+pub struct Selection<'a> {
+    pub kept: Vec<Selected<'a>>,
+    pub trace: Trace,
+    pub dropped_groups: Vec<String>,
+}
+
+/// 四阶段过滤：分组选择/改名 → 全局排除 → 源白名单 → 源黑名单。
+///
+/// 预检与同步共用这一份规则，避免两边结论不同。
+pub fn select_entries<'a>(
+    entries: &'a [Entry],
+    source: &PreviewSource,
+    global_exclude: &[String],
+) -> Selection<'a> {
     let total = entries.len();
     let rules = GroupRules {
         group_map: &source.group_map,
@@ -179,28 +252,8 @@ pub fn preview(
         .collect();
     let kept_count = kept.len();
 
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for item in &kept {
-        *counts.entry(item.group.clone()).or_insert(0) += 1;
-    }
-    let out_groups = counts
-        .into_iter()
-        .map(|(name, count)| Count { name, count })
-        .collect();
-
-    let sample = kept
-        .iter()
-        .take(sample_limit)
-        .map(|item| Sample {
-            name: item.entry.name.clone(),
-            group: item.group.clone(),
-            tvg_id: item.entry.tvg_id.clone().unwrap_or_default(),
-        })
-        .collect();
-
-    PreviewResult {
-        kept: kept_count,
-        sample,
+    Selection {
+        kept,
         trace: Trace {
             total,
             after_group,
@@ -209,15 +262,15 @@ pub fn preview(
             after_exclude: kept_count,
         },
         dropped_groups,
-        out_groups,
     }
 }
 
 /// 已通过分组选择的条目。保留原分组以便 `group:` 过滤同时匹配新旧名称。
-struct Selected<'a> {
-    entry: &'a Entry,
-    original: String,
-    group: String,
+#[derive(Debug, Clone)]
+pub struct Selected<'a> {
+    pub entry: &'a Entry,
+    pub original: String,
+    pub group: String,
 }
 
 fn group_of(entry: &Entry) -> String {
@@ -227,7 +280,8 @@ fn group_of(entry: &Entry) -> String {
     }
 }
 
-/// 过滤词命中：频道名包含、`group:` 新旧分组名包含、`id:` 精确匹配 `tvg-id`。
+/// 过滤词命中：频道名包含、`group:` 新旧分组名包含、`id:` 精确匹配 `tvg-id`、
+/// `url:` 精确匹配地址。
 fn matches_filter(patterns: &[String], item: &Selected<'_>) -> bool {
     let id = item.entry.tvg_id.as_deref().unwrap_or_default();
     patterns
@@ -241,6 +295,8 @@ fn matches_filter(patterns: &[String], item: &Selected<'_>) -> bool {
                     || item.group.to_lowercase().contains(&want)
             } else if let Some(want) = pattern.strip_prefix("id:") {
                 id.to_lowercase() == want.trim().to_lowercase()
+            } else if let Some(want) = pattern.strip_prefix("url:") {
+                item.entry.url.trim() == want.trim()
             } else {
                 item.entry
                     .name

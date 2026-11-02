@@ -29,10 +29,13 @@ export function clearToken(): void {
 /** 带状态码的接口错误。 */
 export class ApiError extends Error {
   readonly status: number;
+  /** 服务端给的错误码，如 `stale_revision`、`content_exists`。 */
+  readonly code: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code = '') {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -59,13 +62,15 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
 
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
+    let code = '';
     try {
-      const data = (await response.json()) as { error?: string };
+      const data = (await response.json()) as { error?: string; code?: string };
       if (data.error) message = data.error;
+      if (data.code) code = data.code;
     } catch {
       // 保留默认文案
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, code);
   }
   return (await response.json()) as T;
 }
@@ -88,6 +93,19 @@ export async function apiText(method: string, path: string): Promise<string> {
     throw new ApiError(response.status, message);
   }
   return response.text();
+}
+
+/**
+ * 保存整份配置。带上 `revision` 并发令牌。
+ *
+ * 配置已被别处更新时抛出 `ApiError`，`code = "stale_revision"`。
+ * 调用方应重新加载配置，不要覆盖。
+ */
+export async function putConfig<T extends Record<string, unknown>>(
+  config: T,
+): Promise<number> {
+  const result = await api<{ ok: boolean; revision: number }>('PUT', '/config', config);
+  return result.revision;
 }
 
 /** 复制文本。剪贴板不可用时回退到临时输入框。 */

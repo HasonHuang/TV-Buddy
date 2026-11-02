@@ -48,7 +48,7 @@ const NAV: { id: SectionId; label: string; icon: IconName; feature?: string; adm
   { feature: 'recording', id: 'schedule', label: '定时录制', icon: 'schedule', adminOnly: true },
   { feature: 'epg', id: 'epg', label: '节目指南', icon: 'epg', adminOnly: true },
   { feature: 'logo', id: 'logos', label: '台标管理', icon: 'logo', adminOnly: true },
-  { feature: 'playlist', id: 'subs', label: '订阅聚合', icon: 'subs', adminOnly: true },
+  { feature: 'playlist', id: 'subs', label: '订阅源', icon: 'subs', adminOnly: true },
   { feature: 'livestream', id: 'livestream', label: '回看管理', icon: 'livestream', adminOnly: true },
   { feature: 'assets', id: 'assets', label: '视频素材', icon: 'assets', adminOnly: true },
   { id: 'logs', label: '运行日志', icon: 'logs', adminOnly: true },

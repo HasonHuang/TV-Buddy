@@ -41,6 +41,7 @@ pub mod source_cache;
 pub mod state;
 pub mod stats;
 pub mod subs;
+pub mod subscription;
 pub mod subtitle;
 pub mod timeshift;
 pub mod translate;

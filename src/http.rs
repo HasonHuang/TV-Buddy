@@ -9,7 +9,7 @@ pub mod static_assets;
 use std::sync::Arc;
 
 use axum::{
-    routing::{any, get, post, put},
+    routing::{any, delete, get, post, put},
     Router,
 };
 
@@ -93,6 +93,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/subs/status", get(routes::subs::panel_status))
         .route("/panel/api/subs/groups", post(routes::subs::panel_groups))
         .route("/panel/api/subs/preview", post(routes::subs::panel_preview))
+        .route("/panel/api/subs/sync", post(routes::subs::panel_sync))
+        .route(
+            "/panel/api/subs/:id/content",
+            delete(routes::subs::panel_content),
+        )
         .route(
             "/panel/api/schedule",
             get(routes::schedule::list).post(routes::schedule::create),
@@ -124,6 +129,18 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/panel/api/playlist",
             get(routes::playlist::get).put(routes::playlist::update),
+        )
+        .route(
+            "/panel/api/playlist/settings",
+            put(routes::playlist::update_settings),
+        )
+        .route(
+            "/panel/api/playlist/sources",
+            post(routes::playlist::create_source),
+        )
+        .route(
+            "/panel/api/playlist/sources/:id",
+            put(routes::playlist::update_source).delete(routes::playlist::delete_source),
         )
         .route("/panel/api/dash/status", get(routes::dash::status))
         .route(
@@ -346,6 +363,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/panel/api/groups/:gid/channels/:cid",
             put(routes::groups::update_channel).delete(routes::groups::delete_channel),
+        )
+        .route(
+            "/panel/api/groups/:gid/detach",
+            post(routes::groups::detach_group),
+        )
+        .route(
+            "/panel/api/groups/:gid/channels/:cid/detach",
+            post(routes::groups::detach_channel),
         )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

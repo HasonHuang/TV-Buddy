@@ -216,10 +216,11 @@ pub async fn put_config(
         Ok(revision) => revision,
         Err(err) => {
             if let Some(stale) = err.downcast_ref::<config::StaleRevision>() {
-                return Err(ApiError::conflict(format!(
-                    "配置已被更新，当前版本 {}",
-                    stale.0
-                )));
+                return Err(ApiError::conflict_body(json!({
+                    "error": format!("配置已被更新，当前版本 {}", stale.0),
+                    "code": "stale_revision",
+                    "revision": stale.0,
+                })));
             }
             return Err(ApiError::internal(format!("保存失败: {err}")));
         }

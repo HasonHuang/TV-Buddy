@@ -90,6 +90,10 @@ pub struct AppState {
     pub estimate: crate::cache_estimate::Estimator,
     /// 按代理配置缓存的 HTTP 客户端。
     proxy_clients: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
+    /// 同一时间只跑一次订阅同步。
+    pub sync_lock: Arc<tokio::sync::Mutex<()>>,
+    /// 单源手动同步节流：源 id → 上次触发时刻（Unix 秒）。
+    pub sync_triggers: Mutex<std::collections::HashMap<String, u64>>,
     /// 最近日志行。
     pub logs: Arc<RingBuffer>,
     /// 进程启动时刻。
@@ -163,6 +167,8 @@ impl AppState {
             unban_quota: crate::auth::UnbanQuota::new(),
             estimate,
             proxy_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
+            sync_lock: Arc::new(tokio::sync::Mutex::new(())),
+            sync_triggers: Mutex::new(std::collections::HashMap::new()),
             logs,
             started: Instant::now(),
             write_lock: Mutex::new(()),
@@ -183,6 +189,13 @@ impl AppState {
         let Some(proxy) = config.proxy_for(gid, cid) else {
             return self.http.clone();
         };
+        self.client_for_proxy(proxy)
+    }
+
+    /// 按代理配置取客户端。相同配置复用同一个客户端。
+    ///
+    /// 代理地址为空或客户端创建失败时回退直连。
+    pub fn client_for_proxy(&self, proxy: &crate::config::model::ProxyCfg) -> reqwest::Client {
         let Some(addr) = proxy.url() else {
             tracing::warn!(kind = %proxy.kind, "代理地址为空；改用直连");
             return self.http.clone();

@@ -180,7 +180,8 @@ impl SourceCache {
         self.update_status(id, |status| status.channels = channels);
     }
 
-    fn update_status<F>(&self, id: &str, update: F)
+    /// 更新一个源的状态并落盘。
+    pub fn update_status<F>(&self, id: &str, update: F)
     where
         F: FnOnce(&mut SourceStatus),
     {

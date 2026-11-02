@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { api, copyText } from './api';
+import { api, copyText, putConfig } from './api';
 import { Icon } from './icons';
 import { Badge, Confirm, Field, Modal, PageHead, Select, Switch, useToast } from './ui';
 
@@ -17,6 +17,11 @@ export type Channel = {
   id: string;
   name: string;
   url: string;
+  /** 来源订阅源 id；空表示手工频道。 */
+  source_id?: string;
+  source_key?: string;
+  /** 跟随上游字段。缺失按 true 处理。 */
+  sync_follow?: boolean;
   /** 本地回看（`常驻` 徽章的来源）。 */
   livestream?: boolean;
   /** DASH 轨道选择；空数组 = 全轨道（`全轨道` 徽章的来源）。 */
@@ -30,6 +35,10 @@ export type Group = {
   mode: string;
   access: string;
   format: string;
+  /** `manual` 或 `sync`。 */
+  origin?: string;
+  source_id?: string;
+  source_group?: string;
   channels?: Channel[];
   [key: string]: unknown;
 };
@@ -116,6 +125,11 @@ type ChannelForm = {
   timeshiftMaxGb: string;
   headers: string;
   proxy: ProxyForm;
+  /** 来源源 id；空表示手工频道。 */
+  sourceId: string;
+  syncFollow: boolean;
+  /** 打开弹窗时的跟随状态。用来判断用户是否显式切换。 */
+  originalFollow: boolean;
 };
 
 /**
@@ -355,7 +369,13 @@ export function GroupsPage() {
   } | null>(null);
   const [confirmBatch, setConfirmBatch] = useState(false);
   const [removing, setRemoving] = useState<
-    { kind: 'group' | 'channel'; gid: string; cid?: string; label: string } | null
+    {
+      kind: 'group' | 'channel';
+      gid: string;
+      cid?: string;
+      label: string;
+      synced?: boolean;
+    } | null
   >(null);
   const [importing, setImporting] = useState<{ kind: 'json' | 'm3u'; force: boolean } | null>(null);
   const [importText, setImportText] = useState('');
@@ -375,6 +395,8 @@ export function GroupsPage() {
   const [scripts, setScripts] = useState<string[]>([]);
   /** 当前账号的播放令牌。复制播放地址时附上，否则在开启令牌时是死链。 */
   const [playToken, setPlayToken] = useState('');
+  /** 来源 id → 源名称。分组与频道徽章用。 */
+  const [sourceNames, setSourceNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void api<{ token?: string }>('GET', '/me')
@@ -388,6 +410,15 @@ export function GroupsPage() {
       // 逐频道探测结果；未启用探测时为空对象。
       const body = await api<{ entries?: Record<string, HealthEntry> }>('GET', '/health');
       setHealth(body.entries ?? {});
+      const playlist = await api<{ sources?: { id: string; name: string }[] }>(
+        'GET',
+        '/playlist',
+      ).catch(() => ({ sources: [] }));
+      setSourceNames(
+        Object.fromEntries(
+          (playlist.sources ?? []).map((source) => [source.id, source.name || source.id]),
+        ),
+      );
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     }
@@ -452,6 +483,10 @@ export function GroupsPage() {
       proxy: proxyPayload(form.proxy),
       prefetch: prefetchPayload(prefetch),
     };
+    // 只在用户显式切换时发送；否则由服务端按上游字段变化自动固定。
+    if (!isNew && form.syncFollow !== form.originalFollow) {
+      payload.sync_follow = form.syncFollow;
+    }
     try {
       if (isNew) {
         await api('POST', `/groups/${gid}/channels`, { id: form.id, ...payload });
@@ -484,6 +519,21 @@ export function GroupsPage() {
     }
   };
 
+  const detach = async (kind: 'group' | 'channel', gid: string, cid?: string) => {
+    try {
+      await api(
+        'POST',
+        kind === 'group'
+          ? `/groups/${gid}/detach`
+          : `/groups/${gid}/channels/${cid}/detach`,
+      );
+      ok(kind === 'group' ? '分组已转为手工' : '频道已转为手工');
+      await load();
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const copy = async (value: string, label: string) => {
     const done = await copyText(value);
     if (done) ok(`${label}已复制`);
@@ -502,7 +552,7 @@ export function GroupsPage() {
       const config = await api<{ groups?: Group[] } & Record<string, unknown>>('GET', '/config');
       const list = config.groups ?? [];
       if (!mutate(list)) return;
-      await api('PUT', '/config', { ...config, groups: list });
+      await putConfig({ ...config, groups: list });
       ok('顺序已保存');
       await load();
     } catch (error) {
@@ -717,6 +767,9 @@ export function GroupsPage() {
             timeshiftMaxGb: String(channel.timeshift_max_gb ?? 0),
             headers: headersToText(channel.headers),
             proxy: proxyForm(channel.proxy),
+            sourceId: channel.source_id ?? '',
+            syncFollow: channel.sync_follow !== false,
+            originalFollow: channel.sync_follow !== false,
           }
         : {
             id: '',
@@ -734,6 +787,9 @@ export function GroupsPage() {
             timeshiftMaxGb: '0',
             headers: '',
             proxy: emptyProxy(),
+            sourceId: '',
+            syncFollow: true,
+            originalFollow: true,
           },
       prefetch: prefetchForm(channel?.prefetch),
       isNew: !channel,
@@ -902,6 +958,13 @@ export function GroupsPage() {
               <Icon name="folder" size={15} className="folder" />
               <span className="gname">{group.name || group.id}</span>
               <span className="gid">[{group.id}]</span>
+              {group.source_id ? (
+                <Badge tone="info">
+                  订阅：{sourceNames[group.source_id] ?? group.source_id}
+                </Badge>
+              ) : (
+                <Badge tone="muted">手工</Badge>
+              )}
               <div className="ops">
                 <span className={`badge mode ${group.mode}`}>{group.mode}</span>
                 <span className="count">{channels.length} 频道</span>
@@ -935,6 +998,15 @@ export function GroupsPage() {
                 >
                   <Icon name="download" size={13} />
                 </button>
+                {group.source_id && (
+                  <button
+                    className="chip"
+                    title="断开来源关系，内容保留"
+                    onClick={() => void detach('group', group.id)}
+                  >
+                    转为手工
+                  </button>
+                )}
                 <button
                   className="chip danger"
                   aria-label="删除分组"
@@ -992,6 +1064,14 @@ export function GroupsPage() {
                       {group.mode === 'passthrough' && <Badge tone="muted">直通</Badge>}
                     </div>
                     <div className="ch-badges">
+                      {channel.source_id ? (
+                        <Badge tone={channel.sync_follow === false ? 'warn' : 'info'}>
+                          订阅：{sourceNames[channel.source_id] ?? channel.source_id}
+                          {channel.sync_follow === false ? ' · 固定' : ' · 跟随'}
+                        </Badge>
+                      ) : (
+                        <Badge tone="muted">手工</Badge>
+                      )}
                       {tvgId !== '' && <Badge tone="muted">tvg-id</Badge>}
                       {logo !== '' && <Badge tone="muted">Logo</Badge>}
                       <PrefetchBadge raw={channel.prefetch} />
@@ -1037,6 +1117,15 @@ export function GroupsPage() {
                     >
                       编辑
                     </button>
+                    {channel.source_id && (
+                      <button
+                        className="chip"
+                        title="断开来源关系，内容保留"
+                        onClick={() => void detach('channel', group.id, channel.id)}
+                      >
+                        转为手工
+                      </button>
+                    )}
                     <button
                       className="chip danger"
                       aria-label="删除频道"
@@ -1046,6 +1135,7 @@ export function GroupsPage() {
                           gid: group.id,
                           cid: channel.id,
                           label: channel.name || channel.id,
+                          synced: Boolean(channel.source_id),
                         })
                       }
                     >
@@ -1200,6 +1290,38 @@ export function GroupsPage() {
               />
             </Field>
           </div>
+          {channelForm.form.sourceId !== '' && (
+            <div className="fields">
+              <Field
+                label="订阅来源"
+                tip="跟随上游时，同步会更新名称、地址与台标。关闭后固定为当前值。"
+                hint={
+                  channelForm.form.syncFollow
+                    ? '跟随上游字段。手动修改名称、地址或台标后会自动固定。'
+                    : '已固定，不再跟随源。勾选后恢复跟随。'
+                }
+              >
+                <div className="row">
+                  <Badge tone="info">
+                    订阅：{sourceNames[channelForm.form.sourceId] ?? channelForm.form.sourceId}
+                  </Badge>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={channelForm.form.syncFollow}
+                      onChange={(event) =>
+                        setChannelForm({
+                          ...channelForm,
+                          form: { ...channelForm.form, syncFollow: event.target.checked },
+                        })
+                      }
+                    />{' '}
+                    跟随上游
+                  </label>
+                </div>
+              </Field>
+            </div>
+          )}
           <div className="fields">
             <Field label="上游 URL" tip="频道原始地址。系统从这里拉取清单与切片。">
               <input
@@ -1499,7 +1621,11 @@ export function GroupsPage() {
       {removing && (
         <Confirm
           title={removing.kind === 'group' ? '删除分组' : '删除频道'}
-          text={`确认删除「${removing.label}」？此操作不可撤销。`}
+          text={
+            removing.synced
+              ? `确认删除「${removing.label}」？此操作不可撤销。该内容来自订阅源，删除后会加入排除列表，同步不会恢复。`
+              : `确认删除「${removing.label}」？此操作不可撤销。`
+          }
           onCancel={() => setRemoving(null)}
           onConfirm={() => void doRemove()}
         />

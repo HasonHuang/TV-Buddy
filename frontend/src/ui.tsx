@@ -178,6 +178,48 @@ export function Modal({
   );
 }
 
+/** 侧边抽屉。遮罩点击与 Esc 都能关闭。 */
+export function Drawer({
+  title,
+  onClose,
+  children,
+  footer,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay drawer-overlay" onClick={onClose}>
+      <div className="drawer" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <h3>{title}</h3>
+          <button className="icon-btn" onClick={onClose} aria-label="关闭">
+            <Icon name="close" size={15} />
+          </button>
+        </div>
+        <div className="drawer-body">{children}</div>
+        <div className="modal-foot">
+          {footer ?? (
+            <button className="ghost" onClick={onClose}>
+              关闭
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** 确认框。危险操作默认红色按钮。 */
 export function Confirm({
   title,

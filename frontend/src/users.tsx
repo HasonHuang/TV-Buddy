@@ -38,7 +38,14 @@ type AccessToken = {
 };
 
 type OptionChannel = { id: string; name: string; key: string };
-type OptionGroup = { id: string; name: string; channels: OptionChannel[] };
+type OptionGroup = {
+  id: string;
+  name: string;
+  origin?: string;
+  source_id?: string;
+  source_name?: string;
+  channels: OptionChannel[];
+};
 
 type UserForm = {
   username: string;
@@ -469,6 +476,11 @@ export function UsersPage() {
                       />
                       {group.name}
                       <span className="gid">{group.id}</span>
+                      {group.source_id ? (
+                        <Badge tone="info">订阅</Badge>
+                      ) : (
+                        <Badge tone="muted">手工</Badge>
+                      )}
                     </label>
                   ))}
                   {options.length === 0 && <p className="muted">还没有分组。</p>}

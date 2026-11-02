@@ -149,7 +149,8 @@ pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Report)> {
     let Some(text) = config_json else {
         bail!("备份中没有 config.json");
     };
-    let config: Config = serde_json::from_str(&text).context("备份配置不合法")?;
+    let mut config: Config = serde_json::from_str(&text).context("备份配置不合法")?;
+    config.normalize();
     crate::config::validate(&config).context("备份配置不合法")?;
 
     for (name, bytes) in &logos {

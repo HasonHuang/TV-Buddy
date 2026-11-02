@@ -20,6 +20,8 @@ pub enum ApiError {
     NotFound(String),
     /// 资源冲突，如分组 id 重复。
     Conflict(String),
+    /// 带 `code` 的资源冲突。前端按 `code` 分流。
+    ConflictBody(Value),
     /// 上游失败，如订阅源抓取失败。
     BadGateway(String),
     /// 请求过多，如登录失败锁。
@@ -38,6 +40,16 @@ impl ApiError {
 
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::Conflict(message.into())
+    }
+
+    /// 冲突，响应体为 `{"error": ..., "code": ...}`。
+    pub fn conflict_code(code: &str, message: impl Into<String>) -> Self {
+        Self::ConflictBody(json!({ "error": message.into(), "code": code }))
+    }
+
+    /// 冲突，使用给定响应体。
+    pub fn conflict_body(body: Value) -> Self {
+        Self::ConflictBody(body)
     }
 
     pub fn bad_gateway(message: impl Into<String>) -> Self {
@@ -66,6 +78,7 @@ impl IntoResponse for ApiError {
             ApiError::BadRequest(message) => (StatusCode::BAD_REQUEST, json!({ "error": message })),
             ApiError::NotFound(message) => (StatusCode::NOT_FOUND, json!({ "error": message })),
             ApiError::Conflict(message) => (StatusCode::CONFLICT, json!({ "error": message })),
+            ApiError::ConflictBody(body) => (StatusCode::CONFLICT, body),
             ApiError::BadGateway(message) => (StatusCode::BAD_GATEWAY, json!({ "error": message })),
             ApiError::TooMany(body) => (StatusCode::TOO_MANY_REQUESTS, body),
             ApiError::Internal(message) => (

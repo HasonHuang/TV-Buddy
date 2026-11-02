@@ -62,6 +62,23 @@ impl Config {
             if group.access == "open" {
                 group.access = "public".to_string();
             }
+            if group.origin.trim().is_empty() {
+                group.origin = "manual".to_string();
+            }
+        }
+        for source in &mut self.playlist.sources {
+            if source.mode.trim().is_empty() {
+                source.mode = "aggregate".to_string();
+            }
+            if source.schedule.trim().is_empty() {
+                source.schedule = "inherit".to_string();
+            }
+            if source.playback_mode.trim().is_empty() {
+                source.playback_mode = "auto".to_string();
+            }
+            if source.format.trim().is_empty() {
+                source.format = "auto".to_string();
+            }
         }
     }
 
@@ -965,6 +982,15 @@ pub struct Group {
     /// 分组级预取覆盖；缺省继承全局。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefetch: Option<PrefetchOverrideCfg>,
+    /// `manual` 或 `sync`。手工分组不写该键。
+    #[serde(skip_serializing_if = "is_manual")]
+    pub origin: String,
+    /// 创建该分组的源 id。只用于显示与清理，不表示独占。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source_id: String,
+    /// 上游原分组名。同源内匹配用。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source_group: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub channels: Vec<Channel>,
     #[serde(flatten)]
@@ -986,6 +1012,9 @@ impl Default for Group {
             headers: Vec::new(),
             proxy: None,
             prefetch: None,
+            origin: "manual".into(),
+            source_id: String::new(),
+            source_group: String::new(),
             channels: Vec::new(),
             extra: Extra::new(),
         }
@@ -1019,6 +1048,15 @@ pub struct Channel {
     pub resolver_catchup: bool,
     pub catchup_days: u32,
     pub url_pool_size: u32,
+    /// 来源 id。空值表示手工频道。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source_id: String,
+    /// 源内稳定键。同源内匹配用。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source_key: String,
+    /// 跟随上游字段。默认 true，为 true 时不写该键。
+    #[serde(skip_serializing_if = "is_true")]
+    pub sync_follow: bool,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -1045,6 +1083,9 @@ impl Default for Channel {
             resolver_catchup: false,
             catchup_days: 7,
             url_pool_size: 1,
+            source_id: String::new(),
+            source_key: String::new(),
+            sync_follow: true,
             extra: Extra::new(),
         }
     }
@@ -1139,6 +1180,25 @@ pub struct PlaylistCfg {
     /// `top` 或 `bottom`。
     pub merge_position: String,
     pub global_exclude: Vec<String>,
+    /// 自动同步总开关。手动触发不受限。
+    pub sync_enabled: bool,
+    /// 全局默认调度：`interval` 或 `daily`。
+    pub sync_schedule: String,
+    pub sync_interval_secs: u64,
+    /// 每天固定时间，`HH:MM`，服务器本地时区。
+    pub sync_daily_at: String,
+    /// 允许空清单清空内容。关闭时 0 条硬拦截。
+    pub sync_allow_empty: bool,
+    /// 移除比例达到该值时标红。只影响显示。
+    pub sync_warn_removal_ratio: f64,
+    /// 单源频道上限。超出不改配置。
+    pub sync_max_channels: u64,
+    /// 总频道数警告阈值。
+    pub sync_total_warn: u64,
+    /// 同步并发。低配默认 1。
+    pub sync_concurrency: u64,
+    /// 单次抓取超时（秒）。
+    pub sync_fetch_timeout_secs: u64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<PlaylistSource>,
     #[serde(flatten)]
@@ -1151,6 +1211,16 @@ impl Default for PlaylistCfg {
             merge_ttl_secs: 300,
             merge_position: "bottom".into(),
             global_exclude: Vec::new(),
+            sync_enabled: true,
+            sync_schedule: "interval".into(),
+            sync_interval_secs: 21600,
+            sync_daily_at: "03:30".into(),
+            sync_allow_empty: false,
+            sync_warn_removal_ratio: 0.2,
+            sync_max_channels: 20000,
+            sync_total_warn: 5000,
+            sync_concurrency: 1,
+            sync_fetch_timeout_secs: 25,
             sources: Vec::new(),
             extra: Extra::new(),
         }
@@ -1158,7 +1228,7 @@ impl Default for PlaylistCfg {
 }
 
 /// `[[playlist.sources]]`——聚合源。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct PlaylistSource {
     pub id: String,
@@ -1175,9 +1245,34 @@ pub struct PlaylistSource {
     pub merge_group: String,
     /// 未出现在 `group_map` 的分组：`drop`（默认）或 `keep`。
     pub unlisted_groups: String,
-    /// 频道名白名单；支持 `group:` 与 `id:` 前缀。
+    /// 频道名白名单；支持 `group:` / `id:` / `url:` 前缀。
     pub include: Vec<String>,
     pub exclude: Vec<String>,
+    /// `aggregate`（默认）渲染时拼接；`sync` 物化进总清单。
+    pub mode: String,
+    /// `inherit`（默认）、`interval` 或 `daily`。
+    pub schedule: String,
+    /// 0 继承全局。非零范围 300–2592000。
+    pub sync_interval_secs: u64,
+    /// `HH:MM`。空值继承全局。
+    pub sync_daily_at: String,
+    /// 新分组显示名前缀。空值 = 源名 + " · "。
+    pub group_prefix: String,
+    /// `auto` / `proxy` / `remux` / `dash` / `redirect` / `rewrite`。禁止 `passthrough`。
+    pub playback_mode: String,
+    /// `auto` / `hls` / `mpd`。
+    pub format: String,
+    /// `top` / `bottom`。空值继承 `merge_position`。
+    pub position: String,
+    /// 抓取请求头，格式 `名称: 值`。
+    pub headers: Vec<String>,
+    /// 抓取 M3U 的代理。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyCfg>,
+    /// 单源频道上限。0 继承全局。
+    pub max_channels: u64,
+    /// 上游分组名 → 已有分组 id。显式并入。
+    pub merge_into: BTreeMap<String, String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -1196,9 +1291,29 @@ impl Default for PlaylistSource {
             unlisted_groups: "drop".into(),
             include: Vec::new(),
             exclude: Vec::new(),
+            mode: "aggregate".into(),
+            schedule: "inherit".into(),
+            sync_interval_secs: 0,
+            sync_daily_at: String::new(),
+            group_prefix: String::new(),
+            playback_mode: "auto".into(),
+            format: "auto".into(),
+            position: String::new(),
+            headers: Vec::new(),
+            proxy: None,
+            max_channels: 0,
+            merge_into: BTreeMap::new(),
             extra: Extra::new(),
         }
     }
+}
+
+fn is_manual(value: &str) -> bool {
+    value == "manual"
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 /// `[share]`——多 VPS 分享（F-013 §10）。
@@ -1585,5 +1700,96 @@ mod tests {
         assert!(encoded["groups"][0].get("prefetch").is_none(), "{encoded}");
         let decoded: Config = serde_json::from_value(encoded).expect("再解析");
         assert!(decoded.group("g").expect("分组").prefetch.is_none());
+    }
+
+    #[test]
+    fn manual_group_and_following_channel_omit_source_keys() {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g".into(),
+            name: "组".into(),
+            channels: vec![Channel {
+                id: "c".into(),
+                name: "频道".into(),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        let encoded = serde_json::to_value(&config).expect("序列化");
+        let group = &encoded["groups"][0];
+        assert!(group.get("origin").is_none(), "{encoded}");
+        assert!(group.get("source_id").is_none(), "{encoded}");
+        let channel = &group["channels"][0];
+        assert!(channel.get("source_id").is_none(), "{encoded}");
+        assert!(channel.get("source_key").is_none(), "{encoded}");
+        assert!(channel.get("sync_follow").is_none(), "真值不写 {encoded}");
+
+        let decoded: Config = serde_json::from_value(encoded).expect("再解析");
+        assert_eq!(decoded.groups[0].origin, "manual");
+        assert!(decoded.groups[0].channels[0].sync_follow);
+    }
+
+    #[test]
+    fn sync_group_and_fixed_channel_write_source_keys() {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g".into(),
+            name: "组".into(),
+            origin: "sync".into(),
+            source_id: "s1".into(),
+            source_group: "上游组".into(),
+            channels: vec![Channel {
+                id: "c".into(),
+                name: "频道".into(),
+                source_id: "s1".into(),
+                source_key: "id:c".into(),
+                sync_follow: false,
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        let encoded = serde_json::to_value(&config).expect("序列化");
+        let group = &encoded["groups"][0];
+        assert_eq!(group["origin"], "sync");
+        assert_eq!(group["source_id"], "s1");
+        assert_eq!(group["source_group"], "上游组");
+        assert_eq!(group["channels"][0]["sync_follow"], false);
+        let decoded: Config = serde_json::from_value(encoded).expect("再解析");
+        assert!(!decoded.groups[0].channels[0].sync_follow);
+    }
+
+    #[test]
+    fn normalize_fills_empty_source_mode() {
+        let mut config = Config::default();
+        let mut source = PlaylistSource::default();
+        source.mode.clear();
+        source.schedule.clear();
+        source.playback_mode.clear();
+        source.format.clear();
+        config.playlist.sources.push(source);
+        config.normalize();
+        let source = &config.playlist.sources[0];
+        assert_eq!(source.mode, "aggregate");
+        assert_eq!(source.schedule, "inherit");
+        assert_eq!(source.playback_mode, "auto");
+        assert_eq!(source.format, "auto");
+    }
+
+    #[test]
+    fn legacy_source_without_sync_keys_gets_defaults() {
+        let raw = serde_json::json!({
+            "playlist": {
+                "sources": [{ "id": "s1", "name": "旧源", "url": "http://up/a.m3u" }]
+            }
+        });
+        let config: Config = serde_json::from_value(raw).expect("解析");
+        let source = &config.playlist.sources[0];
+        assert_eq!(source.mode, "aggregate");
+        assert_eq!(source.schedule, "inherit");
+        assert_eq!(source.playback_mode, "auto");
+        assert_eq!(source.format, "auto");
+        assert_eq!(source.max_channels, 0);
+        assert!(source.merge_into.is_empty());
+        assert!(config.playlist.sync_enabled);
     }
 }
