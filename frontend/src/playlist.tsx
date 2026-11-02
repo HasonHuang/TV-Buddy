@@ -207,6 +207,7 @@ export function PlaylistPage() {
   const [drawer, setDrawer] = useState<DrawerState | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [allGroups, setAllGroups] = useState<ExistingGroup[]>([]);
+  const [unauthorizedSync, setUnauthorizedSync] = useState(0);
   const { node, ok, err } = useToast();
 
   const load = useCallback(async () => {
@@ -218,6 +219,25 @@ export function PlaylistPage() {
         sources: [],
       }));
       setStatuses(Object.fromEntries((status.sources ?? []).map((item) => [item.id, item])));
+      // 同步分组不自动授权。统计未授权给受限用户的数量，只做提示。
+      const [users, options] = await Promise.all([
+        api<{ users: { role: string; allowed_group_ids: string[] }[] }>('GET', '/users').catch(
+          () => ({ users: [] }),
+        ),
+        api<{ groups: ExistingGroup[] }>('GET', '/users/channel-options').catch(() => ({
+          groups: [],
+        })),
+      ]);
+      const restricted = (users.users ?? []).filter((user) => user.role !== 'admin');
+      if (restricted.length === 0) {
+        setUnauthorizedSync(0);
+      } else {
+        const granted = new Set(restricted.flatMap((user) => user.allowed_group_ids ?? []));
+        setUnauthorizedSync(
+          (options.groups ?? []).filter((group) => group.origin === 'sync' && !granted.has(group.id))
+            .length,
+        );
+      }
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     }
@@ -433,6 +453,12 @@ export function PlaylistPage() {
         <button onClick={() => openSource()}>添加源</button>
         <Tip text="聚合源在渲染订阅时拼接；托管源会物化进总清单，可管理、可授权。" />
       </PageHead>
+
+      {unauthorizedSync > 0 ? (
+        <div className="msg warn">
+          有 {unauthorizedSync} 个同步分组未授权给受限用户。请在「用户与设备」页勾选。
+        </div>
+      ) : null}
 
       <div className="card">
         <div className="row between">
