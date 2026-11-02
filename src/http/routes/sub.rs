@@ -80,11 +80,10 @@ pub async fn playlist(
 async fn aggregate_sources(state: &Arc<AppState>, config: &crate::config::Config) -> String {
     let mut extra = String::new();
     let mut seen = HashSet::new();
-    for source in config
-        .playlist
-        .sources
-        .iter()
-        .filter(|source| source.enabled && !source.url.trim().is_empty())
+    for source in
+        config.playlist.sources.iter().filter(|source| {
+            source.enabled && source.mode != "sync" && !source.url.trim().is_empty()
+        })
     {
         let key = format!("sub:{}:{}", source.id, source.url);
         let ttl = std::time::Duration::from_secs(crate::subs::effective_ttl_secs(source.ttl_secs));

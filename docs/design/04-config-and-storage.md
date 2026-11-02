@@ -48,9 +48,67 @@
 | `[[epg.sources]]` | `id`、`name`、`kind`、`enabled`、`url`、`script`、`cron`、`timeout_secs`、`tz_shift_mins` | 节目单源 |
 | `[epg.translate]` | `enabled`、`url`/`mtran_url`、`token`/`mtran_token`、`source`、`target(s)`、`mtran_batch` | EPG 机翻 |
 | `[subtitle.translate]` | `enabled`、`url`、`token`、`source`、`target(s)`、`batch` | 字幕机翻 |
-| `[playlist]` | `merge_ttl_secs`、`merge_position`、`global_exclude` | 聚合缓存参数、插入位置与全局排除 |
-| `[[playlist.sources]]` | `id`、`name`、`url`、`enabled`、`ttl_secs`、`group_map`、`group_mode`、`merge_group`、`unlisted_groups`、`include`、`exclude` | 源缓存、分组选择/改名、过滤；`ttl_secs=0` 按 3600 秒 |
-| `[[groups]]`/`[[groups.channels]]` | 见 `02-architecture.md` §4.1 | 数据面 |
+| `[playlist]` | `merge_ttl_secs`、`merge_position`、`global_exclude`、`sync_*` | 聚合缓存参数、插入位置、全局排除与同步默认值。见 §1.2 |
+| `[[playlist.sources]]` | `id`、`name`、`url`、`enabled`、`ttl_secs`、`group_map`、`group_mode`、`merge_group`、`unlisted_groups`、`include`、`exclude`、`mode`、同步与抓取字段 | 源缓存、分组选择/改名、过滤、托管同步。见 §1.2；`ttl_secs=0` 按 3600 秒 |
+| `[[groups]]`/`[[groups.channels]]` | 见 `02-architecture.md` §4.1；新增 `origin`、`source_id`、`source_group`、`source_key`、`sync_follow` | 数据面。见 §1.3 |
+
+### 1.2 订阅同步配置
+
+设计见 [`11-subscription-sync.md`](11-subscription-sync.md)。
+
+`[playlist]` 新增：
+
+| 字段 | 默认 | 含义 |
+| --- | --- | --- |
+| `sync_enabled` | true | 自动同步总开关 |
+| `sync_schedule` | `interval` | 全局默认调度：`interval` / `daily` |
+| `sync_interval_secs` | 21600 | 默认间隔。非零范围 300–2592000 |
+| `sync_daily_at` | `03:30` | 每天固定时间，`HH:MM` |
+| `sync_allow_empty` | false | 允许空清单清空内容 |
+| `sync_warn_removal_ratio` | 0.2 | 缩水标红阈值。只影响显示 |
+| `sync_max_channels` | 20000 | 单源频道上限 |
+| `sync_total_warn` | 5000 | 总频道数警告阈值 |
+| `sync_concurrency` | 1 | 同步并发。当前串行 |
+| `sync_fetch_timeout_secs` | 25 | 抓取超时。范围 1–600 |
+
+`[[playlist.sources]]` 新增：
+
+| 字段 | 默认 | 含义 |
+| --- | --- | --- |
+| `mode` | `aggregate` | `aggregate` 渲染时拼接；`sync` 物化 |
+| `schedule` | `inherit` | `inherit` / `interval` / `daily` |
+| `sync_interval_secs` | 0 | 0 继承全局 |
+| `sync_daily_at` | 空 | `HH:MM`。空继承全局 |
+| `group_prefix` | 空 | 新分组前缀。空值 = `源名 + " · "` |
+| `playback_mode` | `auto` | 托管源禁止 `passthrough` |
+| `format` | `auto` | `auto` / `hls` / `mpd` |
+| `position` | 空 | `top` / `bottom`。空继承 `merge_position` |
+| `headers` | 空 | 抓取请求头，`名称: 值` |
+| `proxy` | 空 | 抓取代理 |
+| `max_channels` | 0 | 0 继承全局 |
+| `merge_into` | 空 | 上游分组名 → 已有分组 id |
+
+### 1.3 分组与频道的来源字段
+
+| 结构 | 字段 | 序列化 |
+| --- | --- | --- |
+| `Group` | `origin`（`manual` / `sync`） | `manual` 时省略 |
+| `Group` | `source_id`、`source_group` | 空时省略 |
+| `Channel` | `source_id`、`source_key` | 空时省略 |
+| `Channel` | `sync_follow`（默认 true） | true 时省略，只写 false |
+
+### 1.4 归一与并发
+
+- `Config::normalize()` 在加载、保存、`save_config`、`mutate` 前运行。
+  - `group.access == "open"` 改为 `public`。
+  - `group.origin` 为空时补 `manual`。
+  - 源 `mode`、`schedule`、`playback_mode`、`format` 为空时补默认值。
+- `Config.revision` 是并发令牌。
+  - 唯一自增点：`ConfigStore::save`。
+  - `PUT /panel/api/config` 从请求体读 `revision`。
+  - 与库内值不同时返回 `409`，`code=stale_revision`，并附当前 `revision`。
+  - 不带 `revision`（0）时不校验，兼容旧客户端。
+- 专用端点走 `state.mutate`，只改自己的字段，不要求 `revision`。
 
 ## 2. 热重载矩阵
 

@@ -47,9 +47,9 @@
 | 方法 | 路径 | 鉴权 | 响应 | 阶段 | 依据 |
 | --- | --- | --- | --- | --- | --- |
 | GET | `/playlist.m3u` | 无 | `404` 文本，指路 `/sub/<令牌>/playlist.m3u` | v2026.7 | 设计决策（订阅只从用户令牌进入） |
-| GET | `/subs/status` | 无 | `200` JSON 源列表 | ✅ P3 | S-GAP-07 |
-| POST | `/subs/groups` | 无 | `200` JSON 分组；非 http(s) → `400`；抓取失败 → `502` | ✅ P3 | S-GAP-07 |
-| POST | `/subs/preview` | 无 | `200` JSON 预检 | ✅ P3 | S-GAP-07 |
+| GET | `/subs/status` | 管理员会话 | `200` JSON 源列表；未登录 `401`；非管理员 `403` | ✅ v2026.16 | S-GAP-07 |
+| POST | `/subs/groups` | 管理员会话 | `200` JSON 分组；非 http(s) → `400`；抓取失败 → `502` | ✅ v2026.16 | S-GAP-07 |
+| POST | `/subs/preview` | 管理员会话 | `200` JSON 预检 | ✅ v2026.16 | S-GAP-07 |
 | GET | `/{gid}/playlist.m3u` | 无 | `404` 文本，同上 | v2026.7 | 设计决策 |
 | GET | `/sub/:token/playlist.m3u` | 令牌 | `200` M3U；令牌无效或过期 → `404`；`Cache-Control: private, no-store` | ✅ v2026.7 | F-1 §3.3 |
 | GET | `/sub/:token/epg.xml` | 令牌 | `200` XMLTV，只含该用户可见频道；令牌无效 → `404`；EPG 关 → `404`；`private, no-store` | ✅ v2026.7 | F-1 §3.3 |
@@ -63,18 +63,18 @@
 | GET | `/{gid}/{cid}/timeshift/{filename}` | 按 token 开关 | `200` 本地回看 | P1 | F-014 |
 | GET | `/{gid}/{cid}/dash-timeshift/{track}[/{playlist,playlist.txt,playlist.m3u8}]` | 无 | `200` VOD 清单；缺或错 `playseek` → `400 missing playseek`；区间不重叠、未知轨道、非 `dash` 组 → `404 no segments in range` | P3.5 | S-EP-16、S-TS-01、F-016 §5.1 |
 | GET | `/{gid}/{cid}/dash-timeshift/{track}/<段号>.<ext>` | 无 | `200` 切片；ext 取伪装扩展名或 `m4s`；未命中 → `404 segment not found` | P3.5 | 同上 |
-| GET | `/epg` | 无 | `200` `text/html`；EPG 关 → `404` | ✅ P1 | S-EP-05 |
-| GET | `/epg.xml`、`/epg.xml.gz` | 无 | `200` `application/xml` / `application/gzip`；EPG 关 → `404` | ✅ P1 | S-EP-05 |
-| GET | `/epg/api/{channels,programmes/:channel,search}` | 无 | `200` JSON | P1 | S-EP-16 |
-| GET | `/logo` | 无 | `200` `text/html` | ✅ P1 | S-EP-06 |
+| GET | `/epg` | — | 已删除公开路由，`404`。改用 `/sub/<令牌>/epg.xml` 与面板「节目指南」 | ✅ v2026.16 | 安全收紧 |
+| GET | `/epg.xml`、`/epg.xml.gz` | — | 已删除公开路由，`404`。改用 `/sub/<令牌>/epg.xml[.gz]` | ✅ v2026.16 | 安全收紧 |
+| GET | `/epg/api/{channels,programmes/:channel,search}` | — | 已删除公开路由，`404`。改用 `/panel/api/epg/*` | ✅ v2026.16 | 安全收紧 |
+| GET | `/logo` | — | 已删除公开页面，`404`。改用面板「台标管理」 | ✅ v2026.16 | 安全收紧 |
 | GET | `/logo/<file>` | 无 | `200` 图片 + `public, max-age=86400`；缺文件、越界名、非白名单扩展 → `404` | ✅ P1 | F-011 §6 |
-| GET | `/logo/api/list` | 无 | `{"allowed_exts","count","logos":[{"file","name","ext","bytes","mtime","url"}]}` | ✅ P1 | F-011 |
-| GET | `/unban` | 无 | `200` `text/html`；封禁期也可访问 | ✅ P3 | S-EP-07 |
-| POST | `/unban` | 无 | `200` `{"msg","ok"}`；未封禁、配额用完、IP 管控关闭均为 `ok:false` | ✅ P3 | S-AUTH-07 |
-| GET | `/unban/whoami` | 无 | 开启 IP 管控：`{"banned","enabled":true,"ip","max_per_month":3,"remaining","used"}`；关闭：`{"enabled":false,"ip"}`；XFF 取末项，其次 `X-Real-IP`，最后 TCP 对端 | ✅ P3 | S-EP-15 |
+| GET | `/logo/api/list` | — | 已删除公开接口，`404`。改用 `/panel/api/logo/list` | ✅ v2026.16 | 安全收紧 |
+| GET | `/unban` | 无 | `200` `text/html`；封禁期也可访问。无会话时页面提示先登录 | ✅ P3 | S-EP-07 |
+| POST | `/unban` | 登录会话 | `200` `{"msg","ok"}`；未登录 `401`；未封禁、配额用完、IP 管控关闭均为 `ok:false` | ✅ v2026.16 | S-AUTH-07 |
+| GET | `/unban/whoami` | 登录会话 | 开启 IP 管控：`{"banned","enabled":true,"ip","max_per_month":3,"remaining","used"}`；关闭：`{"enabled":false,"ip"}`；未登录 `401`；XFF 取末项，其次 `X-Real-IP`，最后 TCP 对端 | ✅ v2026.16 | S-EP-15 |
 | GET | `/whoami` | 无 | `404`（目标未注册） | ✅ P3 | S-EP-15 |
 | GET | `/health` | 无 | `200` `ok`（`text/plain`） | ✅ M0 | S-EP-10 |
-| GET | `/panel`、`/panel/`、`/panel/epg` | 无 | `200` `text/html` | ✅ M0 | S-EP-01 |
+| GET | `/panel`、`/panel/` | 无 | `200` `text/html` | ✅ M0 | S-EP-01 |
 | GET | `/__assets/*path` | 无 | `200` 静态资源 / `404` | ✅ M0 | S-EP-16 |
 
 ## 4. 播放契约（proxy）
@@ -633,9 +633,9 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
-| GET | `/subs/status`、`/panel/api/subs/status` | — | `{"sources":[{"id","name","enabled","error","channels","last_ok","last_try","ttl"}]}` |
+| GET | `/subs/status`、`/panel/api/subs/status` | — | `{"sources":[{"id","name","url","enabled","mode","error","channels","groups","last_ok","last_try","last_sync","added","updated","removed","skipped_removals","needs_review","zero_blocked","shrink_permille","duration_ms","syncing","next_sync","ttl"}],"sync":{"enabled","schedule","interval_secs","daily_at"}}` |
 | POST | `/subs/groups`、`/panel/api/subs/groups` | `{"url":"<m3u>"}` | `{"groups":[{"name","count"}],"total":<n>}` |
-| POST | `/subs/preview`、`/panel/api/subs/preview` | `{"source":{"id"?,"url"?,"group_map":{…},"group_mode"?,"merge_group"?,"unlisted_groups"?,"include"?,"exclude"?}}` | `{"kept","sample":[{"name","group","tvg_id"}]×≤5,"trace":{"total","after_group","after_global_exclude","after_include","after_exclude","dropped_groups","out_groups":[{"name","count"}]}}` |
+| POST | `/subs/preview`、`/panel/api/subs/preview` | `{"source":{"id"?,"url"?,"mode"?,"group_map":{…},"group_mode"?,"merge_group"?,"unlisted_groups"?,"include"?,"exclude"?,"headers"?,"proxy"?}}` | `{"kept","sample":[{"name","group","tvg_id"}]×≤5,"sync"?,"trace":{"total","after_group","after_global_exclude","after_include","after_exclude","dropped_groups","out_groups":[{"name","count"}]}}` |
 
 规则：
 
@@ -645,10 +645,13 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 - 未带 `group-title` 的条目分组名为 `(无分组)`。
 - 顺序固定：分组选择/改名 → `global_exclude` → 源 `include` → 源 `exclude`。
 - `trace` 的 `after_group` 只计分组阶段；`after_global_exclude`、`after_include`、`after_exclude` 均在分组与全局排除之后，按各自阶段累计。
-- 过滤词：频道名包含；`group:<文本>` 同时匹配原分组与映射分组；`id:<tvg-id>` 精确匹配。
-- 源抓取超时 20 秒。`sample` 最多 5 条。
+- 过滤词：频道名包含；`group:<文本>` 同时匹配原分组与映射分组；`id:<tvg-id>` 精确匹配；`url:<完整地址>` 精确匹配。
+- 所有处理器需要管理员会话。公开路径与 `/panel/api` 别名受同一保护。
+- 抓取超时 25 秒，正文上限 16 MiB。托管源预检使用草稿源的请求头与代理。
+- `sample` 最多 5 条。
 - `ttl_secs=0` 按 3600 秒；状态 `channels` 为去重后并入条数。
 - 聚合按 URL 去重，范围覆盖同一源与多个源。
+- 源是 `mode=sync` 时，预览增加 `sync` 差异。字段见 [`11-subscription-sync.md`](11-subscription-sync.md) §8.3。
 
 ### 6.17 自助解封（P3 已实现）
 
@@ -703,6 +706,29 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 | 非 `dash` 组 / 未知 `gid` / 未开时移 | 同样返回上面两种 `404`，**不跳 302** |
 | 落盘 | `cache/dash_timeshift/{gid}_{cid}/{index.json, init/<track>.mp4, segments/<track>/<段号>.m4s}` |
 | 保留 | `dash_timeshift_hours` 时长 + `dash_timeshift_max_gb` 容量，二者取先到者 |
+
+### 6.20 订阅同步与托管（v2026.16 已实现）
+
+证据：自有功能。设计见 [`11-subscription-sync.md`](11-subscription-sync.md)。
+
+| 方法 | 路径 | 请求 | 响应 |
+| --- | --- | --- | --- |
+| POST | `/panel/api/subs/sync` | `{"id"?,"force"?}` | `202 {"ok":true,"queued":<n>}`；忙 `409 sync_running`；同源 10 秒内重复 `429` |
+| DELETE | `/panel/api/subs/:id/content` | `?to_manual=1`（默认）或 `0` | `{"ok":true,"channels":<n>,"to_manual":<bool>}` |
+| PUT | `/panel/api/playlist/settings` | 全局字段 | `{"ok":true}`。保留源列表 |
+| POST | `/panel/api/playlist/sources` | 一个源；空 `id` 生成 UUID | `{"ok":true,"source":{…}}` |
+| PUT | `/panel/api/playlist/sources/:id` | 一个源；`?keep_content=0` | `409 content_exists` 或 `{"ok":true}` |
+| DELETE | `/panel/api/playlist/sources/:id` | `?keep_content=0` | 默认保留为手工；`409 content_exists` 或 `{"ok":true}` |
+| POST | `/panel/api/groups/:gid/detach` | — | 分组转为手工 |
+| POST | `/panel/api/groups/:gid/channels/:cid/detach` | — | 频道转为手工 |
+
+规则：
+
+- 所有路径需要管理员会话。
+- `PUT /panel/api/config` 校验 `revision`。不一致时 `409`，响应带 `code=stale_revision` 与当前 `revision`。
+- 导入分组默认跳过 `source_id` 非空的分组。`include_synced=true` 才覆盖。
+- 删除同步频道或分组时，自动写入源 `exclude`。有 `tvg-id` 用 `id:`，否则用 `url:`。
+- 编辑同步频道的上游字段且未显式传 `sync_follow` 时，自动置 `false`。
 
 ## 7. 错误串对照
 

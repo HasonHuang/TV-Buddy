@@ -283,7 +283,10 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 返回 `404` 文本，指路用户订阅。
 
 **EPG 跟随令牌**：`/sub/:token/epg.xml(.gz)` 只含该用户可见频道的节目。
-公开 `/epg.xml[.gz]` 仍在，供面板与旧客户端使用。
+公开 `/epg.xml[.gz]` 已删除。面板「节目指南」走 `/panel/api/epg/*`。
+
+**订阅来源展示**：分组授权列表显示 `origin` 与 `source_id`。
+同步新增的分组不自动授权给受限用户。管理员在用户页手工勾选。
 
 **面板按角色分权**：普通用户只看到「我的订阅」页（订阅地址、EPG 地址、授权频道）。
 其余 `/panel/api/*` 返回 `403`。角色每次请求从库重读，降级立即生效。

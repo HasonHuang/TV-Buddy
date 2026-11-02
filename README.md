@@ -51,6 +51,7 @@ TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、�
 | 切片缓存 | 磁盘与内存索引可限，按频道设上限 |
 | 切片伪装 | 切片路径改名，不暴露上游地址 |
 | 订阅聚合 | 合并多个远端订阅源，支持过滤与位置 |
+| 托管同步 | 定时抓取远端 M3U，物化为分组与频道。可管理、可授权、可进 EPG |
 | 预取 | 开播前预取首批切片，减少首帧等待 |
 | CDN 兜底 | 响应头加缓存策略，空响应不落 CDN |
 
@@ -59,7 +60,7 @@ TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、�
 - 采集：XML 源与脚本源。
 - 匹配：按频道名自动匹配，可手工映射。
 - 翻译：接 MTranServer，批量翻译标题与描述。
-- 输出：`/epg.xml`、`/epg.xml.gz` 与公开查节目页。
+- 输出：`/sub/<令牌>/epg.xml`，面板「节目指南」。
 - 订阅注入：开启后自动写入 `x-tvg-url`。
 
 ### 录制与回看
@@ -629,7 +630,6 @@ ls scripts/smoke-*.sh
 | `GET` | `/sub/<令牌>/epg.xml[.gz]` | 用户节目单 |
 | `GET` | `/{gid}/{cid}.m3u8`（或 `.mpd`） | 入口清单 |
 | `GET` | `/{gid}/{cid}/video/index.txt` | 媒体清单 |
-| `GET` | `/epg.xml[.gz]` | 全局节目单 |
 | `POST` | `/panel/api/login` | 面板登录 |
 | `GET` | `/panel/api/me` | 当前账号、订阅地址与可见频道 |
 | `GET` | `/panel/api/health` | 本机健康摘要 |
@@ -648,6 +648,15 @@ ls scripts/smoke-*.sh
 | `POST` | `/panel/api/groups/{gid}/channels` | 新建频道 |
 | `PUT`/`DELETE` | `/panel/api/groups/{gid}/channels/{cid}` | 局部更新 / 删除频道 |
 | `POST` | `/panel/api/groups/import[/m3u]` | 批量导入分组（JSON / M3U） |
+| `POST` | `/panel/api/groups/{gid}/detach` | 分组转为手工 |
+| `POST` | `/panel/api/groups/{gid}/channels/{cid}/detach` | 频道转为手工 |
+| `GET`/`PUT` | `/panel/api/playlist` | 读取 / 保存订阅源配置 |
+| `POST` | `/panel/api/playlist/sources` | 新建订阅源 |
+| `PUT`/`DELETE` | `/panel/api/playlist/sources/{id}` | 保存 / 删除订阅源 |
+| `PUT` | `/panel/api/playlist/settings` | 保存全局同步设置 |
+| `GET` | `/panel/api/subs/status` | 订阅源状态与同步差异 |
+| `POST` | `/panel/api/subs/sync` | 立即同步（异步） |
+| `DELETE` | `/panel/api/subs/{id}/content` | 清理某源内容（可转手工） |
 | `POST` | `/panel/api/reload` | 立即重读配置 |
 | `GET` | `/panel/api/cache/stats` | 缓存条目与占用 |
 | `POST` | `/panel/api/cache/flush` | 清空缓存（保留 `dash/`） |
@@ -661,7 +670,7 @@ ls scripts/smoke-*.sh
 | `GET` | `/panel/api/backup?include=` | 导出 gzip(tar) 备份 |
 | `POST` | `/panel/api/restore` | 恢复备份并重载 |
 | `GET` | `/logo/<file>` | 台标图片 |
-| `GET` | `/logo/api/list` | 台标列表 |
+| `GET` | `/panel/api/logo/list` | 台标列表 |
 | `POST` | `/panel/api/logo/{upload,delete,rename,apply}` | 台标管理 |
 | `GET` | `/panel/api/logo/match-report` | 缺台标、坏引用与未使用 |
 | `POST` | `/panel/api/logo/suggest` | 按名称相似度推荐台标 |
@@ -673,7 +682,6 @@ ls scripts/smoke-*.sh
 | `GET` | `/api/share/pull?key=` | 多 VPS 同步载荷 |
 | `GET` | `/panel/api/dash/tracks/:gid/:cid` | DASH 轨道列表 |
 | `POST` | `/panel/api/dash/scan-url` | 解析任意 MPD |
-| `GET` | `/epg/api/{channels,programmes,search}` | 节目单 JSON |
 | `GET` | `/panel/api/epg/{status,mappings,match-report}` | EPG 状态、映射与匹配报告 |
 | `POST` | `/panel/api/epg/{refresh,mapping}` | 立即采集、设置或清除映射 |
 
@@ -710,6 +718,7 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 | [`docs/findings/`](docs/findings/) | 逆向证据（`F-*`、`D-*`） |
 | [`docs/design/`](docs/design/) | 实现方案：选型、架构、HTTP 契约、低配优化 |
 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) | 路由表与接口契约 |
+| [`docs/design/11-subscription-sync.md`](docs/design/11-subscription-sync.md) | 定时订阅、托管同步与管理规则 |
 | [`PROGRESS.md`](PROGRESS.md) | 进度与缺口。唯一进度权威 |
 
 ---
@@ -720,7 +729,8 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 - **Remux**：纯 Rust 切片。冷启动时在首批切片产出前返回 `503 remux warming up`，不是恒 503。
 - **DASH**：已把 MPD 转成 HLS。需要 `SegmentTimeline`，或 `SegmentTemplate@duration` 加总时长。CENC/ClearKey 不解密，按原字节代理。
 - **缓存**：无容量上限校验。`cache.backend=memory` 只回显，实际仍落盘。
-- **EPG**：录制前后缓冲与部分私有端点未实现。
+- **EPG**：录制前后缓冲与部分私有端点未实现。公开 EPG 页与全局 `/epg.xml` 已删除，改用 `/sub/<令牌>/epg.xml` 或面板「节目指南」。
+- **订阅托管**：同步一次写整份配置。大清单会增加写入时间。单源上限 20000 条，空清单默认拦截。上游分组改名按旧组删除、新组创建处理。
 - **录制**：DASH 频道要求直播 MPD 且系统有 ffmpeg。静态 MPD 报「录制区间内无可用切片」。
 - **未实现**：`l1`/`l2` 限流、每 IP 会话上限、`random_id_enabled` 的随机 ID 行为、`compat_mode`、`srt_ua_keywords`、`socks5`。部分只保留配置键。
 - **兼容差异**：P0 对拍 22 项用例差异为 0。

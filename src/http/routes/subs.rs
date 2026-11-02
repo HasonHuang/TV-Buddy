@@ -184,7 +184,34 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
         }
     }
 
-    let text = fetch(&state, url).await?;
+    // 托管源使用草稿源抓取，应用请求头、代理与超时。聚合源沿用轻量抓取。
+    let mut candidate = configured.cloned().unwrap_or_default();
+    if let Some(object) = input.as_object() {
+        let mut base = serde_json::to_value(&candidate).unwrap_or_else(|_| json!({}));
+        if let Some(map) = base.as_object_mut() {
+            for (key, value) in object {
+                if key != "id" {
+                    map.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        candidate = serde_json::from_value(base).unwrap_or(candidate);
+    }
+    candidate.url = url.to_string();
+    candidate.group_map = source.group_map.clone();
+    candidate.group_mode = source.group_mode.clone();
+    candidate.merge_group = source.merge_group.clone();
+    candidate.unlisted_groups = source.unlisted_groups.clone();
+    candidate.include = source.include.clone();
+    candidate.exclude = source.exclude.clone();
+
+    let text = if candidate.mode == "sync" {
+        subscription::fetch(&state, &candidate, &config.playlist)
+            .await
+            .map_err(|error| ApiError::bad_gateway(format!("{error:#}")))?
+    } else {
+        fetch(&state, url).await?
+    };
     let entries = m3u::parse(&text);
     let result = subs::preview(
         &entries,
@@ -211,26 +238,6 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
         .collect();
 
     // 托管源：用同一份抓取结果给出同步差异。不写配置，不写状态。
-    let mut candidate = configured.cloned().unwrap_or_default();
-    if let Some(object) = input.as_object() {
-        let mut base = serde_json::to_value(&candidate).unwrap_or_else(|_| json!({}));
-        if let Some(map) = base.as_object_mut() {
-            for (key, value) in object {
-                if key != "id" {
-                    map.insert(key.clone(), value.clone());
-                }
-            }
-        }
-        candidate = serde_json::from_value(base).unwrap_or(candidate);
-    }
-    candidate.url = url.to_string();
-    candidate.group_map = source.group_map.clone();
-    candidate.group_mode = source.group_mode.clone();
-    candidate.merge_group = source.merge_group.clone();
-    candidate.unlisted_groups = source.unlisted_groups.clone();
-    candidate.include = source.include.clone();
-    candidate.exclude = source.exclude.clone();
-
     let sync = if candidate.mode == "sync" {
         let plan = subscription::plan(&config, &candidate, &entries);
         let diff = subscription::diff(&config, &candidate, &plan);
