@@ -52,7 +52,7 @@ pub async fn playlist(
     let config = state.snapshot();
     let base = base_url(&headers);
     let local = playlist::render_user(&config, &user, &base, &token);
-    let extra = aggregate_sources(&state, &config).await;
+    let extra = aggregate_sources(&state, &config, &user).await;
     let body = playlist::compose(local, extra, &config.playlist.merge_position);
     (
         [
@@ -77,16 +77,32 @@ pub async fn playlist(
 /// 单个源失败只记日志；本地订阅照常返回。
 /// 外部源条目不属于任何本地分组，无法映射到 `allowed_group_ids`，
 /// 所以对所有用户一视同仁。
-async fn aggregate_sources(state: &Arc<AppState>, config: &crate::config::Config) -> String {
+///
+/// 去重只对照该用户可见的本地频道。用全部频道会让受限用户或归档组
+/// 压掉自己看不到的聚合副本。
+async fn aggregate_sources(
+    state: &Arc<AppState>,
+    config: &crate::config::Config,
+    user: &User,
+) -> String {
     let mut extra = String::new();
-    // 本地频道地址先占位，避免与聚合条目重复输出。
-    let mut seen: HashSet<String> = config
-        .groups
-        .iter()
-        .flat_map(|group| group.channels.iter())
-        .map(|channel| channel.url.trim().to_string())
-        .filter(|url| !url.is_empty())
-        .collect();
+    // 只把该用户可见的本地地址放进去重集合。
+    let mut seen: HashSet<String> = HashSet::new();
+    for group in &config.groups {
+        if group.access == "archived" || !user.can_see_group(&group.id) {
+            continue;
+        }
+        for channel in &group.channels {
+            if !user.can_see_channel(&group.id, &channel.id) {
+                continue;
+            }
+            let url = channel.url.trim();
+            if !url.is_empty() {
+                seen.insert(url.to_string());
+            }
+        }
+    }
+    let statuses = state.sources.statuses();
     for source in
         config.playlist.sources.iter().filter(|source| {
             source.enabled && source.mode != "sync" && !source.url.trim().is_empty()
@@ -96,14 +112,23 @@ async fn aggregate_sources(state: &Arc<AppState>, config: &crate::config::Config
         let ttl = std::time::Duration::from_secs(crate::subs::effective_ttl_secs(source.ttl_secs));
         let body = match state.sources.get_with_ttl(&key, ttl) {
             Some(body) => body,
-            None => match fetch_source(state, source, &config.playlist).await {
-                Ok(text) => text,
-                Err(error) => {
-                    tracing::warn!(url = %source.url, error = %error, "抓取聚合源失败");
-                    state.sources.mark_error(&source.id, error);
+            None => {
+                // 失败冷却：每个订阅请求都重试慢源会堆积连接。
+                let failed_recently = statuses.get(&source.id).is_some_and(|status| {
+                    status.error.is_some() && now_secs().saturating_sub(status.last_try) < 60
+                });
+                if failed_recently {
                     continue;
                 }
-            },
+                match fetch_source(state, source).await {
+                    Ok(text) => text,
+                    Err(error) => {
+                        tracing::warn!(url = %source.url, error = %error, "抓取聚合源失败");
+                        state.sources.mark_error(&source.id, error);
+                        continue;
+                    }
+                }
+            }
         };
         let (piece, channels) =
             playlist::aggregate_seen(source, &config.playlist.global_exclude, &body, &mut seen);
@@ -114,19 +139,29 @@ async fn aggregate_sources(state: &Arc<AppState>, config: &crate::config::Config
 }
 
 /// 抓取单个聚合源；成功时写入缓存与状态。
-async fn fetch_source(
-    state: &Arc<AppState>,
-    source: &PlaylistSource,
-    playlist: &crate::config::model::PlaylistCfg,
-) -> Result<String, String> {
-    let text = crate::subscription::fetch(state, source, playlist)
-        .await
-        .map_err(|error| format!("{error:#}"))?;
+///
+/// 聚合源用固定短超时：订阅请求同步等待，不能套用托管源的长超时。
+async fn fetch_source(state: &Arc<AppState>, source: &PlaylistSource) -> Result<String, String> {
+    let text = crate::subscription::fetch_bounded(
+        state,
+        source,
+        std::time::Duration::from_secs(crate::subscription::AGGREGATE_FETCH_TIMEOUT_SECS),
+        crate::subscription::MAX_BODY_BYTES,
+    )
+    .await
+    .map_err(|error| format!("{error:#}"))?;
     state
         .sources
         .put(&format!("sub:{}:{}", source.id, source.url), text.clone());
     state.sources.mark_success(&source.id);
     Ok(text)
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0)
 }
 
 /// `GET /sub/:token/epg.xml`。

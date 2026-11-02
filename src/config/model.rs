@@ -67,18 +67,7 @@ impl Config {
             }
         }
         for source in &mut self.playlist.sources {
-            if source.mode.trim().is_empty() {
-                source.mode = "aggregate".to_string();
-            }
-            if source.schedule.trim().is_empty() {
-                source.schedule = "inherit".to_string();
-            }
-            if source.playback_mode.trim().is_empty() {
-                source.playback_mode = "auto".to_string();
-            }
-            if source.format.trim().is_empty() {
-                source.format = "auto".to_string();
-            }
+            source.normalize();
         }
     }
 
@@ -1275,6 +1264,24 @@ pub struct PlaylistSource {
     pub merge_into: BTreeMap<String, String>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+impl PlaylistSource {
+    /// 补空值默认项。`Config::normalize` 与单源保存接口共用。
+    pub fn normalize(&mut self) {
+        if self.mode.trim().is_empty() {
+            self.mode = "aggregate".to_string();
+        }
+        if self.schedule.trim().is_empty() {
+            self.schedule = "inherit".to_string();
+        }
+        if self.playback_mode.trim().is_empty() {
+            self.playback_mode = "auto".to_string();
+        }
+        if self.format.trim().is_empty() {
+            self.format = "auto".to_string();
+        }
+    }
 }
 
 impl Default for PlaylistSource {

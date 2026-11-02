@@ -182,6 +182,25 @@ function parseMap(text: string): Record<string, string> {
   return out;
 }
 
+/** 代理字段 → 草稿值。保留空地址，保存时再清空。 */
+function proxyDraft(
+  current: Source['proxy'],
+  patch: Partial<NonNullable<Source['proxy']>>,
+): Source['proxy'] {
+  return {
+    kind: patch.kind ?? current?.kind ?? 'http',
+    addr: patch.addr ?? current?.addr ?? '',
+    username: patch.username ?? current?.username,
+    password: patch.password ?? current?.password,
+  };
+}
+
+/** 保存前清掉空地址代理，避免每轮抓取都告警。 */
+function cleanSource(source: Source): Source {
+  const proxy = source.proxy?.addr.trim() ? source.proxy : null;
+  return { ...source, proxy };
+}
+
 function when(value: number): string {
   if (!value) return '—';
   return new Date(value * 1000).toLocaleString();
@@ -316,8 +335,9 @@ export function PlaylistPage() {
       const data = await api<{ groups: GroupCount[]; total: number }>('POST', '/subs/groups', {
         id: drawer.draft.id || undefined,
         url,
+        mode: drawer.draft.mode,
         headers: drawer.draft.headers,
-        proxy: drawer.draft.proxy ?? undefined,
+        proxy: drawer.draft.proxy?.addr.trim() ? drawer.draft.proxy : undefined,
       });
       setDrawer((current) => (current ? { ...current, groups: data.groups ?? [] } : current));
       ok(`读到 ${(data.groups ?? []).length} 个分组、${data.total} 个频道`);
@@ -336,7 +356,7 @@ export function PlaylistPage() {
     setDrawer((current) => (current ? { ...current, busy: true, error: '' } : current));
     try {
       const result = await api<Preview>('POST', '/subs/preview', {
-        ...source,
+        ...cleanSource(source),
         id: source.id || undefined,
       });
       setDrawer((current) =>
@@ -359,15 +379,16 @@ export function PlaylistPage() {
         ? ''
         : `?keep_content=${keepContent ? 1 : 0}`;
     try {
+      const payload = cleanSource(source);
       let saved: Source;
       if (!source.id) {
-        const result = await api<{ source: Source }>('POST', '/playlist/sources', source);
+        const result = await api<{ source: Source }>('POST', '/playlist/sources', payload);
         saved = result.source;
       } else {
         const result = await api<{ source: Source }>(
           'PUT',
           `/playlist/sources/${encodeURIComponent(source.id)}${query}`,
-          source,
+          payload,
         );
         saved = result.source;
       }
@@ -378,8 +399,8 @@ export function PlaylistPage() {
       await loadGroups();
       if (thenSync && saved.id && saved.mode === 'sync') {
         await triggerSync(saved.id);
-      } else if (!wasSync && saved.id && saved.mode === 'sync') {
-        // 聚合切托管：立即补一次同步，不等下一个周期。
+      } else if (!wasSync && saved.id && saved.mode === 'sync' && saved.enabled) {
+        // 聚合切托管：立即补一次同步，不等下一个周期。禁用源交给调度器跳过。
         await triggerSync(saved.id);
       }
     } catch (error) {
@@ -804,7 +825,7 @@ export function PlaylistPage() {
             {drawer.draft.group_mode === 'merge' && (
               <label>
                 合并到分组
-                <Tip text="所有选中的上游分组合并到该名称。" />
+                <Tip text="保留的上游分组都并入该名称。未列出分组要设为 keep，或填写分组映射。" />
                 <input
                   value={drawer.draft.merge_group}
                   placeholder="目标分组名"
@@ -842,7 +863,11 @@ export function PlaylistPage() {
             {drawer.draft.mode === 'sync' &&
               drawer.draft.unlisted_groups === 'drop' &&
               Object.keys(drawer.draft.group_map).length === 0 && (
-                <span className="msg warn">没有分组映射且未列出分组为 drop：不会导入任何频道。</span>
+                <span className="msg warn">
+                  {drawer.draft.group_mode === 'merge'
+                    ? '合并模式：未列出分组为 drop 且没有映射，不会导入任何频道。请把「未列出分组」改为 keep。'
+                    : '没有分组映射且未列出分组为 drop：不会导入任何频道。'}
+                </span>
               )}
           </div>
           {drawer.groups && drawer.groups.length > 0 && (
@@ -1043,12 +1068,7 @@ export function PlaylistPage() {
                 placeholder="http"
                 onChange={(event) =>
                   patch({
-                    proxy: {
-                      kind: event.target.value,
-                      addr: drawer.draft.proxy?.addr ?? '',
-                      username: drawer.draft.proxy?.username,
-                      password: drawer.draft.proxy?.password,
-                    },
+                    proxy: proxyDraft(drawer.draft.proxy, { kind: event.target.value }),
                   })
                 }
               />
@@ -1060,12 +1080,7 @@ export function PlaylistPage() {
                 placeholder="host:port"
                 onChange={(event) =>
                   patch({
-                    proxy: {
-                      kind: drawer.draft.proxy?.kind ?? 'http',
-                      addr: event.target.value,
-                      username: drawer.draft.proxy?.username,
-                      password: drawer.draft.proxy?.password,
-                    },
+                    proxy: proxyDraft(drawer.draft.proxy, { addr: event.target.value }),
                   })
                 }
               />
@@ -1079,12 +1094,7 @@ export function PlaylistPage() {
                 autoComplete="off"
                 onChange={(event) =>
                   patch({
-                    proxy: {
-                      kind: drawer.draft.proxy?.kind ?? 'http',
-                      addr: drawer.draft.proxy?.addr ?? '',
-                      username: event.target.value,
-                      password: drawer.draft.proxy?.password,
-                    },
+                    proxy: proxyDraft(drawer.draft.proxy, { username: event.target.value }),
                   })
                 }
               />
@@ -1097,12 +1107,7 @@ export function PlaylistPage() {
                 autoComplete="new-password"
                 onChange={(event) =>
                   patch({
-                    proxy: {
-                      kind: drawer.draft.proxy?.kind ?? 'http',
-                      addr: drawer.draft.proxy?.addr ?? '',
-                      username: drawer.draft.proxy?.username,
-                      password: event.target.value,
-                    },
+                    proxy: proxyDraft(drawer.draft.proxy, { password: event.target.value }),
                   })
                 }
               />

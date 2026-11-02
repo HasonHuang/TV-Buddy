@@ -261,7 +261,7 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 | GET | `/panel/api/status` | — | 目标字段：`uptime_secs, cache_backend, active_sessions, online_viewers, group_count, channel_count, version, mem_rss_mb, cpu_seconds, disk_cache_mb, recording_mb, low_resource_mode, poll_interval_secs, traffic_in_bytes, traffic_out_bytes, whole_file_{committed,budget,peak,hits,fallbacks}, entry_exts{gid → ext}, cpu_cores`。附加字段：`name, bind, log_level, timezone_offset_hours, cache_disk_path`。`traffic_in_bytes` 恒 0（S-BUG-01） |
 | GET | `/panel/api/config` | — | 全量配置 JSON |
 | PUT | `/panel/api/config` | 全量配置 | `{"ok":true}`；非法 → `400` |
-| POST | `/panel/api/reload` | — | `{"ok":true}` |
+| POST | `/panel/api/reload` | — | `{"ok":true}`；读取或保存失败 → `500`（保留旧快照） |
 
 登录锁：窗口内失败数达到 `auth_fail_free_per_window + auth_fail_ban_threshold` 后，后续登录返回 `429`。默认窗口 60 秒、免费 15 次、阈值 6、锁定 300 秒。既有 Bearer 会话不受影响。
 
@@ -339,7 +339,7 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 | `POST` | `/panel/api/cache/flush` | `{"ok":true,"removed":<文件数>}`；清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash`**（S-CACHE-06）；同时丢弃进程内索引与清单缓存 |
 | `GET` | `/panel/api/stats` | `{"version","uptime_secs","requests","playlists","segments","segment_hits","upstream_failures","online_window_secs","groups":[{"id","requests"}]}` |
 | `GET` | `/panel/api/logs?limit=n` | `{"total","lines":[…]}`；`limit` 上限 500，默认 200；来源为进程内环形缓冲（500 行） |
-| `POST` | `/panel/api/reload` | 立即重读配置；返回 `{"ok":true}` |
+| `POST` | `/panel/api/reload` | 立即重读配置；返回 `{"ok":true}`；读取或保存失败返回 `500` |
 
 热重载：只监视配置文件本身；解析失败保留旧快照并记 `error` 日志（`design/04` §2）。冷却中的频道在配置重载后立即解除冷却（S-MODE-17）。
 

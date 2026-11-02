@@ -154,7 +154,8 @@
 | 3 | 以上都空 | `url:<完整 URL>` |
 
 - 用上游原分组。分组改名映射变化不换键。
-- 同源重复键追加 `#2`、`#3`。
+- 同源重复键追加 `#<8 位 Hex>`，取自 URL。与上游顺序无关。
+- 旧数据的 `#2`、`#3` 键在首次同步时按键族配对，迁移到新键；频道 ID 不变。
 - 计划阶段按 URL 去重。同源先出现者优先；跨源按源配置顺序。
 
 ### 4.2 频道 ID
@@ -173,6 +174,8 @@
 2. 否则按 `(source_id, source_group)` 查找。找不到时按 `(source_id, 空 source_group, 同名)` 兼容旧数据。
 3. 新建分组用 `m3u::group_id(目标名)`。冲突时用 `s-<hash8>`。
 4. `group_prefix` 只影响显示名，不影响 ID。
+5. 分组身份：`merge_into` 为 `gid:<id>`；`merge` 模式为 `merge:<目标名>`；其余为 `group:<上游分组>`。同一身份只建一个分组。
+6. 同步分组在 `extra` 记 `sync_name`（显示名基线）与 `sync_target`（身份）。转为手工或改挂其他源时清除。
 
 ## 5 同步算法
 
@@ -196,10 +199,12 @@
 在 `state.mutate` 闭包内执行。一次改写 `config.groups`。
 
 1. 校验源仍存在、`mode=sync`、源配置未变。否则中止。
-2. 解析或创建目标分组。
+2. 解析或创建目标分组。同一身份的上游分组共用一个分组。
+   - 配置改名（`group_map`、`merge_group`、`group_prefix`）只作用于未手工改名的分组。
+   - 旧分组没有 `sync_name` 基线：记录基线，不覆盖现有名称。
 3. 就地更新：计划内、`sync_follow=true` 的频道更新上游字段。
 4. 删除：计划外、`sync_follow=true` 的本源频道删除。
-5. 移动：目标分组变化时移动频道，并重新分配 ID。
+5. 移动：目标分组变化时移动频道。保留原频道 ID。
 6. 新增：计划内、当前不存在的频道新增。
 7. 分组清理：
    - 本源同步分组且无频道：删除。
@@ -247,6 +252,7 @@
   - 本地时间用 `server.timezone_offset_hours` 计算。不引入时区数据库。
   - 时间已过则排到明天。
 - 启动补跑：`last_try=0` 视为到期。
+- 源或全局为每天定时时，至少一处要能解析 `HH:MM`。否则保存返回 `400`，不退化成「上次 +24 小时」。
 - 到期源按配置顺序串行执行。源之间等待 1 秒。
 - 失败退避：1、2、4… 分钟，上限 60 分钟。只用于间隔调度。成功或空清单拦截后清零。
 - 手动同步更新 `last_try`。自动周期从手动时间重新计算。
@@ -365,17 +371,18 @@
 - 源启用时 URL 必须是 `http(s)`。
 - 已有物化内容且请求未显式选择时，修改模式或删除源返回 `409`，`code=content_exists`，附 `channels` 计数。
 - 改 `sync` → `aggregate` 后，源摘要变化。正在运行的同步自动中止。
-- 改 `aggregate` → `sync` 后，清空该源的 `last_try`。保存后立即同步。
-- 读取分组使用源或草稿的请求头、代理与超时。
+- 改 `aggregate` → `sync` 后，清空该源的 `last_try`。保存后立即同步。单源保存与全量替换两条路径一致。
+- 读取分组与预检使用同一套抓取参数：请求头、代理、按模式选超时。聚合源固定 25 秒。
+- 失败聚合源在 60 秒内不重试，避免订阅请求堆积。
 
 ### 8.6 分组与频道
 
 | 接口 | 说明 |
 | --- | --- |
 | `PUT /panel/api/groups/:gid/channels/:cid` | 上游字段变化且未显式传 `sync_follow` 时，自动置 `false` |
-| `DELETE /panel/api/groups/:gid/channels/:cid` | 同步频道删除时写入源 `exclude`。`tvg-id` 在同源内唯一时用 `id:`，否则用 `url:` |
+| `DELETE /panel/api/groups/:gid/channels/:cid` | 同步频道删除时写入源 `exclude`。`tvg-id` 同源唯一用 `id:`；不唯一但名称唯一用 `idname:`；都相同才用 `url:` |
 | `DELETE /panel/api/groups/:gid` | 同步分组删除时写入组内每个频道键。不写 `group:` |
-| `POST /panel/api/groups/:gid/detach` | 分组转为手工。频道保留来源关系 |
+| `POST /panel/api/groups/:gid/detach` | 分组转为手工。只断开本源频道，其他源频道保持跟随 |
 | `POST /panel/api/groups/:gid/channels/:cid/detach` | 频道转为手工 |
 | `POST /panel/api/groups/import[/force]` | 默认跳过 `source_id` 非空的分组 |
 | `POST /panel/api/groups/import/m3u` | 同上。`replace` 遇同步分组时要求 `include_synced=true` |
@@ -436,7 +443,7 @@
 | --- | --- |
 | 改名称、URL、台标、请求头 | `sync_follow=false`。以后不覆盖上游字段 |
 | 改播放参数、代理、预取、回看 | 手工字段。同步不动 |
-| 改分组名称 | 保留。同步按 `source_group` 匹配 |
+| 改分组名称 | 保留。同步不覆盖手工改名；配置映射改名只作用于未手工改名的分组 |
 | 改分组模式、访问级别、格式 | 保留。同步只在新建时写默认值 |
 | 删除同步频道 | 写入源 `exclude`。下次同步不加回 |
 | 删除同步分组 | 写入组内频道键。下次同步不重建 |
@@ -488,7 +495,7 @@
 - 首次同步、第二次零变更。
 - 新增、删除、改 URL、改名、移组。
 - 固定频道不覆盖、不删除。
-- 删除后防回流（`id:` / `url:`）。
+- 删除后防回流（`id:` / `idname:` / `url:`）。
 - 每源独立分组、`merge_into`、不自动合并。
 - 空组删除、只剩手工转手工、多源并组保留。
 - 空清单拦截、`force`、`sync_allow_empty`。

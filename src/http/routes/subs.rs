@@ -125,9 +125,11 @@ async fn groups_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, A
             draft.proxy = parsed;
         }
     }
-    let text = subscription::fetch(&state, &draft, &config.playlist)
-        .await
-        .map_err(|error| ApiError::bad_gateway(format!("{error:#}")))?;
+    if let Some(mode) = body.get("mode").and_then(Value::as_str) {
+        draft.mode = mode.to_string();
+    }
+    draft.normalize();
+    let text = fetch_for(&state, &draft, &config.playlist).await?;
     let entries = m3u::parse(&text);
     let total = entries.len();
     let groups: Vec<Value> = subs::group_counts(&entries)
@@ -233,14 +235,10 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
     candidate.unlisted_groups = source.unlisted_groups.clone();
     candidate.include = source.include.clone();
     candidate.exclude = source.exclude.clone();
+    candidate.normalize();
 
-    let text = if candidate.mode == "sync" {
-        subscription::fetch(&state, &candidate, &config.playlist)
-            .await
-            .map_err(|error| ApiError::bad_gateway(format!("{error:#}")))?
-    } else {
-        fetch(&state, url).await?
-    };
+    // 与「读取分组」同一套抓取参数：请求头、代理、按模式选超时。
+    let text = fetch_for(&state, &candidate, &config.playlist).await?;
     let entries = m3u::parse(&text);
     let result = subs::preview(
         &entries,
@@ -491,21 +489,25 @@ fn validate_url(url: &str) -> Result<(), ApiError> {
     }
 }
 
-async fn fetch(state: &Arc<AppState>, url: &str) -> Result<String, ApiError> {
-    let response = state
-        .http
-        .get(url)
-        .send()
+/// 按源模式抓取：托管源用同步超时，聚合源用固定短超时。
+///
+/// 请求头与代理都生效。「读取分组」与「预检」共用，避免同一源两个按钮
+/// 拿到不同结果。
+async fn fetch_for(
+    state: &Arc<AppState>,
+    source: &crate::config::model::PlaylistSource,
+    playlist: &crate::config::model::PlaylistCfg,
+) -> Result<String, ApiError> {
+    let result = if source.mode == "sync" {
+        subscription::fetch(state, source, playlist).await
+    } else {
+        subscription::fetch_bounded(
+            state,
+            source,
+            Duration::from_secs(subscription::AGGREGATE_FETCH_TIMEOUT_SECS),
+            subscription::MAX_BODY_BYTES,
+        )
         .await
-        .map_err(|error| ApiError::bad_gateway(format!("抓取失败: {error}")))?;
-    if !response.status().is_success() {
-        return Err(ApiError::bad_gateway(format!(
-            "上游返回 {}",
-            response.status()
-        )));
-    }
-    response
-        .text()
-        .await
-        .map_err(|error| ApiError::bad_gateway(format!("读取失败: {error}")))
+    };
+    result.map_err(|error| ApiError::bad_gateway(format!("{error:#}")))
 }

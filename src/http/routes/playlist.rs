@@ -37,16 +37,40 @@ pub async fn update(
         normalize_source(source)?;
     }
     // 先校验候选配置。失败返回 400，不能走到保存阶段变成 500。
+    // 与 `mutate`/`store.save` 一致：先补默认值再校验，空字符串不算错误。
     let mut candidate = (*state.snapshot()).clone();
     candidate.playlist = cfg.clone();
+    candidate.normalize();
     crate::config::validate(&candidate)
         .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
+    // 全量替换同样遵守「进入托管后立即同步」：清掉旧计时。
+    let previous: HashMap<String, String> = state
+        .snapshot()
+        .playlist
+        .sources
+        .iter()
+        .map(|source| (source.id.clone(), source.mode.clone()))
+        .collect();
+    let entered_sync: Vec<String> = candidate
+        .playlist
+        .sources
+        .iter()
+        .filter(|source| source.mode == "sync")
+        .filter(|source| previous.get(&source.id).map(String::as_str) != Some("sync"))
+        .map(|source| source.id.clone())
+        .collect();
     state
         .mutate(|config| {
             config.playlist = cfg.clone();
             Ok(())
         })
         .map_err(|error| ApiError::internal(format!("{error:#}")))?;
+    for id in entered_sync {
+        state.sources.update_status(&id, |status| {
+            status.last_try = 0;
+            status.error = None;
+        });
+    }
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -62,6 +86,7 @@ pub async fn update_settings(
     // 先校验候选配置。失败返回 400，不能走到保存阶段变成 500。
     let mut candidate = (*state.snapshot()).clone();
     apply_global_settings(&mut candidate.playlist, &cfg);
+    candidate.normalize();
     crate::config::validate(&candidate)
         .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
 
@@ -108,8 +133,16 @@ pub async fn create_source(
         return Err(ApiError::bad_request(format!("订阅源 id 重复: {id}")));
     }
     candidate.playlist.sources.push(source.clone());
+    candidate.normalize();
     crate::config::validate(&candidate)
         .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
+    let source = candidate
+        .playlist
+        .sources
+        .iter()
+        .find(|item| item.id == id)
+        .cloned()
+        .unwrap_or(source);
     state
         .mutate(|config| {
             config.playlist.sources.push(source.clone());
@@ -160,8 +193,16 @@ pub async fn update_source(
     {
         *slot = source.clone();
     }
+    candidate.normalize();
     crate::config::validate(&candidate)
         .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
+    let source = candidate
+        .playlist
+        .sources
+        .iter()
+        .find(|item| item.id == id)
+        .cloned()
+        .unwrap_or(source);
 
     let mut detached = 0;
     state
@@ -251,6 +292,8 @@ fn content_exists(channels: usize) -> ApiError {
 }
 
 fn normalize_source(source: &mut PlaylistSource) -> Result<(), ApiError> {
+    // 空字符串按默认值处理，与整份配置保存一致。
+    source.normalize();
     source.name = source.name.trim().to_string();
     source.url = source.url.trim().to_string();
     if source.enabled && !(source.url.starts_with("http://") || source.url.starts_with("https://"))

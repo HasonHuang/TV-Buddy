@@ -237,6 +237,9 @@ pub async fn reload(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
-    crate::reload::reload(&state);
-    Ok(Json(json!({ "ok": true })))
+    match crate::reload::reload(&state) {
+        Ok(true) => Ok(Json(json!({ "ok": true }))),
+        Ok(false) => Err(ApiError::internal("数据库里没有配置")),
+        Err(error) => Err(ApiError::internal(format!("重载失败: {error:#}"))),
+    }
 }

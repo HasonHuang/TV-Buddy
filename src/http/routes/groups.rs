@@ -113,9 +113,7 @@ pub async fn delete_group(
         .mutate(|config| {
             // 同步分组删除：把现有频道的键写入源排除。不写 `group:`，
             // 避免同组的新频道被永久排除。
-            for channel in &group.channels {
-                subscription::exclude_channel(config, channel);
-            }
+            subscription::exclude_channels(config, &group.channels);
             config.groups.retain(|item| item.id != gid);
             Ok(())
         })

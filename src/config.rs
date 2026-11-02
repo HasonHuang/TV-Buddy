@@ -103,6 +103,26 @@ fn validate_playlist(playlist: &crate::config::model::PlaylistCfg) -> anyhow::Re
             "inherit" | "interval" | "daily" => {}
             other => bail!("订阅源 {} 的 schedule 不支持 {other}", source.id),
         }
+        // 每天定时必须有可用的 HH:MM。源级留空时用全局；
+        // 全局为间隔模式且时间为空时，拒绝保存，避免退化成「上次 +24h」。
+        let daily = match source.schedule.as_str() {
+            "daily" => true,
+            "interval" => false,
+            _ => playlist.sync_schedule == "daily",
+        };
+        if daily {
+            let at = if source.sync_daily_at.trim().is_empty() {
+                playlist.sync_daily_at.trim()
+            } else {
+                source.sync_daily_at.trim()
+            };
+            if !valid_daily_at(at) {
+                bail!(
+                    "订阅源 {} 为每天定时，但源级与全局的每天时间都为空",
+                    source.id
+                );
+            }
+        }
         if source.sync_interval_secs != 0 && !(300..=2_592_000).contains(&source.sync_interval_secs)
         {
             bail!(
@@ -191,6 +211,25 @@ mod tests {
         let mut source = source("aggregate");
         source.playback_mode = "passthrough".into();
         validate(&config_with_source(source)).expect("聚合源可保留 passthrough");
+    }
+
+    #[test]
+    fn daily_source_without_time_is_rejected() {
+        let mut config = config_with_source(source("sync"));
+        config.playlist.sync_schedule = "interval".into();
+        config.playlist.sync_daily_at.clear();
+        config.playlist.sources[0].schedule = "daily".into();
+        let error = validate(&config).expect_err("源级与全局都没有时间时应拒绝");
+        assert!(error.to_string().contains("每天时间"), "{error}");
+    }
+
+    #[test]
+    fn daily_source_inherits_global_time() {
+        let mut config = config_with_source(source("sync"));
+        config.playlist.sync_schedule = "daily".into();
+        config.playlist.sync_daily_at = "04:15".into();
+        config.playlist.sources[0].schedule = "daily".into();
+        validate(&config).expect("源级留空应继承全局时间");
     }
 
     #[test]

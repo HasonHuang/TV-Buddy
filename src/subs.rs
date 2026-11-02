@@ -295,6 +295,14 @@ fn matches_filter(patterns: &[String], item: &Selected<'_>) -> bool {
                     || item.group.to_lowercase().contains(&want)
             } else if let Some(want) = pattern.strip_prefix("id:") {
                 id.to_lowercase() == want.trim().to_lowercase()
+            } else if let Some(want) = pattern.strip_prefix("idname:") {
+                // `idname:<小写 tvg-id>\u{1f}<小写名称>`：同 id 多条时按名称区分。
+                want.split_once('\u{1f}')
+                    .is_some_and(|(want_id, want_name)| {
+                        id.eq_ignore_ascii_case(want_id.trim())
+                            && item.entry.name.trim().to_lowercase()
+                                == want_name.trim().to_lowercase()
+                    })
             } else if let Some(want) = pattern.strip_prefix("url:") {
                 item.entry.url.trim() == want.trim()
             } else {
