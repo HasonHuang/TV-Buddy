@@ -91,6 +91,7 @@ pub async fn groups(
 }
 
 async fn groups_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, ApiError> {
+    let config = state.snapshot();
     let url = body
         .get("url")
         .and_then(Value::as_str)
@@ -98,7 +99,35 @@ async fn groups_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, A
         .filter(|url| !url.is_empty())
         .ok_or_else(|| ApiError::bad_request("缺少 url"))?;
     validate_url(url)?;
-    let text = fetch(&state, url).await?;
+    let configured = body
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(|id| config.playlist.sources.iter().find(|item| item.id == id));
+    // 草稿可带请求头与代理。读取分组要和同步使用同一套抓取参数。
+    let mut draft = configured.cloned().unwrap_or_default();
+    draft.url = url.to_string();
+    if let Some(headers) = body.get("headers") {
+        draft.headers = headers
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+    if let Some(proxy) = body.get("proxy") {
+        if let Ok(parsed) =
+            serde_json::from_value::<Option<crate::config::model::ProxyCfg>>(proxy.clone())
+        {
+            draft.proxy = parsed;
+        }
+    }
+    let text = subscription::fetch(&state, &draft, &config.playlist)
+        .await
+        .map_err(|error| ApiError::bad_gateway(format!("{error:#}")))?;
     let entries = m3u::parse(&text);
     let total = entries.len();
     let groups: Vec<Value> = subs::group_counts(&entries)

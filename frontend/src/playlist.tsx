@@ -26,7 +26,12 @@ type Source = {
   format: string;
   position: string;
   headers: string[];
-  proxy?: { kind: string; addr: string; user?: string; pass?: string } | null;
+  proxy?: {
+    kind: string;
+    addr: string;
+    username?: string | null;
+    password?: string | null;
+  } | null;
   max_channels: number;
   merge_into: Record<string, string>;
 };
@@ -190,12 +195,15 @@ function sourceModeBadge(source: Source) {
   );
 }
 
-function statusBadge(status?: Status) {
+function statusBadge(status?: Status, warnRatio = 0.2) {
   if (!status) return null;
   if (status.syncing) return <Badge tone="info">同步中</Badge>;
   if (status.needs_review) return <Badge tone="warn">待确认</Badge>;
   if (status.error) return <Badge tone="danger">失败</Badge>;
-  if (status.shrink_permille > 0) return <Badge tone="warn">缩水</Badge>;
+  const threshold = Math.max(0, Math.round(warnRatio * 1000));
+  if (status.shrink_permille > 0 && status.shrink_permille >= threshold) {
+    return <Badge tone="warn">缩水</Badge>;
+  }
   if (status.zero_blocked) return <Badge tone="warn">空清单</Badge>;
   return <Badge tone="ok">正常</Badge>;
 }
@@ -306,7 +314,10 @@ export function PlaylistPage() {
     }
     try {
       const data = await api<{ groups: GroupCount[]; total: number }>('POST', '/subs/groups', {
+        id: drawer.draft.id || undefined,
         url,
+        headers: drawer.draft.headers,
+        proxy: drawer.draft.proxy ?? undefined,
       });
       setDrawer((current) => (current ? { ...current, groups: data.groups ?? [] } : current));
       ok(`读到 ${(data.groups ?? []).length} 个分组、${data.total} 个频道`);
@@ -340,6 +351,9 @@ export function PlaylistPage() {
   };
 
   const saveSource = async (source: Source, keepContent?: boolean | null, thenSync = false) => {
+    const wasSync = source.id
+      ? sources.find((item) => item.id === source.id)?.mode === 'sync'
+      : false;
     const query =
       keepContent === undefined || keepContent === null
         ? ''
@@ -364,10 +378,14 @@ export function PlaylistPage() {
       await loadGroups();
       if (thenSync && saved.id && saved.mode === 'sync') {
         await triggerSync(saved.id);
+      } else if (!wasSync && saved.id && saved.mode === 'sync') {
+        // 聚合切托管：立即补一次同步，不等下一个周期。
+        await triggerSync(saved.id);
       }
     } catch (error) {
       if (error instanceof ApiError && error.code === 'content_exists') {
         const channels = statuses[source.id]?.channels ?? 0;
+        setDrawer((current) => (current ? { ...current, busy: false } : current));
         setPending({ kind: 'save', source, id: source.id, channels });
         return;
       }
@@ -443,6 +461,12 @@ export function PlaylistPage() {
     [allGroups],
   );
 
+  const totalSyncChannels = sources.reduce(
+    (sum, source) =>
+      source.mode === 'sync' ? sum + (statuses[source.id]?.channels ?? 0) : sum,
+    0,
+  );
+
   return (
     <>
       <PageHead
@@ -457,6 +481,11 @@ export function PlaylistPage() {
       {unauthorizedSync > 0 ? (
         <div className="msg warn">
           有 {unauthorizedSync} 个同步分组未授权给受限用户。请在「用户与设备」页勾选。
+        </div>
+      ) : null}
+      {global.sync_total_warn > 0 && totalSyncChannels > global.sync_total_warn ? (
+        <div className="msg warn">
+          托管频道共 {totalSyncChannels} 条，超过建议阈值 {global.sync_total_warn} 条。大清单会增大配置写入时间。
         </div>
       ) : null}
 
@@ -512,7 +541,7 @@ export function PlaylistPage() {
                         : '—'}
                     </td>
                     <td>{when(status?.last_sync ?? 0)}</td>
-                    <td>{statusBadge(status)}</td>
+                    <td>{statusBadge(status, global.sync_warn_removal_ratio)}</td>
                     <td className="right">
                       {source.mode === 'sync' && (
                         <button
@@ -772,6 +801,17 @@ export function PlaylistPage() {
                 compact
               />
             </Field>
+            {drawer.draft.group_mode === 'merge' && (
+              <label>
+                合并到分组
+                <Tip text="所有选中的上游分组合并到该名称。" />
+                <input
+                  value={drawer.draft.merge_group}
+                  placeholder="目标分组名"
+                  onChange={(event) => patch({ merge_group: event.target.value })}
+                />
+              </label>
+            )}
             <Field label="未列出分组" tip="没有出现在映射里的分组保留还是丢弃。">
               <Select
                 ariaLabel="未列出分组"
@@ -1006,8 +1046,8 @@ export function PlaylistPage() {
                     proxy: {
                       kind: event.target.value,
                       addr: drawer.draft.proxy?.addr ?? '',
-                      user: drawer.draft.proxy?.user,
-                      pass: drawer.draft.proxy?.pass,
+                      username: drawer.draft.proxy?.username,
+                      password: drawer.draft.proxy?.password,
                     },
                   })
                 }
@@ -1023,8 +1063,45 @@ export function PlaylistPage() {
                     proxy: {
                       kind: drawer.draft.proxy?.kind ?? 'http',
                       addr: event.target.value,
-                      user: drawer.draft.proxy?.user,
-                      pass: drawer.draft.proxy?.pass,
+                      username: drawer.draft.proxy?.username,
+                      password: drawer.draft.proxy?.password,
+                    },
+                  })
+                }
+              />
+            </label>
+          </div>
+          <div className="row">
+            <label>
+              代理用户名
+              <input
+                value={drawer.draft.proxy?.username ?? ''}
+                autoComplete="off"
+                onChange={(event) =>
+                  patch({
+                    proxy: {
+                      kind: drawer.draft.proxy?.kind ?? 'http',
+                      addr: drawer.draft.proxy?.addr ?? '',
+                      username: event.target.value,
+                      password: drawer.draft.proxy?.password,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label>
+              代理密码
+              <input
+                type="password"
+                value={drawer.draft.proxy?.password ?? ''}
+                autoComplete="new-password"
+                onChange={(event) =>
+                  patch({
+                    proxy: {
+                      kind: drawer.draft.proxy?.kind ?? 'http',
+                      addr: drawer.draft.proxy?.addr ?? '',
+                      username: drawer.draft.proxy?.username,
+                      password: event.target.value,
                     },
                   })
                 }

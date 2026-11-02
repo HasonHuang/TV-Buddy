@@ -8,19 +8,9 @@ use crate::state::AppState;
 
 /// 从数据库重读配置并替换快照。失败保留旧快照。
 pub fn reload(state: &AppState) {
-    match state.config_store.load() {
-        Ok(Some(mut config)) => {
-            if crate::sign::needs_secret(&config) {
-                crate::sign::ensure_secret(&mut config);
-                match state.config_store.save(&config) {
-                    Ok(revision) => config.revision = revision,
-                    Err(error) => tracing::warn!(%error, "补写签名密钥失败"),
-                }
-            }
-            state.replace(config);
-            tracing::info!("配置已重载");
-        }
-        Ok(None) => tracing::error!("数据库里没有配置，保留旧配置"),
+    match state.reload_from_db() {
+        Ok(true) => tracing::info!("配置已重载"),
+        Ok(false) => tracing::error!("数据库里没有配置，保留旧配置"),
         Err(err) => tracing::error!(error = %err, "配置解析失败，保留旧配置"),
     }
 }

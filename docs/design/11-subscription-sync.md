@@ -365,13 +365,15 @@
 - 源启用时 URL 必须是 `http(s)`。
 - 已有物化内容且请求未显式选择时，修改模式或删除源返回 `409`，`code=content_exists`，附 `channels` 计数。
 - 改 `sync` → `aggregate` 后，源摘要变化。正在运行的同步自动中止。
+- 改 `aggregate` → `sync` 后，清空该源的 `last_try`。保存后立即同步。
+- 读取分组使用源或草稿的请求头、代理与超时。
 
 ### 8.6 分组与频道
 
 | 接口 | 说明 |
 | --- | --- |
 | `PUT /panel/api/groups/:gid/channels/:cid` | 上游字段变化且未显式传 `sync_follow` 时，自动置 `false` |
-| `DELETE /panel/api/groups/:gid/channels/:cid` | 同步频道删除时写入源 `exclude`。有 `tvg-id` 用 `id:`，否则用 `url:` |
+| `DELETE /panel/api/groups/:gid/channels/:cid` | 同步频道删除时写入源 `exclude`。`tvg-id` 在同源内唯一时用 `id:`，否则用 `url:` |
 | `DELETE /panel/api/groups/:gid` | 同步分组删除时写入组内每个频道键。不写 `group:` |
 | `POST /panel/api/groups/:gid/detach` | 分组转为手工。频道保留来源关系 |
 | `POST /panel/api/groups/:gid/channels/:cid/detach` | 频道转为手工 |
@@ -442,7 +444,7 @@
 | 关闭源 | 自动同步停止。内容保留 |
 | 删除源 | 询问：保留为手工或删除 |
 | `sync` 切到 `aggregate` | 询问：保留为手工或删除 |
-| `aggregate` 切到 `sync` | 下一次同步物化 |
+| `aggregate` 切到 `sync` | 保存后立即同步 |
 | 上游改 URL、改名、移组 | `sync_follow=true` 时更新；否则保留 |
 | 上游改分组名 | 旧组删除、新组创建。旧组有手工内容时保留 |
 | 上游清空清单 | 默认拦截。`sync_allow_empty=true` 时清空 |
@@ -464,6 +466,7 @@
 - 源地址由管理员配置。服务端会主动抓取。内网部署时注意 SSRF 风险。第一版不封锁内网地址。
 - 源 URL 与备份可能包含账号令牌。与现有聚合源行为一致。
 - `sync_concurrency` 当前只登记，不并行执行。
+- 聚合输出与本地频道按 URL 去重。本地已存在的地址不再追加。
 
 ## 12 兼容与迁移
 
@@ -491,6 +494,9 @@
 - 空清单拦截、`force`、`sync_allow_empty`。
 - 缩水比例。
 - 跨源/手工 URL 去重、ID 冲突、稳定键后缀。
+- 分组改名保留。多源并入同组时频道 ID 不冲突。
+- 同源重复 `tvg-id` 删除时改用 `url:` 排除。
+- 旧大小写键继续匹配。
 - 调度：间隔、每天、退避。
 - 源配置校验。
 

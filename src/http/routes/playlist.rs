@@ -36,6 +36,11 @@ pub async fn update(
     for source in &mut cfg.sources {
         normalize_source(source)?;
     }
+    // 先校验候选配置。失败返回 400，不能走到保存阶段变成 500。
+    let mut candidate = (*state.snapshot()).clone();
+    candidate.playlist = cfg.clone();
+    crate::config::validate(&candidate)
+        .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
     state
         .mutate(|config| {
             config.playlist = cfg.clone();
@@ -49,32 +54,42 @@ pub async fn update(
 pub async fn update_settings(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
-    Json(mut cfg): Json<PlaylistCfg>,
+    Json(cfg): Json<PlaylistCfg>,
 ) -> Result<Json<Value>, ApiError> {
-    cfg.merge_ttl_secs = cfg.merge_ttl_secs.clamp(30, 86_400);
     if cfg.merge_position != "top" && cfg.merge_position != "bottom" {
         return Err(ApiError::bad_request("merge_position 只能是 top 或 bottom"));
     }
-    cfg.sources.clear();
+    // 先校验候选配置。失败返回 400，不能走到保存阶段变成 500。
+    let mut candidate = (*state.snapshot()).clone();
+    apply_global_settings(&mut candidate.playlist, &cfg);
+    crate::config::validate(&candidate)
+        .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
+
     state
         .mutate(|config| {
-            config.playlist.merge_ttl_secs = cfg.merge_ttl_secs;
-            config.playlist.merge_position = cfg.merge_position.clone();
-            config.playlist.global_exclude = cfg.global_exclude.clone();
-            config.playlist.sync_enabled = cfg.sync_enabled;
-            config.playlist.sync_schedule = cfg.sync_schedule.clone();
-            config.playlist.sync_interval_secs = cfg.sync_interval_secs;
-            config.playlist.sync_daily_at = cfg.sync_daily_at.clone();
-            config.playlist.sync_allow_empty = cfg.sync_allow_empty;
-            config.playlist.sync_warn_removal_ratio = cfg.sync_warn_removal_ratio;
-            config.playlist.sync_max_channels = cfg.sync_max_channels;
-            config.playlist.sync_total_warn = cfg.sync_total_warn;
-            config.playlist.sync_concurrency = cfg.sync_concurrency;
-            config.playlist.sync_fetch_timeout_secs = cfg.sync_fetch_timeout_secs;
+            // 只改全局字段。并发修改的其他字段（如源列表）保持不动。
+            apply_global_settings(&mut config.playlist, &cfg);
             Ok(())
         })
         .map_err(map_internal)?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// 把全局同步与聚合设置写入目标。源列表不动。
+fn apply_global_settings(target: &mut PlaylistCfg, cfg: &PlaylistCfg) {
+    target.merge_ttl_secs = cfg.merge_ttl_secs.clamp(30, 86_400);
+    target.merge_position = cfg.merge_position.clone();
+    target.global_exclude = cfg.global_exclude.clone();
+    target.sync_enabled = cfg.sync_enabled;
+    target.sync_schedule = cfg.sync_schedule.clone();
+    target.sync_interval_secs = cfg.sync_interval_secs;
+    target.sync_daily_at = cfg.sync_daily_at.clone();
+    target.sync_allow_empty = cfg.sync_allow_empty;
+    target.sync_warn_removal_ratio = cfg.sync_warn_removal_ratio;
+    target.sync_max_channels = cfg.sync_max_channels;
+    target.sync_total_warn = cfg.sync_total_warn;
+    target.sync_concurrency = cfg.sync_concurrency;
+    target.sync_fetch_timeout_secs = cfg.sync_fetch_timeout_secs;
 }
 
 /// `POST /panel/api/playlist/sources`——新建一个源。
@@ -170,6 +185,13 @@ pub async fn update_source(
             Ok(())
         })
         .map_err(map_internal)?;
+    // 首次进入托管：清掉旧计时，调度器下一轮立即补跑。
+    if existing.mode != "sync" && source.mode == "sync" {
+        state.sources.update_status(&id, |status| {
+            status.last_try = 0;
+            status.error = None;
+        });
+    }
     Ok(Json(json!({
         "ok": true,
         "source": source,

@@ -180,6 +180,25 @@ impl AppState {
         self.config.load_full()
     }
 
+    /// 从数据库重读并替换快照。写锁内完成，避免与保存交错。
+    ///
+    /// 返回 `Ok(false)` 表示库里没有配置。此时保留旧快照。
+    pub fn reload_from_db(&self) -> anyhow::Result<bool> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        match self.config_store.load()? {
+            Some(mut config) => {
+                if crate::sign::needs_secret(&config) {
+                    crate::sign::ensure_secret(&mut config);
+                    let revision = self.config_store.save(&config)?;
+                    config.revision = revision;
+                }
+                self.replace(config);
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
     /// 选择频道上游客户端。
     ///
     /// 频道级代理优先于分组级。目标在代理不可用时**不回退**到分组代理或直连；

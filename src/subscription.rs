@@ -231,13 +231,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
             })
         });
         let id = match existing {
-            Some(idx) => {
-                let group = &mut groups[idx];
-                if group.origin == "sync" && group.source_id == source.id && group.name != name {
-                    group.name = name;
-                }
-                group.id.clone()
-            }
+            Some(idx) => groups[idx].id.clone(),
             None => {
                 let sample = plan
                     .channels
@@ -283,10 +277,10 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         .filter_map(|(original, id)| index_by_id.get(id).map(|idx| (original.clone(), *idx)))
         .collect();
 
-    let plan_by_key: HashMap<&str, &PlannedChannel> = plan
+    let plan_by_key: HashMap<String, &PlannedChannel> = plan
         .channels
         .iter()
-        .map(|channel| (channel.key.as_str(), channel))
+        .map(|channel| (canonical_key(&channel.key), channel))
         .collect();
     let mut existing_keys: HashSet<String> = HashSet::new();
     let mut remove_keys: HashSet<String> = HashSet::new();
@@ -298,7 +292,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
             if channel.source_id != source.id || channel.source_key.is_empty() {
                 continue;
             }
-            let key = channel.source_key.clone();
+            let key = canonical_key(&channel.source_key);
             existing_keys.insert(key.clone());
             let Some(planned) = plan_by_key.get(key.as_str()) else {
                 if channel.sync_follow {
@@ -329,7 +323,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
             let before = group.channels.len();
             group.channels.retain(|channel| {
                 !(channel.source_id == source.id
-                    && remove_keys.contains(channel.source_key.as_str()))
+                    && remove_keys.contains(&canonical_key(&channel.source_key)))
             });
             stats.removed += before - group.channels.len();
         }
@@ -343,14 +337,15 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
             while idx > 0 {
                 idx -= 1;
                 let channel = &group.channels[idx];
-                if channel.source_id == source.id && move_keys.contains(channel.source_key.as_str())
+                if channel.source_id == source.id
+                    && move_keys.contains(&canonical_key(&channel.source_key))
                 {
                     moved.push(group.channels.remove(idx));
                 }
             }
         }
         for mut channel in moved {
-            let Some(planned) = plan_by_key.get(channel.source_key.as_str()) else {
+            let Some(planned) = plan_by_key.get(&canonical_key(&channel.source_key)) else {
                 continue;
             };
             update_fields(&mut channel, planned);
@@ -361,7 +356,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
                 }
                 continue;
             };
-            channel.id = unique_channel_id(&groups[gidx], &planned.id_base, &channel.source_key);
+            channel.id = unique_channel_id(&groups[gidx], &planned.id_base);
             groups[gidx].channels.push(channel);
             stats.updated += 1;
         }
@@ -369,13 +364,13 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
 
     // 阶段五：新增计划内、当前不存在的频道。
     for planned in &plan.channels {
-        if existing_keys.contains(&planned.key) {
+        if existing_keys.contains(&canonical_key(&planned.key)) {
             continue;
         }
         let Some(&gidx) = target_index.get(&planned.source_group) else {
             continue;
         };
-        let id = unique_channel_id(&groups[gidx], &planned.id_base, &planned.key);
+        let id = unique_channel_id(&groups[gidx], &planned.id_base);
         let channel = build_channel(source, planned, id);
         groups[gidx].channels.push(channel);
         stats.added += 1;
@@ -435,12 +430,12 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
 
 /// 预检差异。与 [`apply`] 使用同一套匹配规则。
 pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
-    let planned: HashMap<&str, &PlannedChannel> = plan
+    let planned: HashMap<String, &PlannedChannel> = plan
         .channels
         .iter()
-        .map(|channel| (channel.key.as_str(), channel))
+        .map(|channel| (canonical_key(&channel.key), channel))
         .collect();
-    let mut existing: HashSet<&str> = HashSet::new();
+    let mut existing: HashSet<String> = HashSet::new();
     let mut out = Diff {
         skipped_duplicates: plan.duplicates,
         ..Diff::default()
@@ -451,8 +446,8 @@ pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
             if channel.source_id != source.id || channel.source_key.is_empty() {
                 continue;
             }
-            existing.insert(channel.source_key.as_str());
-            match planned.get(channel.source_key.as_str()) {
+            existing.insert(canonical_key(&channel.source_key));
+            match planned.get(&canonical_key(&channel.source_key)) {
                 Some(planned) => {
                     if channel.sync_follow && !same_upstream(channel, planned) {
                         out.update += 1;
@@ -469,7 +464,7 @@ pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
     out.add = plan
         .channels
         .iter()
-        .filter(|channel| !existing.contains(channel.key.as_str()))
+        .filter(|channel| !existing.contains(&canonical_key(&channel.key)))
         .count();
 
     for planned_group in &plan.groups {
@@ -532,7 +527,7 @@ pub async fn fetch(
             request = request.header(name, value);
         }
     }
-    let response = request.send().await.context("抓取失败")?;
+    let mut response = request.send().await.context("抓取失败")?;
     let status = response.status();
     if !status.is_success() {
         bail!("上游返回 {status}");
@@ -542,9 +537,13 @@ pub async fn fetch(
             bail!("正文超过 16 MiB");
         }
     }
-    let bytes = response.bytes().await.context("读取失败")?;
-    if bytes.len() > MAX_BODY_BYTES {
-        bail!("正文超过 16 MiB");
+    // 流式累计，先拦上限再扩容，避免无 Content-Length 的大响应占满内存。
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = response.chunk().await.context("读取失败")? {
+        if bytes.len() + chunk.len() > MAX_BODY_BYTES {
+            bail!("正文超过 16 MiB");
+        }
+        bytes.extend_from_slice(&chunk);
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
@@ -887,7 +886,7 @@ pub fn detach_channel(config: &mut Config, gid: &str, cid: &str) -> bool {
     found
 }
 
-/// 把一个分组转为手工。组内频道保留来源关系。
+/// 把一个分组转为手工。组内频道一并断开来源，避免下次同步移回。
 pub fn detach_group(config: &mut Config, gid: &str) -> bool {
     let Some(group) = config.group_mut(gid) else {
         return false;
@@ -895,6 +894,11 @@ pub fn detach_group(config: &mut Config, gid: &str) -> bool {
     group.origin = "manual".into();
     group.source_id.clear();
     group.source_group.clear();
+    for channel in &mut group.channels {
+        channel.source_id.clear();
+        channel.source_key.clear();
+        channel.sync_follow = true;
+    }
     true
 }
 
@@ -909,21 +913,25 @@ pub fn upstream_differs(a: &Channel, b: &Channel) -> bool {
         || extra_str(a, "group_title") != extra_str(b, "group_title")
 }
 
-/// 频道对应的排除词。有 `tvg-id` 用 `id:`，否则用 `url:`。
-pub fn exclude_pattern(channel: &Channel) -> Option<String> {
-    if let Some(tvg_id) = trim_opt(channel.extra.get("tvg_id").and_then(Value::as_str)) {
-        return Some(format!("id:{}", tvg_id.to_lowercase()));
-    }
-    let url = channel.url.trim();
-    (!url.is_empty()).then(|| format!("url:{url}"))
-}
-
 /// 把一个频道键加入源排除列表。重复时不写。
+///
+/// 同源内 `tvg-id` 不唯一时改用 `url:`。否则删除一个频道会连带排除
+/// 同 id 的其他频道。
 pub fn exclude_channel(config: &mut Config, channel: &Channel) {
     if channel.source_id.is_empty() || channel.source_key.is_empty() {
         return;
     }
-    let Some(pattern) = exclude_pattern(channel) else {
+    let tvg_id = trim_opt(channel.extra.get("tvg_id").and_then(Value::as_str));
+    let pattern = match tvg_id {
+        Some(id) if same_tvg_id_count(config, &channel.source_id, &id) <= 1 => {
+            Some(format!("id:{}", id.to_lowercase()))
+        }
+        _ => {
+            let url = channel.url.trim();
+            (!url.is_empty()).then(|| format!("url:{url}"))
+        }
+    };
+    let Some(pattern) = pattern else {
         return;
     };
     let source_id = channel.source_id.clone();
@@ -937,6 +945,22 @@ pub fn exclude_channel(config: &mut Config, channel: &Channel) {
             source.exclude.push(pattern);
         }
     }
+}
+
+/// 同一源内使用该 `tvg-id` 的频道数。
+fn same_tvg_id_count(config: &Config, source_id: &str, tvg_id: &str) -> usize {
+    let wanted = tvg_id.to_lowercase();
+    config
+        .groups
+        .iter()
+        .flat_map(|group| group.channels.iter())
+        .filter(|channel| channel.source_id == source_id)
+        .filter(|channel| {
+            trim_opt(channel.extra.get("tvg_id").and_then(Value::as_str))
+                .map(|value| value.to_lowercase())
+                == Some(wanted.clone())
+        })
+        .count()
 }
 
 /// 同步分组清理。
@@ -1045,9 +1069,24 @@ fn stable_key(entry: &Entry, original: &str) -> String {
     }
     let name = entry.name.trim();
     if !name.is_empty() {
-        return format!("name:{original}\u{1f}{name}");
+        return format!(
+            "name:{}\u{1f}{}",
+            original.trim().to_lowercase(),
+            name.to_lowercase()
+        );
     }
     format!("url:{}", entry.url.trim())
+}
+
+/// 匹配用的规范键。`name:` 键忽略大小写；`id:` 已小写；`url:` 保持原样。
+///
+/// 旧版本按原样保存 `name:` 键。这里归一后，升级不会误删或重复频道。
+fn canonical_key(key: &str) -> String {
+    if key.starts_with("name:") {
+        key.to_lowercase()
+    } else {
+        key.to_string()
+    }
 }
 
 fn channel_id_base(entry: &Entry, key: &str) -> String {
@@ -1129,14 +1168,10 @@ fn unique_group_id(groups: &[Group], name: &str) -> String {
     id
 }
 
-fn unique_channel_id(group: &Group, base: &str, key: &str) -> String {
+fn unique_channel_id(group: &Group, base: &str) -> String {
     let mut id = base.to_string();
     let mut suffix = 2;
-    while group
-        .channels
-        .iter()
-        .any(|channel| channel.id == id && channel.source_key != key)
-    {
+    while group.channels.iter().any(|channel| channel.id == id) {
         id = format!("{base}-{suffix}");
         suffix += 1;
     }
@@ -1667,5 +1702,127 @@ mod tests {
         let playlist = PlaylistCfg::default();
         assert!(!playlist.sync_allow_empty);
         assert_eq!(playlist.sync_max_channels, 20_000);
+    }
+
+    #[test]
+    fn group_rename_survives_sync() {
+        let mut config = config_with_source();
+        let source = source();
+        let entries = urls(&[("c1", "央视", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+        config.groups[0].name = "我的频道".into();
+        run(&mut config, &source, &entries);
+        assert_eq!(config.groups[0].name, "我的频道");
+    }
+
+    #[test]
+    fn merged_sources_with_same_key_get_distinct_ids() {
+        let mut config = Config::default();
+        let mut first = source();
+        first.merge_into.insert("共享".into(), "g".into());
+        let mut second = source();
+        second.id = "s2".into();
+        second.name = "上游2".into();
+        second.merge_into.insert("共享".into(), "g".into());
+        config.playlist.sources.push(first.clone());
+        config.playlist.sources.push(second.clone());
+        config.groups.push(Group {
+            id: "g".into(),
+            name: "共享".into(),
+            ..Group::default()
+        });
+
+        run(
+            &mut config,
+            &first,
+            &[entry("C1", "共享", "same", "http://up/a.m3u8")],
+        );
+        run(
+            &mut config,
+            &second,
+            &[entry("C1", "共享", "same", "http://up/b.m3u8")],
+        );
+        let ids: Vec<&str> = config.groups[0]
+            .channels
+            .iter()
+            .map(|channel| channel.id.as_str())
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert_ne!(ids[0], ids[1], "同组内频道 id 必须唯一");
+    }
+
+    #[test]
+    fn duplicate_tvg_id_excludes_by_url() {
+        let mut config = config_with_source();
+        let source = source();
+        let entries = vec![
+            entry("标清", "央视", "same", "http://up/sd.m3u8"),
+            entry("高清", "央视", "same", "http://up/hd.m3u8"),
+        ];
+        run(&mut config, &source, &entries);
+        let channel = config.groups[0].channels[0].clone();
+        exclude_channel(&mut config, &channel);
+        let exclude = &config.playlist.sources[0].exclude;
+        assert_eq!(exclude, &vec!["url:http://up/sd.m3u8".to_string()]);
+    }
+
+    #[test]
+    fn detach_group_clears_channel_sources() {
+        let mut config = config_with_source();
+        let source = source();
+        let entries = urls(&[("c1", "央视", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+        let gid = config.groups[0].id.clone();
+        assert!(detach_group(&mut config, &gid));
+        assert_eq!(config.groups[0].origin, "manual");
+        assert!(config.groups[0].source_id.is_empty());
+        assert!(config.groups[0].channels[0].source_id.is_empty());
+        assert!(config.groups[0].channels[0].source_key.is_empty());
+    }
+
+    #[test]
+    fn legacy_mixed_case_name_key_still_matches() {
+        let mut config = config_with_source();
+        let source = source();
+        let entries = vec![Entry {
+            name: "CCTV-1".into(),
+            group_title: Some("CCTV".into()),
+            url: "http://up/1".into(),
+            ..Entry::default()
+        }];
+        run(&mut config, &source, &entries);
+        // 模拟旧版本按原样写入的键。
+        config.groups[0].channels[0].source_key = "name:CCTV\u{1f}CCTV-1".into();
+
+        let stats = run(&mut config, &source, &entries);
+        assert_eq!(config.groups[0].channels.len(), 1, "旧键不应产生重复");
+        assert_eq!(
+            (
+                stats.added,
+                stats.updated,
+                stats.removed,
+                stats.skipped_removals
+            ),
+            (0, 0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn name_key_ignores_case() {
+        let upper = Entry {
+            name: "CCTV-1".into(),
+            group_title: Some("CCTV".into()),
+            ..Entry::default()
+        };
+        let lower = Entry {
+            name: "cctv-1".into(),
+            group_title: Some("cctv".into()),
+            ..Entry::default()
+        };
+        assert_eq!(
+            stable_key(&upper, "CCTV"),
+            stable_key(&lower, "cctv"),
+            "大小写变化不应换键"
+        );
     }
 }

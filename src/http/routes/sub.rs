@@ -79,7 +79,14 @@ pub async fn playlist(
 /// 所以对所有用户一视同仁。
 async fn aggregate_sources(state: &Arc<AppState>, config: &crate::config::Config) -> String {
     let mut extra = String::new();
-    let mut seen = HashSet::new();
+    // 本地频道地址先占位，避免与聚合条目重复输出。
+    let mut seen: HashSet<String> = config
+        .groups
+        .iter()
+        .flat_map(|group| group.channels.iter())
+        .map(|channel| channel.url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .collect();
     for source in
         config.playlist.sources.iter().filter(|source| {
             source.enabled && source.mode != "sync" && !source.url.trim().is_empty()
@@ -89,7 +96,7 @@ async fn aggregate_sources(state: &Arc<AppState>, config: &crate::config::Config
         let ttl = std::time::Duration::from_secs(crate::subs::effective_ttl_secs(source.ttl_secs));
         let body = match state.sources.get_with_ttl(&key, ttl) {
             Some(body) => body,
-            None => match fetch_source(state, source).await {
+            None => match fetch_source(state, source, &config.playlist).await {
                 Ok(text) => text,
                 Err(error) => {
                     tracing::warn!(url = %source.url, error = %error, "抓取聚合源失败");
@@ -107,20 +114,14 @@ async fn aggregate_sources(state: &Arc<AppState>, config: &crate::config::Config
 }
 
 /// 抓取单个聚合源；成功时写入缓存与状态。
-async fn fetch_source(state: &Arc<AppState>, source: &PlaylistSource) -> Result<String, String> {
-    let response = state
-        .http
-        .get(&source.url)
-        .send()
+async fn fetch_source(
+    state: &Arc<AppState>,
+    source: &PlaylistSource,
+    playlist: &crate::config::model::PlaylistCfg,
+) -> Result<String, String> {
+    let text = crate::subscription::fetch(state, source, playlist)
         .await
-        .map_err(|error| format!("抓取失败: {error}"))?;
-    if !response.status().is_success() {
-        return Err(format!("上游返回 {}", response.status()));
-    }
-    let text = response
-        .text()
-        .await
-        .map_err(|error| format!("读取失败: {error}"))?;
+        .map_err(|error| format!("{error:#}"))?;
     state
         .sources
         .put(&format!("sub:{}:{}", source.id, source.url), text.clone());

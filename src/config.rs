@@ -71,7 +71,11 @@ fn validate_playlist(playlist: &crate::config::model::PlaylistCfg) -> anyhow::Re
     {
         bail!("playlist.sync_interval_secs 必须在 300–2592000 之间");
     }
-    if !valid_daily_at(&playlist.sync_daily_at) {
+    if playlist.sync_schedule == "daily" {
+        if !valid_daily_at(&playlist.sync_daily_at) {
+            bail!("playlist.sync_daily_at 必须是 HH:MM");
+        }
+    } else if !playlist.sync_daily_at.is_empty() && !valid_daily_at(&playlist.sync_daily_at) {
         bail!("playlist.sync_daily_at 必须是 HH:MM");
     }
     if playlist.sync_fetch_timeout_secs == 0 || playlist.sync_fetch_timeout_secs > 600 {
@@ -246,5 +250,21 @@ mod tests {
         assert!(!valid_daily_at("24:00"));
         assert!(!valid_daily_at("12:60"));
         assert!(!valid_daily_at(""));
+    }
+
+    #[test]
+    fn interval_schedule_allows_empty_daily_time() {
+        let mut config = Config::default();
+        config.playlist.sync_schedule = "interval".into();
+        config.playlist.sync_daily_at.clear();
+        validate(&config).expect("间隔调度不要求每天时间");
+    }
+
+    #[test]
+    fn daily_schedule_requires_daily_time() {
+        let mut config = Config::default();
+        config.playlist.sync_schedule = "daily".into();
+        config.playlist.sync_daily_at.clear();
+        assert!(validate(&config).is_err());
     }
 }

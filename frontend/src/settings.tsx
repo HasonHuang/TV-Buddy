@@ -571,9 +571,10 @@ export function SettingsPage({
     setBusy('save');
     try {
       const next = draft;
-      await putConfig(next);
-      setDraft(next);
-      setBaseline(next);
+      const revision = await putConfig(next);
+      const saved = { ...next, revision };
+      setDraft(saved);
+      setBaseline(saved);
       ok('设置已保存');
       try {
         const stats = await api<{ recommend: Recommend }>('GET', '/cache/stats');
@@ -1648,8 +1649,8 @@ function RawCard({ draft, onSaved }: { draft: Cfg; onSaved: (next: Cfg) => void 
     setBusy(true);
     try {
       const parsed = JSON.parse(text) as Cfg;
-      await putConfig(parsed);
-      onSaved(parsed);
+      const revision = await putConfig(parsed);
+      onSaved({ ...parsed, revision });
       setEdited(false);
       setRaw(null);
       ok('配置已保存');
