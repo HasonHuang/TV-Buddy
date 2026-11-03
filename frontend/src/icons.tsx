@@ -22,6 +22,7 @@ export type IconName =
   | 'logs'
   | 'tv'
   | 'plus'
+  | 'minus'
   | 'edit'
   | 'trash'
   | 'download'
@@ -153,6 +154,7 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   up: <path d="m4.7 9.7 3.3-3.4 3.3 3.4" />,
   down: <path d="m4.7 6.3 3.3 3.4 3.3-3.4" />,
+  minus: <path d="M3.3 8h9.4" />,
   sun: (
     <>
       <circle cx="8" cy="8" r="2.9" />

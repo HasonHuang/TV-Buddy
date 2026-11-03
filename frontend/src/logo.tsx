@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken } from './api';
-import { Confirm, Empty, Modal, PageHead, Select, Tip } from './ui';
+import { Confirm, Empty, Modal, NumberBox, PageHead, Select, Tip } from './ui';
 import './style.css';
 
 type Logo = {
@@ -397,25 +397,23 @@ export function LogosPage() {
             <label>
               最大边
               <Tip text="上传前按最长边等比缩放。超过这个值的图片会缩小，避免占用过多内存。" />
-              <input
-                type="number"
+              <NumberBox
                 min={16}
                 max={2048}
-                style={{ width: 90 }}
+                style={{ width: 112 }}
                 value={opts.maxEdge}
-                onChange={(event) => setOpts({ ...opts, maxEdge: event.target.value })}
+                onChange={(next) => setOpts({ ...opts, maxEdge: next })}
               />
             </label>
             <label>
               质量
               <Tip text="WebP 编码质量。数值越高越清晰，文件也越大。" />
-              <input
-                type="number"
+              <NumberBox
                 min={1}
                 max={100}
-                style={{ width: 80 }}
+                style={{ width: 104 }}
                 value={opts.quality}
-                onChange={(event) => setOpts({ ...opts, quality: event.target.value })}
+                onChange={(next) => setOpts({ ...opts, quality: next })}
               />
             </label>
             <label className="check">
@@ -428,7 +426,7 @@ export function LogosPage() {
               <Tip text="在浏览器里先转成 WebP 再上传。透明背景会保留。" />
             </label>
             <span className="muted">
-              上载前在浏览器里按最长边等比缩放并转码（目标同：服务端上载不转码）。
+              上载前在浏览器里按最长边等比缩放并转码（服务端上载时不转码）。
             </span>
           </div>
         )}

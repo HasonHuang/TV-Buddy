@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError } from './api';
-import { Badge, Drawer, Field, Modal, PageHead, Select, Tip, useToast } from './ui';
+import { Badge, Drawer, Field, Modal, NumberBox, PageHead, Select, Tip, useToast } from './ui';
 
 type Source = {
   id: string;
@@ -577,7 +577,7 @@ export function PlaylistPage() {
                       <button className="ghost" onClick={() => openSource(source)}>
                         编辑
                       </button>
-                      <button className="icon-btn" onClick={() => void askDelete(source)}>
+                      <button className="chip danger-text" onClick={() => void askDelete(source)}>
                         删除
                       </button>
                     </td>
@@ -587,7 +587,7 @@ export function PlaylistPage() {
               {sources.length === 0 && (
                 <tr>
                   <td colSpan={8} className="muted">
-                    暂无订阅源。
+                    暂无订阅源。点右上角「添加源」开始。
                   </td>
                 </tr>
               )}
@@ -605,11 +605,10 @@ export function PlaylistPage() {
           <label>
             聚合缓存秒数
             <Tip text="聚合结果缓存多久。缓存期内直接复用上次结果。" />
-            <input
-              type="number"
+            <NumberBox
               value={global.merge_ttl_secs}
-              onChange={(event) =>
-                setGlobal({ ...global, merge_ttl_secs: Number(event.target.value) || 300 })
+              onChange={(next) =>
+                setGlobal({ ...global, merge_ttl_secs: Number(next) || 300 })
               }
             />
           </label>
@@ -652,14 +651,13 @@ export function PlaylistPage() {
           </Field>
           <label>
             默认间隔（秒）
-            <input
-              type="number"
+            <NumberBox
               min={300}
               value={global.sync_interval_secs}
-              onChange={(event) =>
+              onChange={(next) =>
                 setGlobal({
                   ...global,
-                  sync_interval_secs: Number(event.target.value) || 21600,
+                  sync_interval_secs: Number(next) || 21600,
                 })
               }
             />
@@ -676,38 +674,35 @@ export function PlaylistPage() {
         <div className="row">
           <label>
             单源频道上限
-            <input
-              type="number"
+            <NumberBox
               min={0}
               value={global.sync_max_channels}
-              onChange={(event) =>
-                setGlobal({ ...global, sync_max_channels: Number(event.target.value) || 0 })
+              onChange={(next) =>
+                setGlobal({ ...global, sync_max_channels: Number(next) || 0 })
               }
             />
           </label>
           <label>
             总频道警告阈值
-            <input
-              type="number"
+            <NumberBox
               min={0}
               value={global.sync_total_warn}
-              onChange={(event) =>
-                setGlobal({ ...global, sync_total_warn: Number(event.target.value) || 0 })
+              onChange={(next) =>
+                setGlobal({ ...global, sync_total_warn: Number(next) || 0 })
               }
             />
           </label>
           <label>
             缩水标红比例
-            <input
-              type="number"
+            <NumberBox
               min={0}
               max={1}
               step={0.05}
               value={global.sync_warn_removal_ratio}
-              onChange={(event) =>
+              onChange={(next) =>
                 setGlobal({
                   ...global,
-                  sync_warn_removal_ratio: Number(event.target.value) || 0,
+                  sync_warn_removal_ratio: Number(next) || 0,
                 })
               }
             />
@@ -971,13 +966,10 @@ export function PlaylistPage() {
                 </Field>
                 <label>
                   间隔（秒）
-                  <input
-                    type="number"
+                  <NumberBox
                     min={0}
                     value={drawer.draft.sync_interval_secs}
-                    onChange={(event) =>
-                      patch({ sync_interval_secs: Number(event.target.value) || 0 })
-                    }
+                    onChange={(next) => patch({ sync_interval_secs: Number(next) || 0 })}
                   />
                   <span className="hint">0 继承全局</span>
                 </label>
@@ -1036,13 +1028,10 @@ export function PlaylistPage() {
                 </Field>
                 <label>
                   单源上限
-                  <input
-                    type="number"
+                  <NumberBox
                     min={0}
                     value={drawer.draft.max_channels}
-                    onChange={(event) =>
-                      patch({ max_channels: Number(event.target.value) || 0 })
-                    }
+                    onChange={(next) => patch({ max_channels: Number(next) || 0 })}
                   />
                   <span className="hint">0 继承全局</span>
                 </label>

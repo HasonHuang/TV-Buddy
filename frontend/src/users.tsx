@@ -372,7 +372,7 @@ export function UsersPage() {
                     重置密码
                   </button>
                   <button
-                    className="chip danger"
+                    className="chip danger-text"
                     title="删除用户，同时撤销其全部设备令牌"
                     onClick={() => setConfirmRemove(user)}
                   >
@@ -617,7 +617,7 @@ export function UsersPage() {
                       复制
                     </button>
                     <button
-                      className="chip danger"
+                      className="chip danger-text"
                       title="让这个设备的播放地址立即失效"
                       onClick={() => setConfirmRevoke(token)}
                     >

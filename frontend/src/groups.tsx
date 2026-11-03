@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText, putConfig } from './api';
 import { Icon } from './icons';
-import { Badge, Confirm, Field, Modal, PageHead, Select, Switch, useToast } from './ui';
+import { Badge, Confirm, Field, Modal, NumberBox, PageHead, Select, Switch, useToast } from './ui';
 
 export type Channel = {
   id: string;
@@ -315,22 +315,20 @@ function NetworkBlock({
       {numeric && (
         <div className="fields">
           <Field label="单次上限（0 = 不限）" tip="每个清单最多预取的切片数。0 表示抓满清单窗口。">
-            <input
-              type="number"
+            <NumberBox
               min={0}
               value={prefetch.limit}
               placeholder="留空不覆盖"
-              onChange={(e) => onPrefetch({ ...prefetch, limit: e.target.value })}
+              onChange={(next) => onPrefetch({ ...prefetch, limit: next })}
             />
           </Field>
           <Field label="并发数（1-32）" tip="同时发出的预取请求数。过高会挤占带宽。">
-            <input
-              type="number"
+            <NumberBox
               min={1}
               max={32}
               value={prefetch.concurrency}
               placeholder="留空不覆盖"
-              onChange={(e) => onPrefetch({ ...prefetch, concurrency: e.target.value })}
+              onChange={(next) => onPrefetch({ ...prefetch, concurrency: next })}
             />
           </Field>
         </div>
@@ -900,7 +898,11 @@ export function GroupsPage() {
       )}
 
       {visible.length === 0 && (
-        <div className="card muted">{groups.length === 0 ? '还没有分组。' : '没有匹配的分组。'}</div>
+        <div className="card muted">
+          {groups.length === 0
+            ? '还没有分组。点「新建分组」创建，或用 M3U 导入现有清单。'
+            : '没有匹配的分组。'}
+        </div>
       )}
 
       {visible.map((group) => {
@@ -1008,7 +1010,7 @@ export function GroupsPage() {
                   </button>
                 )}
                 <button
-                  className="chip danger"
+                  className="chip danger-text"
                   aria-label="删除分组"
                   onClick={() =>
                     setRemoving({ kind: 'group', gid: group.id, label: group.name || group.id })
@@ -1127,7 +1129,7 @@ export function GroupsPage() {
                       </button>
                     )}
                     <button
-                      className="chip danger"
+                      className="chip danger-text"
                       aria-label="删除频道"
                       onClick={() =>
                         setRemoving({
@@ -1432,14 +1434,13 @@ export function GroupsPage() {
                 />
               </Field>
               <Field label="缓存秒数" tip="脚本结果的缓存时间。0 表示每次都重新运行脚本。">
-                <input
-                  type="number"
+                <NumberBox
                   min={0}
                   value={channelForm.form.scriptTtl}
-                  onChange={(event) =>
+                  onChange={(next) =>
                     setChannelForm({
                       ...channelForm,
-                      form: { ...channelForm.form, scriptTtl: event.target.value },
+                      form: { ...channelForm.form, scriptTtl: next },
                     })
                   }
                 />
@@ -1479,27 +1480,25 @@ export function GroupsPage() {
             {channelForm.form.livestream && (
               <div className="fields">
                 <Field label="保留小时数" tip="历史切片保留的时长。0 表示不按时间限制。" hint="0 表示不限制。">
-                  <input
-                    type="number"
+                  <NumberBox
                     min={0}
                     value={channelForm.form.timeshiftHours}
-                    onChange={(event) =>
+                    onChange={(next) =>
                       setChannelForm({
                         ...channelForm,
-                        form: { ...channelForm.form, timeshiftHours: event.target.value },
+                        form: { ...channelForm.form, timeshiftHours: next },
                       })
                     }
                   />
                 </Field>
                 <Field label="磁盘上限（GB）" hint="0 表示不限制。">
-                  <input
-                    type="number"
+                  <NumberBox
                     min={0}
                     value={channelForm.form.timeshiftMaxGb}
-                    onChange={(event) =>
+                    onChange={(next) =>
                       setChannelForm({
                         ...channelForm,
-                        form: { ...channelForm.form, timeshiftMaxGb: event.target.value },
+                        form: { ...channelForm.form, timeshiftMaxGb: next },
                       })
                     }
                   />

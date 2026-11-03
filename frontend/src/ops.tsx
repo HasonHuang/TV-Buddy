@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, apiText, getToken, putConfig } from './api';
 import { Icon } from './icons';
-import { Confirm, Field, PageHead, Select, Tip } from './ui';
+import { Confirm, Field, NumberBox, PageHead, Select, Tip } from './ui';
 
 type IpEntry = {
   ip: string;
@@ -37,7 +37,7 @@ type AuthCfg = Record<string, unknown>;
 type FullConfig = { auth?: AuthCfg } & Record<string, unknown>;
 
 /** 数字字段：路径 + 标签 + 单位。 */
-type NumField = { key: string; label: string; hint?: string };
+type NumField = { key: string; label: string; hint?: string; unit?: string };
 
 const AUTH_LIMIT: NumField[] = [
   {
@@ -104,12 +104,14 @@ function NumberField({
       <span>
         {field.label}
       </span>
-      <input
-        type="number"
-        min={0}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
+      <div className="num-line">
+        <NumberBox
+          min={0}
+          value={value}
+          onChange={onChange}
+        />
+        {field.unit ? <span className="field-unit">{field.unit}</span> : null}
+      </div>
       {field.hint && <div className="hint">{field.hint}</div>}
     </label>
   );
@@ -186,7 +188,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
   };
 
   return (
-    <div className="card">
+    <div className="card security-card">
       <div className="row between">
         <div>
           <h2>访问控制</h2>
@@ -206,9 +208,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
       <h3>白名单</h3>
       <p className="muted">
         每行一个地址，支持精确 IP、IPv4 CIDR 与 <code className="mono">*</code>。
-        只在上方「IP 管控」开启时生效：名单内的地址豁免封禁与并发会话上限。
-        目标键面里有它，但豁免语义在目标上未观测到，本实现的规则是自定的（见{' '}
-        <code className="mono">PROGRESS.md</code> §3.3）。
+        只在「IP 管控」开启时生效：名单内的地址不受封禁与并发会话上限限制。
       </p>
       <textarea
         rows={4}
@@ -230,6 +230,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
               { value: 'on', label: '开启' },
             ]}
             onChange={(next) => setKey('ip_guard_enabled', next === 'on')}
+            compact
           />
         </Field>
         <Field label="播放 Token" tip="开启后每个设备令牌只能播放自己的授权频道">
@@ -241,10 +242,11 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
               { value: 'on', label: '开启' },
             ]}
             onChange={(next) => setKey('token_enabled', next === 'on')}
+            compact
           />
         </Field>
         <NumberField
-          field={{ key: 'token_ttl_hours', label: 'Token 有效期', hint: '小时' }}
+          field={{ key: 'token_ttl_hours', label: 'Token 有效期', unit: '小时' }}
           value={authNumber(auth, 'token_ttl_hours')}
           onChange={(next) => setKey('token_ttl_hours', Number(next) || 0)}
         />
@@ -287,10 +289,11 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
               { value: 'off', label: '关闭' },
             ]}
             onChange={(next) => setKey('slice_sign_enabled', next === 'on')}
+            compact
           />
         </Field>
         <NumberField
-          field={{ key: 'slice_sign_window_secs', label: '签名时间窗', hint: '秒；30–3600' }}
+          field={{ key: 'slice_sign_window_secs', label: '签名时间窗', unit: '秒', hint: '范围 30–3600' }}
           value={authNumber(auth, 'slice_sign_window_secs')}
           onChange={(next) => setKey('slice_sign_window_secs', Number(next) || 0)}
         />
@@ -320,8 +323,6 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
       <p className="muted">
         限流只计播放入口请求（换台 / 新建播放），不计切片。二级是突发上限，
         一级是持续上限，任一超限即进入冷却并记一次违规。全部只在「IP 管控」开启时生效。
-        规则是自定的：目标 v0.8.2 的触发条件未复现（见{' '}
-        <code className="mono">PROGRESS.md</code> §3.1.5）。
       </p>
       <div className="fields">
         {AUTH_LIMIT.map((field) => (
@@ -355,7 +356,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
       <h3>登录防爆破</h3>
       <p className="muted">
         窗口内累计失败达到「免费次数 + 阈值」后，该 IP 的 <code className="mono">/panel/api/login</code> 返回 <code className="mono">429</code>；
-        锁不波及已有的 Bearer 会话。首次锁定时长固定 ≈300s（与目标观测一致）。
+        已登录的面板会话不受影响。首次锁定时长约 5 分钟。
       </p>
       <div className="fields">
         {AUTH_LOCK.map((field) => (
@@ -620,7 +621,7 @@ export function LogsPage() {
         title="运行日志"
         sub={`最近 ${shown.length} 行${level === 'all' ? '' : `（${level.toUpperCase()}）`}（共 ${total} 行）`}
       >
-        <div className="row">
+        <div className="row log-tools">
           <Select
             ariaLabel="日志级别"
             title="只显示所选级别的日志行"
@@ -630,14 +631,15 @@ export function LogsPage() {
               label: item === 'all' ? '全部级别' : item.toUpperCase(),
             }))}
             onChange={(next) => setLevel(next as Level)}
-            width={120}
+            width={124}
           />
           <input
             aria-label="读取行数"
             title="从环形缓冲读取最近多少行"
             value={limit}
             onChange={(event) => setLimit(event.target.value)}
-            style={{ width: 80 }}
+            inputMode="numeric"
+            style={{ width: 84 }}
           />
           <button
             className="ghost"
@@ -780,17 +782,20 @@ export function BackupPage({
           恢复会覆盖当前配置，旧配置另存为 <code className="mono">tv-buddy.db.bak.json</code>。
           非法内容不会落盘。恢复成功后配置会重新读取。
         </p>
-        <input
-          ref={file}
-          type="file"
-          accept=".gz,application/gzip"
-          aria-label="选择备份包"
-          title="选择 .tar.gz 备份包"
-          onChange={(event) => {
-            const selected = event.target.files?.[0];
-            if (selected) setPending(selected);
-          }}
-        />
+        <label className="ghost file-pick" title="选择 .tar.gz 备份包">
+          <Icon name="upload" size={14} />
+          {pending ? pending.name : '选择备份文件'}
+          <input
+            ref={file}
+            type="file"
+            accept=".gz,application/gzip"
+            aria-label="选择备份包"
+            onChange={(event) => {
+              const selected = event.target.files?.[0];
+              if (selected) setPending(selected);
+            }}
+          />
+        </label>
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}
       </div>
@@ -1013,7 +1018,7 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
           </h2>
           <p className="muted">
             引擎负责把节目名/简介翻成目标语言，译文按 <code className="mono">lang</code> 写进 XMLTV。
-            本实现只实现 MTranServer 的 HTTP 批量接口（<code className="mono">/translate/batch</code>，失败回退单条）。
+            通过 MTranServer 的 HTTP 批量接口翻译；批量失败时逐条重试。
           </p>
         </div>
         <div className="row">
@@ -1061,7 +1066,7 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
             value={text('engine') || 'mtran'}
             options={[
               { value: 'mtran', label: 'MTranServer' },
-              { value: 'google', label: 'google（目标键面；本实现仅走 URL 的 HTTP 接口）' },
+              { value: 'google', label: 'Google（通过 HTTP 接口）' },
             ]}
             onChange={(next) => setKey('engine', next)}
           />
@@ -1083,21 +1088,19 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
         </label>
         <label className="field">
           <span>批量大小</span>
-          <input
-            type="number"
+          <NumberBox
             min={1}
             max={500}
             value={num('mtran_batch')}
-            onChange={(event) => setKey('mtran_batch', Number(event.target.value) || 0)}
+            onChange={(next) => setKey('mtran_batch', Number(next) || 0)}
           />
         </label>
         <label className="field">
           <span>每轮上限</span>
-          <input
-            type="number"
+          <NumberBox
             min={0}
             value={num('mtran_max_per_round')}
-            onChange={(event) => setKey('mtran_max_per_round', Number(event.target.value) || 0)}
+            onChange={(next) => setKey('mtran_max_per_round', Number(next) || 0)}
           />
         </label>
       </div>

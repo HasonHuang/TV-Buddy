@@ -30,12 +30,12 @@ export function ThemeToggle({
   return (
     <button
       type="button"
-      className={`ghost icon-btn theme-toggle${className ? ` ${className}` : ''}`}
+      className={`ghost${showLabel ? '' : ' icon-btn'} theme-toggle${className ? ` ${className}` : ''}`}
       title={label}
       aria-label={label}
       onClick={() => setTheme(toggleTheme())}
     >
-      <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
+      <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={14} />
       {showLabel ? <span className="nav-label">{theme === 'dark' ? '浅色' : '深色'}</span> : null}
     </button>
   );
@@ -369,6 +369,7 @@ export function Select({
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLUListElement>(null);
   const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
   const typed = useRef({ text: '', at: 0 });
   const [open, setOpen] = useState(false);
@@ -379,7 +380,23 @@ export function Select({
 
   const close = (focusButton = false) => {
     setOpen(false);
-    if (focusButton) btnRef.current?.focus();
+    // 聚焦时不滚动页面：点击下拉只应展开菜单，不应带着整页跳一下。
+    if (focusButton) btnRef.current?.focus({ preventScroll: true });
+  };
+
+  /** 聚焦选项并只滚动菜单自身，不触达页面滚动位置。 */
+  const revealOption = (index: number) => {
+    const menu = menuRef.current;
+    const option = optionRefs.current[index];
+    if (!menu || !option) return;
+    option.focus({ preventScroll: true });
+    const menuRect = menu.getBoundingClientRect();
+    const optionRect = option.getBoundingClientRect();
+    if (optionRect.top < menuRect.top) {
+      menu.scrollTop -= menuRect.top - optionRect.top;
+    } else if (optionRect.bottom > menuRect.bottom) {
+      menu.scrollTop += optionRect.bottom - menuRect.bottom;
+    }
   };
 
   const openMenu = () => {
@@ -393,7 +410,7 @@ export function Select({
   // 打开后把焦点移到当前选项。用 `open` 作依赖即可：列表刚挂载，ref 已就位。
   useEffect(() => {
     if (!open) return;
-    optionRefs.current[active]?.focus();
+    revealOption(active);
   }, [open]);
 
   // 点击外部关闭。用 pointerdown，早于焦点转移，避免菜单先失焦再点不中。
@@ -428,7 +445,7 @@ export function Select({
     if (!count) return;
     const index = ((next % count) + count) % count;
     setActive(index);
-    optionRefs.current[index]?.focus();
+    revealOption(index);
   };
 
   const choose = (index: number) => {
@@ -525,6 +542,7 @@ export function Select({
 
       {open && (
         <ul
+          ref={menuRef}
           id={`${id}-menu`}
           className={`select-menu${dropUp ? ' drop-up' : ''}${align === 'right' ? ' right' : ''}`}
           role="listbox"
@@ -542,6 +560,7 @@ export function Select({
               tabIndex={-1}
               className={`select-option${option.value === value ? ' selected' : ''}`}
               onFocus={() => setActive(index)}
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => choose(index)}
             >
               <span>{option.label}</span>
@@ -550,6 +569,92 @@ export function Select({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** 数字输入框：右侧一列加大号的加减按钮。
+ *
+ * 原生 `type=number` 的上下箭头很小，鼠标不好点。这里保留原生输入行为
+ * （键盘、滚轮、校验），只在右侧叠加两个 24 × 16 px 的按钮。
+ * 按钮 `tabIndex=-1`，不打断键盘输入；`onMouseDown` 阻止焦点离开输入框。
+ */
+export function NumberBox({
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  ariaLabel,
+  title,
+  placeholder,
+  disabled,
+  className = '',
+  style,
+}: {
+  value: string | number;
+  onChange: (next: string) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  ariaLabel?: string;
+  title?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const bump = (direction: 1 | -1) => {
+    if (disabled) return;
+    const current = Number(value);
+    const base = Number.isFinite(current) ? current : (min ?? 0);
+    let next = base + direction * step;
+    // 小数步长（如 0.05）会留下 0.30000000000000004。
+    next = Math.round(next * 1e6) / 1e6;
+    if (min !== undefined) next = Math.max(min, next);
+    if (max !== undefined) next = Math.min(max, next);
+    onChange(String(next));
+  };
+
+  return (
+    <div className={`num-box${className ? ` ${className}` : ''}`} style={style}>
+      <input
+        className="num-input"
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        aria-label={ariaLabel}
+        title={title}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <div className="num-steps">
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="增加"
+          title="增加"
+          disabled={disabled}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => bump(1)}
+        >
+          <Icon name="plus" size={13} />
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="减少"
+          title="减少"
+          disabled={disabled}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => bump(-1)}
+        >
+          <Icon name="minus" size={13} />
+        </button>
+      </div>
     </div>
   );
 }

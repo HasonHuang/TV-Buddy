@@ -22,7 +22,7 @@ import { Icon } from './icons';
 import { RecommendCard, type Recommend } from './lowcfg';
 import { BackupPage } from './ops';
 import { SystemPage } from './system';
-import { Card, Confirm, PageHead, Select, Tip, useToast } from './ui';
+import { Card, Confirm, NumberBox, PageHead, Select, Tip, useToast } from './ui';
 
 type Cfg = Record<string, unknown>;
 
@@ -98,15 +98,14 @@ function Num({
         {tip ? <Tip text={tip} /> : null}
       </label>
       <div className="field-control">
-        <input
-          className="num"
-          type="number"
+        <NumberBox
           min={0}
           step={step ?? 1}
+          ariaLabel={label}
           value={String(asNumber(draft, path))}
-          onChange={(event) => {
-            const next = Number(event.target.value);
-            update(path, Number.isFinite(next) ? next : 0);
+          onChange={(next) => {
+            const value = Number(next);
+            update(path, Number.isFinite(value) ? value : 0);
           }}
         />
         {unit ? <span className="field-unit">{unit}</span> : null}
@@ -963,8 +962,8 @@ export function SettingsPage({
                 />
               </div>
               <p className="muted">
-                目标 v0.8.2 的这几个容量键都没生效（F-015）。本实现让上面两个真正生效；
-                segment_cache_max_mb、m3u8_max_entries、segment_max_entries 保留键面但不消费。
+                硬盘与内存上限都已生效。segment_cache_max_mb、m3u8_max_entries、
+                segment_max_entries 仍保留在配置里，但当前版本不读取。
               </p>
             </Card>
 
@@ -1009,7 +1008,7 @@ export function SettingsPage({
                   path="cache.prefetch.skip_tail"
                   unit="片"
                   tip="清单末尾不预取的切片数，避免请求还没生成的切片。"
-                  hint="本实现扩展：清单末尾不预取"
+                  hint="清单末尾不预取"
                 />
               </div>
             </Card>
@@ -1141,7 +1140,7 @@ export function SettingsPage({
 
             <Card
               title="切片缓存"
-              note="本实现扩展：磁盘索引与内存索引上限"
+              note="磁盘索引与内存索引上限"
               tip="这些上限只影响索引条目数，不直接限制磁盘字节。0 表示交给默认值。"
             >
               <div className="fields">
@@ -1322,8 +1321,8 @@ export function SettingsPage({
                 <Toggle
                   label="订阅地址带分享 token"
                   path="share.share_token"
-                  tip="目标键；本实现仅回显，不改变订阅地址。"
-                  hint="目标键：本实现仅回显，不改变订阅地址"
+                  tip="仅记录该开关，不改变订阅地址。"
+                  hint="仅记录，不改变订阅地址"
                 />
               </div>
               <div className="fields">
@@ -1406,8 +1405,8 @@ export function SettingsPage({
                     path="cache.dash.fast_start_secs"
                     unit="秒"
                     step={0.5}
-                    tip="目标侧无可观测差异，保留配置即可。"
-                    hint="目标侧无可观测差异，保留配置"
+                    tip="当前版本没有可见差异，保留配置即可。"
+                    hint="当前没有可见差异"
                   />
                 </div>
               </details>
@@ -1563,7 +1562,7 @@ export function SettingsPage({
                     { value: 'on', label: '总是' },
                     { value: 'off', label: '从不' },
                   ]}
-                  hint="取值以配置为准；目标侧该键存在回读异常（S-CACHE-07）"
+                  hint="取值以配置为准"
                 />
               </details>
             </Card>

@@ -256,6 +256,22 @@ function Overview({ features }: { features: Record<string, boolean> | null }) {
         <Stat label="缓存磁盘占用" value={text('disk_cache_mb')} unit="MB" icon="file" />
       </div>
 
+      {status !== null && num('group_count') === 0 ? (
+        <section className="card setup-card">
+          <div>
+            <h2>从第一个分组开始</h2>
+            <p className="muted">创建分组并添加频道，或用 M3U 导入。保存后订阅地址会立即更新。</p>
+          </div>
+          <button
+            className="ghost"
+            onClick={() => window.dispatchEvent(new CustomEvent('tv-buddy:goto-groups'))}
+          >
+            <Icon name="groups" size={14} />
+            打开分组管理
+          </button>
+        </section>
+      ) : null}
+
       <div className="dash-grid">
         <div className="dash-main">
           <section className="card">
@@ -343,12 +359,9 @@ function Overview({ features }: { features: Record<string, boolean> | null }) {
                 {enabledFeatures.length === 0 ? (
                   <span className="muted">{features ? '全部关闭' : '—'}</span>
                 ) : (
-                  enabledFeatures.map(([key, label], index) => (
-                    <span key={key}>
+                  enabledFeatures.map(([key, label]) => (
+                    <span key={key} className="badge muted">
                       {label}
-                      {index < enabledFeatures.length - 1 ? (
-                        <span className="sep"> · </span>
-                      ) : null}
                     </span>
                   ))
                 )}
@@ -436,8 +449,13 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     const gotoMy = () => go('my');
+    const gotoGroups = () => go('groups');
     window.addEventListener('tv-buddy:goto-my', gotoMy);
-    return () => window.removeEventListener('tv-buddy:goto-my', gotoMy);
+    window.addEventListener('tv-buddy:goto-groups', gotoGroups);
+    return () => {
+      window.removeEventListener('tv-buddy:goto-my', gotoMy);
+      window.removeEventListener('tv-buddy:goto-groups', gotoGroups);
+    };
   });
 
   const logout = async () => {
@@ -461,6 +479,29 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const shownNav = query
     ? visibleNav.filter((item) => item.label.toLowerCase().includes(query))
     : visibleNav;
+
+  // 管理员的「我的订阅」移出主菜单，放在侧栏底部，与后台分区分开。
+  // 普通用户只有这一个分区，仍放在菜单顶部，避免侧栏只剩底部一条。
+  const myItem = shownNav.find((item) => item.id === 'my');
+  const bottomMy = isAdmin ? myItem : undefined;
+  const navItems = bottomMy ? shownNav.filter((item) => item.id !== 'my') : shownNav;
+
+  const navButton = (item: (typeof NAV)[number]) => (
+    <button
+      key={item.id}
+      className={`nav-item${active === item.id ? ' active' : ''}`}
+      title={item.label}
+      aria-label={item.label}
+      aria-current={active === item.id ? 'page' : undefined}
+      onClick={() => {
+        setNavQuery('');
+        go(item.id);
+      }}
+    >
+      <Icon name={item.icon} size={15} />
+      <span className="nav-label">{item.label}</span>
+    </button>
+  );
 
   return (
     <div className="shell">
@@ -487,24 +528,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <kbd>{SHORTCUT}</kbd>
         </label>
         <nav>
-          {shownNav.map((item) => (
-            <button
-              key={item.id}
-              className={`nav-item${active === item.id ? ' active' : ''}`}
-              title={item.label}
-              aria-label={item.label}
-              aria-current={active === item.id ? 'page' : undefined}
-              onClick={() => {
-                setNavQuery('');
-                go(item.id);
-              }}
-            >
-              <Icon name={item.icon} size={15} />
-              <span className="nav-label">{item.label}</span>
-            </button>
-          ))}
+          {navItems.map(navButton)}
           {query && shownNav.length === 0 ? <div className="nav-empty">没有匹配的分区</div> : null}
         </nav>
+        {bottomMy ? <div className="sidebar-my">{navButton(bottomMy)}</div> : null}
         {isAdmin && (
           <div className="sidebar-meta">
             <div className="kv">
@@ -526,7 +553,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             title="结束当前面板会话并回到登录页"
             onClick={() => void logout()}
           >
-            <Icon name="close" size={13} />
+            <Icon name="close" size={14} />
             <span className="nav-label">退出登录</span>
           </button>
         </div>
@@ -583,6 +610,25 @@ function App() {
     const onUnauthorized = () => setLoggedIn(false);
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
+
+  // 日期与时间输入：点输入框任意位置都打开选择器，不再只认右侧小图标。
+  // 浏览器已打开时 `showPicker` 会抛错，直接忽略。
+  useEffect(() => {
+    const openPicker = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const input = target?.closest?.('input');
+      if (!(input instanceof HTMLInputElement)) return;
+      if (!['date', 'time', 'datetime-local', 'month', 'week'].includes(input.type)) return;
+      if (input.disabled || input.readOnly) return;
+      try {
+        (input as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
+      } catch {
+        // 选择器已经打开，或浏览器不允许本次调用。
+      }
+    };
+    document.addEventListener('click', openPicker);
+    return () => document.removeEventListener('click', openPicker);
   }, []);
 
   return loggedIn ? (

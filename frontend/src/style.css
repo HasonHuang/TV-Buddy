@@ -32,8 +32,8 @@
 
   /* 文字 */
   --text: #16203a;
-  --text2: #6a7690;
-  --text3: #98a3b8;
+  --text2: #5f6b82;
+  --text3: #6f7c94;
 
   /* 强调色（品牌蓝，取自台标） */
   --accent: #2f5bff;
@@ -67,6 +67,8 @@
   --radius: 16px;
   --radius-sm: 9px;
   --ring: rgba(47, 91, 255, 0.18);
+  /* 全站控件同高：输入框、下拉、按钮共用。 */
+  --control-h: 34px;
 
   --shadow: 0 1px 2px rgba(22, 32, 58, 0.04), 0 18px 40px -28px rgba(22, 32, 58, 0.28);
   --shadow-xs: 0 1px 1px rgba(20, 20, 26, 0.05);
@@ -81,6 +83,9 @@
 
   /* 过渡时长：全站统一。 */
   --ease: 0.14s ease;
+
+  /* 勾选标记：浅色主题用白勾，深色主题在下方覆盖为深色勾。 */
+  --check-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.2 8.4l3.1 3.1 6.5-7' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 /* 深色主题：`data-theme="dark"`。
@@ -103,11 +108,11 @@
 
   --text: #e9eefb;
   --text2: #94a1ba;
-  --text3: #6f7c94;
+  --text3: #7e8ba3;
 
   --accent: #7fa0ff;
   --accent-dark: #9db6ff;
-  --accent-weak: #17223c;
+  --accent-weak: #1a2742;
   --accent-line: #2e3f63;
 
   --btn: #7fa0ff;
@@ -140,6 +145,9 @@
   --tip-bg: #ededef;
   --tip-ink: #111114;
   --overlay: rgba(0, 0, 0, 0.62);
+
+  /* 强调色偏亮，勾选标记改用深色。 */
+  --check-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.2 8.4l3.1 3.1 6.5-7' fill='none' stroke='%230a0e16' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 * {
@@ -209,6 +217,19 @@ h3 {
   margin: 0;
   font-size: 14px;
   font-weight: 650;
+}
+
+/* 卡片内的小节：用细线分段，长表单不用靠空白猜层级。 */
+.card > h3 {
+  margin: 20px 0 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.card > h3:first-of-type {
+  margin-top: 6px;
+  padding-top: 0;
+  border-top: 0;
 }
 
 a {
@@ -302,16 +323,23 @@ a {
 .nav-search {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
   height: 30px;
   margin: 0 2px;
-  padding: 0 8px;
+  padding: 0 10px 0 7px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--panel-2);
   color: var(--text3);
   cursor: text;
   transition: border-color var(--ease), background var(--ease);
+}
+
+/* 搜索图标的槽宽与菜单一致，让文字起点对齐。 */
+.nav-search .icon {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
 }
 
 .nav-search:focus-within {
@@ -373,7 +401,8 @@ a {
 }
 
 .nav-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   background: transparent;
@@ -387,9 +416,23 @@ a {
   cursor: pointer;
 }
 
+/* 图标固定 16 px 槽并居中，所有菜单文字从同一列开始。 */
 .nav-item .icon {
   flex: none;
+  justify-self: center;
   color: var(--text3);
+}
+
+/* 「我的订阅」单独放在侧栏底部，与后台分区分开。 */
+.sidebar-my {
+  flex: none;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin-top: 2px;
+}
+
+.sidebar-my .nav-item {
+  width: 100%;
 }
 
 .nav-item:hover:not(:disabled) {
@@ -424,13 +467,25 @@ a {
 }
 
 .sidebar-foot button {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+/* 侧栏里的主题按钮与退出登录等宽，文字与高度也一致。 */
+.sidebar-foot .theme-toggle {
+  flex: 1 1 0;
+  width: auto;
+  padding: 0 10px;
 }
 
 .content {
   width: 100%;
   min-width: 0;
-  padding: 26px 32px 56px;
+  min-height: 100vh;
+  padding: 26px 32px 40px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* --- 页面标题行 --- */
@@ -474,6 +529,23 @@ a {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+/* 页头里的一组紧凑控件：不换行，宽度固定，避免按钮被挤到下一行。 */
+.page-head .log-tools {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.page-head .log-tools > .select {
+  flex: 0 0 124px;
+}
+
+.page-head .log-tools > input {
+  flex: 0 0 84px;
+  width: 84px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 卡片内的小节标题。 */
@@ -534,6 +606,12 @@ a {
   overflow: hidden;
 }
 
+/* 无内边距卡片里的标题要自己补边距，与表格首列对齐。 */
+.card.flush > .section-title {
+  padding: 14px 16px 0;
+  margin-bottom: 0;
+}
+
 .row {
   display: flex;
   gap: 10px;
@@ -566,13 +644,105 @@ a {
 
 .fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 2px 14px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 2px 16px;
 }
 
 .field {
   margin-bottom: 10px;
   min-width: 0;
+}
+
+/* 安全管控：字段多、说明长，改成两列横向行，标签与控件成对。 */
+.security-card .fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 24px;
+}
+
+.security-card .field {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 8px;
+  margin-bottom: 10px;
+}
+
+.security-card .field > label,
+.security-card .field > span {
+  grid-column: 1;
+  min-width: 0;
+  margin: 0;
+  line-height: 1.35;
+  /* 标签靠右贴住控件，短标签不再隔出一大段空白。 */
+  display: flex;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.security-card .field > input,
+.security-card .field > .select,
+.security-card .field > .input-group,
+.security-card .field > .num-line,
+.security-card .field > .num-box,
+.security-card .field > .field-control {
+  grid-column: 2;
+  min-width: 0;
+}
+
+/* 数字框与单位同一行；单位不单独占一行。 */
+.security-card .field > .num-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.security-card .field > .num-line .num-box {
+  flex: none;
+  width: 118px;
+}
+
+.security-card .field > .hint {
+  grid-column: 2;
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .security-card .fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 手机宽度：标签放到控件上方，输入框吃满整行。 */
+@media (max-width: 640px) {
+  .security-card .field {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .security-card .field > label,
+  .security-card .field > span,
+  .security-card .field > input,
+  .security-card .field > .select,
+  .security-card .field > .input-group,
+  .security-card .field > .num-line,
+  .security-card .field > .num-box,
+  .security-card .field > .field-control,
+  .security-card .field > .hint {
+    grid-column: 1;
+  }
+
+  .security-card .field > label,
+  .security-card .field > span {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .security-card .field > .num-line .num-box {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
 }
 
 /* --- 表单 --- */
@@ -594,23 +764,25 @@ label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   margin-left: 5px;
   border-radius: 50%;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   background: transparent;
   color: var(--text3);
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 700;
   line-height: 1;
   cursor: help;
   flex: none;
   vertical-align: middle;
+  opacity: 0.8;
   transition:
     color var(--ease),
     border-color var(--ease),
-    background var(--ease);
+    background var(--ease),
+    opacity var(--ease);
 }
 
 .tip::before {
@@ -622,6 +794,7 @@ label {
   color: var(--accent-dark);
   border-color: var(--accent-line);
   background: var(--accent-weak);
+  opacity: 1;
   outline: none;
 }
 
@@ -696,6 +869,23 @@ textarea:disabled {
   cursor: not-allowed;
 }
 
+/* 日期与时间：整个输入框都可点击打开选择器。 */
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+input[type='month'],
+input[type='week'] {
+  cursor: pointer;
+}
+
+input[type='date']::-webkit-calendar-picker-indicator,
+input[type='time']::-webkit-calendar-picker-indicator,
+input[type='datetime-local']::-webkit-calendar-picker-indicator,
+input[type='month']::-webkit-calendar-picker-indicator,
+input[type='week']::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+}
+
 input.search {
   width: 200px;
 }
@@ -703,20 +893,103 @@ input.search {
 /* 勾选框与文件框不吃输入框的尺寸。 */
 input[type='checkbox'],
 input[type='radio'] {
-  width: 15px;
-  height: 15px;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
   padding: 0;
   margin: 0;
-  accent-color: var(--accent);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--field);
   cursor: pointer;
   vertical-align: middle;
+  flex: none;
+  transition:
+    background var(--ease),
+    border-color var(--ease),
+    box-shadow var(--ease);
 }
 
+input[type='checkbox']:hover:not(:disabled),
+input[type='radio']:hover:not(:disabled) {
+  border-color: var(--text3);
+}
+
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+input[type='checkbox']:checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: var(--check-icon);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 13px 13px;
+}
+
+input[type='radio'] {
+  border-radius: 50%;
+}
+
+input[type='radio']:checked {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 4px, transparent 4px);
+}
+
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 原生文件框统一成字段外观，选择按钮跟随 ghost 按钮。 */
 input[type='file'] {
   height: auto;
-  padding: 5px 0;
-  border: 0;
-  background: transparent;
+  padding: 4px 8px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  cursor: pointer;
+}
+
+/* 用 label.ghost 包住隐藏的文件框：外观与普通按钮一致。 */
+.file-pick {
+  position: relative;
+  cursor: pointer;
+}
+
+.file-pick input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+input[type='file']::file-selector-button {
+  height: 28px;
+  margin-right: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    border-color var(--ease);
+}
+
+input[type='file']::file-selector-button:hover {
+  background: var(--panel-2);
+  border-color: var(--text3);
 }
 
 textarea {
@@ -864,6 +1137,118 @@ textarea {
   flex: none;
 }
 
+/* --- 数字输入框（自绘加减） ---
+ *
+ * 原生上下箭头只有几像素高，鼠标难点。整块控件的边框放在外层，
+ * 右侧固定 24 px 的加减列；输入框本身仍保留 `type=number` 的键盘行为。
+ */
+.num-box {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-h);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+  transition:
+    border-color var(--ease),
+    box-shadow var(--ease);
+}
+
+.num-box:hover {
+  border-color: var(--text3);
+}
+
+.num-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.num-box .num-input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.num-box .num-input:hover,
+.num-box .num-input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.num-box .num-input::-webkit-inner-spin-button,
+.num-box .num-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.num-box .num-input {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.num-box:has(.num-input:disabled) {
+  opacity: 0.6;
+}
+
+.num-steps {
+  display: flex;
+  flex: 0 0 24px;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+}
+
+.num-steps button {
+  flex: 1 1 50%;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text3);
+  box-shadow: none;
+}
+
+.num-steps button + button {
+  border-top: 1px solid var(--line);
+}
+
+.num-steps button:hover:not(:disabled) {
+  background: var(--accent-weak);
+  border-color: transparent;
+  color: var(--accent-dark);
+}
+
+.num-steps button:disabled {
+  opacity: 0.35;
+}
+
+/* 数字字段在表单里保持紧凑，不铺满整行。 */
+.field > .num-box {
+  width: 100%;
+  max-width: 180px;
+}
+
+/* 没有字段容器的数字框（订阅源、台标选项）用同一宽度，避免同排参差。 */
+label > .num-box {
+  width: 140px;
+  max-width: 140px;
+}
+
 label.check {
   display: flex;
   align-items: center;
@@ -875,8 +1260,8 @@ label.check {
 }
 
 label.check input {
-  width: auto;
-  height: auto;
+  width: 16px;
+  height: 16px;
   margin: 0;
 }
 
@@ -907,7 +1292,7 @@ button {
   border-radius: var(--radius-sm);
   color: var(--btn-ink);
   padding: 0 14px;
-  height: 34px;
+  height: var(--control-h);
   font: inherit;
   font-size: 13px;
   font-weight: 500;
@@ -926,10 +1311,6 @@ button:hover:not(:disabled) {
   border-color: var(--btn-hover);
 }
 
-button:active:not(:disabled) {
-  transform: translateY(0.5px);
-}
-
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -944,13 +1325,6 @@ button.icon-btn {
 
 .sidebar-foot .icon-btn {
   flex: 0 0 34px;
-}
-
-/* 侧栏里的主题按钮带文字，按内容取宽。 */
-.sidebar-foot .theme-toggle {
-  flex: 0 0 auto;
-  width: auto;
-  padding: 0 10px;
 }
 
 button.ghost,
@@ -1003,9 +1377,9 @@ label.ghost {
 
 a.ghost,
 label.ghost {
-  height: 32px;
+  height: var(--control-h);
   margin: 0;
-  padding: 0 13px;
+  padding: 0 14px;
   font-size: 13px;
   font-weight: 500;
   background: var(--panel);
@@ -1134,6 +1508,20 @@ a.compact {
   border-color: var(--danger-dark);
 }
 
+/* 行内删除：默认低调，悬停才显红。避免整页红色按钮抢注意力。 */
+.chip.danger-text {
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--text2);
+  font-weight: 500;
+}
+
+.chip.danger-text:hover {
+  background: var(--danger-weak);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .chip.icon-only {
   padding: 0 7px;
 }
@@ -1233,7 +1621,9 @@ a.compact {
   text-align: left;
   color: var(--text2);
   font-weight: 500;
-  font-size: 12px;
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  background: var(--panel-2);
   border-bottom: 1px solid var(--line);
   padding: 8px 10px;
   white-space: nowrap;
@@ -1295,23 +1685,41 @@ dl > dd:last-of-type {
 
 .msg {
   font-size: 12.5px;
+  line-height: 1.55;
   margin-top: 10px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text2);
 }
 
 .msg.ok {
+  border-color: color-mix(in srgb, var(--ok) 28%, transparent);
+  background: var(--ok-weak);
   color: var(--ok);
 }
 
-.msg.err {
+.msg.err,
+.msg.danger {
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  background: var(--danger-weak);
   color: var(--danger);
 }
 
 .msg.warn {
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+  background: var(--warn-weak);
   color: var(--warn);
 }
 
 .msg.info {
   color: var(--text2);
+}
+
+/* 提示条里的行内按钮跟随文字颜色，不抢整条提示。 */
+.msg > button {
+  margin-left: 6px;
 }
 
 /* 嵌入设置页的小节头（系统状态、备份与恢复）。 */
@@ -1320,11 +1728,18 @@ dl > dd:last-of-type {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin: 4px 0 12px;
+  margin: 18px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.embedded-head:first-child {
+  margin-top: 4px;
 }
 
 .embedded-head h2 {
   margin-bottom: 2px;
+  font-size: 14.5px;
 }
 
 .embedded-head .muted {
@@ -1672,6 +2087,26 @@ pre.log .lv-trace {
   align-items: start;
 }
 
+/* 空实例引导：一句话 + 一个动作，不占整屏。 */
+.setup-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setup-card h2 {
+  margin-bottom: 2px;
+}
+
+.setup-card .muted {
+  display: block;
+}
+
+.setup-card button {
+  flex: none;
+}
+
 .dash-main,
 .dash-rail {
   display: flex;
@@ -1771,6 +2206,9 @@ pre.log .lv-trace {
 }
 
 .feature-block .feature-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
   font-size: 12px;
   line-height: 1.5;
   color: var(--text);
@@ -1899,13 +2337,13 @@ pre.log .lv-trace {
   right: 18px;
   z-index: 5;
   width: auto;
-  height: 32px;
-  padding: 0 12px;
+  height: var(--control-h);
+  padding: 0 14px;
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .login-form {
@@ -2493,7 +2931,7 @@ pre.log .lv-trace {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin-top: 28px;
+  margin-top: auto;
   padding-top: 16px;
   border-top: 1px solid var(--line);
   color: var(--text3);
@@ -2595,8 +3033,8 @@ pre code {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 28px 12px;
+  gap: 5px;
+  padding: 20px 12px;
   color: var(--text3);
   font-size: 12.5px;
   text-align: center;
@@ -2680,9 +3118,9 @@ pre code {
 /* 横向字段行：标签 | 控件 | 后缀。 */
 .settings-page .field {
   display: grid;
-  grid-template-columns: 104px minmax(0, 1fr);
+  grid-template-columns: 120px minmax(0, 1fr);
   align-items: center;
-  gap: 3px 10px;
+  gap: 3px 8px;
   margin-bottom: 9px;
   min-width: 0;
 }
@@ -2691,9 +3129,11 @@ pre code {
   margin: 0;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 1px;
   min-width: 0;
   line-height: 1.4;
+  text-align: right;
 }
 
 .settings-page .field > .hint {
@@ -2721,15 +3161,12 @@ pre code {
 }
 
 /* 数字字段内容短，固定窄宽并右对齐，扫读时数位成列。 */
-.settings-page .field-control > input.num {
-  flex: 0 0 96px;
-  width: 96px;
-  text-align: right;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-variant-numeric: tabular-nums;
+.settings-page .field-control > .num-box {
+  flex: 0 0 118px;
+  width: 118px;
 }
 
-.settings-page .field-unit {
+.field-unit {
   color: var(--text2);
   font-size: 12px;
   white-space: nowrap;
@@ -2805,8 +3242,20 @@ pre code {
   }
 
   .nav-item {
+    display: flex;
     justify-content: center;
+    gap: 0;
     padding: 9px 0;
+    width: 46px;
+  }
+
+  .sidebar-my {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .sidebar-my .nav-item {
     width: 46px;
   }
 
@@ -2874,8 +3323,24 @@ pre code {
 
   .nav-item {
     flex: none;
+    display: grid;
     width: auto;
     padding: 7px 9px;
+  }
+
+  .sidebar-my {
+    flex: 0 0 auto;
+    display: flex;
+    width: auto;
+    border-top: 0;
+    border-left: 1px solid var(--line);
+    margin-top: 0;
+    padding-top: 0;
+    padding-left: 6px;
+  }
+
+  .sidebar-my .nav-item {
+    width: auto;
   }
 
   .nav-label {
@@ -2920,6 +3385,11 @@ pre code {
     gap: 4px;
   }
 
+  .settings-page .field > label {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
   .settings-page .field > .hint,
   .settings-page .field > .row,
   .settings-page .field > textarea,
@@ -2934,6 +3404,19 @@ pre code {
 
   .page-head {
     flex-wrap: wrap;
+  }
+
+  .page-head .log-tools {
+    flex-wrap: wrap;
+  }
+
+  .setup-card {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .setup-card button {
+    width: 100%;
   }
 
   .page-head .actions {

@@ -233,7 +233,7 @@ function Library({
               只看未被引用
             </label>
           )}
-          <label className="tag" style={{ cursor: 'pointer' }} title="上传新文件">
+          <label className="ghost" style={{ cursor: 'pointer' }} title="上传新文件">
             上传
             <input
               type="file"
@@ -257,8 +257,7 @@ function Library({
       )}
       {kind === 'assets' && (
         <p className="muted">
-          未被引用的素材 {unused.length} 个（共 {files.length} 个）。判定标准：配置里没有任何地址指向
-          <code className="mono">/assets/&lt;文件名&gt;</code>（本实现自定，目标未观测）。
+          未被引用的素材 {unused.length} 个（共 {files.length} 个）。配置里没有任何地址指向的文件算作未被引用。
         </p>
       )}
       <div className="table-wrap">
@@ -300,7 +299,7 @@ function Library({
                     </button>
                   )}
                   <button
-                    className="icon-btn"
+                    className="chip danger-text"
                     title="删除文件；引用它的频道会变成坏引用"
                     onClick={() => setPendingRemove(file.file)}
                   >
@@ -504,6 +503,7 @@ function CandidatesCard({ ready }: { ready: boolean }) {
               </td>
               <td className="right">
                 <button
+                  className="ghost"
                   title={item.converted ? '重新转换这个地址' : '把这个地址转换成本地 HLS'}
                   disabled={!ready || busy || item.url === ''}
                   onClick={() => void convert(item.url)}

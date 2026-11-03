@@ -83,8 +83,8 @@ export function MySubsPage() {
           <input
             readOnly
             aria-label="订阅地址"
-            title={me?.playlist_link ?? ''}
-            value={me?.playlist_link ?? ''}
+            title={me?.playlist_link ? `${location.origin}${me.playlist_link}` : ''}
+            value={me?.playlist_link ? `${location.origin}${me.playlist_link}` : ''}
             className="mono"
           />
           <button
@@ -106,8 +106,8 @@ export function MySubsPage() {
               <input
                 readOnly
                 aria-label="EPG 地址"
-                title={me.epg_link}
-                value={me.epg_link}
+                title={me.epg_link ? `${location.origin}${me.epg_link}` : ''}
+                value={me.epg_link ? `${location.origin}${me.epg_link}` : ''}
                 className="mono"
               />
               <button
@@ -130,7 +130,10 @@ export function MySubsPage() {
 
       {groups.map((group) => (
         <div className="card flush" key={group.id}>
-          <div className="section-title">{group.name}</div>
+          <div className="section-title">
+            {group.name}
+            <span className="muted">{group.channels.length} 个频道</span>
+          </div>
           <table className="table">
             <thead>
               <tr>
