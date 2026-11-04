@@ -235,7 +235,7 @@ function Overview({ features }: { features: Record<string, boolean> | null }) {
     return value === undefined || value === null ? '—' : String(value);
   };
 
-  const backend = text('cache_backend');
+  const backend = text('cache_backend') === 'memory' ? '内存' : '硬盘';
   // 版本号在接口里不带前缀，界面统一显示 `v`。
   const version = status?.version ? `v${status.version}` : '—';
   // 与侧栏同一口径：缺少键也算启用，只有显式 false 才隐藏。
@@ -277,8 +277,8 @@ function Overview({ features }: { features: Record<string, boolean> | null }) {
           <section className="card">
             <div className="section-title">实时指标</div>
             <div className="metric-strip">
-              <Stat label="下行 · 回源" value={bytes(num('traffic_in_bytes'))} icon="download" />
-              <Stat label="上行 · 出网" value={bytes(num('traffic_out_bytes'))} icon="upload" />
+              <Stat label="下行流量" value={bytes(num('traffic_in_bytes'))} icon="download" />
+              <Stat label="上行流量" value={bytes(num('traffic_out_bytes'))} icon="upload" />
               <Stat label="进程内存" value={text('mem_rss_mb')} unit="MB" icon="cache" />
               <Stat label="CPU 占用" value={text('cpu_seconds')} unit="秒" icon="stats" />
               <Stat
@@ -295,7 +295,7 @@ function Overview({ features }: { features: Record<string, boolean> | null }) {
             <div className="quick-grid">
               <button
                 className="ghost"
-                title="删除已落盘的清单与切片，释放磁盘"
+                title="删除已保存的清单与切片，释放磁盘"
                 disabled={busy !== ''}
                 onClick={() => void action('flush', '/cache/flush', '本地缓存已清空')}
               >
@@ -306,10 +306,10 @@ function Overview({ features }: { features: Record<string, boolean> | null }) {
                 className="ghost"
                 title="从数据库重新读取配置并立即生效"
                 disabled={busy !== ''}
-                onClick={() => void action('reload', '/reload', '配置已热重载')}
+                onClick={() => void action('reload', '/reload', '配置已重新读取')}
               >
                 <Icon name="refresh" size={14} />
-                {busy === 'reload' ? '重载中…' : '热重载配置'}
+                {busy === 'reload' ? '读取中…' : '重新读取配置'}
               </button>
               <button
                 className="ghost"
@@ -345,7 +345,7 @@ function Overview({ features }: { features: Record<string, boolean> | null }) {
                 <b>{uptime(num('uptime_secs'))}</b>
               </div>
               <div className="kv">
-                <span>缓存后端</span>
+                <span>缓存位置</span>
                 <b className="mono">{backend}</b>
               </div>
               <div className="kv">

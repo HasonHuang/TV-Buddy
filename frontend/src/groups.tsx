@@ -17,10 +17,10 @@ export type Channel = {
   id: string;
   name: string;
   url: string;
-  /** 来源订阅源 id；空表示手工频道。 */
+  /** 来源订阅源 id；空表示本地频道。 */
   source_id?: string;
   source_key?: string;
-  /** 跟随上游字段。缺失按 true 处理。 */
+  /** 跟随来源字段。缺失按 true 处理。 */
   sync_follow?: boolean;
   /** 本地回看（`常驻` 徽章的来源）。 */
   livestream?: boolean;
@@ -53,25 +53,30 @@ export type HealthEntry = {
   ok: boolean;
 };
 
-const MODES: { value: string; label: string }[] = [
-  { value: 'proxy', label: 'Proxy（反向代理）' },
-  { value: 'remux', label: 'Remux（重封装）' },
-  { value: 'dash', label: 'DASH（MPD 转 HLS）' },
-  { value: 'redirect', label: 'Redirect（302 跳转）' },
-  { value: 'rewrite', label: 'Rewrite（改写清单）' },
-  { value: 'passthrough', label: 'Passthrough（直通）' },
+const MODES: { value: string; label: string; desc: string }[] = [
+  { value: 'proxy', label: '服务器转发', desc: '视频经过本机。兼容性最好。' },
+  { value: 'remux', label: '服务器转封装', desc: '本机重新打包视频流。占用 CPU。' },
+  { value: 'dash', label: 'DASH 转发', desc: '处理 DASH 清单。源必须提供 MPD。' },
+  { value: 'redirect', label: '跳转源地址', desc: '播放器直接连源。会显示源地址。' },
+  { value: 'rewrite', label: '改写地址', desc: '本机改写清单地址，播放器再连源。' },
+  { value: 'passthrough', label: '原样直通', desc: '直接使用源地址。不经过本机。' },
 ];
 
-const ACCESS: { value: string; label: string }[] = [
-  { value: 'public', label: '公开' },
-  { value: 'hidden', label: '隐藏' },
-  { value: 'archived', label: '归档' },
+const ACCESS: { value: string; label: string; desc: string }[] = [
+  { value: 'public', label: '公开', desc: '正常出现在订阅里。' },
+  { value: 'hidden', label: '隐藏', desc: '当前与公开相同，只保留旧配置。' },
+  { value: 'archived', label: '归档', desc: '停播：不出现在订阅里，也不能播放。' },
 ];
 
-const FORMATS: { value: string; label: string }[] = [
-  { value: 'hls', label: 'HLS（m3u8）' },
-  { value: 'mpd', label: 'DASH（mpd）' },
+const FORMATS: { value: string; label: string; desc: string }[] = [
+  { value: 'hls', label: 'HLS', desc: '下发 m3u8 清单。' },
+  { value: 'mpd', label: 'DASH', desc: '下发 mpd 清单。' },
 ];
+
+/** 模式徽标的中文名。 */
+function modeLabel(mode: string): string {
+  return MODES.find((item) => item.value === mode)?.label ?? mode;
+}
 
 /** 播放地址后缀由分组格式决定（S-URL-03）。 */
 function entryExt(group: Group): string {
@@ -83,7 +88,7 @@ function entryUrl(group: Group, channel: Channel): string {
 }
 
 /**
- * 播放地址。附上当前账号的播放令牌。
+ * 播放地址。附上当前账号的播放凭证。
  *
  * 与订阅里的地址同规则（`src/playlist.rs::entry_url`）。
  */
@@ -125,7 +130,7 @@ type ChannelForm = {
   timeshiftMaxGb: string;
   headers: string;
   proxy: ProxyForm;
-  /** 来源源 id；空表示手工频道。 */
+  /** 来源源 id；空表示本地频道。 */
   sourceId: string;
   syncFollow: boolean;
   /** 打开弹窗时的跟随状态。用来判断用户是否显式切换。 */
@@ -145,11 +150,11 @@ type PrefetchForm = {
   concurrency: string;
 };
 
-const PREFETCH_OPTIONS: { value: PrefetchForm['state']; label: string }[] = [
-  { value: '', label: '跟随全局' },
-  { value: 'inherit', label: '只覆盖数量与并发' },
-  { value: 'on', label: '开启预取' },
-  { value: 'off', label: '关闭预取' },
+const PREFETCH_OPTIONS: { value: PrefetchForm['state']; label: string; desc: string }[] = [
+  { value: '', label: '跟随全局', desc: '使用上一级的预取设置。' },
+  { value: 'inherit', label: '只覆盖数量与并发', desc: '开关仍跟随上一级。' },
+  { value: 'on', label: '开启预取', desc: '为这个分组开启预取。' },
+  { value: 'off', label: '关闭预取', desc: '为这个分组关闭预取。' },
 ];
 
 function emptyProxy(): ProxyForm {
@@ -246,20 +251,20 @@ function NetworkBlock({
         {summary}
       </summary>
       <div className="fields">
-        <Field label="代理类型" tip="上游请求使用的代理协议。代理地址留空时不启用代理。">
+        <Field label="代理类型" tip="读取频道时使用的代理协议。代理地址留空时不启用代理。">
           <Select
             ariaLabel="代理类型"
             value={proxy.kind}
             options={[
-              { value: 'http', label: 'http' },
-              { value: 'https', label: 'https' },
-              { value: 'socks5', label: 'socks5' },
+              { value: 'http', label: 'HTTP', desc: '普通 HTTP 代理。' },
+              { value: 'https', label: 'HTTPS', desc: '加密的 HTTP 代理。' },
+              { value: 'socks5', label: 'SOCKS5', desc: 'SOCKS5 代理。' },
             ]}
             onChange={(next) => onProxy({ ...proxy, kind: next })}
             compact
           />
         </Field>
-        <Field label="代理地址" tip="上游请求经过的代理。留空表示直连上游。">
+        <Field label="代理地址" tip="读取频道时经过的代理。留空表示直接连接。">
           <input
             placeholder="127.0.0.1:8080，留空表示不用"
             value={proxy.addr}
@@ -284,7 +289,7 @@ function NetworkBlock({
       </div>
       <Field
         label="请求头"
-        tip="附加到每个上游请求。上游需要特定 User-Agent 或 Referer 时使用。"
+        tip="读取频道时附加的请求头。源需要额外的身份信息时填写。"
         hint="每行一条，格式为「名称: 值」。留空表示不加。"
       >
         <textarea
@@ -296,16 +301,13 @@ function NetworkBlock({
       </Field>
       <Field
         label="预取覆盖"
-        tip="覆盖上层的预取设置。留空表示继承分组或全局配置。"
-        hint="留空继承上一级；数值留空表示不覆盖。"
+        tip="覆盖上一级的分组或全局预取设置。留空表示跟随上一级。"
+        hint="数值留空表示不覆盖。"
       >
         <Select
           ariaLabel="预取覆盖"
           value={prefetch.state}
-          options={PREFETCH_OPTIONS.map((option) => ({
-            value: option.value,
-            label: option.label,
-          }))}
+          options={PREFETCH_OPTIONS}
           onChange={(next) =>
             onPrefetch({ ...prefetch, state: next as PrefetchForm['state'] })
           }
@@ -391,7 +393,7 @@ export function GroupsPage() {
   const [dropTarget, setDropTarget] = useState('');
   /** 解析脚本列表；打开频道弹窗时按需加载。 */
   const [scripts, setScripts] = useState<string[]>([]);
-  /** 当前账号的播放令牌。复制播放地址时附上，否则在开启令牌时是死链。 */
+  /** 当前账号的播放凭证。复制播放地址时附上，否则在开启凭证校验时是死链。 */
   const [playToken, setPlayToken] = useState('');
   /** 来源 id → 源名称。分组与频道徽章用。 */
   const [sourceNames, setSourceNames] = useState<Record<string, string>>({});
@@ -481,7 +483,7 @@ export function GroupsPage() {
       proxy: proxyPayload(form.proxy),
       prefetch: prefetchPayload(prefetch),
     };
-    // 只在用户显式切换时发送；否则由服务端按上游字段变化自动固定。
+    // 只在用户显式切换时发送；否则由服务端按来源字段变化自动固定。
     if (!isNew && form.syncFollow !== form.originalFollow) {
       payload.sync_follow = form.syncFollow;
     }
@@ -525,7 +527,7 @@ export function GroupsPage() {
           ? `/groups/${gid}/detach`
           : `/groups/${gid}/channels/${cid}/detach`,
       );
-      ok(kind === 'group' ? '分组已转为手工' : '频道已转为手工');
+      ok(kind === 'group' ? '分组已断开订阅' : '频道已断开订阅');
       await load();
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
@@ -962,13 +964,13 @@ export function GroupsPage() {
               <span className="gid">[{group.id}]</span>
               {group.source_id ? (
                 <Badge tone="info">
-                  订阅：{sourceNames[group.source_id] ?? group.source_id}
+                  来源：{sourceNames[group.source_id] ?? group.source_id}
                 </Badge>
               ) : (
-                <Badge tone="muted">手工</Badge>
+                <Badge tone="muted">本地</Badge>
               )}
               <div className="ops">
-                <span className={`badge mode ${group.mode}`}>{group.mode}</span>
+                <span className={`badge mode ${group.mode}`}>{modeLabel(group.mode)}</span>
                 <span className="count">{channels.length} 频道</span>
                 <button
                   className="icon-btn move"
@@ -1006,7 +1008,7 @@ export function GroupsPage() {
                     title="断开来源关系，内容保留"
                     onClick={() => void detach('group', group.id)}
                   >
-                    转为手工
+                    断开订阅
                   </button>
                 )}
                 <button
@@ -1057,8 +1059,8 @@ export function GroupsPage() {
                       <span>{channel.name || channel.id}</span>
                       <span className="cid">[{channel.id}]</span>
                       {state?.ok === false && <Badge tone="warn">异常</Badge>}
-                      {channel.livestream === true && <Badge tone="info">常驻</Badge>}
-                      {allTracks && <Badge tone="muted">全轨道</Badge>}
+                      {channel.livestream === true && <Badge tone="info">回看</Badge>}
+                      {allTracks && <Badge tone="muted">全部轨道</Badge>}
                     </div>
                     <div className="ch-url">{channel.url}</div>
                     <div className="ch-url local">
@@ -1068,11 +1070,11 @@ export function GroupsPage() {
                     <div className="ch-badges">
                       {channel.source_id ? (
                         <Badge tone={channel.sync_follow === false ? 'warn' : 'info'}>
-                          订阅：{sourceNames[channel.source_id] ?? channel.source_id}
+                          来源：{sourceNames[channel.source_id] ?? channel.source_id}
                           {channel.sync_follow === false ? ' · 固定' : ' · 跟随'}
                         </Badge>
                       ) : (
-                        <Badge tone="muted">手工</Badge>
+                        <Badge tone="muted">本地</Badge>
                       )}
                       {tvgId !== '' && <Badge tone="muted">tvg-id</Badge>}
                       {logo !== '' && <Badge tone="muted">Logo</Badge>}
@@ -1125,7 +1127,7 @@ export function GroupsPage() {
                         title="断开来源关系，内容保留"
                         onClick={() => void detach('channel', group.id, channel.id)}
                       >
-                        转为手工
+                        断开订阅
                       </button>
                     )}
                     <button
@@ -1168,8 +1170,8 @@ export function GroupsPage() {
         >
           <Field
             label="分组 ID"
-            tip="用于订阅地址与配置键。建成后不能修改。"
-            hint="只用于地址与配置键，建成后不能改。"
+            tip="用于订阅地址。建成后不能修改。"
+            hint="建成后不能改。"
           >
             <input
               value={groupForm.form.id}
@@ -1190,7 +1192,7 @@ export function GroupsPage() {
             />
           </Field>
           <div className="fields">
-            <Field label="工作模式" tip="决定切片代理方式。PROXY 适合大多数 HLS 源；DASH 需要上游支持 MPD。">
+            <Field label="工作模式" tip="选择视频流的转发方式。">
               <Select
                 ariaLabel="工作模式"
                 value={groupForm.form.mode}
@@ -1204,7 +1206,7 @@ export function GroupsPage() {
                 width={200}
               />
             </Field>
-            <Field label="内容格式" tip="决定下发的清单格式。HLS 使用 m3u8；DASH 使用 mpd。">
+            <Field label="内容格式" tip="选择下发给播放器的清单格式。">
               <Select
                 ariaLabel="内容格式"
                 value={groupForm.form.format}
@@ -1221,7 +1223,7 @@ export function GroupsPage() {
           </div>
           <Field
             label="访问范围"
-            tip="公开分组会出现在订阅列表。隐藏、归档或开放分组按对应规则处理。"
+            tip="归档的分组停播：不出现在订阅里，也不能播放。公开和隐藏现在作用相同。"
           >
             <Select
               ariaLabel="访问范围"
@@ -1237,7 +1239,7 @@ export function GroupsPage() {
             />
           </Field>
           <NetworkBlock
-            summary="网络配置 · 分组级默认，频道可单独覆盖"
+            summary="网络配置 · 分组默认值，频道可以单独覆盖"
             proxy={groupForm.form.proxy}
             onProxy={(proxy) =>
               setGroupForm({ ...groupForm, form: { ...groupForm.form, proxy } })
@@ -1266,7 +1268,7 @@ export function GroupsPage() {
           }
         >
           <div className="fields">
-            <Field label="频道 ID" tip="用于订阅地址与配置键。建成后不能修改。" hint="建成后不能改。">
+            <Field label="频道 ID" tip="用于订阅地址。建成后不能修改。" hint="建成后不能改。">
               <input
                 value={channelForm.form.id}
                 disabled={!channelForm.isNew}
@@ -1296,16 +1298,16 @@ export function GroupsPage() {
             <div className="fields">
               <Field
                 label="订阅来源"
-                tip="跟随上游时，同步会更新名称、地址与台标。关闭后固定为当前值。"
+                tip="跟随源时，同步会更新名称、地址和台标。关闭后固定为当前值。"
                 hint={
                   channelForm.form.syncFollow
-                    ? '跟随上游字段。手动修改名称、地址或台标后会自动固定。'
+                    ? '跟随源里的名称、地址和台标。手动修改后会自动固定。'
                     : '已固定，不再跟随源。勾选后恢复跟随。'
                 }
               >
                 <div className="row">
                   <Badge tone="info">
-                    订阅：{sourceNames[channelForm.form.sourceId] ?? channelForm.form.sourceId}
+                    来源：{sourceNames[channelForm.form.sourceId] ?? channelForm.form.sourceId}
                   </Badge>
                   <label>
                     <input
@@ -1318,14 +1320,14 @@ export function GroupsPage() {
                         })
                       }
                     />{' '}
-                    跟随上游
+                    跟随订阅源
                   </label>
                 </div>
               </Field>
             </div>
           )}
           <div className="fields">
-            <Field label="上游 URL" tip="频道原始地址。系统从这里拉取清单与切片。">
+            <Field label="源地址" tip="频道原始地址。系统从这里读取清单与切片。">
               <input
                 value={channelForm.form.url}
                 placeholder="http://upstream/index.m3u8"
@@ -1337,7 +1339,7 @@ export function GroupsPage() {
                 }
               />
             </Field>
-            <Field label="频道 Logo URL" tip="播放器列表里显示的台标地址。可以填站内路径或外部图片地址。">
+            <Field label="频道台标地址" tip="播放器列表里显示的台标地址。可以填站内路径或外部图片地址。">
               <input
                 value={channelForm.form.logo}
                 placeholder="/logo/x.png 或 https://…"
@@ -1351,7 +1353,7 @@ export function GroupsPage() {
             </Field>
           </div>
           <div className="fields">
-            <Field label="tvg-id" tip="用于匹配 EPG 的频道标识。留空时使用频道 ID。" hint="留空则同频道 ID。">
+            <Field label="EPG 频道 ID" tip="用于匹配节目单的频道标识。留空时使用频道 ID。" hint="留空则同频道 ID。">
               <input
                 value={channelForm.form.tvgId}
                 onChange={(event) =>
@@ -1362,7 +1364,7 @@ export function GroupsPage() {
                 }
               />
             </Field>
-            <Field label="tvg-name" tip="用于匹配 EPG 的频道名称。留空时使用频道名称。" hint="留空则同频道名称。">
+            <Field label="EPG 频道名称" tip="用于匹配节目单的频道名称。留空时使用频道名称。" hint="留空则同频道名称。">
               <input
                 value={channelForm.form.tvgName}
                 onChange={(event) =>
@@ -1376,17 +1378,17 @@ export function GroupsPage() {
           </div>
 
           <hr className="divider" />
-          <div className="section-title">上游解析</div>
+          <div className="section-title">地址解析</div>
           <Field
-            label="上游类型"
-            tip="静态 URL 直接拉取；解析脚本先运行脚本，再使用脚本输出。"
+            label="地址来源"
+            tip="固定地址直接读取。解析脚本先运行脚本，再使用脚本的输出。"
           >
             <Select
-              ariaLabel="上游类型"
+              ariaLabel="地址来源"
               value={channelForm.form.upstream}
               options={[
-                { value: 'static', label: '静态 URL' },
-                { value: 'script', label: '解析脚本' },
+                { value: 'static', label: '固定地址', desc: '直接读取下面的源地址。' },
+                { value: 'script', label: '解析脚本', desc: '先运行脚本，再把输出当作源地址。' },
               ]}
               onChange={(next) =>
                 setChannelForm({
@@ -1404,7 +1406,7 @@ export function GroupsPage() {
             <div className="fields">
               <Field
                 label="脚本"
-                tip="解析脚本放在缓存目录的 resolvers 下。脚本输出作为上游地址。"
+                tip="解析脚本放在缓存目录的 resolvers 文件夹。脚本的输出就是源地址。"
                 hint="位于 <缓存目录>/resolvers/。"
               >
                 <Select
@@ -1455,7 +1457,7 @@ export function GroupsPage() {
               <button
                 className="icon-btn"
                 title="复制"
-                onClick={() => void copy(channelForm.form.url, '上游地址')}
+                onClick={() => void copy(channelForm.form.url, '源地址')}
               >
                 <Icon name="copy" size={13} />
               </button>
@@ -1468,7 +1470,7 @@ export function GroupsPage() {
               回看配置
             </summary>
             <div className="row between" style={{ marginBottom: 8 }}>
-              <span className="muted">保留历史切片，支持 ?playseek= 回看。</span>
+              <span className="muted">保留历史切片，可以回看过去的节目。</span>
               <Switch
                 label="开启回看"
                 checked={channelForm.form.livestream}
@@ -1508,7 +1510,7 @@ export function GroupsPage() {
           </details>
 
           <NetworkBlock
-            summary="网络配置 · 留空则继承分组配置"
+            summary="网络配置 · 留空则使用分组配置"
             proxy={channelForm.form.proxy}
             onProxy={(proxy) =>
               setChannelForm({ ...channelForm, form: { ...channelForm.form, proxy } })
@@ -1547,15 +1549,15 @@ export function GroupsPage() {
           {importing.kind === 'm3u' ? (
             <Field
               label="同名分组处理"
-              tip="append 跳过同名分组；merge 补齐频道；replace 整体替换。"
+              tip="选择导入内容遇到同名分组时怎么做。"
             >
               <Select
                 ariaLabel="M3U 导入模式"
                 value={m3uMode}
                 options={[
-                  { value: 'append', label: 'append —— 同名分组跳过' },
-                  { value: 'merge', label: 'merge —— 同名分组补频道' },
-                  { value: 'replace', label: 'replace —— 同名分组整体替换' },
+                  { value: 'append', label: '跳过同名分组', desc: '只导入新分组。' },
+                  { value: 'merge', label: '补齐同名分组', desc: '保留原频道，只加入缺少的。' },
+                  { value: 'replace', label: '替换同名分组', desc: '整组换成导入的内容。' },
                 ]}
                 onChange={(next) =>
                   setM3uMode(next as 'append' | 'merge' | 'replace')
@@ -1566,13 +1568,13 @@ export function GroupsPage() {
           ) : (
             <p className="muted">
               {importing.force
-                ? '按分组 ID 覆盖：已存在的分组整体替换，其余追加。'
-                : '按分组 ID 追加：已存在的分组跳过，其余新增。'}
+                ? '按分组 ID 覆盖：已有的分组整体替换，其余新增。'
+                : '按分组 ID 追加：已有的分组跳过，其余新增。'}
             </p>
           )}
           <Field
             label={importing.kind === 'm3u' ? 'M3U 文本' : '分组 JSON 数组'}
-            tip="导入会新增或覆盖分组。重复的频道 ID 按所选策略处理。"
+            tip="导入会新增或覆盖分组。重复的频道 ID 按所选方式处理。"
           >
             <textarea
               style={{ minHeight: 300 }}
@@ -1622,7 +1624,7 @@ export function GroupsPage() {
           title={removing.kind === 'group' ? '删除分组' : '删除频道'}
           text={
             removing.synced
-              ? `确认删除「${removing.label}」？此操作不可撤销。该内容来自订阅源，删除后会加入排除列表，同步不会恢复。`
+              ? `确认删除「${removing.label}」？此操作不可撤销。这个频道来自订阅源，删除后会加入排除列表，下次同步不会恢复。`
               : `确认删除「${removing.label}」？此操作不可撤销。`
           }
           onCancel={() => setRemoving(null)}

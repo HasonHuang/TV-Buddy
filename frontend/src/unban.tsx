@@ -76,7 +76,7 @@ function App() {
           <Icon name="security" size={34} />
         </div>
         <div className="name">自助解封</div>
-        <div className="tagline">Unban</div>
+        <div className="tagline">恢复访问</div>
 
         <div className="unban-ip">
           <span className="muted">当前地址</span>
@@ -96,7 +96,7 @@ function App() {
           {busy ? '提交中…' : '提交解封'}
         </button>
         <div className="unban-tip">
-          <Tip text="解封只影响当前公网地址。配额用完后需要等待或联系管理员。" />
+          <Tip text="解封只影响当前网络地址。次数用完后需要等待或联系管理员。" />
         </div>
 
         {message ? <p className={`msg ${tone}`}>{message}</p> : null}

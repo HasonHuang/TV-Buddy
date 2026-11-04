@@ -395,7 +395,7 @@ export function LogosPage() {
         {authed && (
           <div className="row">
             <label>
-              最大边
+              最大边长
               <Tip text="上传前按最长边等比缩放。超过这个值的图片会缩小，避免占用过多内存。" />
               <NumberBox
                 min={16}
@@ -405,7 +405,7 @@ export function LogosPage() {
               />
             </label>
             <label>
-              质量
+              图片质量
               <Tip text="WebP 编码质量。数值越高越清晰，文件也越大。" />
               <NumberBox
                 min={1}
@@ -424,13 +424,13 @@ export function LogosPage() {
               <Tip text="在浏览器里先转成 WebP 再上传。透明背景会保留。" />
             </label>
             <span className="muted">
-              上载前在浏览器里按最长边等比缩放并转码（服务端上载时不转码）。
+              上传前在浏览器里缩放并转换。服务器不再转换。
             </span>
           </div>
         )}
         {report && (
           <p className="muted">
-            频道 {report.channels} 个；缺台标 {report.missing} 个；坏引用 {report.broken} 个；未使用{' '}
+            频道 {report.channels} 个；缺台标 {report.missing} 个；引用失效 {report.broken} 个；未使用{' '}
             {report.unused} 个。
           </p>
         )}
@@ -490,7 +490,7 @@ export function LogosPage() {
                   )}
                   <button
                     className="icon-btn"
-                    title="删除台标；引用它的频道会变成坏引用"
+                    title="删除台标；引用它的频道会失效"
                     onClick={() => setPendingAction({ kind: 'remove', file: logo.file })}
                   >
                     删除
@@ -506,8 +506,7 @@ export function LogosPage() {
         <div className="card" style={{ marginTop: 16 }}>
           <h2>生成动效</h2>
           <p className="muted">
-            {animating.file}：输出固定 10 帧无损动画 WebP（前 9 帧 80 ms、末帧 1500 ms），
-            覆盖原图前会先备份到 <code className="mono">.orig/</code>。
+            {animating.file}：生成 10 帧动画并覆盖原图。生成前会把原图备份，可以还原。
           </p>
           <div className="row">
             <div className="field" style={{ width: 260 }}>
@@ -519,10 +518,7 @@ export function LogosPage() {
                 ariaLabel="效果"
                 title="选择台标进入与退出的动画方式"
                 value={animating.effect}
-                options={EFFECTS.map((item) => ({
-                  value: item.value,
-                  label: `${item.label}（${item.value}）`,
-                }))}
+                options={EFFECTS}
                 onChange={(next) => setAnimating({ ...animating, effect: next })}
               />
             </div>
@@ -539,7 +535,7 @@ export function LogosPage() {
           {animReport && (
             <p className="muted">
               上次结果：{animReport.frames} 帧 {animReport.width}×{animReport.height}，
-              {animReport.total_ms} ms，脏像素 {animReport.dirty_ratio}%
+              {animReport.total_ms} ms，变化区域 {animReport.dirty_ratio}%
             </p>
           )}
         </div>
@@ -612,7 +608,7 @@ export function LogosPage() {
               ? '所有静态 WebP 台标会生成动画。原图先备份到 .orig，完成后可还原。'
               : pendingAction.kind === 'restore-all'
                 ? '所有带备份的台标会恢复为静态原图。动效会被覆盖。'
-                : `删除「${pendingAction.file}」后，引用它的频道会变成坏引用。`
+                : `删除「${pendingAction.file}」后，引用它的频道会失效。`
           }
           confirmText={
             pendingAction.kind === 'animate-all'

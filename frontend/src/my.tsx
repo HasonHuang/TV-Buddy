@@ -74,10 +74,10 @@ export function MySubsPage() {
       <div className="card">
         <h2>
           订阅地址
-          <Tip text="地址内带你的专属令牌。任何人拿到它都能播放你可见的频道。" />
+          <Tip text="地址里带你的专属凭证。任何人拿到它都能播放你看得到的频道。" />
         </h2>
         <p className="muted">
-          把这个地址填进播放器的 M3U 订阅。地址里带你的专属令牌，不要外传。
+          把这个地址填进播放器的订阅。地址里带你的专属凭证，不要外传。
         </p>
         <div className="row form-row">
           <input
@@ -99,9 +99,9 @@ export function MySubsPage() {
           <>
             <h2>
               EPG 地址
-              <Tip text="节目单只包含你可见的频道。播放器支持时填这里。" />
+              <Tip text="节目单只包含你看得到的频道。播放器支持时填这里。" />
             </h2>
-            <p className="muted">只含你可见频道的节目单。播放器支持时填这里。</p>
+            <p className="muted">只含你看得到的频道。播放器支持时填这里。</p>
             <div className="row form-row">
               <input
                 readOnly

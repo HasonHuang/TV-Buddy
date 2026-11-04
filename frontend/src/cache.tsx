@@ -111,7 +111,7 @@ export function CachePage() {
       <PageHead
         icon="cache"
         title="缓存状态"
-        sub={stats ? `${stats.backend} · ${formatBytes(stats.bytes)}` : '读取中…'}
+        sub={stats ? `${stats.backend === 'memory' ? '内存' : '硬盘'} · ${formatBytes(stats.bytes)}` : '读取中…'}
       >
         <button
           className="ghost"
@@ -122,7 +122,7 @@ export function CachePage() {
           刷新
         </button>
         <button
-          title="删除已落盘的清单与切片"
+          title="删除已保存的清单与切片"
           disabled={busy}
           onClick={() => setConfirmFlush(true)}
         >
@@ -133,14 +133,14 @@ export function CachePage() {
       <div className="card">
         <h2>
           缓存目录
-          <Tip text="缓存目录决定切片落盘位置。内存清单缓存只保存清单索引。" />
+          <Tip text="保存缓存文件的位置。内存缓存只保存清单索引。" />
         </h2>
         <dl>
           <dt>目录</dt>
           <dd className="mono ellipsis" title={stats?.disk_path ?? ''}>
             {stats?.disk_path ?? '—'}
           </dd>
-          <dt>内存清单缓存</dt>
+          <dt>内存中的清单缓存</dt>
           <dd>{stats?.playlist_cache_entries ?? 0} 项</dd>
         </dl>
         <div className="table-wrap">
@@ -169,7 +169,7 @@ export function CachePage() {
       {confirmFlush ? (
         <Confirm
           title="清空缓存？"
-          text="会删除已落盘的清单与切片。正在播放的频道可能需要重新起播。"
+          text="会删除已保存的清单与切片。正在播放的频道可能需要重新起播。"
           confirmText="清空缓存"
           busy={busy}
           onCancel={() => setConfirmFlush(false)}
@@ -222,7 +222,7 @@ export function StatsPage() {
             当前在线
           </div>
           <div className="v">{stats?.online_viewers ?? 0}</div>
-          <div className="hint">近 {stats?.online_window_secs ?? 0} 秒去重观众合计</div>
+          <div className="hint">最近 {stats?.online_window_secs ?? 0} 秒内播放过的设备数</div>
         </div>
         <div className="stat">
           <div className="k">
@@ -285,9 +285,9 @@ export function StatsPage() {
           <dd>{stats?.playlists ?? 0}</dd>
           <dt>切片请求</dt>
           <dd>{stats?.segments ?? 0}</dd>
-          <dt>切片命中</dt>
+          <dt>缓存命中</dt>
           <dd>{stats?.segment_hits ?? 0}</dd>
-          <dt>上游失败</dt>
+          <dt>源读取失败</dt>
           <dd>{stats?.upstream_failures ?? 0}</dd>
         </dl>
         <table className="table">

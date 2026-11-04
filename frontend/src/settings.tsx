@@ -160,7 +160,7 @@ function Pick({
   path: string;
   hint?: string;
   tip?: string;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; desc?: string }[];
 }) {
   const { draft, update } = useDraft();
   // 最短选项也短时收窄下拉，避免「开启 / 关闭」占满整行。
@@ -373,7 +373,7 @@ function Chips({
   primaryPath?: string;
   hint?: string;
   tip?: string;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; desc?: string }[];
 }) {
   const { draft, update } = useDraft();
   const chosen = asList(draft, path);
@@ -454,11 +454,19 @@ function Range({
 const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error'];
 
 const CATCHUP_TEMPLATES = [
-  { value: 'guonei', label: '国产（DIYP / 影音仓库 / TVBox / OK）' },
-  { value: 'dollar', label: '国外（${start}-${end}）' },
-  { value: 'unix', label: 'Kodi（{utc}-{utcend}）' },
-  { value: 'both', label: '两者都带' },
+  { value: 'guonei', label: '国内常用格式', desc: '适用于 DIYP、TVBox 等播放器。' },
+  { value: 'dollar', label: '国外常用格式', desc: '使用开始和结束时间占位符。' },
+  { value: 'unix', label: 'Kodi 格式', desc: '使用 UTC 时间占位符。' },
+  { value: 'both', label: '两种都带', desc: '同时输出两组参数。' },
 ];
+
+const LOG_LEVEL_LABELS: Record<string, { label: string; desc: string }> = {
+  trace: { label: '跟踪', desc: '记录最详细的信息。' },
+  debug: { label: '调试', desc: '记录排查问题需要的详细信息。' },
+  info: { label: '信息', desc: '记录正常运行信息。推荐。' },
+  warn: { label: '警告', desc: '只记录异常和警告。' },
+  error: { label: '错误', desc: '只记录错误。' },
+};
 
 /** 字幕字号预设；`[subtitle].style.font_size` 存字符串百分比。 */
 const FONT_SIZES = ['60%', '70%', '80%', '90%', '100%', '110%', '120%', '150%'].map((size) => ({
@@ -740,14 +748,18 @@ export function SettingsPage({
                 <Pick
                   label="回看格式"
                   path="server.catchup_tpl"
-                  tip="生成回看地址使用的模板。不同播放器与上游支持的占位符不同。"
+                  tip="生成回看地址使用的模板。不同播放器使用的格式不同。"
                   options={CATCHUP_TEMPLATES}
                 />
                 <Pick
                   label="日志级别"
                   path="server.log_level"
                   tip="写入运行日志的最低级别。排查问题时可临时改为 debug。"
-                  options={LOG_LEVELS.map((level) => ({ value: level, label: level }))}
+                  options={LOG_LEVELS.map((level) => ({
+                    value: level,
+                    label: LOG_LEVEL_LABELS[level]?.label ?? level,
+                    desc: LOG_LEVEL_LABELS[level]?.desc,
+                  }))}
                 />
                 <Text
                   label="首页跳转"
@@ -762,7 +774,7 @@ export function SettingsPage({
                 <Text
                   label="错误跳转"
                   path="server.error_url"
-                  tip="上游或代理出错时跳转的地址。"
+                  tip="读取源或播放出错时跳转的地址。"
                 />
               </div>
               <Lines
@@ -777,8 +789,8 @@ export function SettingsPage({
 
             <Card
               title="功能开关"
-              note="关闭后侧栏不显示该分区，相关接口返回 403"
-              tip="只控制面板入口与接口可见性，不会删除已有数据。"
+              note="关闭后侧栏不显示该分区，相关接口也不可用"
+              tip="只控制面板入口与接口是否可用，不会删除已有数据。"
             >
               <div className="fields">
                 <BoolPick
@@ -797,9 +809,9 @@ export function SettingsPage({
                   tip="显示「台标管理」分区与台标接口。"
                 />
                 <BoolPick
-                  label="订阅聚合"
+                  label="订阅源"
                   path="features.playlist"
-                  tip="显示「订阅聚合」分区与聚合订阅接口。"
+                  tip="显示「订阅源」分区与订阅接口。"
                 />
                 <BoolPick
                   label="视频素材"
@@ -809,7 +821,7 @@ export function SettingsPage({
                 <BoolPick
                   label="用户与设备"
                   path="features.users"
-                  tip="显示「用户与设备」分区与账号、设备令牌接口。"
+                  tip="显示「用户与设备」分区与账号、设备凭证接口。"
                 />
               </div>
               <p className="muted">
@@ -826,18 +838,18 @@ export function SettingsPage({
             <Card
               title="面板认证"
               note="账号在「用户与设备」分区管理"
-              tip="账号、角色与设备令牌存放在 users.db，不写进配置文件。"
+              tip="账号和密码保存在本地数据库，不写进配置文件。"
             >
               <p className="muted">
-                面板账号、角色与设备令牌存在 <code className="mono">users.db</code>，
-                不再写进配置文件。请到「用户与设备」分区新建用户或重置密码。
+                面板账号、角色与设备凭证保存在本地数据库，不写进配置文件。
+                请到「用户与设备」分区新建用户或重置密码。
               </p>
             </Card>
 
             <Card
               title="切片伪装"
               note="把切片伪装成图片，降低被举报风险"
-              tip="只改下发的扩展名，不改变切片内容。个别播放器可能不识别伪装后的地址。"
+              tip="把切片地址伪装成图片后缀。视频内容不变。个别播放器可能不识别伪装后的地址。"
             >
               <div className="fields">
                 <BoolPick
@@ -882,7 +894,7 @@ export function SettingsPage({
                 <BoolPick
                   label="健康探测"
                   path="health.enabled"
-                  tip="定期探测频道上游是否可用；关闭后分组页不显示状态点。"
+                  tip="定期检查频道源是否可用；关闭后分组页不显示状态点。"
                 />
                 <Num
                   label="探测周期"
@@ -911,20 +923,20 @@ export function SettingsPage({
                   label="在线窗口"
                   path="stats.online_window_secs"
                   unit="秒"
-                  tip="窗口内出现过的播放 token 计为在线观众。"
-                  hint="窗口内的播放 token 计为在线"
+                  tip="一段时间内播放过的设备算作在线。这里设置这段时间的长度。"
+                  hint="这段时间内播放过的设备算作在线"
                 />
               </div>
             </Card>
 
             <Card
               title="缓存配置"
-              note="后端与容量"
-              tip="缓存后端决定切片存放位置。容量为 0 时按推荐值或内存索引上限自动处理。"
+              note="存放位置与容量"
+              tip="缓存位置决定切片存放的地方。容量填 0 时自动处理。"
               actions={
                 <button
                   className="ghost"
-                  title="删除已落盘的清单与切片"
+                  title="删除已保存的清单与切片"
                   disabled={busy === 'flush'}
                   onClick={() => setConfirmFlush(true)}
                 >
@@ -934,49 +946,45 @@ export function SettingsPage({
             >
               <div className="fields">
                 <Pick
-                  label="后端"
+                  label="缓存位置"
                   path="cache.backend"
-                  tip="disk 写入磁盘，重启后保留；memory 只占内存，重启清空。"
+                  tip="选择切片存放的位置。"
                   options={[
-                    { value: 'disk', label: '硬盘（disk）' },
-                    { value: 'memory', label: '内存（memory，重启清空）' },
+                    { value: 'disk', label: '硬盘', desc: '重启后保留。' },
+                    { value: 'memory', label: '内存', desc: '速度更快，重启后清空。' },
                   ]}
                 />
                 <Text
                   label="缓存目录"
                   path="cache.disk_path"
-                  tip="切片落盘目录，相对进程工作目录。保存后需重启进程。"
-                  hint="相对进程工作目录；改后需重启"
+                  tip="缓存文件的保存目录。相对程序启动目录。保存后需重启。"
+                  hint="相对程序启动目录；改后需重启"
                 />
                 <Num
                   label="硬盘上限"
                   path="cache.disk_max_mb"
                   unit="MB"
-                  tip="磁盘缓存上限。0 表示不限；与「磁盘回收」的上限同时非 0 时取更小值。"
+                  tip="磁盘缓存最多用多少空间。0 表示不限。两个上限同时设置时，使用较小的值。"
                 />
                 <Num
                   label="内存上限"
                   path="cache.memory_max_mb"
                   unit="MB"
-                  tip="内存缓存上限。0 表示不限；按每条约 256 B 估算成索引条目数。"
+                  tip="内存缓存最多用多少空间。0 表示不限。"
                 />
               </div>
-              <p className="muted">
-                硬盘与内存上限都已生效。segment_cache_max_mb、m3u8_max_entries、
-                segment_max_entries 仍保留在配置里，但当前版本不读取。
-              </p>
             </Card>
 
             <Card
               title="预载配置"
-              note="仅 Proxy 模式生效"
-              tip="预取后续切片，减少起播后的卡顿。并发过高会挤占上行带宽。"
+              note="仅服务器转发模式生效"
+              tip="提前读取后面的切片，减少起播后的卡顿。并发过高会占用上行带宽。"
             >
               <div className="fields">
                 <BoolPick
                   label="预载"
                   path="cache.prefetch.enabled"
-                  tip="播放前预取后续切片；仅 Proxy 模式生效。"
+                  tip="播放前提前读取后面的切片。仅服务器转发模式生效。"
                 />
                 <Num
                   label="拉取并发"
@@ -1089,59 +1097,59 @@ export function SettingsPage({
 
             <Card
               title="CDN 兜底"
-              note="外部 CDN 侧不生效时的服务端兜底；默认关闭"
-              tip="开启后由服务端补齐缓存头与失败状态码，避免 CDN 缓存空响应。"
+              note="外部 CDN 没有生效时，由本机补齐缓存头和错误状态；默认关闭"
+              tip="开启后由本机补齐缓存头与失败状态码，避免 CDN 缓存空响应。"
             >
               <div className="fields">
                 <BoolPick
                   label="启用 CDN 兜底"
                   path="cdn.enabled"
-                  tip="关闭时响应头与状态码与旧版逐字节一致。"
-                  hint="关闭时响应头与状态码与旧版逐字节一致"
+                  tip="关闭时，响应头与状态码保持旧版行为。"
+                  hint="关闭时保持旧版行为"
                 />
                 <BoolPick
                   label="被动实测"
                   path="cdn.auto_tune"
-                  tip="从真实播放流量推算 TTL 与磁盘上限，无需主动压测。"
+                  tip="从真实播放流量推算参数，不需要主动压测。"
                   hint="从真实播放流量推算推荐值"
                 />
                 <Num
-                  label="切片 max-age"
+                  label="切片缓存时长"
                   path="cdn.segment_max_age_secs"
                   unit="秒"
-                  tip="切片缓存时长。0 表示使用推荐值。"
+                  tip="切片在 CDN 缓存多久。0 表示使用推荐值。"
                   hint={ttlHint}
                 />
                 <Num
-                  label="上游失败状态码"
+                  label="源失败时状态码"
                   path="cdn.empty_status"
-                  tip="上游返回空体时使用的状态码。502 可避免 CDN 缓存空响应。"
-                  hint="默认 502：让「200 + 空体」不被 CDN 缓存"
+                  tip="源返回空内容时使用的状态码。502 可以避免 CDN 缓存空响应。"
+                  hint="默认 502：让空内容不被 CDN 缓存"
                 />
                 <Text
-                  label="对外基址"
+                  label="对外地址"
                   path="cdn.public_base"
                   placeholder="https://cdn.example"
-                  tip="CDN 没有回传 X-Forwarded-Proto 时使用；留空按 Host 推导。"
-                  hint="CDN 不下发 X-Forwarded-Proto 时用；留空则按 Host 推导"
+                  tip="CDN 不传协议头时使用。留空时按访问地址推导。"
+                  hint="CDN 不传协议头时使用；留空则按访问地址推导"
                 />
                 <Toggle
-                  label="命中路径也标 public"
+                  label="缓存命中时也允许 CDN 继续缓存"
                   path="cdn.shared_cache_hits"
-                  tip="缓存命中时也发送 public 缓存头，允许 CDN 继续缓存。"
+                  tip="缓存命中时也发送允许缓存的响应头。"
                 />
                 <Toggle
-                  label="空体加 no-store"
+                  label="空内容不缓存"
                   path="cdn.dont_cache_empty"
-                  tip="上游返回空体时附加 no-store，避免 CDN 缓存空响应。"
+                  tip="源返回空内容时告诉 CDN 不要缓存。"
                 />
               </div>
             </Card>
 
             <Card
               title="切片缓存"
-              note="磁盘索引与内存索引上限"
-              tip="这些上限只影响索引条目数，不直接限制磁盘字节。0 表示交给默认值。"
+              note="切片索引条目上限"
+              tip="这些值只限制系统记录的切片条数，不直接限制磁盘空间。0 表示使用默认值。"
             >
               <div className="fields">
                 <Num
@@ -1218,7 +1226,7 @@ export function SettingsPage({
               <Toggle
                 label="字幕机翻"
                 path="subtitle.translate.enabled"
-                tip="把字幕翻译成目标语言；上游必须有字幕轨道。"
+                tip="把字幕翻译成目标语言；源必须提供字幕轨道。"
               />
               <Chips
                 label="目标语言"
@@ -1255,17 +1263,17 @@ export function SettingsPage({
               </div>
               <div className="fields">
                 <Text
-                  label="MTranServer"
+                  label="机翻服务地址"
                   path="subtitle.translate.url"
                   placeholder="http://127.0.0.1:8989"
-                  tip="自建 MTranServer 地址；留空使用内置免费机翻。"
+                  tip="自建 MTranServer 的地址。留空使用内置免费机翻。"
                   hint="留空则用内置免费机翻"
                 />
                 <Text
-                  label="API Key"
+                  label="访问令牌"
                   path="subtitle.translate.token"
-                  tip="MTranServer 的访问令牌；没有就留空。"
-                  hint="没填就留空"
+                  tip="机翻服务的访问令牌。不需要就留空。"
+                  hint="不需要就留空"
                 />
               </div>
               <div className="row">
@@ -1284,68 +1292,76 @@ export function SettingsPage({
 
             <div className="span-all">
             <Card
-              title="分享（多 VPS）"
-              note="主从互拉分组与订阅；对端用 ?key= 鉴权"
+              title="多服务器分享"
+              note="主从服务器互拉分组与订阅"
               wide
-              tip="master 汇总下线数据，follower 从主机拉取。两端密钥必须一致。"
+              tip="主机汇总各从机的数据，从机从主机拉取。两端密钥必须一致。"
             >
               <div className="fields">
                 <Toggle
                   label="启用分享"
                   path="share.enabled"
-                  tip="开启主从互拉；关闭后不发送也不接收分享数据。"
+                  tip="开启主从互拉。关闭后不发送也不接收分享数据。"
                 />
                 <Pick
                   label="角色"
                   path="share.role"
-                  tip="master 拉取下线；follower 从主机拉取。角色会影响安全策略。"
+                  tip="选择这台服务器是主机还是从机。"
                   options={[
-                    { value: 'master', label: 'master（主机，拉取下线）' },
-                    { value: 'follower', label: 'follower（从机，从主机拉取）' },
+                    {
+                      value: 'master',
+                      label: '主机',
+                      desc: '从各从机拉取数据，汇总到一起。',
+                    },
+                    {
+                      value: 'follower',
+                      label: '从机',
+                      desc: '从主机拉取数据。',
+                    },
                   ]}
                   hint="角色会影响「安全管控」的策略"
                 />
                 <Text
                   label="分享密钥"
                   path="share.key"
-                  tip="对端用 ?key= 传入，主从两端必须一致。"
-                  hint="对端用 ?key= 传入；主从必须一致"
+                  tip="两端填写同一个密钥。对端请求时用它验证身份。"
+                  hint="两端必须一致"
                 />
                 <Num
-                  label="轮询周期"
+                  label="拉取周期"
                   path="share.poll_secs"
                   unit="秒"
-                  tip="follower 拉取主机的间隔，实际下限 5 秒。"
+                  tip="从机多久从主机拉取一次。最短 5 秒。"
                   hint="实际下限 5 秒"
                 />
                 <Toggle
-                  label="订阅地址带分享 token"
+                  label="记录分享令牌"
                   path="share.share_token"
-                  tip="仅记录该开关，不改变订阅地址。"
-                  hint="仅记录，不改变订阅地址"
+                  tip="只记录这个开关，不改变订阅地址。"
+                  hint="不改变订阅地址"
                 />
               </div>
               <div className="fields">
                 <Text
                   label="主机地址"
                   path="share.master_url"
-                  tip="follower 从这里拉取主机数据。"
+                  tip="从机从这里拉取主机数据。"
                   placeholder="https://master.example"
                 />
                 <Lines
-                  label="下线地址"
+                  label="从机地址"
                   path="share.follower_urls"
-                  tip="master 逐个拉取这些地址上的分组与订阅。"
+                  tip="主机逐个读取这些地址上的分组与订阅。"
                   rows={2}
-                  hint="一行一个；master 逐个拉取"
+                  hint="一行一个；主机逐个读取"
                 />
               </div>
               <Lines
                 label="允许拉取的来源"
                 path="share.trust_ips"
-                tip="精确 IP 或 a.b.c.0/24；留空表示不限制来源。"
+                tip="只接受这些地址发来的分享请求。可以填单个 IP 或网段。留空表示不限制。"
                 rows={2}
-                hint="精确 IP 或 a.b.c.0/24；留空表示不限制"
+                hint="单个 IP 或网段；留空表示不限制"
               />
             </Card>
             </div>
@@ -1353,7 +1369,7 @@ export function SettingsPage({
             <div className="span-all">
             <Card
               title="DASH 调优"
-              note="304 增量刷新、多 CDN 故障切换、断流续传、片段级容错都是自动的，无需配置"
+              note="缓存刷新、CDN 切换、断流续传和片段容错都已自动处理"
               wide
               tip="三组参数默认值已适配大多数源。不确定用途时不要改，以免影响起播与卡顿。"
             >
@@ -1376,7 +1392,7 @@ export function SettingsPage({
                     path="cache.dash.start_time_offset_secs"
                     unit="秒"
                     step={0.5}
-                    tip="清单起点相对直播时间的偏移，用于吸收上游发布延迟。"
+                    tip="清单起点相对直播时间的偏移，用于吸收源的发布延迟。"
                   />
                   <Num
                     label="发布延迟"
@@ -1449,7 +1465,7 @@ export function SettingsPage({
                     label="请求间隔下限"
                     path="cache.dash.min_request_interval_ms"
                     unit="毫秒"
-                    tip="两次上游请求之间的最小间隔，避免触发限流。"
+                    tip="两次读取源之间的最小间隔，避免触发限流。"
                   />
                   <Num
                     label="重试次数"
@@ -1550,7 +1566,7 @@ export function SettingsPage({
                   <Toggle
                     label="清单正文去重"
                     path="cache.dash.mpd_body_dedup"
-                    tip="清单正文未变化时复用缓存，减少上游请求。"
+                    tip="清单正文未变化时复用缓存，减少读取源。"
                   />
                 </div>
                 <Pick
@@ -1603,7 +1619,7 @@ export function SettingsPage({
       {confirmFlush ? (
         <Confirm
           title="清空本地缓存？"
-          text="会删除已落盘的清单与切片。正在播放的频道可能需要重新起播。"
+          text="会删除已保存的清单与切片。正在播放的频道可能需要重新起播。"
           confirmText="清空缓存"
           busy={busy === 'flush'}
           onCancel={() => setConfirmFlush(false)}

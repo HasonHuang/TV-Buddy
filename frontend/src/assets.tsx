@@ -26,6 +26,21 @@ const LABEL: Record<Kind, string> = {
   subtitle: '字幕文件',
 };
 
+/** 字幕目标语言的中文名。 */
+const LANG_LABELS: Record<string, string> = {
+  'zh-cn': '简体中文',
+  'zh-tw': '繁體中文',
+  ja: '日本語',
+  ko: '한국어',
+  en: '英语',
+  es: '西班牙语',
+  fr: '法语',
+  de: '德语',
+  ru: '俄语',
+  he: '希伯来语',
+  vi: '越南语',
+};
+
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -210,7 +225,7 @@ function Library({
       <div className="row between">
         <h2>
           {LABEL[kind]}
-          <Tip text="素材保存在 cache 目录。上传后的文件名不能修改，引用它的频道会按文件名查找。" />
+          <Tip text="素材保存在缓存目录。文件名上传后不能改，频道按文件名查找。" />
         </h2>
         <div className="row">
           {kind === 'subtitle' && translation?.enabled && translation.targets.length > 1 && (
@@ -218,7 +233,10 @@ function Library({
               ariaLabel="翻译目标语言"
               title="翻译并生成对应语言的字幕文件"
               value={target}
-              options={translation.targets.map((code) => ({ value: code, label: code }))}
+              options={translation.targets.map((code) => ({
+                value: code,
+                label: LANG_LABELS[code] ?? code,
+              }))}
               onChange={setTarget}
               compact
             />
@@ -243,17 +261,17 @@ function Library({
               onChange={(event) => void upload(event.target.files)}
             />
           </label>
-          <Tip text="同名文件会被覆盖。字幕支持常见文本格式，视频按 ffmpeg 能力转封装。" />
+          <Tip text="同名文件会被覆盖。字幕支持常见文本格式。视频转换需要 ffmpeg。" />
         </div>
       </div>
       {kind === 'assets' && !ffmpegReady && (
-        <p className="muted">未检测到 ffmpeg：转封装（remux/dash）保持 503 预热。</p>
+        <p className="muted">未检测到 ffmpeg：视频转换不可用。</p>
       )}
       {kind === 'subtitle' && translation && !translation.enabled && (
-        <p className="muted">字幕翻译未启用：请在配置中打开 [subtitle.translate].enabled。</p>
+        <p className="muted">字幕翻译未启用。可以在「系统设置」的字幕设置里开启。</p>
       )}
       {kind === 'subtitle' && translation?.enabled && translation.engine === 'none' && (
-        <p className="muted">未配置 MTranServer 地址：翻译请求会返回 400。</p>
+        <p className="muted">还没有配置翻译服务地址，翻译会失败。</p>
       )}
       {kind === 'assets' && (
         <p className="muted">
@@ -295,12 +313,12 @@ function Library({
                       title="复制这个素材的公网地址"
                       onClick={() => void copyLink(file.file)}
                     >
-                      复制外链
+                      复制地址
                     </button>
                   )}
                   <button
                     className="chip danger-text"
-                    title="删除文件；引用它的频道会变成坏引用"
+                    title="删除文件；引用它的频道会失效"
                     onClick={() => setPendingRemove(file.file)}
                   >
                     删除
@@ -330,7 +348,7 @@ function Library({
       {pendingRemove ? (
         <Confirm
           title="删除文件？"
-          text={`文件「${pendingRemove}」删除后，引用它的频道会变成坏引用。`}
+          text={`文件「${pendingRemove}」删除后，引用它的频道会失效。`}
           confirmText="删除文件"
           onCancel={() => setPendingRemove(null)}
           onConfirm={() => {
@@ -370,28 +388,27 @@ function ConvertCard({ ready }: { ready: boolean }) {
 
   return (
     <div className="card">
-      <h2>远程转换</h2>
+      <h2>远程视频转换</h2>
       <p className="muted">
-        用 ffmpeg 把上游地址转成本地 HLS，并写入{' '}
-        <code className="mono">[assets].map</code>。需要 ffmpeg。
+        把远程视频转成本地可播放的格式。需要 ffmpeg。
       </p>
       <div className="row">
         <input
-          aria-label="要转换的上游地址"
-          title="转换结果会写入本地素材目录，并登记到 [assets].map"
+          aria-label="要转换的视频地址"
+          title="转换结果会保存到本地素材目录"
           placeholder="http(s)://…/live.ts"
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           style={{ flex: 1 }}
         />
         <button
-          title="用 ffmpeg 把远程流转换成本地 HLS"
+          title="把远程视频转换成本地可播放的文件"
           onClick={() => void run()}
           disabled={!ready || busy || url.trim() === ''}
         >
           {busy ? '转换中…' : '转换'}
         </button>
-        <Tip text="转换会占用 CPU 与磁盘。完成后播放器改用本地 HLS 地址。" />
+        <Tip text="转换会占用 CPU 和磁盘。完成后使用本地地址播放。" />
       </div>
       {!ready && <div className="msg err">未检测到 ffmpeg，无法转换。</div>}
       {result && (
@@ -469,7 +486,7 @@ function CandidatesCard({ ready }: { ready: boolean }) {
   return (
     <div className="card">
       <div className="row between">
-        <h2>配置中的占位视频 URL</h2>
+        <h2>占位视频地址</h2>
         <button
           title="逐个转换所有未处理的占位地址"
           disabled={!ready || busy || pending.length === 0}
@@ -479,8 +496,8 @@ function CandidatesCard({ ready }: { ready: boolean }) {
         </button>
       </div>
       <p className="muted">
-        这些地址常指向 MP4。部分播放器不显示 MP4，转成本地 HLS 后可见。转换结果写入{' '}
-        <code className="mono">[assets].map</code>，不改动配置里的跳转键。
+        这些地址常指向 MP4。部分播放器不能播放 MP4，转成本地文件后可以显示。
+        转换不会修改原配置。
       </p>
       <table className="table">
         <thead>

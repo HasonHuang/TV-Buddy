@@ -193,12 +193,12 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         <div>
           <h2>访问控制</h2>
           <p className="muted">
-            写 <code className="mono">[auth]</code> 段：改完点保存，整份配置原子替换（与设置页同一机制）。
+            这些设置影响播放链接、限流和封禁。改完点保存。
           </p>
         </div>
         <button
           disabled={saving}
-          title="保存 [auth] 段的访问控制设置"
+          title="保存访问控制设置"
           onClick={() => void save()}
         >
           {saving ? '保存中…' : '保存访问控制'}
@@ -219,7 +219,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         onChange={(event) => setWhitelist(event.target.value)}
       />
 
-      <h3>会话与 Token</h3>
+      <h3>会话与凭证</h3>
       <div className="fields">
         <Field label="IP 管控" tip="开启后启用按 IP 的限流、封禁与并发会话上限">
           <Select
@@ -233,9 +233,9 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
             compact
           />
         </Field>
-        <Field label="播放 Token" tip="开启后每个设备令牌只能播放自己的授权频道">
+        <Field label="播放凭证" tip="开启后每个设备凭证只能播放自己的授权频道">
           <Select
-            ariaLabel="播放 Token"
+            ariaLabel="播放凭证"
             value={auth.token_enabled === true ? 'on' : 'off'}
             options={[
               { value: 'off', label: '关闭' },
@@ -246,30 +246,30 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
           />
         </Field>
         <NumberField
-          field={{ key: 'token_ttl_hours', label: 'Token 有效期', unit: '小时' }}
+          field={{ key: 'token_ttl_hours', label: '凭证有效期', unit: '小时' }}
           value={authNumber(auth, 'token_ttl_hours')}
           onChange={(next) => setKey('token_ttl_hours', Number(next) || 0)}
         />
       </div>
       {auth.token_enabled === false ? (
         <div className="msg warn">
-          播放令牌已关闭：任何拿到地址的人都能播放，且无法按用户收回。{' '}
+          播放凭证已关闭：任何拿到地址的人都能播放，而且无法按用户收回。{' '}
           <button className="ghost" onClick={() => setKey('token_enabled', true)}>
-            开启令牌校验
+            开启凭证校验
           </button>
         </div>
       ) : (
-        <p className="msg ok">播放令牌已开启。旧版「开放」分组不再生成免令牌直链。</p>
+        <p className="msg ok">播放凭证已开启。旧版的「开放」分组不再生成免验证的播放地址。</p>
       )}
       {passthroughGroups.length > 0 && (
         <div className="msg warn">
-          有 {passthroughGroups.length} 个手工分组使用 passthrough（
+          有 {passthroughGroups.length} 个本地分组使用「原样直通」（
           {passthroughGroups
             .slice(0, 3)
             .map((group) => group.name || group.id)
             .join('、')}
           {passthroughGroups.length > 3 ? '…' : ''}
-          ）。这些分组绕过代理与令牌，建议改为 rewrite。
+          ）。这些分组绕过本机和凭证检查。建议改为「改写地址」。
         </div>
       )}
 
@@ -280,7 +280,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         修改密钥会让当前窗口内的旧链接立即失效。
       </p>
       <div className="fields">
-        <Field label="切片签名" tip="开启后切片地址带时间窗签名；关闭播放 Token 时本项不生效">
+        <Field label="切片签名" tip="开启后切片地址带时间签名。关闭播放凭证时本项不生效">
           <Select
             ariaLabel="切片签名"
             value={auth.slice_sign_enabled === false ? 'off' : 'on'}
@@ -468,10 +468,10 @@ export function SecurityPage() {
         </button>
       </PageHead>
       <div className="card">
-        <h2>播放令牌</h2>
+        <h2>播放凭证</h2>
         <p className="muted">
-          令牌按用户与设备下发，在「用户与设备」分区管理。
-          每个设备一条订阅地址，播放链接只用该设备的令牌。
+          凭证按用户与设备下发，在「用户与设备」分区管理。
+          每个设备一条订阅地址，播放链接只使用该设备的凭证。
         </p>
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}
@@ -571,6 +571,15 @@ export function SecurityPage() {
 const LEVELS = ['all', 'trace', 'debug', 'info', 'warn', 'error'] as const;
 type Level = (typeof LEVELS)[number];
 
+const LEVEL_LABELS: Record<Level, string> = {
+  all: '全部级别',
+  trace: '跟踪',
+  debug: '调试',
+  info: '信息',
+  warn: '警告',
+  error: '错误',
+};
+
 /** 环形缓冲里的行带 ANSI 颜色，直接塞进 `<pre>` 会显示成乱码控制符。 */
 // eslint-disable-next-line no-control-regex
 const ANSI = /\u001b\[[0-9;]*m/g;
@@ -619,7 +628,7 @@ export function LogsPage() {
       <PageHead
         icon="logs"
         title="运行日志"
-        sub={`最近 ${shown.length} 行${level === 'all' ? '' : `（${level.toUpperCase()}）`}（共 ${total} 行）`}
+        sub={`最近 ${shown.length} 行${level === 'all' ? '' : `（${LEVEL_LABELS[level]}）`}（共 ${total} 行）`}
       >
         <div className="row log-tools">
           <Select
@@ -628,14 +637,14 @@ export function LogsPage() {
             value={level}
             options={LEVELS.map((item) => ({
               value: item,
-              label: item === 'all' ? '全部级别' : item.toUpperCase(),
+              label: LEVEL_LABELS[item],
             }))}
             onChange={(next) => setLevel(next as Level)}
             width={124}
           />
           <input
             aria-label="读取行数"
-            title="从环形缓冲读取最近多少行"
+            title="读取最近多少行日志"
             value={limit}
             onChange={(event) => setLimit(event.target.value)}
             inputMode="numeric"
@@ -666,7 +675,7 @@ export function LogsPage() {
           })}
         </pre>
         {level !== 'all' && shown.length === 0 && (
-          <p className="muted">当前缓冲里没有 {level.toUpperCase()} 级别的行。</p>
+          <p className="muted">当前日志里没有 {LEVEL_LABELS[level]} 级别的行。</p>
         )}
       </div>
     </>
@@ -730,7 +739,7 @@ export function BackupPage({
       if (!response.ok) {
         throw new Error(data.error ?? `HTTP ${response.status}`);
       }
-      setMessage(`已恢复 ${data.report?.files.length ?? 0} 个文件，配置已重载`);
+      setMessage(`已恢复 ${data.report?.files.length ?? 0} 个文件，配置已重新读取`);
       onRestored?.();
     } catch (err) {
       setError(errorText(err));
@@ -760,9 +769,9 @@ export function BackupPage({
             title="选择备份包含的配置与资源"
             value={scope}
             options={[
-              { value: 'all', label: '全部' },
-              { value: 'epg-scripts', label: '仅 EPG 脚本' },
-              { value: 'resolver', label: '仅解析脚本' },
+              { value: 'all', label: '全部', desc: '配置、脚本和资源。' },
+              { value: 'epg-scripts', label: '仅节目单脚本', desc: '只导出节目单采集脚本。' },
+              { value: 'resolver', label: '仅解析脚本', desc: '只导出频道地址解析脚本。' },
             ]}
             onChange={setScope}
             width={190}
@@ -779,8 +788,8 @@ export function BackupPage({
           恢复
         </div>
         <p className="muted">
-          恢复会覆盖当前配置，旧配置另存为 <code className="mono">tv-buddy.db.bak.json</code>。
-          非法内容不会落盘。恢复成功后配置会重新读取。
+          恢复会覆盖当前配置。旧配置会另存为备份文件，内容有问题时不会覆盖当前数据。
+          恢复成功后配置立即重新读取。
         </p>
         <label className="ghost file-pick" title="选择 .tar.gz 备份包">
           <Icon name="upload" size={14} />
@@ -803,7 +812,7 @@ export function BackupPage({
       {pending ? (
         <Confirm
           title="恢复备份？"
-          text={`备份包「${pending.name}」会覆盖当前配置与同名资源。旧配置会另存为 tv-buddy.db.bak.json。`}
+          text={`备份包「${pending.name}」会覆盖当前配置与同名资源。旧配置会另存为备份文件。`}
           confirmText="恢复备份"
           busy={busy}
           onCancel={() => {
@@ -902,7 +911,7 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
   if (!config) {
     return (
       <div className="card">
-        <h2>EPG 翻译</h2>
+        <h2>节目单翻译</h2>
         {error ? <div className="msg err">{error}</div> : <p className="muted">读取中…</p>}
       </div>
     );
@@ -943,7 +952,7 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
         },
       };
       await putConfig(next);
-      setNote('EPG 翻译配置已保存');
+      setNote('节目单翻译配置已保存');
       await load();
       onChanged();
     } catch (err) {
@@ -1013,12 +1022,11 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
       <div className="row between">
         <div>
           <h2>
-            EPG 翻译
-            <Tip text="译文按目标语言写进 XMLTV。保存后用于下一次翻译。" />
+            节目单翻译
+            <Tip text="译文会写进节目单。保存后用于下一次翻译。" />
           </h2>
           <p className="muted">
-            引擎负责把节目名/简介翻成目标语言，译文按 <code className="mono">lang</code> 写进 XMLTV。
-            通过 MTranServer 的 HTTP 批量接口翻译；批量失败时逐条重试。
+            把节目名称和简介翻译成目标语言。译文会写进节目单。
           </p>
         </div>
         <div className="row">
@@ -1039,7 +1047,7 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
             清空译文缓存
           </button>
           <button
-            title="保存 EPG 翻译设置"
+            title="保存节目单翻译设置"
             disabled={busy}
             onClick={() => void save()}
           >
@@ -1049,7 +1057,7 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
       </div>
 
       <div className="fields">
-        <Field label="启用" tip="开启后按下方设置翻译 EPG 节目信息">
+        <Field label="启用" tip="开启后翻译节目信息。">
           <Select
             ariaLabel="启用"
             value={translate.enabled === true ? 'on' : 'off'}
@@ -1060,13 +1068,13 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
             onChange={(next) => setKey('enabled', next === 'on')}
           />
         </Field>
-        <Field label="引擎" tip="MTranServer 为本机或局域网部署；google 走 URL 的 HTTP 接口">
+        <Field label="翻译服务" tip="选择用哪个服务翻译。">
           <Select
-            ariaLabel="引擎"
+            ariaLabel="翻译服务"
             value={text('engine') || 'mtran'}
             options={[
-              { value: 'mtran', label: 'MTranServer' },
-              { value: 'google', label: 'Google（通过 HTTP 接口）' },
+              { value: 'mtran', label: 'MTranServer', desc: '在本机或局域网自建。' },
+              { value: 'google', label: 'Google', desc: '使用 Google 的在线翻译。' },
             ]}
             onChange={(next) => setKey('engine', next)}
           />
@@ -1080,14 +1088,14 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
           />
         </label>
         <label className="field">
-          <span>Token（可选）</span>
+          <span>访问令牌（可选）</span>
           <input
             value={text('mtran_token')}
             onChange={(event) => setKey('mtran_token', event.target.value)}
           />
         </label>
         <label className="field">
-          <span>批量大小</span>
+          <span>每次翻译条数</span>
           <NumberBox
             min={1}
             max={500}
@@ -1096,7 +1104,7 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
           />
         </label>
         <label className="field">
-          <span>每轮上限</span>
+          <span>每轮最多翻译条数</span>
           <NumberBox
             min={0}
             value={num('mtran_max_per_round')}
@@ -1269,7 +1277,7 @@ function EpgCronCard({ onChanged }: { onChanged: () => void }) {
   );
 }
 
-/** 节目指南：采集状态、采集节奏、翻译设置、手工映射与额外频道。 */
+/** 节目指南：采集状态、采集节奏、翻译设置、频道对应关系与额外频道。 */
 export function EpgPanelPage() {
   const [status, setStatus] = useState<EpgStatus | null>(null);
   const [data, setData] = useState<EpgMapData>({ mappings: {}, extra: [] });
@@ -1439,9 +1447,9 @@ export function EpgPanelPage() {
         </button>
       </PageHead>
       <div className="card">
-        <h2>EPG 状态</h2>
+        <h2>节目单状态</h2>
         <dl>
-          <dt>源</dt>
+          <dt>节目源</dt>
           <dd>{status?.sources ?? 0} 个</dd>
           <dt>频道 / 节目</dt>
           <dd>
@@ -1466,30 +1474,30 @@ export function EpgPanelPage() {
       <EpgMatchReportCard />
       <EpgViewerCard />
       <div className="card">
-        <h2>手工映射</h2>
+        <h2>频道对应关系</h2>
         <div className="fields">
-          <Field label="本地分组 ID" tip="要匹配的本地分组。">
+          <Field label="本地分组" tip="要匹配的本地分组。填分组 ID。">
             <input
               placeholder="gid"
               value={mapping.gid}
               onChange={(event) => setMapping({ ...mapping, gid: event.target.value })}
             />
           </Field>
-          <Field label="本地频道 ID" tip="要匹配的本地频道。">
+          <Field label="本地频道" tip="要匹配的本地频道。填频道 ID。">
             <input
               placeholder="cid"
               value={mapping.cid}
               onChange={(event) => setMapping({ ...mapping, cid: event.target.value })}
             />
           </Field>
-          <Field label="节目源 ID" tip="节目源的标识。">
+          <Field label="节目源" tip="节目源的标识。在节目源设置里查看。">
             <input
               placeholder="source_id"
               value={mapping.source_id}
               onChange={(event) => setMapping({ ...mapping, source_id: event.target.value })}
             />
           </Field>
-          <Field label="源频道 ID" tip="节目源中的频道标识。">
+          <Field label="源频道" tip="节目源里的频道标识。">
             <input
               placeholder="source_channel_id"
               value={mapping.source_channel_id}
@@ -1501,9 +1509,9 @@ export function EpgPanelPage() {
         </div>
         <div className="row">
           <button title="保存这条频道与节目源的对应关系" onClick={() => void saveMapping()}>
-            保存映射
+            保存对应关系
           </button>
-          <Tip text="映射决定本地频道读取哪个节目源的节目单。" />
+          <Tip text="对应关系决定本地频道显示哪个节目源的节目单。" />
         </div>
         <div className="table-wrap">
         <table className="table">
@@ -1526,7 +1534,7 @@ export function EpgPanelPage() {
                 <td className="right">
                   <button
                     className="icon-btn"
-                    title="删除这条手工映射"
+                    title="删除这条对应关系"
                     onClick={() => void removeMapping(key)}
                   >
                     清除
@@ -1537,7 +1545,7 @@ export function EpgPanelPage() {
             {Object.keys(data.mappings).length === 0 && (
               <tr>
                 <td colSpan={5} className="muted">
-                  暂无手工映射。
+                  暂无对应关系。
                 </td>
               </tr>
             )}
@@ -1551,14 +1559,14 @@ export function EpgPanelPage() {
       <div className="card">
         <h2>额外频道</h2>
         <div className="fields">
-          <Field label="节目源 ID" tip="节目源的标识。">
+          <Field label="节目源" tip="节目源的标识。在节目源设置里查看。">
             <input
               placeholder="source_id"
               value={extra.source_id}
               onChange={(event) => setExtra({ ...extra, source_id: event.target.value })}
             />
           </Field>
-          <Field label="源频道 ID" tip="节目源中的频道标识。">
+          <Field label="源频道" tip="节目源里的频道标识。">
             <input
               placeholder="source_channel_id"
               value={extra.source_channel_id}
@@ -1761,7 +1769,7 @@ function EpgScriptsCard() {
       {pendingDelete ? (
         <Confirm
           title="删除采集脚本？"
-          text={`脚本「${pendingDelete}」删除后，引用它的 EPG 源会采集失败。`}
+          text={`脚本「${pendingDelete}」删除后，引用它的节目源会采集失败。`}
           confirmText="删除脚本"
           onCancel={() => setPendingDelete(null)}
           onConfirm={() => {
@@ -1801,6 +1809,7 @@ function EpgMatchReportCard() {
           刷新
         </button>
       </div>
+      <p className="muted">显示本地频道与节目源的匹配结果。</p>
       <pre
         className="mono"
         style={{ whiteSpace: 'pre-wrap', maxHeight: 360, overflow: 'auto' }}
@@ -1854,16 +1863,22 @@ function EpgModelsCard() {
   return (
     <div className="card">
       <div className="row between">
-        <h2>翻译模型</h2>
+        <h2>翻译服务状态</h2>
         <button className="ghost" onClick={() => void run()}>
-          探测引擎
+          测试翻译服务
         </button>
       </div>
       <dl>
         <dt>启用</dt>
         <dd>{models.enabled ? '是' : '否'}</dd>
-        <dt>引擎</dt>
-        <dd className="mono">{models.engine}</dd>
+        <dt>服务</dt>
+        <dd className="mono">
+          {models.engine === 'mtran'
+            ? 'MTranServer'
+            : models.engine === 'google'
+              ? 'Google'
+              : '未配置'}
+        </dd>
         <dt>目标语言</dt>
         <dd className="mono">{models.models.join(', ') || '—'}</dd>
       </dl>
@@ -1972,14 +1987,14 @@ function EpgMatchToolsCard({
     <div className="card">
       <h2>匹配工具</h2>
       <div className="fields">
-        <Field label="本地分组 ID" tip="要匹配的本地分组。">
+        <Field label="本地分组" tip="要匹配的本地分组。填分组 ID。">
           <input
             placeholder="gid"
             value={gid}
             onChange={(event) => setGid(event.target.value)}
           />
         </Field>
-        <Field label="本地频道 ID" tip="要匹配的本地频道。">
+        <Field label="本地频道" tip="要匹配的本地频道。填频道 ID。">
           <input
             placeholder="cid"
             value={cid}
@@ -2019,7 +2034,7 @@ function EpgMatchToolsCard({
                 <td className="right">
                   <button
                     className="icon-btn"
-                    title="把这条建议写入手工映射表单"
+                    title="把这条建议填入对应关系表单"
                     onClick={() =>
                       onPick({
                         gid: gid.trim(),
@@ -2029,7 +2044,7 @@ function EpgMatchToolsCard({
                       })
                     }
                   >
-                    填入映射
+                    填入对应关系
                   </button>
                 </td>
               </tr>
@@ -2040,7 +2055,7 @@ function EpgMatchToolsCard({
       )}
 
       <div className="fields" style={{ marginTop: 12 }}>
-        <Field label="节目源 ID" tip="__all__ 表示查看全部节目源。">
+        <Field label="节目源" tip="填节目源 ID。留空或填 __all__ 表示全部。">
           <input
             placeholder="source_id（__all__ = 全部）"
             value={sourceId}
@@ -2137,7 +2152,7 @@ function EpgViewerCard() {
   return (
     <div className="card">
       <div className="row between">
-        <h2>公开查看器频道</h2>
+        <h2>公开节目单频道</h2>
         <button className="ghost" onClick={() => void load()}>
           刷新
         </button>
@@ -2193,11 +2208,11 @@ function EpgViewerCard() {
 
   return (
     <div className="card">
-      <h2>播放链接审计</h2>
+      <h2>播放链接检查</h2>
       <dl>
-        <dt>Token 校验</dt>
+        <dt>凭证校验</dt>
         <dd>{info?.token_enabled ? '已开启' : '已关闭'}</dd>
-        <dt>当前 Token</dt>
+        <dt>当前凭证</dt>
         <dd className="mono ellipsis">{info?.token || '—'}</dd>
         <dt>随机 ID</dt>
         <dd>{info?.random_id_enabled ? '已开启' : '已关闭'}</dd>

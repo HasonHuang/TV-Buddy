@@ -73,7 +73,7 @@ export function RecommendCard({ recommend }: { recommend: Recommend }) {
         <div>
           <h2>
             CDN 推荐值
-            <Tip text="按最近实测的切片工作集推算。把 TTL 填进 CDN 的强制缓存规则即可。" />
+            <Tip text="根据最近的播放情况推算。把缓存时长填进 CDN 规则。" />
           </h2>
           <span className={`badge ${recommend.source === 'fallback' ? 'warn' : 'ok'}`}>
             {SOURCE_LABEL[recommend.source] ?? recommend.source}
@@ -84,15 +84,15 @@ export function RecommendCard({ recommend }: { recommend: Recommend }) {
         </div>
         <button
           className="ghost"
-          title="复制推荐的切片 TTL 秒数"
+          title="复制推荐的缓存时长（秒）"
           onClick={() => void copyTtl()}
         >
-          {copied ? '已复制' : '复制 TTL'}
+          {copied ? '已复制' : '复制缓存时长'}
         </button>
       </div>
       <div className="rec">
         <div className="rec-item">
-          <div className="k">切片 TTL</div>
+          <div className="k">缓存时长</div>
           <div className="v">{recommend.ttl_secs}s</div>
         </div>
         <div className="rec-item">
@@ -100,11 +100,11 @@ export function RecommendCard({ recommend }: { recommend: Recommend }) {
           <div className="v">{formatMB(recommend.disk_cap_mb)}</div>
         </div>
         <div className="rec-item">
-          <div className="k">实测工作集</div>
+          <div className="k">实测占用</div>
           <div className="v">{formatMB(recommend.working_mb)}</div>
         </div>
         <div className="rec-item">
-          <div className="k">覆盖分组</div>
+          <div className="k">统计分组</div>
           <div className="v">{recommend.groups}</div>
         </div>
         <div className="rec-item">
@@ -121,14 +121,13 @@ export function RecommendCard({ recommend }: { recommend: Recommend }) {
         <dd>
           可用 {formatMB(recommend.disk_free_mb)} / 总 {formatMB(recommend.disk_total_mb)}
         </dd>
-        <dt>被动实测</dt>
+        <dt>自动实测</dt>
         <dd>{recommend.auto_tune ? '已开启' : '已关闭（沿用上次估算）'}</dd>
         <dt>磁盘回收</dt>
         <dd>{recommend.gc_enabled ? '已开启' : '已关闭（切片不会自动删除）'}</dd>
       </dl>
       <p className="muted">
-        把 TTL 填进 CDN 面板的「强制 TTL」规则；切片路径用规则 B 缓存，清单与
-        <code className="mono">/panel*</code>、<code className="mono">/health</code> 走 BYPASS。
+        把缓存时长填进 CDN 面板的「强制缓存」规则。清单、面板和健康检查路径请设为不缓存。
       </p>
     </div>
   );

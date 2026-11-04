@@ -48,6 +48,9 @@ type Timeshift = {
   channels: { group_id: string; channel_id: string; hours: number; segments: number }[];
 };
 
+/** DASH 会话阶段的中文名。 */
+const PHASES: Record<string, string> = { ready: '就绪', starting: '启动中' };
+
 function uptime(seconds: number): string {
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3600);
@@ -246,7 +249,7 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
                   <td className="mono">{session.stream_key}</td>
                   <td>
                     <Badge tone={session.phase === 'ready' ? 'ok' : 'warn'}>
-                      {session.phase}
+                      {PHASES[session.phase] ?? session.phase}
                     </Badge>
                     {session.last_error ? (
                       <span className="muted"> {session.last_error}</span>
@@ -290,7 +293,7 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
       <div className="card">
         <h2>频道探测</h2>
         {health?.enabled === false ? (
-          <p className="muted">未启用（<code className="mono">[health].enabled = false</code>）。</p>
+          <p className="muted">未启用。可以在「系统设置」的「监控」卡片开启。</p>
         ) : Object.keys(health?.entries ?? {}).length === 0 ? (
           <p className="muted">还没有探测结果。健康探测开启后会在这里显示。</p>
         ) : (
@@ -318,7 +321,7 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
       {pendingRemove ? (
         <Confirm
           title="删除解析脚本？"
-          text={`解析脚本「${pendingRemove}」删除后，引用它的频道需要改用静态 URL 或其他脚本。`}
+          text={`解析脚本「${pendingRemove}」删除后，引用它的频道需要改用固定地址或其他脚本。`}
           confirmText="删除脚本"
           onCancel={() => setPendingRemove(null)}
           onConfirm={() => {

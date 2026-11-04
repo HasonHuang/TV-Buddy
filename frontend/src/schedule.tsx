@@ -58,6 +58,14 @@ const STATUS_TONE: Record<string, string> = {
   stopped: 'muted',
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  pending: '等待中',
+  recording: '录制中',
+  finished: '已完成',
+  failed: '失败',
+  stopped: '已停止',
+};
+
 function sizeText(bytes: number): string {
   if (!bytes) return '—';
   if (bytes >= 1 << 30) return `${(bytes / (1 << 30)).toFixed(1)} GB`;
@@ -257,7 +265,7 @@ export function SchedulePage({
     const action = channel.livestream ? 'stop' : 'start';
     try {
       await api('POST', `/livestream/${group.id}/${channel.id}/${action}`);
-      ok(action === 'start' ? '已点亮并开始缓冲' : '已停止回看');
+      ok(action === 'start' ? '已开启回看并开始保留内容' : '已停止回看');
       await load();
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
@@ -268,14 +276,14 @@ export function SchedulePage({
     <>
       {view !== 'livestream' && (
         <>
-          <PageHead icon="schedule" title="定时录制" sub="按时间表用 ffmpeg 录制，产物为 MKV" />
+          <PageHead icon="schedule" title="定时录制" sub="按时间表自动录制节目，保存为视频文件" />
           <div className="card">
             <div className="section-title">
               新建录制任务
               <Tip text="录制按开始与结束时间执行。频道需要在录制开始时可用。" />
             </div>
             <div className="fields">
-              <Field label="分组" tip="录制任务按频道所属分组查找上游。">
+              <Field label="分组" tip="先选分组，再选频道。">
                 <Select
                   ariaLabel="分组"
                   value={form.group_id}
@@ -330,13 +338,13 @@ export function SchedulePage({
                   onChange={(next) => setForm({ ...form, end_time: next })}
                 />
               </Field>
-              <Field label="格式" tip="MKV 需要 ffmpeg；TS 直接保存原始流。">
+              <Field label="格式" tip="选择录制文件的保存格式。">
                 <Select
                   ariaLabel="格式"
                   value={form.format}
                   options={[
-                    { value: 'mkv', label: 'MKV（需 ffmpeg）' },
-                    { value: 'ts', label: 'TS' },
+                    { value: 'mkv', label: 'MKV', desc: '需要安装 ffmpeg。' },
+                    { value: 'ts', label: 'TS', desc: '直接保存原始流，不需要 ffmpeg。' },
                   ]}
                   onChange={(next) => setForm({ ...form, format: next })}
                 />
@@ -352,9 +360,9 @@ export function SchedulePage({
                 disabled={!form.channel_id || epgBusy}
                 onClick={() => void loadEpg()}
               >
-                {epgBusy ? '读取中…' : '从 EPG 加载节目'}
+                {epgBusy ? '读取中…' : '读取节目单'}
               </button>
-              <Tip text="EPG 节目自带补时。点「填入」只改表单，点「排期」会立即创建任务。" />
+              <Tip text="节目单里的节目自带补时。点「填入」只填表单，点「排期」直接创建任务。" />
             </div>
             {programmes !== null && (
               <div className="field">
@@ -419,7 +427,7 @@ export function SchedulePage({
                   <th>频道</th>
                   <th>时间</th>
                   <th>状态</th>
-                  <th>产物</th>
+                  <th>文件</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -434,7 +442,9 @@ export function SchedulePage({
                       {task.start_time} → {task.end_time}
                     </td>
                     <td>
-                      <Badge tone={STATUS_TONE[task.status] ?? 'muted'}>{task.status}</Badge>
+                      <Badge tone={STATUS_TONE[task.status] ?? 'muted'}>
+                        {STATUS_LABELS[task.status] ?? task.status}
+                      </Badge>
                       {(task.error || task.note) && (
                         <div className="muted">{task.error || task.note}</div>
                       )}
@@ -443,7 +453,7 @@ export function SchedulePage({
                       {task.output_file ? (
                         <button
                           className="ghost"
-                          title="下载录制产物"
+                          title="下载录制文件"
                           onClick={() => void download(task.output_file).catch(() => err('下载失败'))}
                         >
                           {sizeText(task.file_size)}
@@ -464,7 +474,7 @@ export function SchedulePage({
                       )}
                       <button
                         className="icon-btn"
-                        title="删除任务；已生成的产物不会被删除"
+                        title="删除任务；已生成的文件不会被删除"
                         onClick={() => setPendingDelete(index)}
                       >
                         删除
@@ -488,15 +498,15 @@ export function SchedulePage({
 
       {view !== 'schedule' && (
         <>
-        <PageHead icon="livestream" title="回看管理" sub="按频道缓冲历史切片，支持时移回看" />
+        <PageHead icon="livestream" title="回看管理" sub="为频道保留历史内容，可以回看过去的节目" />
         <div className="card">
           <p className="muted">
-            点亮后按频道 <code className="mono">timeshift_hours</code> 缓冲；回看清单用 <code className="mono">?start&end</code> 或 <code className="mono">?playseek</code> 请求入口。
+            开启后，系统会为这个频道保留一段时间的历史内容。观众可以用回看地址播放过去的节目。
             {timeshift &&
-              ` 已点亮 ${timeshift.channels.length} 个频道，已缓冲切片 ${timeshift.channels.reduce(
+              ` 已开启 ${timeshift.channels.length} 个频道，已保留 ${timeshift.channels.reduce(
                 (sum, channel) => sum + channel.segments,
                 0,
-              )} 条。`}
+              )} 个切片。`}
           </p>
           <div className="table-wrap">
           <table className="table">
@@ -504,7 +514,7 @@ export function SchedulePage({
               <tr>
                 <th>分组</th>
                 <th>频道</th>
-                <th>缓冲</th>
+                <th>保留</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -522,16 +532,16 @@ export function SchedulePage({
                         {channel.livestream ? (
                           <Badge tone="ok">{state ? `${state.segments} 片` : '缓冲中'}</Badge>
                         ) : (
-                          <Badge tone="muted">未点亮</Badge>
+                          <Badge tone="muted">未开启</Badge>
                         )}
                       </td>
                       <td>
                         <button
                           className="ghost"
-                          title="实时请求频道流并保留历史切片"
+                          title="立即开始保留这个频道的历史内容"
                           onClick={() => void toggle(group, channel)}
                         >
-                          {channel.livestream ? '停止' : '点亮'}
+                          {channel.livestream ? '停止' : '开启'}
                         </button>
                       </td>
                     </tr>

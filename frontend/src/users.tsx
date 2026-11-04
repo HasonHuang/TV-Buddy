@@ -106,7 +106,7 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 令牌有效期文本。 */
+/** 凭证有效期文本。 */
 function ttlText(token: AccessToken): string {
   if (token.expires_at_ms === null) return '永不过期';
   const left = token.expires_at_ms - Date.now();
@@ -243,7 +243,7 @@ export function UsersPage() {
     try {
       await api('DELETE', `/users/${tokenFor.id}/tokens/${token.token}`);
       await loadTokens(tokenFor.id);
-      ok('令牌已撤销');
+      ok('设备已撤销');
     } catch (error) {
       err(errorText(error));
     }
@@ -301,7 +301,7 @@ export function UsersPage() {
   return (
     <>
       {node}
-      <PageHead icon="users" title="用户与设备" sub="管理员与普通观众账户，下发可见分组范围">
+      <PageHead icon="users" title="用户与设备" sub="管理面板账号与每个用户能看的分组">
         <button
           title="创建面板账号并设置可见范围"
           onClick={() => setEditing({ form: emptyForm(), id: null })}
@@ -318,7 +318,7 @@ export function UsersPage() {
               <th>用户名</th>
               <th>角色</th>
               <th>可见分组</th>
-              <th>WebUI 登录</th>
+              <th>面板登录</th>
               <th>创建时间</th>
               <th className="right">操作</th>
             </tr>
@@ -349,7 +349,7 @@ export function UsersPage() {
                 <td className="right">
                   <button
                     className="chip"
-                    title="管理这个用户的设备令牌"
+                    title="管理这个用户的设备凭证"
                     onClick={() => void openTokens(user)}
                   >
                     设备
@@ -373,7 +373,7 @@ export function UsersPage() {
                   </button>
                   <button
                     className="chip danger-text"
-                    title="删除用户，同时撤销其全部设备令牌"
+                    title="删除用户，同时撤销其全部设备"
                     onClick={() => setConfirmRemove(user)}
                   >
                     删除
@@ -448,8 +448,8 @@ export function UsersPage() {
                 ariaLabel="角色"
                 value={form.role}
                 options={[
-                  { value: 'admin', label: '管理员' },
-                  { value: 'user', label: '普通用户' },
+                  { value: 'admin', label: '管理员', desc: '可以管理所有分区。' },
+                  { value: 'user', label: '普通用户', desc: '只能查看授权的频道。' },
                 ]}
                 onChange={(next) =>
                   setEditing({ ...editing, form: { ...form, role: next as Role } })
@@ -477,9 +477,9 @@ export function UsersPage() {
                       {group.name}
                       <span className="gid">{group.id}</span>
                       {group.source_id ? (
-                        <Badge tone="info">订阅</Badge>
+                        <Badge tone="info">来自订阅</Badge>
                       ) : (
-                        <Badge tone="muted">手工</Badge>
+                        <Badge tone="muted">本地</Badge>
                       )}
                     </label>
                   ))}
@@ -491,7 +491,7 @@ export function UsersPage() {
                 <div>
                   <div className="section-title">只开放指定频道</div>
                   <p className="muted">
-                    开启后，频道列表、EPG、订阅与已有播放链接都只允许勾选的频道。
+                    开启后，频道列表、节目单、订阅和已有的播放地址都只允许勾选的频道。
                   </p>
                 </div>
                 <Switch
@@ -534,13 +534,13 @@ export function UsersPage() {
 
           <div className="row between">
             <div>
-              <div className="section-title">允许登录 WebUI</div>
+              <div className="section-title">允许登录面板</div>
               <p className="muted">
-                登录后只能查看授权频道、EPG，并复制安全播放链接。
+                登录后只能查看授权的频道和节目单，并复制播放地址。
               </p>
             </div>
             <Switch
-              label="允许登录 WebUI"
+              label="允许登录面板"
               checked={form.web_ui_access}
               disabled={form.role === 'admin'}
               onChange={(next) =>
@@ -562,8 +562,8 @@ export function UsersPage() {
           }
         >
           <p className="muted">
-            每个设备一个令牌。播放地址形如{' '}
-            <code className="mono">/sub/&lt;令牌&gt;/playlist.m3u</code>。
+            每个设备有一个独立播放凭证。播放地址形如{' '}
+            <code className="mono">/sub/&lt;凭证&gt;/playlist.m3u</code>。
           </p>
           <div className="row form-row">
             <input
@@ -574,7 +574,7 @@ export function UsersPage() {
               onChange={(event) => setTokenLabel(event.target.value)}
             />
             <Select
-              ariaLabel="令牌有效期"
+              ariaLabel="有效期"
               title="到期后播放地址自动失效"
               value={tokenTtl === null ? 'forever' : String(tokenTtl)}
               options={TTL_CHOICES.map((item) => ({
@@ -585,12 +585,12 @@ export function UsersPage() {
               compact
             />
             <button
-              title="为这个用户生成一个新的设备令牌"
+              title="为这个用户生成一个新的设备凭证"
               onClick={() => void createToken()}
             >
               添加设备
             </button>
-            <Tip text="每个设备一个独立令牌。撤销某个令牌只会让该设备的播放地址失效。" />
+            <Tip text="每个设备一个独立凭证。撤销某个凭证只会让该设备的播放地址失效。" />
           </div>
 
           <table className="table">
@@ -673,7 +673,7 @@ export function UsersPage() {
       {confirmRemove ? (
         <Confirm
           title="删除用户？"
-          text={`用户「${confirmRemove.username}」及其全部设备令牌会一起删除。这个操作不能撤销。`}
+          text={`用户「${confirmRemove.username}」及其全部设备会一起删除。这个操作不能撤销。`}
           confirmText="删除用户"
           busy={busy}
           onCancel={() => setConfirmRemove(null)}
@@ -687,9 +687,9 @@ export function UsersPage() {
 
       {confirmRevoke ? (
         <Confirm
-          title="撤销设备令牌？"
-          text="使用这个令牌的播放地址会立即失效。其他设备不受影响。"
-          confirmText="撤销令牌"
+          title="撤销这个设备？"
+          text="使用这个凭证的播放地址会立即失效。其他设备不受影响。"
+          confirmText="撤销设备"
           onCancel={() => setConfirmRevoke(null)}
           onConfirm={() => {
             const token = confirmRevoke;
