@@ -351,7 +351,7 @@ export function Select({
   title,
 }: {
   value: string;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; desc?: string }[];
   onChange: (next: string) => void;
   disabled?: boolean;
   ariaLabel?: string;
@@ -377,6 +377,7 @@ export function Select({
   const [dropUp, setDropUp] = useState(false);
 
   const selected = options.findIndex((option) => option.value === value);
+  const described = options.some((option) => Boolean(option.desc));
 
   const close = (focusButton = false) => {
     setOpen(false);
@@ -512,7 +513,7 @@ export function Select({
   return (
     <div
       ref={rootRef}
-      className={`select${compact || width !== undefined ? ' compact' : ''}${open ? ' open' : ''}${className ? ` ${className}` : ''}`}
+      className={`select${described ? ' described' : ''}${compact || width !== undefined ? ' compact' : ''}${open ? ' open' : ''}${className ? ` ${className}` : ''}`}
       style={width !== undefined ? { width } : undefined}
     >
       <button
@@ -558,7 +559,7 @@ export function Select({
               role="option"
               aria-selected={option.value === value}
               tabIndex={-1}
-              className={`select-option${option.value === value ? ' selected' : ''}`}
+              className={`select-option${option.desc ? ' has-desc' : ''}${option.value === value ? ' selected' : ''}`}
               onFocus={() => setActive(index)}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => choose(index)}
@@ -566,7 +567,10 @@ export function Select({
               <span className="select-check" aria-hidden="true">
                 {option.value === value ? <Icon name="check" size={14} /> : null}
               </span>
-              <span className="select-label">{option.label}</span>
+              <span className="select-text">
+                <span className="select-label">{option.label}</span>
+                {option.desc ? <span className="select-desc">{option.desc}</span> : null}
+              </span>
             </li>
           ))}
         </ul>

@@ -221,7 +221,7 @@ function statusBadge(status?: Status, warnRatio = 0.2) {
   if (status.error) return <Badge tone="danger">失败</Badge>;
   const threshold = Math.max(0, Math.round(warnRatio * 1000));
   if (status.shrink_permille > 0 && status.shrink_permille >= threshold) {
-    return <Badge tone="warn">缩水</Badge>;
+    return <Badge tone="warn">频道变少</Badge>;
   }
   if (status.zero_blocked) return <Badge tone="warn">空清单</Badge>;
   return <Badge tone="ok">正常</Badge>;
@@ -439,7 +439,7 @@ export function PlaylistPage() {
   const askDelete = async (source: Source) => {
     try {
       await api('DELETE', `/playlist/sources/${encodeURIComponent(source.id)}`);
-      ok('源已删除，内容保留为手工');
+      ok('源已删除，频道保留为本地频道');
       await load();
     } catch (error) {
       if (error instanceof ApiError && error.code === 'content_exists') {
@@ -462,7 +462,7 @@ export function PlaylistPage() {
         'DELETE',
         `/playlist/sources/${encodeURIComponent(pending.id)}?keep_content=${toManual ? 1 : 0}`,
       );
-      ok(toManual ? '源已删除，内容转为手工' : '源与内容已删除');
+      ok(toManual ? '源已删除，频道转为本地频道' : '源与频道已删除');
       setPending(null);
       setDrawer(null);
       await load();
@@ -473,7 +473,7 @@ export function PlaylistPage() {
 
   const mergedGroupOptions = useMemo(
     () => [
-      { value: '', label: '独立建组（默认）' },
+      { value: '', label: '保持独立（默认）', desc: '这个分组不并入其它分组。' },
       ...allGroups.map((group) => ({
         value: group.id,
         label: `${group.name}（${group.id}）`,
@@ -493,20 +493,20 @@ export function PlaylistPage() {
       <PageHead
         icon="subs"
         title="订阅源"
-        sub="聚合与托管共同形成一个总清单。托管源按计划同步进分组与频道。"
+        sub="聚合源在播放时读取源。托管源把频道保存到本地。"
       >
         <button onClick={() => openSource()}>添加源</button>
-        <Tip text="聚合源在渲染订阅时拼接；托管源会物化进总清单，可管理、可授权。" />
+        <Tip text="聚合：每次播放时读取源。托管：频道保存在本地，可以分组、授权、设置节目单。" />
       </PageHead>
 
       {unauthorizedSync > 0 ? (
         <div className="msg warn">
-          有 {unauthorizedSync} 个同步分组未授权给受限用户。请在「用户与设备」页勾选。
+          有 {unauthorizedSync} 个托管分组还没有授权给普通用户。请到「用户与设备」页勾选。
         </div>
       ) : null}
       {global.sync_total_warn > 0 && totalSyncChannels > global.sync_total_warn ? (
         <div className="msg warn">
-          托管频道共 {totalSyncChannels} 条，超过建议阈值 {global.sync_total_warn} 条。大清单会增大配置写入时间。
+          托管频道共 {totalSyncChannels} 条，超过建议上限 {global.sync_total_warn} 条。清单太大时，保存配置会变慢。
         </div>
       ) : null}
 
@@ -567,7 +567,7 @@ export function PlaylistPage() {
                       {source.mode === 'sync' && (
                         <button
                           className="ghost"
-                          title="立即同步这个源"
+                          title="马上同步这个源"
                           disabled={status?.syncing}
                           onClick={() => void triggerSync(source.id)}
                         >
@@ -603,8 +603,8 @@ export function PlaylistPage() {
         </div>
         <div className="row">
           <label>
-            聚合缓存秒数
-            <Tip text="聚合结果缓存多久。缓存期内直接复用上次结果。" />
+            聚合缓存（秒）
+            <Tip text="这段时间内重复读取源时，直接使用上次结果。" />
             <NumberBox
               value={global.merge_ttl_secs}
               onChange={(next) =>
@@ -612,13 +612,13 @@ export function PlaylistPage() {
               }
             />
           </label>
-          <Field label="合并位置" tip="聚合条目插在每个用户订阅的顶部或底部。">
+          <Field label="合并位置" tip="聚合内容放在每个用户订阅的哪一端。">
             <Select
               ariaLabel="合并位置"
               value={global.merge_position}
               options={[
-                { value: 'bottom', label: '底部' },
-                { value: 'top', label: '顶部' },
+                { value: 'bottom', label: '底部', desc: '放在订阅末尾。' },
+                { value: 'top', label: '顶部', desc: '放在订阅开头。' },
               ]}
               onChange={(next) => setGlobal({ ...global, merge_position: next })}
               compact
@@ -633,17 +633,17 @@ export function PlaylistPage() {
               }
             />{' '}
             自动同步
-            <Tip text="关闭后仍可在列表里手动触发同步。" />
+            <Tip text="关闭后，托管源不会按计划自动同步。你仍可在列表里手动同步。" />
           </label>
         </div>
         <div className="row">
-          <Field label="默认调度">
+          <Field label="默认调度" tip="新建托管源默认使用的同步时间。">
             <Select
               ariaLabel="默认调度"
               value={global.sync_schedule}
               options={[
-                { value: 'interval', label: '按间隔' },
-                { value: 'daily', label: '每天定时' },
+                { value: 'interval', label: '按间隔', desc: '每隔一段时间同步一次。' },
+                { value: 'daily', label: '每天定时', desc: '每天在固定时间同步一次。' },
               ]}
               onChange={(next) => setGlobal({ ...global, sync_schedule: next })}
               compact
@@ -651,6 +651,7 @@ export function PlaylistPage() {
           </Field>
           <label>
             默认间隔（秒）
+            <Tip text="两次同步之间等待的秒数。最短 300 秒。" />
             <NumberBox
               min={300}
               value={global.sync_interval_secs}
@@ -664,6 +665,7 @@ export function PlaylistPage() {
           </label>
           <label>
             默认每天时间
+            <Tip text="每天执行同步的时间。" />
             <DateInput
               type="time"
               ariaLabel="默认每天时间"
@@ -675,6 +677,7 @@ export function PlaylistPage() {
         <div className="row">
           <label>
             单源频道上限
+            <Tip text="一个托管源最多导入多少条频道。填 0 表示不限。" />
             <NumberBox
               min={0}
               value={global.sync_max_channels}
@@ -684,7 +687,8 @@ export function PlaylistPage() {
             />
           </label>
           <label>
-            总频道警告阈值
+            总频道提醒上限
+            <Tip text="托管频道总数超过这个值时给出提醒。填 0 表示不提醒。" />
             <NumberBox
               min={0}
               value={global.sync_total_warn}
@@ -694,7 +698,8 @@ export function PlaylistPage() {
             />
           </label>
           <label>
-            缩水标红比例
+            缩水提醒比例
+            <Tip text="一次同步删除的频道超过这个比例时标黄。例如 0.2 表示 20%。" />
             <NumberBox
               min={0}
               max={1}
@@ -717,12 +722,12 @@ export function PlaylistPage() {
               }
             />{' '}
             允许空清单清空
-            <Tip text="关闭时，源返回 0 条不会清空已有内容，只标记待确认。" />
+            <Tip text="开启后，源返回 0 条时会清空本地频道。关闭时保留原频道，只标记待确认。" />
           </label>
         </div>
         <label>
           全局排除
-          <Tip text="匹配的频道不会出现在任何聚合或同步结果里。每行一条。" />
+          <Tip text="这些名字不会出现在聚合和同步结果里。每行一条。" />
           <textarea
             aria-label="全局排除关键词"
             value={(global.global_exclude ?? []).join('\n')}
@@ -771,10 +776,12 @@ export function PlaylistPage() {
                 onChange={(event) => patch({ enabled: event.target.checked })}
               />{' '}
               启用
+              <Tip text="关闭后，这个源不参与聚合，也不自动同步。" />
             </label>
           </div>
           <label>
             地址
+            <Tip text="M3U 播放列表的地址。支持 http(s) 链接。" />
             <input
               value={drawer.draft.url}
               placeholder="http(s)://…/playlist.m3u"
@@ -785,34 +792,34 @@ export function PlaylistPage() {
           <h3>模式</h3>
           <Field
             label="处理方式"
-            tip="聚合：渲染订阅时拼接。托管：物化进总清单，可管理、可授权、进 EPG。"
+            tip="选择这个源的内容怎么进入你的订阅。"
           >
             <Select
               ariaLabel="处理方式"
               value={drawer.draft.mode}
               options={[
-                { value: 'aggregate', label: '聚合（渲染时拼接）' },
-                { value: 'sync', label: '托管（物化进总清单）' },
+                { value: 'aggregate', label: '聚合', desc: '播放时读取源，不在本地保存频道。' },
+                { value: 'sync', label: '托管', desc: '频道保存到本地，可以分组和授权。' },
               ]}
               onChange={(next) => patch({ mode: next })}
             />
           </Field>
           {drawer.draft.mode === 'sync' && (
             <p className="muted">
-              托管源会按分组建立真实分组。删除源或改回聚合时，系统会先询问内容的去留。
+              托管源会建立本地分组。删除源或改回聚合时，系统会先问你要不要保留内容。
             </p>
           )}
           <hr className="divider" />
           <h3>分组</h3>
           <div className="row">
-            <Field label="分组模式" tip="keep 保留原名；map 按映射改名；merge 合并到同一组。">
+            <Field label="分组方式" tip="选择如何整理源里的分组。">
               <Select
-                ariaLabel="分组模式"
+                ariaLabel="分组方式"
                 value={drawer.draft.group_mode}
                 options={[
-                  { value: 'keep', label: 'keep' },
-                  { value: 'map', label: 'map' },
-                  { value: 'merge', label: 'merge' },
+                  { value: 'keep', label: '保留原名', desc: '分组名不变。' },
+                  { value: 'map', label: '按映射改名', desc: '按下面的改名表更换分组名。' },
+                  { value: 'merge', label: '全部并成一组', desc: '所有分组放进同一个分组。' },
                 ]}
                 onChange={(next) => patch({ group_mode: next })}
                 compact
@@ -821,7 +828,7 @@ export function PlaylistPage() {
             {drawer.draft.group_mode === 'merge' && (
               <label>
                 合并到分组
-                <Tip text="保留的上游分组都并入该名称。未列出分组要设为 keep，或填写分组映射。" />
+                <Tip text="源里的分组都放进这个分组。请填写分组名。" />
                 <input
                   value={drawer.draft.merge_group}
                   placeholder="目标分组名"
@@ -829,13 +836,13 @@ export function PlaylistPage() {
                 />
               </label>
             )}
-            <Field label="未列出分组" tip="没有出现在映射里的分组保留还是丢弃。">
+            <Field label="映射外的分组" tip="没有写进改名表的分组怎么处理。">
               <Select
-                ariaLabel="未列出分组"
+                ariaLabel="映射外的分组"
                 value={drawer.draft.unlisted_groups}
                 options={[
-                  { value: 'drop', label: 'drop' },
-                  { value: 'keep', label: 'keep' },
+                  { value: 'drop', label: '丢弃', desc: '不导入这些分组。' },
+                  { value: 'keep', label: '保留', desc: '按原样或合并规则导入。' },
                 ]}
                 onChange={(next) => patch({ unlisted_groups: next })}
                 compact
@@ -843,7 +850,7 @@ export function PlaylistPage() {
             </Field>
             <label>
               分组名前缀
-              <Tip text="留空时用「源名 · 」。" />
+              <Tip text="加到每个分组名的前面。留空时使用「源名 · 」。" />
               <input
                 value={drawer.draft.group_prefix}
                 placeholder={drawer.draft.name ? `${drawer.draft.name} · ` : ''}
@@ -855,14 +862,14 @@ export function PlaylistPage() {
             <button className="ghost" disabled={drawer.busy} onClick={() => void readGroups()}>
               读取分组
             </button>
-            <Tip text="只读取源的分组名与条数，不修改配置。" />
+            <Tip text="只看源里有哪些分组、各有多少频道。不会修改设置。" />
             {drawer.draft.mode === 'sync' &&
               drawer.draft.unlisted_groups === 'drop' &&
               Object.keys(drawer.draft.group_map).length === 0 && (
                 <span className="msg warn">
                   {drawer.draft.group_mode === 'merge'
-                    ? '合并模式：未列出分组为 drop 且没有映射，不会导入任何频道。请把「未列出分组」改为 keep。'
-                    : '没有分组映射且未列出分组为 drop：不会导入任何频道。'}
+                    ? '合并模式：映射外的分组设为丢弃，而且没有改名规则，所以不会导入任何频道。请把「映射外的分组」改为保留。'
+                    : '没有改名规则，而且映射外的分组设为丢弃，所以不会导入任何频道。'}
                 </span>
               )}
           </div>
@@ -871,9 +878,9 @@ export function PlaylistPage() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>上游分组</th>
+                    <th>源里的分组</th>
                     <th className="right">频道</th>
-                    <th>并入已有分组</th>
+                    <th>并入本地分组</th>
                     <th className="right">操作</th>
                   </tr>
                 </thead>
@@ -911,7 +918,7 @@ export function PlaylistPage() {
                             })
                           }
                         >
-                          加入映射
+                          加入改名表
                         </button>
                       </td>
                     </tr>
@@ -921,8 +928,8 @@ export function PlaylistPage() {
             </div>
           )}
           <label>
-            分组映射
-            <Tip text="每行一条「上游分组=目标分组」。分组模式为 map 时生效。" />
+            分组改名表
+            <Tip text="每行一条「源里的分组=新分组名」。分组方式为「按映射改名」时生效。" />
             <textarea
               value={mapText(drawer.draft.group_map)}
               onChange={(event) => patch({ group_map: parseMap(event.target.value) })}
@@ -930,16 +937,16 @@ export function PlaylistPage() {
           </label>
           <div className="row">
             <label>
-              include
-              <Tip text="只保留匹配的行。支持 group:、id:、url: 前缀。" />
+              只保留
+              <Tip text="只保留匹配的频道。开头写 group: 匹配分组，id: 匹配 tvg-id，url: 匹配地址。每行一条。" />
               <textarea
                 value={drawer.draft.include.join('\n')}
                 onChange={(event) => patch({ include: lines(event.target.value) })}
               />
             </label>
             <label>
-              exclude
-              <Tip text="匹配的频道会被排除；删除同步频道时会自动写入。" />
+              排除
+              <Tip text="匹配的频道会被排除。在列表里删除托管频道时，会自动写入这里。" />
               <textarea
                 value={drawer.draft.exclude.join('\n')}
                 onChange={(event) => patch({ exclude: lines(event.target.value) })}
@@ -952,14 +959,14 @@ export function PlaylistPage() {
               <hr className="divider" />
               <h3>同步</h3>
               <div className="row">
-                <Field label="调度">
+                <Field label="调度" tip="这个源多久同步一次。">
                   <Select
                     ariaLabel="调度"
                     value={drawer.draft.schedule}
                     options={[
-                      { value: 'inherit', label: '继承全局' },
-                      { value: 'interval', label: '按间隔' },
-                      { value: 'daily', label: '每天定时' },
+                      { value: 'inherit', label: '继承全局', desc: '使用全局设置。' },
+                      { value: 'interval', label: '按间隔', desc: '每隔一段时间同步。' },
+                      { value: 'daily', label: '每天定时', desc: '每天在固定时间同步。' },
                     ]}
                     onChange={(next) => patch({ schedule: next })}
                     compact
@@ -972,7 +979,7 @@ export function PlaylistPage() {
                     value={drawer.draft.sync_interval_secs}
                     onChange={(next) => patch({ sync_interval_secs: Number(next) || 0 })}
                   />
-                  <span className="hint">0 继承全局</span>
+                  <span className="hint">0 表示使用全局值</span>
                 </label>
                 <label>
                   每天时间
@@ -982,47 +989,47 @@ export function PlaylistPage() {
                     value={drawer.draft.sync_daily_at}
                     onChange={(next) => patch({ sync_daily_at: next })}
                   />
-                  <span className="hint">留空继承全局</span>
+                  <span className="hint">留空表示使用全局值</span>
                 </label>
               </div>
               <div className="row">
-                <Field label="播放模式" tip="托管源禁止 passthrough。auto 按地址后缀选择。">
+                <Field label="播放方式" tip="选择播放器取流时经过哪条路径。">
                   <Select
-                    ariaLabel="播放模式"
+                    ariaLabel="播放方式"
                     value={drawer.draft.playback_mode}
                     options={[
-                      { value: 'auto', label: 'auto' },
-                      { value: 'proxy', label: 'proxy' },
-                      { value: 'remux', label: 'remux' },
-                      { value: 'dash', label: 'dash' },
-                      { value: 'redirect', label: 'redirect' },
-                      { value: 'rewrite', label: 'rewrite' },
+                      { value: 'auto', label: '自动选择', desc: '按源的类型自动选。' },
+                      { value: 'proxy', label: '服务器转发', desc: '视频经过本机，兼容性最好。' },
+                      { value: 'remux', label: '服务器转封装', desc: '本机重新打包视频流。占用 CPU。' },
+                      { value: 'dash', label: 'DASH 就绪', desc: '用于 DASH 清单。先确认源可用。' },
+                      { value: 'redirect', label: '跳转源地址', desc: '播放器直接连源。会显示源地址。' },
+                      { value: 'rewrite', label: '改写地址', desc: '本机改写清单地址，播放器再连源。' },
                     ]}
                     onChange={(next) => patch({ playback_mode: next })}
                     compact
                   />
                 </Field>
-                <Field label="格式">
+                <Field label="清单格式" tip="输出给播放器的清单格式。">
                   <Select
-                    ariaLabel="格式"
+                    ariaLabel="清单格式"
                     value={drawer.draft.format}
                     options={[
-                      { value: 'auto', label: 'auto' },
-                      { value: 'hls', label: 'hls' },
-                      { value: 'mpd', label: 'mpd' },
+                      { value: 'auto', label: '自动', desc: '跟随源的类型。' },
+                      { value: 'hls', label: 'HLS', desc: 'm3u8 清单。' },
+                      { value: 'mpd', label: 'DASH', desc: 'mpd 清单。' },
                     ]}
                     onChange={(next) => patch({ format: next })}
                     compact
                   />
                 </Field>
-                <Field label="插入位置">
+                <Field label="插入位置" tip="这个源的内容放在订阅的哪一端。">
                   <Select
                     ariaLabel="插入位置"
                     value={drawer.draft.position}
                     options={[
-                      { value: '', label: '继承全局' },
-                      { value: 'top', label: '顶部' },
-                      { value: 'bottom', label: '底部' },
+                      { value: '', label: '继承全局', desc: '使用全局设置。' },
+                      { value: 'top', label: '顶部', desc: '放在订阅开头。' },
+                      { value: 'bottom', label: '底部', desc: '放在订阅末尾。' },
                     ]}
                     onChange={(next) => patch({ position: next })}
                     compact
@@ -1030,12 +1037,13 @@ export function PlaylistPage() {
                 </Field>
                 <label>
                   单源上限
+                  <Tip text="这个源最多导入多少条频道。" />
                   <NumberBox
                     min={0}
                     value={drawer.draft.max_channels}
                     onChange={(next) => patch({ max_channels: Number(next) || 0 })}
                   />
-                  <span className="hint">0 继承全局</span>
+                  <span className="hint">0 表示使用全局值</span>
                 </label>
               </div>
             </>
@@ -1045,7 +1053,7 @@ export function PlaylistPage() {
           <h3>高级</h3>
           <label>
             抓取请求头
-            <Tip text="每行一条「名称: 值」。只用于抓取清单本身。" />
+            <Tip text="每行一条「名称: 值」。读取播放列表时带上。" />
             <textarea
               value={drawer.draft.headers.join('\n')}
               onChange={(event) => patch({ headers: lines(event.target.value) })}
@@ -1054,6 +1062,7 @@ export function PlaylistPage() {
           <div className="row">
             <label>
               代理类型
+              <Tip text="读取源时使用的代理协议。一般不用填。" />
               <input
                 value={drawer.draft.proxy?.kind ?? ''}
                 placeholder="http"
@@ -1066,6 +1075,7 @@ export function PlaylistPage() {
             </label>
             <label>
               代理地址
+              <Tip text="代理服务器地址，格式为 host:port。" />
               <input
                 value={drawer.draft.proxy?.addr ?? ''}
                 placeholder="host:port"
@@ -1080,6 +1090,7 @@ export function PlaylistPage() {
           <div className="row">
             <label>
               代理用户名
+              <Tip text="代理需要登录时填写。" />
               <input
                 value={drawer.draft.proxy?.username ?? ''}
                 autoComplete="off"
@@ -1092,6 +1103,7 @@ export function PlaylistPage() {
             </label>
             <label>
               代理密码
+              <Tip text="代理需要登录时填写。" />
               <input
                 type="password"
                 value={drawer.draft.proxy?.password ?? ''}
@@ -1111,12 +1123,12 @@ export function PlaylistPage() {
             <button className="ghost" disabled={drawer.busy} onClick={() => void runPreview()}>
               抓取并预检
             </button>
-            <Tip text="读取源、按规则过滤，并列出托管模式的差异。不写配置。" />
+            <Tip text="先试读一次源，看看规则的效果。不会保存设置。" />
           </div>
           {drawer.preview && (
             <>
               <p className="muted">
-                共 {drawer.preview.trace.total} 条，保留 {drawer.preview.kept} 条。
+                源里共 {drawer.preview.trace.total} 个频道，保留 {drawer.preview.kept} 个。
               </p>
               {drawer.preview.sync && (
                 <div className="row">
@@ -1128,7 +1140,7 @@ export function PlaylistPage() {
                     <Badge tone="danger">超过单源上限</Badge>
                   )}
                   {drawer.preview.sync.guard.empty && (
-                    <Badge tone="warn">空清单会拦截</Badge>
+                    <Badge tone="warn">空清单会阻止清空</Badge>
                   )}
                 </div>
               )}
@@ -1173,7 +1185,7 @@ export function PlaylistPage() {
                   else void saveSource(pending.source, true, false);
                 }}
               >
-                保留为手工
+                保留为本地频道
               </button>
               <button
                 onClick={() => {
@@ -1189,10 +1201,10 @@ export function PlaylistPage() {
           <p>
             {pending.kind === 'delete'
               ? `「${pending.name}」已有 ${pending.channels} 个频道。`
-              : `「${pending.source.name}」已有 ${pending.channels} 个频道。切换为聚合后，这些内容不再跟随上游。`}
+              : `「${pending.source.name}」已有 ${pending.channels} 个频道。切换为聚合后，这些频道不再跟随源。`}
           </p>
-          <p className="muted">保留为手工：内容与分组保留，来源关系断开。</p>
-          <p className="muted">一并删除：删除该源创建的分组与频道。</p>
+          <p className="muted">保留为本地频道：频道和分组都保留，只是不再跟随源。</p>
+          <p className="muted">一并删除：删除这个源创建的分组和频道。</p>
         </Modal>
       )}
 

@@ -1161,6 +1161,11 @@ textarea {
   box-shadow: var(--shadow-menu);
 }
 
+/* 带说明的选项需要更宽的菜单，紧凑按钮不再决定菜单宽度。 */
+.select.described .select-menu {
+  min-width: min(232px, calc(100vw - 32px));
+}
+
 .select-menu.right {
   right: 0;
   left: auto;
@@ -1196,11 +1201,43 @@ textarea {
   color: var(--accent);
 }
 
-.select-label {
+/* 选项文字纵向排两行：名称在上，说明在下。 */
+.select-text {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.select-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 选项说明：允许换行，不再继承整行的 nowrap。 */
+.select-desc {
+  color: var(--text3);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.select-option.has-desc {
+  align-items: flex-start;
+  white-space: normal;
+}
+
+.select-option.has-desc .select-check {
+  margin-top: 2px;
+}
+
+.select-option.selected .select-desc {
+  color: var(--accent-dark);
+  opacity: 0.8;
 }
 
 .select-option:hover {
