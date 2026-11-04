@@ -1108,7 +1108,7 @@ export function SettingsPage({
                 <Num
                   label="切片 max-age"
                   path="cdn.segment_max_age_secs"
-                  unit="秒，0 = 自动"
+                  unit="秒"
                   tip="切片缓存时长。0 表示使用推荐值。"
                   hint={ttlHint}
                 />

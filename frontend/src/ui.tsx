@@ -563,8 +563,10 @@ export function Select({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => choose(index)}
             >
-              <span>{option.label}</span>
-              {option.value === value ? <Icon name="check" size={14} /> : null}
+              <span className="select-check" aria-hidden="true">
+                {option.value === value ? <Icon name="check" size={14} /> : null}
+              </span>
+              <span className="select-label">{option.label}</span>
             </li>
           ))}
         </ul>
@@ -576,7 +578,7 @@ export function Select({
 /** 数字输入框：右侧一列加大号的加减按钮。
  *
  * 原生 `type=number` 的上下箭头很小，鼠标不好点。这里保留原生输入行为
- * （键盘、滚轮、校验），只在右侧叠加两个 24 × 16 px 的按钮。
+ * （键盘、滚轮、校验），右侧叠加 56 px 横排加减列，每键 28 × 32 px。
  * 按钮 `tabIndex=-1`，不打断键盘输入；`onMouseDown` 阻止焦点离开输入框。
  */
 export function NumberBox({
@@ -590,7 +592,6 @@ export function NumberBox({
   placeholder,
   disabled,
   className = '',
-  style,
 }: {
   value: string | number;
   onChange: (next: string) => void;
@@ -602,7 +603,6 @@ export function NumberBox({
   placeholder?: string;
   disabled?: boolean;
   className?: string;
-  style?: React.CSSProperties;
 }) {
   const bump = (direction: 1 | -1) => {
     if (disabled) return;
@@ -617,7 +617,7 @@ export function NumberBox({
   };
 
   return (
-    <div className={`num-box${className ? ` ${className}` : ''}`} style={style}>
+    <div className={`num-box${className ? ` ${className}` : ''}`}>
       <input
         className="num-input"
         type="number"
@@ -635,17 +635,6 @@ export function NumberBox({
         <button
           type="button"
           tabIndex={-1}
-          aria-label="增加"
-          title="增加"
-          disabled={disabled}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => bump(1)}
-        >
-          <Icon name="plus" size={13} />
-        </button>
-        <button
-          type="button"
-          tabIndex={-1}
           aria-label="减少"
           title="减少"
           disabled={disabled}
@@ -654,7 +643,85 @@ export function NumberBox({
         >
           <Icon name="minus" size={13} />
         </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="增加"
+          title="增加"
+          disabled={disabled}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => bump(1)}
+        >
+          <Icon name="plus" size={13} />
+        </button>
       </div>
+    </div>
+  );
+}
+
+/** 日期与时间输入：左侧日历图标，整块可点。
+ *
+ * 支持 `showPicker` 且能隐藏原生小图标的浏览器，隐藏原生图标，改用左侧
+ * 日历与整块点击；其余浏览器保留原生小图标作为入口。
+ */
+const PICKER_TYPES = ['date', 'time', 'datetime-local', 'month', 'week'] as const;
+export type PickerInputType = (typeof PICKER_TYPES)[number];
+
+/** 尝试打开原生选择器；失败时退回原生小图标。 */
+export function openDatePicker(input: HTMLInputElement): void {
+  if (!PICKER_TYPES.includes(input.type as PickerInputType)) return;
+  if (input.disabled || input.readOnly) return;
+  if (typeof input.showPicker !== 'function') return;
+  try {
+    input.showPicker();
+  } catch (error) {
+    // 已经打开时抛 InvalidStateError，忽略；其它错误说明浏览器拒绝程序化打开。
+    if (!(error instanceof DOMException && error.name === 'InvalidStateError')) {
+      document.documentElement.classList.remove('picker-custom');
+    }
+  }
+}
+
+export function DateInput({
+  type,
+  value,
+  onChange,
+  ariaLabel,
+  title,
+  disabled,
+}: {
+  type: PickerInputType;
+  value: string;
+  onChange: (next: string) => void;
+  ariaLabel?: string;
+  title?: string;
+  disabled?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const open = (event: React.MouseEvent<HTMLDivElement>) => {
+    // 阻止冒泡：抽屉与弹窗会在容器上 stopPropagation。
+    event.stopPropagation();
+    const input = inputRef.current;
+    if (!input) return;
+    // 点在边框等外壳区域时，阻止 label 再向 input 转发一次 click。
+    if (event.target !== input) event.preventDefault();
+    input.focus({ preventScroll: true });
+    openDatePicker(input);
+  };
+
+  return (
+    <div className={`date-field date-${type}`} onClick={open}>
+      <Icon name="calendar" size={15} />
+      <input
+        ref={inputRef}
+        type={type}
+        value={value}
+        aria-label={ariaLabel}
+        title={title}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </div>
   );
 }

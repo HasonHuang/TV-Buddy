@@ -400,7 +400,6 @@ export function LogosPage() {
               <NumberBox
                 min={16}
                 max={2048}
-                style={{ width: 112 }}
                 value={opts.maxEdge}
                 onChange={(next) => setOpts({ ...opts, maxEdge: next })}
               />
@@ -411,7 +410,6 @@ export function LogosPage() {
               <NumberBox
                 min={1}
                 max={100}
-                style={{ width: 104 }}
                 value={opts.quality}
                 onChange={(next) => setOpts({ ...opts, quality: next })}
               />

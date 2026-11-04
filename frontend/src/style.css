@@ -69,12 +69,17 @@
   --ring: rgba(47, 91, 255, 0.18);
   /* 全站控件同高：输入框、下拉、按钮共用。 */
   --control-h: 34px;
+  /* 紧凑数字框与时间框的宽度。 */
+  --control-w: 148px;
 
   --shadow: 0 1px 2px rgba(22, 32, 58, 0.04), 0 18px 40px -28px rgba(22, 32, 58, 0.28);
   --shadow-xs: 0 1px 1px rgba(20, 20, 26, 0.05);
   --shadow-lg:
     0 18px 44px rgba(20, 20, 26, 0.14),
     0 2px 8px rgba(20, 20, 26, 0.06);
+  --shadow-menu:
+    0 12px 28px rgba(20, 20, 26, 0.13),
+    0 2px 6px rgba(20, 20, 26, 0.06);
 
   /* 浮层与反色块：提示气泡、弹窗遮罩。 */
   --tip-bg: #1c1c21;
@@ -140,6 +145,9 @@
   --shadow-xs: none;
   --shadow-lg:
     0 24px 60px rgba(0, 0, 0, 0.6),
+    0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-menu:
+    0 16px 36px rgba(0, 0, 0, 0.55),
     0 2px 8px rgba(0, 0, 0, 0.4);
 
   --tip-bg: #ededef;
@@ -684,6 +692,7 @@ a {
 .security-card .field > .input-group,
 .security-card .field > .num-line,
 .security-card .field > .num-box,
+.security-card .field > .date-field,
 .security-card .field > .field-control {
   grid-column: 2;
   min-width: 0;
@@ -697,8 +706,9 @@ a {
 }
 
 .security-card .field > .num-line .num-box {
-  flex: none;
-  width: 118px;
+  flex: 0 1 var(--control-w);
+  width: auto;
+  min-width: 104px;
 }
 
 .security-card .field > .hint {
@@ -726,6 +736,7 @@ a {
   .security-card .field > .input-group,
   .security-card .field > .num-line,
   .security-card .field > .num-box,
+  .security-card .field > .date-field,
   .security-card .field > .field-control,
   .security-card .field > .hint {
     grid-column: 1;
@@ -884,6 +895,61 @@ input[type='datetime-local']::-webkit-calendar-picker-indicator,
 input[type='month']::-webkit-calendar-picker-indicator,
 input[type='week']::-webkit-calendar-picker-indicator {
   cursor: pointer;
+}
+
+/* 日期与时间：左侧日历图标，整块可点；原生小图标隐藏。 */
+.date-field > .icon {
+  display: none;
+  position: absolute;
+  left: 10px;
+  color: var(--text3);
+  pointer-events: none;
+}
+
+.date-field > input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.date-field > input:hover,
+.date-field > input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+/* 支持 showPicker 且能藏掉原生小图标时，换成左侧图标。 */
+.picker-custom .date-field > .icon {
+  display: block;
+}
+
+.picker-custom .date-field > input {
+  padding-left: 33px;
+}
+
+.picker-custom .date-field input::-webkit-calendar-picker-indicator {
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+}
+
+/* 订阅源行里的短时间框与数字框同宽；datetime-local 值更长，占满字段。 */
+label > .date-field {
+  width: var(--control-w);
+  max-width: var(--control-w);
+}
+
+label > .date-field.date-datetime-local {
+  width: 100%;
+  max-width: none;
 }
 
 input.search {
@@ -1086,13 +1152,13 @@ textarea {
   max-width: min(320px, calc(100vw - 32px));
   max-height: 280px;
   margin: 0;
-  padding: 5px;
+  padding: 4px;
   overflow-y: auto;
   list-style: none;
   background: var(--panel);
   border: 1px solid var(--line-strong);
-  border-radius: 12px;
-  box-shadow: var(--shadow-lg);
+  border-radius: 8px;
+  box-shadow: var(--shadow-menu);
 }
 
 .select-menu.right {
@@ -1108,15 +1174,33 @@ textarea {
 .select-option {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 32px;
-  padding: 6px 10px;
-  border-radius: 7px;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border-radius: 6px;
   color: var(--text);
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* 勾选槽固定 14 px，未选中项也留出同样的左缩进。 */
+.select-check {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.select-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .select-option:hover {
@@ -1124,13 +1208,24 @@ textarea {
 }
 
 .select-option:focus-visible {
-  outline: none;
-  background: var(--accent-weak);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--panel-3);
 }
 
 .select-option.selected {
-  color: var(--accent);
+  background: var(--accent-weak);
+  color: var(--accent-dark);
   font-weight: 600;
+}
+
+/* 已选项获得键盘光标时保留选中底色，靠轮廓区分光标行。 */
+.select-option.selected:focus-visible {
+  background: var(--accent-weak);
+}
+
+.select-option.selected:hover {
+  background: color-mix(in srgb, var(--accent-weak) 82%, var(--panel-3));
 }
 
 .select-option .icon {
@@ -1140,9 +1235,12 @@ textarea {
 /* --- 数字输入框（自绘加减） ---
  *
  * 原生上下箭头只有几像素高，鼠标难点。整块控件的边框放在外层，
- * 右侧固定 24 px 的加减列；输入框本身仍保留 `type=number` 的键盘行为。
+ * 右侧固定 56 px 的横排加减列；输入框本身仍保留 `type=number` 的键盘行为。
+ * 数字框与日期框共用同一层外壳，边框、圆角、焦点环只写一次。
  */
-.num-box {
+.num-box,
+.date-field {
+  position: relative;
   display: flex;
   align-items: stretch;
   width: 100%;
@@ -1152,17 +1250,36 @@ textarea {
   border-radius: var(--radius-sm);
   background: var(--field);
   box-shadow: var(--shadow-xs);
-  overflow: hidden;
   transition:
     border-color var(--ease),
     box-shadow var(--ease);
 }
 
-.num-box:hover {
+.num-box {
+  overflow: hidden;
+}
+
+.date-field {
+  align-items: center;
+  cursor: pointer;
+}
+
+.date-field:has(input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.date-field:has(input:disabled):hover {
+  border-color: var(--line-strong);
+}
+
+.num-box:hover,
+.date-field:hover {
   border-color: var(--text3);
 }
 
-.num-box:focus-within {
+.num-box:focus-within,
+.date-field:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--ring);
 }
@@ -1205,15 +1322,15 @@ textarea {
 
 .num-steps {
   display: flex;
-  flex: 0 0 24px;
-  flex-direction: column;
+  flex: 0 0 56px;
+  flex-direction: row;
   border-left: 1px solid var(--line);
 }
 
 .num-steps button {
   flex: 1 1 50%;
-  width: 100%;
-  height: auto;
+  width: auto;
+  height: 100%;
   min-height: 0;
   padding: 0;
   border: 0;
@@ -1224,7 +1341,7 @@ textarea {
 }
 
 .num-steps button + button {
-  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
 }
 
 .num-steps button:hover:not(:disabled) {
@@ -1238,15 +1355,10 @@ textarea {
 }
 
 /* 数字字段在表单里保持紧凑，不铺满整行。 */
-.field > .num-box {
-  width: 100%;
-  max-width: 180px;
-}
-
-/* 没有字段容器的数字框（订阅源、台标选项）用同一宽度，避免同排参差。 */
+.field > .num-box,
 label > .num-box {
-  width: 140px;
-  max-width: 140px;
+  width: var(--control-w);
+  max-width: var(--control-w);
 }
 
 label.check {
@@ -3103,7 +3215,7 @@ pre code {
   gap: 2px 18px;
 }
 
-@container (min-width: 540px) {
+@container (min-width: 660px) {
   .settings-page .fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3155,15 +3267,17 @@ pre code {
 
 .settings-page .field-control > input,
 .settings-page .field-control > select,
-.settings-page .field-control > textarea {
+.settings-page .field-control > textarea,
+.settings-page .field-control > .date-field {
   flex: 1;
   min-width: 0;
 }
 
 /* 数字字段内容短，固定窄宽并右对齐，扫读时数位成列。 */
 .settings-page .field-control > .num-box {
-  flex: 0 0 118px;
-  width: 118px;
+  flex: 0 1 var(--control-w);
+  width: auto;
+  min-width: 104px;
 }
 
 .field-unit {

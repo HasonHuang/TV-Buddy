@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError } from './api';
-import { Badge, Drawer, Field, Modal, NumberBox, PageHead, Select, Tip, useToast } from './ui';
+import { Badge, DateInput, Drawer, Field, Modal, NumberBox, PageHead, Select, Tip, useToast } from './ui';
 
 type Source = {
   id: string;
@@ -664,10 +664,11 @@ export function PlaylistPage() {
           </label>
           <label>
             默认每天时间
-            <input
+            <DateInput
               type="time"
+              ariaLabel="默认每天时间"
               value={global.sync_daily_at}
-              onChange={(event) => setGlobal({ ...global, sync_daily_at: event.target.value })}
+              onChange={(next) => setGlobal({ ...global, sync_daily_at: next })}
             />
           </label>
         </div>
@@ -975,10 +976,11 @@ export function PlaylistPage() {
                 </label>
                 <label>
                   每天时间
-                  <input
+                  <DateInput
                     type="time"
+                    ariaLabel="每天时间"
                     value={drawer.draft.sync_daily_at}
-                    onChange={(event) => patch({ sync_daily_at: event.target.value })}
+                    onChange={(next) => patch({ sync_daily_at: next })}
                   />
                   <span className="hint">留空继承全局</span>
                 </label>

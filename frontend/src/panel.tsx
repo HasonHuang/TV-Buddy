@@ -613,22 +613,20 @@ function App() {
   }, []);
 
   // 日期与时间输入：点输入框任意位置都打开选择器，不再只认右侧小图标。
-  // 浏览器已打开时 `showPicker` 会抛错，直接忽略。
+  // 只有 showPicker 与 WebKit 选择器图标都可用时才换成左侧图标；
+  // 其它浏览器保留原生小图标作为退路。
   useEffect(() => {
-    const openPicker = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      const input = target?.closest?.('input');
-      if (!(input instanceof HTMLInputElement)) return;
-      if (!['date', 'time', 'datetime-local', 'month', 'week'].includes(input.type)) return;
-      if (input.disabled || input.readOnly) return;
-      try {
-        (input as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
-      } catch {
-        // 选择器已经打开，或浏览器不允许本次调用。
-      }
+    const supportsPicker = typeof HTMLInputElement.prototype.showPicker === 'function';
+    const supportsIndicator =
+      typeof CSS !== 'undefined' &&
+      CSS.supports?.('selector(input::-webkit-calendar-picker-indicator)') === true;
+    document.documentElement.classList.toggle(
+      'picker-custom',
+      supportsPicker && supportsIndicator,
+    );
+    return () => {
+      document.documentElement.classList.remove('picker-custom');
     };
-    document.addEventListener('click', openPicker);
-    return () => document.removeEventListener('click', openPicker);
   }, []);
 
   return loggedIn ? (

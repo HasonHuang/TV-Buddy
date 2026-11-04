@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, getToken } from './api';
 import type { Channel, Group } from './groups';
-import { Badge, Confirm, Field, PageHead, Select, Tip, useToast } from './ui';
+import { Badge, Confirm, DateInput, Field, PageHead, Select, Tip, useToast } from './ui';
 
 type Task = {
   id: string;
@@ -315,17 +315,19 @@ export function SchedulePage({
             </div>
             <div className="fields">
               <Field label="开始时间" tip="录制在这个本地时间开始。">
-                <input
+                <DateInput
                   type="datetime-local"
+                  ariaLabel="开始时间"
                   value={form.start_time}
-                  onChange={(event) => setForm({ ...form, start_time: event.target.value })}
+                  onChange={(next) => setForm({ ...form, start_time: next })}
                 />
               </Field>
               <Field label="结束时间" tip="录制在这个本地时间结束。">
-                <input
+                <DateInput
                   type="datetime-local"
+                  ariaLabel="结束时间"
                   value={form.end_time}
-                  onChange={(event) => setForm({ ...form, end_time: event.target.value })}
+                  onChange={(next) => setForm({ ...form, end_time: next })}
                 />
               </Field>
               <Field label="格式" tip="MKV 需要 ffmpeg；TS 直接保存原始流。">

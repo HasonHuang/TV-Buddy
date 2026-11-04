@@ -23,6 +23,7 @@ export type IconName =
   | 'tv'
   | 'plus'
   | 'minus'
+  | 'calendar'
   | 'edit'
   | 'trash'
   | 'download'
@@ -44,6 +45,14 @@ export type IconName =
   | 'image'
   | 'file'
   | 'users';
+
+/** 日历轮廓；EPG 与日期输入共用同一图形，避免维护两份相近路径。 */
+const CALENDAR_GLYPH = (
+  <>
+    <rect x="2" y="3.4" width="12" height="10.2" rx="1.6" />
+    <path d="M2 6.6h12M5.6 1.9v3M10.4 1.9v3" />
+  </>
+);
 
 const PATHS: Record<IconName, ReactNode> = {
   overview: <path d="M2.2 13.4V8.4M6.2 13.4V5.2M10.2 13.4V9.6M14 13.4V3.2" />,
@@ -75,12 +84,7 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M8 4.7V8l2.2 1.35" />
     </>
   ),
-  epg: (
-    <>
-      <rect x="2" y="3.4" width="12" height="10.2" rx="1.6" />
-      <path d="M2 6.6h12M5.6 1.9v3M10.4 1.9v3" />
-    </>
-  ),
+  epg: CALENDAR_GLYPH,
   logo: (
     <>
       <rect x="2" y="3.2" width="12" height="9.6" rx="1.6" />
@@ -155,6 +159,7 @@ const PATHS: Record<IconName, ReactNode> = {
   up: <path d="m4.7 9.7 3.3-3.4 3.3 3.4" />,
   down: <path d="m4.7 6.3 3.3 3.4 3.3-3.4" />,
   minus: <path d="M3.3 8h9.4" />,
+  calendar: CALENDAR_GLYPH,
   sun: (
     <>
       <circle cx="8" cy="8" r="2.9" />
