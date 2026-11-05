@@ -79,7 +79,7 @@
 | `schedule` | `inherit` | `inherit` / `interval` / `daily` |
 | `sync_interval_secs` | 0 | 0 继承全局 |
 | `sync_daily_at` | 空 | `HH:MM`。空继承全局 |
-| `group_prefix` | 空 | 新分组前缀。空值 = `源名 + " · "` |
+| `group_prefix` | 空 | 新分组前缀。空值 = 保留原名 |
 | `playback_mode` | `auto` | 托管源禁止 `passthrough` |
 | `format` | `auto` | `auto` / `hls` / `mpd` |
 | `position` | 空 | `top` / `bottom`。空继承 `merge_position` |

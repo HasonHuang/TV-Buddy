@@ -809,6 +809,13 @@ label {
   outline: none;
 }
 
+/* 包住任意内容，悬停时显示气泡。 */
+.hover-tip {
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+}
+
 /* 气泡由 React 挂到 body，fixed 定位，不参与页面布局。 */
 .tip-bubble {
   position: fixed;
@@ -2860,6 +2867,8 @@ pre.log .lv-trace {
   border-bottom: 1px solid var(--line);
   background: var(--panel-2);
   flex-wrap: wrap;
+  cursor: pointer;
+  user-select: none;
 }
 
 .group-head .grip {

@@ -59,7 +59,7 @@
 | `schedule` | string | `inherit` | `inherit` / `interval` / `daily` |
 | `sync_interval_secs` | u64 | 0 | 0 继承全局。非零范围 300–2592000 |
 | `sync_daily_at` | string | 空 | `HH:MM`。空继承全局 |
-| `group_prefix` | string | 空 | 新分组名前缀。空值 = `源名 + " · "` |
+| `group_prefix` | string | 空 | 新分组名前缀。空值 = 保留原名 |
 | `playback_mode` | string | `auto` | `auto` / `proxy` / `remux` / `dash` / `redirect` / `rewrite`。托管源禁止 `passthrough` |
 | `format` | string | `auto` | `auto` / `hls` / `mpd` |
 | `position` | string | 空 | `top` / `bottom`。空继承 `playlist.merge_position` |
@@ -186,7 +186,7 @@
 1. `select_entries` 与预检共用。顺序：分组选择/改名 → 全局排除 → 源 `include` → 源 `exclude`。
 2. 收集其他来源（含手工）已占用的 URL。同址外部条目丢弃。
 3. 同源重复 URL 丢弃。计数记入 `skipped_duplicates`。
-4. 生成目标分组名：`group_prefix` 或 `源名 + " · "`，加映射后的分组名。
+4. 生成目标分组名：`group_prefix` 加映射后的分组名。前缀为空时保留原名。
 5. `merge_into` 命中时指向已有分组 id。
 6. 新分组属性：
    - `access=public`、`origin=sync`、`source_id`、`source_group`。

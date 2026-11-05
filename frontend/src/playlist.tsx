@@ -3,7 +3,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError } from './api';
-import { Badge, DateInput, Drawer, Field, Modal, NumberBox, PageHead, Select, Tip, useToast } from './ui';
+import {
+  Badge,
+  DateInput,
+  Drawer,
+  Field,
+  HoverTip,
+  Modal,
+  NumberBox,
+  PageHead,
+  Select,
+  Tip,
+  useToast,
+} from './ui';
 
 type Source = {
   id: string;
@@ -140,7 +152,7 @@ function blankSource(): Source {
     ttl_secs: 0,
     group_mode: 'keep',
     merge_group: '',
-    unlisted_groups: 'drop',
+    unlisted_groups: 'keep',
     group_map: {},
     include: [],
     exclude: [],
@@ -225,6 +237,22 @@ function statusBadge(status?: Status, warnRatio = 0.2) {
   }
   if (status.zero_blocked) return <Badge tone="warn">空清单</Badge>;
   return <Badge tone="ok">正常</Badge>;
+}
+
+/** 状态徽章的说明。只给非正常状态返回文字。 */
+function statusHint(status?: Status, warnRatio = 0.2): string {
+  if (!status) return '';
+  if (status.syncing) return '正在同步这个源。';
+  if (status.needs_review) {
+    return status.error ?? '源返回空清单。本地频道已保留，请确认后再同步。';
+  }
+  if (status.error) return status.error;
+  const threshold = Math.max(0, Math.round(warnRatio * 1000));
+  if (status.shrink_permille > 0 && status.shrink_permille >= threshold) {
+    return `最近一次同步移除了 ${(status.shrink_permille / 10).toFixed(1)}% 的频道。`;
+  }
+  if (status.zero_blocked) return '源返回空清单。本次同步没有清空本地频道。';
+  return '';
 }
 
 export function PlaylistPage() {
@@ -546,11 +574,6 @@ export function PlaylistPage() {
                     </td>
                     <td>
                       <strong>{source.name || source.id}</strong>
-                      {status?.error ? (
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          {status.error}
-                        </div>
-                      ) : null}
                     </td>
                     <td className="mono" style={{ maxWidth: 320, overflowWrap: 'anywhere' }}>
                       {source.url}
@@ -559,10 +582,16 @@ export function PlaylistPage() {
                     <td className="right">
                       {source.mode === 'sync'
                         ? `${status?.channels ?? 0} / ${status?.groups ?? 0}`
-                        : '—'}
+                        : status?.last_ok
+                          ? `${status.channels} / —`
+                          : '—'}
                     </td>
                     <td>{when(status?.last_sync ?? 0)}</td>
-                    <td>{statusBadge(status, global.sync_warn_removal_ratio)}</td>
+                    <td>
+                      <HoverTip text={statusHint(status, global.sync_warn_removal_ratio)}>
+                        {statusBadge(status, global.sync_warn_removal_ratio)}
+                      </HoverTip>
+                    </td>
                     <td className="right">
                       {source.mode === 'sync' && (
                         <button
@@ -836,40 +865,43 @@ export function PlaylistPage() {
                 />
               </label>
             )}
-            <Field label="映射外的分组" tip="没有写进改名表的分组怎么处理。">
-              <Select
-                ariaLabel="映射外的分组"
-                value={drawer.draft.unlisted_groups}
-                options={[
-                  { value: 'drop', label: '丢弃', desc: '不导入这些分组。' },
-                  { value: 'keep', label: '保留', desc: '按原样或合并规则导入。' },
-                ]}
-                onChange={(next) => patch({ unlisted_groups: next })}
-                compact
-              />
-            </Field>
-            <label>
-              分组名前缀
-              <Tip text="加到每个分组名的前面。留空时使用「源名 · 」。" />
-              <input
-                value={drawer.draft.group_prefix}
-                placeholder={drawer.draft.name ? `${drawer.draft.name} · ` : ''}
-                onChange={(event) => patch({ group_prefix: event.target.value })}
-              />
-            </label>
+            {(drawer.draft.group_mode === 'map' ||
+              Object.keys(drawer.draft.group_map).length > 0) && (
+              <Field label="映射外的分组" tip="没有写进改名表的分组怎么处理。">
+                <Select
+                  ariaLabel="映射外的分组"
+                  value={drawer.draft.unlisted_groups}
+                  options={[
+                    { value: 'drop', label: '丢弃', desc: '不导入这些分组。' },
+                    { value: 'keep', label: '保留', desc: '按原样或合并规则导入。' },
+                  ]}
+                  onChange={(next) => patch({ unlisted_groups: next })}
+                  compact
+                />
+              </Field>
+            )}
+            {drawer.draft.mode === 'sync' && (
+              <label>
+                分组名前缀
+                <Tip text="加到每个分组名的前面。留空时保留源里的原名。" />
+                <input
+                  value={drawer.draft.group_prefix}
+                  placeholder="留空则保留原名"
+                  onChange={(event) => patch({ group_prefix: event.target.value })}
+                />
+              </label>
+            )}
           </div>
           <div className="row">
             <button className="ghost" disabled={drawer.busy} onClick={() => void readGroups()}>
               读取分组
             </button>
             <Tip text="只看源里有哪些分组、各有多少频道。不会修改设置。" />
-            {drawer.draft.mode === 'sync' &&
+            {drawer.draft.group_mode === 'map' &&
               drawer.draft.unlisted_groups === 'drop' &&
               Object.keys(drawer.draft.group_map).length === 0 && (
                 <span className="msg warn">
-                  {drawer.draft.group_mode === 'merge'
-                    ? '合并模式：映射外的分组设为丢弃，而且没有改名规则，所以不会导入任何频道。请把「映射外的分组」改为保留。'
-                    : '没有改名规则，而且映射外的分组设为丢弃，所以不会导入任何频道。'}
+                  分组方式是「按映射改名」，但改名表为空，而且映射外的分组设为「丢弃」。这样不会导入任何频道。请添加映射，或把「映射外的分组」改为「保留」。
                 </span>
               )}
           </div>

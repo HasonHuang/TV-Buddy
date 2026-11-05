@@ -11,7 +11,18 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText, putConfig } from './api';
 import { Icon } from './icons';
-import { Badge, Confirm, Field, Modal, NumberBox, PageHead, Select, Switch, useToast } from './ui';
+import {
+  Badge,
+  Confirm,
+  Field,
+  HoverTip,
+  Modal,
+  NumberBox,
+  PageHead,
+  Select,
+  Switch,
+  useToast,
+} from './ui';
 
 export type Channel = {
   id: string;
@@ -932,7 +943,20 @@ export function GroupsPage() {
               setDropTarget('');
             }}
           >
-            <div className="group-head">
+            <div
+              className="group-head"
+              onClick={(event) => {
+                // 只响应空白处与标题。按钮、勾选框和拖动手柄保持原行为。
+                if (
+                  (event.target as HTMLElement).closest(
+                    'button, input, select, textarea, a, .grip',
+                  )
+                ) {
+                  return;
+                }
+                toggleCollapsed(group.id);
+              }}
+            >
               <span
                 className="grip"
                 draggable
@@ -963,9 +987,11 @@ export function GroupsPage() {
               <span className="gname">{group.name || group.id}</span>
               <span className="gid">[{group.id}]</span>
               {group.source_id ? (
-                <Badge tone="info">
-                  来源：{sourceNames[group.source_id] ?? group.source_id}
-                </Badge>
+                <HoverTip text="这个分组由托管源同步生成。断开订阅后，分组和频道保留为本地内容。">
+                  <Badge tone="info">
+                    来源：{sourceNames[group.source_id] ?? group.source_id}
+                  </Badge>
+                </HoverTip>
               ) : (
                 <Badge tone="muted">本地</Badge>
               )}
@@ -1069,10 +1095,18 @@ export function GroupsPage() {
                     </div>
                     <div className="ch-badges">
                       {channel.source_id ? (
-                        <Badge tone={channel.sync_follow === false ? 'warn' : 'info'}>
-                          来源：{sourceNames[channel.source_id] ?? channel.source_id}
-                          {channel.sync_follow === false ? ' · 固定' : ' · 跟随'}
-                        </Badge>
+                        <HoverTip
+                          text={
+                            channel.sync_follow === false
+                              ? '已固定：同步不再更新这个频道的名称、地址和台标。'
+                              : '跟随源：每次同步会更新这个频道的名称、地址和台标。手动修改后自动固定。'
+                          }
+                        >
+                          <Badge tone={channel.sync_follow === false ? 'warn' : 'info'}>
+                            来源：{sourceNames[channel.source_id] ?? channel.source_id}
+                            {channel.sync_follow === false ? ' · 固定' : ' · 跟随'}
+                          </Badge>
+                        </HoverTip>
                       ) : (
                         <Badge tone="muted">本地</Badge>
                       )}

@@ -3043,7 +3043,9 @@ async fn subs_preview_drops_mapped_group_and_rejects_bad_url() {
             serde_json::json!({
                 "source": {
                     "url": format!("{}/extra.m3u8", fixture.upstream),
-                    "group_map": {}
+                    "group_mode": "map",
+                    "group_map": {},
+                    "unlisted_groups": "drop"
                 }
             })
             .to_string(),

@@ -1232,7 +1232,8 @@ pub struct PlaylistSource {
     pub group_mode: String,
     /// `merge` 模式的目标分组名；空值表示保留原名。
     pub merge_group: String,
-    /// 未出现在 `group_map` 的分组：`drop`（默认）或 `keep`。
+    /// 未出现在 `group_map` 的分组：`drop` 或 `keep`（默认）。
+    /// 映射为空时，`keep` / `merge` 模式保留全部分组。
     pub unlisted_groups: String,
     /// 频道名白名单；支持 `group:` / `id:` / `url:` 前缀。
     pub include: Vec<String>,
@@ -1245,7 +1246,7 @@ pub struct PlaylistSource {
     pub sync_interval_secs: u64,
     /// `HH:MM`。空值继承全局。
     pub sync_daily_at: String,
-    /// 新分组显示名前缀。空值 = 源名 + " · "。
+    /// 新分组显示名前缀。空值 = 保留原名。
     pub group_prefix: String,
     /// `auto` / `proxy` / `remux` / `dash` / `redirect` / `rewrite`。禁止 `passthrough`。
     pub playback_mode: String,
@@ -1295,7 +1296,7 @@ impl Default for PlaylistSource {
             group_map: BTreeMap::new(),
             group_mode: "keep".into(),
             merge_group: String::new(),
-            unlisted_groups: "drop".into(),
+            unlisted_groups: "keep".into(),
             include: Vec::new(),
             exclude: Vec::new(),
             mode: "aggregate".into(),

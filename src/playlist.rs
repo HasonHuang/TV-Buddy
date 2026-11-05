@@ -559,8 +559,20 @@ mod aggregate_tests {
     }
 
     #[test]
-    fn empty_map_drops_everything_by_default() {
+    fn empty_map_keeps_all_in_keep_mode() {
+        // 没有映射时，保留原名模式导入全部分组。
         let source = PlaylistSource::default();
+        let out = aggregate(&source, &[], BODY);
+        assert!(out.contains("CCTV-1") && out.contains("CCTV-5"));
+    }
+
+    #[test]
+    fn empty_map_in_map_mode_drops_all() {
+        let source = PlaylistSource {
+            group_mode: "map".into(),
+            unlisted_groups: "drop".into(),
+            ..PlaylistSource::default()
+        };
         assert!(aggregate(&source, &[], BODY).is_empty());
     }
 

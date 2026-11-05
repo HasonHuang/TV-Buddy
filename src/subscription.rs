@@ -1224,16 +1224,12 @@ fn count_source_channels(config: &Config, id: &str) -> usize {
         .count()
 }
 
+/// 分组显示名前缀。空值表示保留源里的原名。
 fn prefix_for(source: &PlaylistSource) -> String {
-    let custom = source.group_prefix.trim();
-    if !custom.is_empty() {
-        return custom.to_string();
-    }
-    let name = source.name.trim();
-    if name.is_empty() {
+    if source.group_prefix.trim().is_empty() {
         String::new()
     } else {
-        format!("{name} · ")
+        source.group_prefix.clone()
     }
 }
 
@@ -1618,10 +1614,20 @@ mod tests {
         assert_eq!(stats.added, 2);
         assert_eq!(stats.groups_created, 1);
         assert_eq!(config.groups.len(), 1);
-        assert_eq!(config.groups[0].name, "上游 · 央视");
+        assert_eq!(config.groups[0].name, "央视");
         assert_eq!(config.groups[0].origin, "sync");
         assert_eq!(config.groups[0].source_id, "s1");
         assert_eq!(config.groups[0].access, "public");
+    }
+
+    #[test]
+    fn custom_group_prefix_is_kept() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.group_prefix = "我的 · ".into();
+        let entries = urls(&[("c1", "央视", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+        assert_eq!(config.groups[0].name, "我的 · 央视");
     }
 
     #[test]
@@ -2202,7 +2208,7 @@ mod tests {
         ]);
         run(&mut config, &source, &entries);
         assert_eq!(config.groups.len(), 1, "merge 只建一个分组");
-        assert_eq!(config.groups[0].name, "上游 · 全部");
+        assert_eq!(config.groups[0].name, "全部");
         assert_eq!(config.groups[0].channels.len(), 2);
         assert_eq!(config.groups[0].channels[0].extra["group_title"], "新闻");
 
@@ -2225,7 +2231,7 @@ mod tests {
         renamed.unlisted_groups = "keep".into();
         run(&mut config, &renamed, &entries);
         assert_eq!(config.groups.len(), 1);
-        assert_eq!(config.groups[0].name, "上游 · 资讯");
+        assert_eq!(config.groups[0].name, "资讯");
         assert_eq!(config.groups[0].id, gid, "改名保留分组 id");
     }
 

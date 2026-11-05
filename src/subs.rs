@@ -17,7 +17,8 @@ pub struct PreviewSource {
     pub group_mode: String,
     /// `merge` 模式的目标分组名；空值表示保留原名。
     pub merge_group: String,
-    /// 未出现在 `group_map` 的分组：`drop`（默认）或 `keep`。
+    /// 未出现在 `group_map` 的分组：`drop` 或 `keep`（默认）。
+    /// 映射为空时，`keep` / `merge` 模式保留全部分组。
     pub unlisted_groups: String,
     /// 频道名白名单；支持 `group:` 与 `id:` 前缀。
     pub include: Vec<String>,
@@ -42,7 +43,10 @@ impl GroupRules<'_> {
         };
         let merge = self.merge_group.trim();
         let Some(mapped) = self.group_map.get(original).map(|value| value.trim()) else {
-            if self.unlisted_groups.trim() != "keep" {
+            // 空映射没有选择集。保留原名与合并模式应导入全部分组；
+            // 只有 map 模式把空映射当作「未选择任何分组」。
+            let keep_all = self.group_map.is_empty() && mode != "map";
+            if !keep_all && self.unlisted_groups.trim() != "keep" {
                 return None;
             }
             return Some(if mode == "merge" && !merge.is_empty() {
@@ -406,19 +410,24 @@ mod tests {
     }
 
     #[test]
-    fn empty_map_drops_all_unless_unlisted_kept() {
+    fn empty_map_keeps_all_in_keep_mode() {
+        // 保留原名模式没有选择集，应导入全部分组，不再依赖 unlisted_groups。
         let source = PreviewSource::default();
-        let result = preview(&sample_entries(), &source, &[], 5);
-        assert_eq!(result.kept, 0);
-        assert_eq!(result.dropped_groups, vec!["远端组", "别的组"]);
-
-        let source = PreviewSource {
-            unlisted_groups: "keep".into(),
-            ..PreviewSource::default()
-        };
         let result = preview(&sample_entries(), &source, &[], 5);
         assert_eq!(result.kept, 4);
         assert!(result.dropped_groups.is_empty());
+    }
+
+    #[test]
+    fn empty_map_in_map_mode_still_drops_unlisted() {
+        // map 模式把空映射当作「未选择任何分组」。
+        let source = PreviewSource {
+            group_mode: "map".into(),
+            ..PreviewSource::default()
+        };
+        let result = preview(&sample_entries(), &source, &[], 5);
+        assert_eq!(result.kept, 0);
+        assert_eq!(result.dropped_groups, vec!["远端组", "别的组"]);
     }
 
     #[test]

@@ -42,11 +42,11 @@ export function ThemeToggle({
 }
 
 
-/** 提示气泡。`?` 由伪元素绘制，不污染父元素文本内容。
+/** 提示气泡的定位与挂载。调用方决定触发元素与显示时机。
  *
  * 气泡用 fixed 定位挂到 body：不会被卡片的 overflow 裁切，也不会撑出横向滚动条。
  */
-export function Tip({ text, side = 'top' }: { text: string; side?: 'top' | 'bottom' }) {
+function useTipBubble(text: string, side: 'top' | 'bottom') {
   const ref = useRef<HTMLSpanElement>(null);
   const [bubble, setBubble] = useState<{
     left: number;
@@ -75,6 +75,25 @@ export function Tip({ text, side = 'top' }: { text: string; side?: 'top' | 'bott
 
   const hide = () => setBubble(null);
 
+  const node = bubble
+    ? createPortal(
+        <span
+          className={`tip-bubble ${bubble.placement}`}
+          style={{ left: bubble.left, top: bubble.top, maxWidth: bubble.width }}
+          role="tooltip"
+        >
+          {text}
+        </span>,
+        document.body,
+      )
+    : null;
+
+  return { ref, show, hide, node };
+}
+
+/** 提示气泡。`?` 由伪元素绘制，不污染父元素文本内容。 */
+export function Tip({ text, side = 'top' }: { text: string; side?: 'top' | 'bottom' }) {
+  const { ref, show, hide, node } = useTipBubble(text, side);
   return (
     <>
       <span
@@ -89,18 +108,34 @@ export function Tip({ text, side = 'top' }: { text: string; side?: 'top' | 'bott
         onBlur={hide}
         onClick={(event) => event.preventDefault()}
       />
-      {bubble
-        ? createPortal(
-            <span
-              className={`tip-bubble ${bubble.placement}`}
-              style={{ left: bubble.left, top: bubble.top, maxWidth: bubble.width }}
-              role="tooltip"
-            >
-              {text}
-            </span>,
-            document.body,
-          )
-        : null}
+      {node}
+    </>
+  );
+}
+
+/** 悬停在任意内容上时显示气泡。`text` 为空时不包外壳，也不显示气泡。 */
+export function HoverTip({
+  text,
+  side = 'top',
+  children,
+}: {
+  text: string;
+  side?: 'top' | 'bottom';
+  children: React.ReactNode;
+}) {
+  const { ref, show, hide, node } = useTipBubble(text, side);
+  if (!text) return <>{children}</>;
+  return (
+    <>
+      <span
+        ref={ref}
+        className="hover-tip"
+        onMouseEnter={show}
+        onMouseLeave={hide}
+      >
+        {children}
+      </span>
+      {node}
     </>
   );
 }
