@@ -1233,7 +1233,7 @@ pub struct PlaylistSource {
     /// `merge` 模式的目标分组名；空值表示保留原名。
     pub merge_group: String,
     /// 未出现在 `group_map` 的分组：`drop` 或 `keep`（默认）。
-    /// 映射为空时，`keep` / `merge` 模式保留全部分组。
+    /// 旧配置在映射为空且模式不是 `map` 时，会把 `drop` 归一为 `keep`。
     pub unlisted_groups: String,
     /// 频道名白名单；支持 `group:` / `id:` / `url:` 前缀。
     pub include: Vec<String>,
@@ -1247,6 +1247,7 @@ pub struct PlaylistSource {
     /// `HH:MM`。空值继承全局。
     pub sync_daily_at: String,
     /// 新分组显示名前缀。空值 = 保留原名。
+    /// 控制字符会被移除，避免截断 `#EXTINF`。
     pub group_prefix: String,
     /// `auto` / `proxy` / `remux` / `dash` / `redirect` / `rewrite`。禁止 `passthrough`。
     pub playback_mode: String,
@@ -1281,6 +1282,24 @@ impl PlaylistSource {
         }
         if self.format.trim().is_empty() {
             self.format = "auto".to_string();
+        }
+        // 控制字符会截断清单行。保存与加载时都清掉。
+        if self.group_prefix.chars().any(char::is_control) {
+            self.group_prefix = self
+                .group_prefix
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .collect();
+        }
+        if self.unlisted_groups.trim().is_empty() {
+            self.unlisted_groups = "keep".to_string();
+        }
+        // 旧默认值 drop + 空映射只会得到零频道。保留原名与合并模式改为 keep。
+        if self.unlisted_groups == "drop"
+            && self.group_map.is_empty()
+            && self.group_mode.trim() != "map"
+        {
+            self.unlisted_groups = "keep".to_string();
         }
     }
 }
@@ -1781,6 +1800,29 @@ mod tests {
         assert_eq!(source.schedule, "inherit");
         assert_eq!(source.playback_mode, "auto");
         assert_eq!(source.format, "auto");
+    }
+
+    #[test]
+    fn normalize_keeps_all_when_unlisted_drop_with_empty_map() {
+        let mut source = PlaylistSource::default();
+        source.group_mode = "keep".into();
+        source.unlisted_groups = "drop".into();
+        source.normalize();
+        assert_eq!(source.unlisted_groups, "keep");
+
+        let mut mapped = PlaylistSource::default();
+        mapped.group_mode = "map".into();
+        mapped.unlisted_groups = "drop".into();
+        mapped.normalize();
+        assert_eq!(mapped.unlisted_groups, "drop");
+    }
+
+    #[test]
+    fn normalize_removes_control_chars_from_group_prefix() {
+        let mut source = PlaylistSource::default();
+        source.group_prefix = "我的\n · ".into();
+        source.normalize();
+        assert_eq!(source.group_prefix, "我的 · ");
     }
 
     #[test]

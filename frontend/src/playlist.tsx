@@ -226,33 +226,46 @@ function sourceModeBadge(source: Source) {
   );
 }
 
-function statusBadge(status?: Status, warnRatio = 0.2) {
-  if (!status) return null;
-  if (status.syncing) return <Badge tone="info">同步中</Badge>;
-  if (status.needs_review) return <Badge tone="warn">待确认</Badge>;
-  if (status.error) return <Badge tone="danger">失败</Badge>;
-  const threshold = Math.max(0, Math.round(warnRatio * 1000));
-  if (status.shrink_permille > 0 && status.shrink_permille >= threshold) {
-    return <Badge tone="warn">频道变少</Badge>;
-  }
-  if (status.zero_blocked) return <Badge tone="warn">空清单</Badge>;
-  return <Badge tone="ok">正常</Badge>;
-}
+type StatusView = { tone: string; label: string; hint: string };
 
-/** 状态徽章的说明。只给非正常状态返回文字。 */
-function statusHint(status?: Status, warnRatio = 0.2): string {
-  if (!status) return '';
-  if (status.syncing) return '正在同步这个源。';
-  if (status.needs_review) {
-    return status.error ?? '源返回空清单。本地频道已保留，请确认后再同步。';
+/** 状态徽章的文字、颜色与悬停说明。只算一次，避免两处规则漂移。 */
+function statusView(status?: Status, warnRatio = 0.2): StatusView | null {
+  if (!status) return null;
+  if (status.syncing) {
+    return { tone: 'info', label: '同步中', hint: '正在同步这个源。' };
   }
-  if (status.error) return status.error;
+  if (status.error) {
+    return {
+      tone: 'danger',
+      label: '失败',
+      hint: status.needs_review
+        ? `${status.error} 另外，源返回空清单，本地频道已保留。`
+        : status.error,
+    };
+  }
+  if (status.needs_review) {
+    return {
+      tone: 'warn',
+      label: '待确认',
+      hint: '源返回空清单。本地频道已保留。如需接受空清单，请开启全局「允许空清单清空」。',
+    };
+  }
   const threshold = Math.max(0, Math.round(warnRatio * 1000));
   if (status.shrink_permille > 0 && status.shrink_permille >= threshold) {
-    return `最近一次同步移除了 ${(status.shrink_permille / 10).toFixed(1)}% 的频道。`;
+    return {
+      tone: 'warn',
+      label: '频道变少',
+      hint: `最近一次同步移除了 ${(status.shrink_permille / 10).toFixed(1)}% 的频道。`,
+    };
   }
-  if (status.zero_blocked) return '源返回空清单。本次同步没有清空本地频道。';
-  return '';
+  if (status.zero_blocked) {
+    return {
+      tone: 'warn',
+      label: '空清单',
+      hint: '源返回空清单。本地频道已保留。',
+    };
+  }
+  return { tone: 'ok', label: '正常', hint: '' };
 }
 
 export function PlaylistPage() {
@@ -516,6 +529,17 @@ export function PlaylistPage() {
     0,
   );
 
+  // 后端 GroupRules 的可见结果：map 模式 + 空映射 + 丢弃 → 零频道。
+  const draft = drawer?.draft;
+  const draftMapEmpty = draft ? Object.keys(draft.group_map).length === 0 : true;
+  const showUnlistedGroups =
+    draft !== undefined && (draft.group_mode === 'map' || !draftMapEmpty);
+  const dropsAllGroups =
+    draft !== undefined &&
+    draft.group_mode === 'map' &&
+    draft.unlisted_groups === 'drop' &&
+    draftMapEmpty;
+
   return (
     <>
       <PageHead
@@ -560,6 +584,7 @@ export function PlaylistPage() {
             <tbody>
               {sources.map((source) => {
                 const status = statuses[source.id];
+                const view = statusView(status, global.sync_warn_removal_ratio);
                 return (
                   <tr key={source.id}>
                     <td>
@@ -582,15 +607,15 @@ export function PlaylistPage() {
                     <td className="right">
                       {source.mode === 'sync'
                         ? `${status?.channels ?? 0} / ${status?.groups ?? 0}`
-                        : status?.last_ok
-                          ? `${status.channels} / —`
-                          : '—'}
+                        : '—'}
                     </td>
                     <td>{when(status?.last_sync ?? 0)}</td>
                     <td>
-                      <HoverTip text={statusHint(status, global.sync_warn_removal_ratio)}>
-                        {statusBadge(status, global.sync_warn_removal_ratio)}
-                      </HoverTip>
+                      {view ? (
+                        <HoverTip text={view.hint}>
+                          <Badge tone={view.tone}>{view.label}</Badge>
+                        </HoverTip>
+                      ) : null}
                     </td>
                     <td className="right">
                       {source.mode === 'sync' && (
@@ -865,8 +890,7 @@ export function PlaylistPage() {
                 />
               </label>
             )}
-            {(drawer.draft.group_mode === 'map' ||
-              Object.keys(drawer.draft.group_map).length > 0) && (
+            {showUnlistedGroups && (
               <Field label="映射外的分组" tip="没有写进改名表的分组怎么处理。">
                 <Select
                   ariaLabel="映射外的分组"
@@ -897,13 +921,11 @@ export function PlaylistPage() {
               读取分组
             </button>
             <Tip text="只看源里有哪些分组、各有多少频道。不会修改设置。" />
-            {drawer.draft.group_mode === 'map' &&
-              drawer.draft.unlisted_groups === 'drop' &&
-              Object.keys(drawer.draft.group_map).length === 0 && (
-                <span className="msg warn">
-                  分组方式是「按映射改名」，但改名表为空，而且映射外的分组设为「丢弃」。这样不会导入任何频道。请添加映射，或把「映射外的分组」改为「保留」。
-                </span>
-              )}
+            {dropsAllGroups && (
+              <span className="msg warn">
+                分组方式是「按映射改名」，但改名表为空，而且映射外的分组设为「丢弃」。这样不会导入任何频道。请添加映射，或把「映射外的分组」改为「保留」。
+              </span>
+            )}
           </div>
           {drawer.groups && drawer.groups.length > 0 && (
             <div className="table-wrap">

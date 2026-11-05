@@ -226,12 +226,21 @@ pub async fn update_source(
             Ok(())
         })
         .map_err(map_internal)?;
-    // 首次进入托管：清掉旧计时，调度器下一轮立即补跑。
-    if existing.mode != "sync" && source.mode == "sync" {
+    // 切换模式后，旧状态只属于旧模式。清空计数与提醒，避免聚合行显示托管状态。
+    if existing.mode != source.mode {
+        let mode = source.mode.clone();
         state.sources.update_status(&id, |status| {
-            status.last_try = 0;
-            status.error = None;
+            *status = crate::subs::SourceStatus {
+                mode,
+                ..Default::default()
+            };
         });
+        // 首次进入托管：清掉旧计时，调度器下一轮立即补跑。
+        if source.mode == "sync" {
+            state
+                .sources
+                .update_status(&id, |status| status.last_try = 0);
+        }
     }
     Ok(Json(json!({
         "ok": true,

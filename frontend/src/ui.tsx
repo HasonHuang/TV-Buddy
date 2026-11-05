@@ -75,6 +75,11 @@ function useTipBubble(text: string, side: 'top' | 'bottom') {
 
   const hide = () => setBubble(null);
 
+  // 内容变为空时清掉旧气泡。否则下一次出现会沿用旧坐标。
+  useEffect(() => {
+    if (!text) setBubble(null);
+  }, [text]);
+
   const node = bubble
     ? createPortal(
         <span
@@ -124,16 +129,29 @@ export function HoverTip({
   children: React.ReactNode;
 }) {
   const { ref, show, hide, node } = useTipBubble(text, side);
+  const id = useId();
   if (!text) return <>{children}</>;
   return (
     <>
       <span
         ref={ref}
         className="hover-tip"
+        tabIndex={0}
+        aria-describedby={id}
         onMouseEnter={show}
         onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        onClick={(event) => {
+          // 触摸设备没有悬停。点一下也显示气泡。
+          event.stopPropagation();
+          show();
+        }}
       >
         {children}
+        <span id={id} className="sr-only">
+          {text}
+        </span>
       </span>
       {node}
     </>

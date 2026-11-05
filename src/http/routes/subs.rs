@@ -183,7 +183,7 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
         })
         .unwrap_or_else(|| PreviewSource {
             group_mode: "keep".into(),
-            unlisted_groups: "drop".into(),
+            unlisted_groups: "keep".into(),
             ..PreviewSource::default()
         });
 
@@ -214,6 +214,9 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
             source.group_map.insert(from.clone(), to.to_string());
         }
     }
+
+    // 与保存时一致：空值按 keep；空映射、非 map 模式的 drop 归一为 keep。
+    source.normalize();
 
     // 托管源使用草稿源抓取，应用请求头、代理与超时。聚合源沿用轻量抓取。
     let mut candidate = configured.cloned().unwrap_or_default();

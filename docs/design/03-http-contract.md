@@ -640,7 +640,7 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 规则：
 
 - `source.id` 命中 `[playlist].sources` 时，未提供的字段用配置补齐。
-- `group_map` 是选择集：键命中即选中；未列出的分组按 `unlisted_groups` 处理：`drop` 或 `keep`（默认）。映射为空时，`keep` / `merge` 模式保留全部分组；`map` 模式 + `drop` → 零频道。目标默认值为 `drop`。本实现默认 `keep`，避免新源默认为零频道。
+- `group_map` 是选择集：键命中即选中；未列出的分组按 `unlisted_groups` 处理：`drop` 或 `keep`（默认）。本实现把「映射为空、模式不是 `map`、值为 `drop`」的旧配置在加载时归一为 `keep`，避免零频道。目标默认值为 `drop`。
 - `group_mode`：`keep`（默认/未知值）保留原名；`map` 使用映射值，空值保留原名；`merge` 在 `merge_group` 非空时统一分组。
 - 未带 `group-title` 的条目分组名为 `(无分组)`。
 - 顺序固定：分组选择/改名 → `global_exclude` → 源 `include` → 源 `exclude`。

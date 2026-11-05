@@ -36,8 +36,6 @@ pub struct PlannedGroup {
     /// 分组身份。合并组为 `merge:<目标名>`，`merge_into` 为 `gid:<id>`，
     /// 其余为 `group:<上游分组>`。
     pub target: String,
-    /// 映射后的分组名，不含前缀。
-    pub label: String,
     /// 显示名，含源前缀。
     pub name: String,
     /// `merge_into` 指定的已有分组 id；空值表示按源独立建组。
@@ -213,7 +211,6 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
             key = format!("{base_key}#{}-{attempt}", key_suffix(&url));
         }
 
-        let label = item.group.clone();
         let merge_id = source
             .merge_into
             .get(&item.original)
@@ -221,13 +218,12 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
             .filter(|value| !value.is_empty())
             .unwrap_or_default();
         let target = group_target(source, &item.original, &merge_id);
-        let name = format!("{prefix}{label}");
+        let name = format!("{prefix}{}", item.group);
         match groups.iter_mut().find(|group| group.target == target) {
             Some(group) => group.count += 1,
             None => groups.push(PlannedGroup {
                 original: item.original.clone(),
                 target: target.clone(),
-                label,
                 name,
                 merge_id,
                 count: 1,
@@ -263,7 +259,6 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
 /// 调用方必须在配置写锁内调用。计划与当前源不一致时应先中止。
 pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> ApplyStats {
     let playlist = config.playlist.clone();
-    let prefix = prefix_for(source);
     let mut stats = ApplyStats::default();
     let mut groups = std::mem::take(&mut config.groups);
 
@@ -274,11 +269,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         if target_ids.contains_key(&planned.target) {
             continue;
         }
-        let name = if planned.name.is_empty() {
-            format!("{prefix}{}", planned.label)
-        } else {
-            planned.name.clone()
-        };
+        let name = planned.name.clone();
         let existing = if !planned.merge_id.is_empty() {
             groups.iter().position(|g| g.id == planned.merge_id)
         } else {
@@ -1225,11 +1216,18 @@ fn count_source_channels(config: &Config, id: &str) -> usize {
 }
 
 /// 分组显示名前缀。空值表示保留源里的原名。
+///
+/// 控制字符会截断 `#EXTINF`，所以在这里再清一次。
 fn prefix_for(source: &PlaylistSource) -> String {
-    if source.group_prefix.trim().is_empty() {
+    let prefix: String = source
+        .group_prefix
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .collect();
+    if prefix.trim().is_empty() {
         String::new()
     } else {
-        source.group_prefix.clone()
+        prefix
     }
 }
 
@@ -1625,6 +1623,16 @@ mod tests {
         let mut config = config_with_source();
         let mut source = source();
         source.group_prefix = "我的 · ".into();
+        let entries = urls(&[("c1", "央视", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+        assert_eq!(config.groups[0].name, "我的 · 央视");
+    }
+
+    #[test]
+    fn group_prefix_drops_control_chars() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.group_prefix = "我的\n · ".into();
         let entries = urls(&[("c1", "央视", "http://up/c1.m3u8")]);
         run(&mut config, &source, &entries);
         assert_eq!(config.groups[0].name, "我的 · 央视");

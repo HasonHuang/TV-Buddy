@@ -84,6 +84,10 @@ const FORMATS: { value: string; label: string; desc: string }[] = [
   { value: 'mpd', label: 'DASH', desc: '下发 mpd 清单。' },
 ];
 
+/** 频道跟随源的规则说明。徽章与编辑表单共用。 */
+const FOLLOW_HINT = '每次同步会更新这个频道的名称、地址和台标。手动修改后自动固定。';
+const FIXED_HINT = '已固定，同步不再更新这个频道的名称、地址和台标。';
+
 /** 模式徽标的中文名。 */
 function modeLabel(mode: string): string {
   return MODES.find((item) => item.value === mode)?.label ?? mode;
@@ -946,10 +950,10 @@ export function GroupsPage() {
             <div
               className="group-head"
               onClick={(event) => {
-                // 只响应空白处与标题。按钮、勾选框和拖动手柄保持原行为。
+                // 只响应空白处与标题。控件和悬停说明保持原行为。
                 if (
                   (event.target as HTMLElement).closest(
-                    'button, input, select, textarea, a, .grip',
+                    'button, input, select, textarea, a, .grip, .hover-tip',
                   )
                 ) {
                   return;
@@ -1098,8 +1102,8 @@ export function GroupsPage() {
                         <HoverTip
                           text={
                             channel.sync_follow === false
-                              ? '已固定：同步不再更新这个频道的名称、地址和台标。'
-                              : '跟随源：每次同步会更新这个频道的名称、地址和台标。手动修改后自动固定。'
+                              ? FIXED_HINT
+                              : `跟随源：${FOLLOW_HINT}`
                           }
                         >
                           <Badge tone={channel.sync_follow === false ? 'warn' : 'info'}>
@@ -1335,8 +1339,8 @@ export function GroupsPage() {
                 tip="跟随源时，同步会更新名称、地址和台标。关闭后固定为当前值。"
                 hint={
                   channelForm.form.syncFollow
-                    ? '跟随源里的名称、地址和台标。手动修改后会自动固定。'
-                    : '已固定，不再跟随源。勾选后恢复跟随。'
+                    ? FOLLOW_HINT
+                    : `${FIXED_HINT} 勾选后恢复跟随。`
                 }
               >
                 <div className="row">

@@ -88,6 +88,8 @@
 | `max_channels` | 0 | 0 继承全局 |
 | `merge_into` | 空 | 上游分组名 → 已有分组 id |
 
+`unlisted_groups` 默认 `keep`。旧配置的空映射 `drop` 在加载时归一为 `keep`。见 `07` `D-007`。
+
 ### 1.3 分组与频道的来源字段
 
 | 结构 | 字段 | 序列化 |

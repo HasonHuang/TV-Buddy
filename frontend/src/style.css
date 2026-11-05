@@ -816,6 +816,19 @@ label {
   cursor: help;
 }
 
+/* 只给读屏软件。不占布局。 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* 气泡由 React 挂到 body，fixed 定位，不参与页面布局。 */
 .tip-bubble {
   position: fixed;
