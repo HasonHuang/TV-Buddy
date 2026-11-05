@@ -842,6 +842,7 @@ label {
   font-weight: 400;
   line-height: 1.5;
   white-space: normal;
+  overflow-wrap: anywhere;
   text-align: left;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
   pointer-events: none;

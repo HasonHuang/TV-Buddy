@@ -283,6 +283,7 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
             "remove": diff.remove,
             "groups_add": diff.groups_add,
             "groups_remove": diff.groups_remove,
+            "groups_rename": diff.groups_rename,
             "skipped_duplicates": diff.skipped_duplicates,
             "guard": {
                 "over_limit": max_channels > 0 && plan.channels.len() as u64 > max_channels,

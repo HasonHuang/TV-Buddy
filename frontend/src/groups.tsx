@@ -7,7 +7,7 @@
  * 未知字段里（`Channel.extra`），后端已经消费它们，所以这里直接读写同名键。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, copyText, putConfig } from './api';
 import { Icon } from './icons';
@@ -87,6 +87,14 @@ const FORMATS: { value: string; label: string; desc: string }[] = [
 /** 频道跟随源的规则说明。徽章与编辑表单共用。 */
 const FOLLOW_HINT = '每次同步会更新这个频道的名称、地址和台标。手动修改后自动固定。';
 const FIXED_HINT = '已固定，同步不再更新这个频道的名称、地址和台标。';
+
+/** 分组标题栏里的控件。点击这些控件不切换折叠。 */
+const GROUP_HEAD_CONTROLS = 'button, input, select, textarea, a, .grip, .hover-tip';
+
+/** 事件起点或终点落在控件上时返回 true。 */
+function hitsControl(node: EventTarget | null): boolean {
+  return node instanceof Element && node.closest(GROUP_HEAD_CONTROLS) !== null;
+}
 
 /** 模式徽标的中文名。 */
 function modeLabel(mode: string): string {
@@ -406,6 +414,8 @@ export function GroupsPage() {
   const [dragging, setDragging] = useState('');
   /** 拖动经过的分组 id。用于画落点。 */
   const [dropTarget, setDropTarget] = useState('');
+  /** 标题栏按下时的元素。按下与松开不在同一元素时，click 落在共同祖先上。 */
+  const headPress = useRef<EventTarget | null>(null);
   /** 解析脚本列表；打开频道弹窗时按需加载。 */
   const [scripts, setScripts] = useState<string[]>([]);
   /** 当前账号的播放凭证。复制播放地址时附上，否则在开启凭证校验时是死链。 */
@@ -949,13 +959,15 @@ export function GroupsPage() {
           >
             <div
               className="group-head"
+              onPointerDown={(event) => {
+                headPress.current = event.target;
+              }}
               onClick={(event) => {
                 // 只响应空白处与标题。控件和悬停说明保持原行为。
-                if (
-                  (event.target as HTMLElement).closest(
-                    'button, input, select, textarea, a, .grip, .hover-tip',
-                  )
-                ) {
+                // 按下与松开跨元素时，click 的目标是共同祖先，所以要同时看起点。
+                const pressed = headPress.current;
+                headPress.current = null;
+                if (hitsControl(event.target) || hitsControl(pressed)) {
                   return;
                 }
                 toggleCollapsed(group.id);

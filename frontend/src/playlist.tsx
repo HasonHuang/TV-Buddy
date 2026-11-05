@@ -94,6 +94,7 @@ type SyncPreview = {
   remove: number;
   groups_add: number;
   groups_remove: number;
+  groups_rename: number;
   skipped_duplicates: number;
   guard: {
     over_limit: boolean;
@@ -1189,6 +1190,15 @@ export function PlaylistPage() {
                   <Badge tone="ok">新增 {drawer.preview.sync.add}</Badge>
                   <Badge tone="info">更新 {drawer.preview.sync.update}</Badge>
                   <Badge tone="warn">移除 {drawer.preview.sync.remove}</Badge>
+                  {drawer.preview.sync.groups_add > 0 && (
+                    <Badge tone="ok">新增分组 {drawer.preview.sync.groups_add}</Badge>
+                  )}
+                  {drawer.preview.sync.groups_rename > 0 && (
+                    <Badge tone="info">分组改名 {drawer.preview.sync.groups_rename}</Badge>
+                  )}
+                  {drawer.preview.sync.groups_remove > 0 && (
+                    <Badge tone="warn">移除分组 {drawer.preview.sync.groups_remove}</Badge>
+                  )}
                   <Badge tone="muted">重复 {drawer.preview.sync.skipped_duplicates}</Badge>
                   {drawer.preview.sync.guard.over_limit && (
                     <Badge tone="danger">超过单源上限</Badge>

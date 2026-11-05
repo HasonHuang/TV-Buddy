@@ -91,6 +91,7 @@ pub struct Diff {
     pub remove: usize,
     pub groups_add: usize,
     pub groups_remove: usize,
+    pub groups_rename: usize,
     pub skipped_duplicates: usize,
 }
 
@@ -576,22 +577,36 @@ pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
     out.add = plan.channels.len().saturating_sub(matched.len());
 
     for planned_group in &plan.groups {
-        let found = if !planned_group.merge_id.is_empty() {
+        let existing = if !planned_group.merge_id.is_empty() {
             config
                 .groups
                 .iter()
-                .any(|group| group.id == planned_group.merge_id)
+                .position(|group| group.id == planned_group.merge_id)
         } else {
-            config.groups.iter().any(|group| {
+            None
+        };
+        let existing = existing.or_else(|| {
+            config.groups.iter().position(|group| {
                 group.origin == "sync"
                     && group.source_id == source.id
                     && (sync_marker(group, SYNC_TARGET_KEY) == planned_group.target
                         || group.source_group == planned_group.original
                         || (group.source_group.is_empty() && group.name == planned_group.name))
             })
-        };
-        if !found {
-            out.groups_add += 1;
+        });
+        match existing {
+            None => out.groups_add += 1,
+            Some(idx) => {
+                let group = &config.groups[idx];
+                let baseline = sync_marker(group, SYNC_NAME_KEY);
+                // 与 apply 一致：只改未被管理员改过名的分组。
+                if !baseline.is_empty()
+                    && group.name == baseline
+                    && group.name != planned_group.name
+                {
+                    out.groups_rename += 1;
+                }
+            }
         }
     }
     for group in &config.groups {
@@ -1862,6 +1877,20 @@ mod tests {
         assert_eq!(diff.add, 1);
         assert_eq!(diff.update, 1);
         assert_eq!(diff.remove, 1);
+    }
+
+    #[test]
+    fn diff_reports_group_rename_when_prefix_changes() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.group_prefix = "旧 · ".into();
+        let entries = urls(&[("c1", "央视", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+
+        source.group_prefix.clear();
+        let diff = diff(&config, &source, &plan(&config, &source, &entries));
+        assert_eq!(diff.groups_rename, 1);
+        assert_eq!(diff.groups_add, 0);
     }
 
     #[test]
