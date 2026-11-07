@@ -1224,12 +1224,10 @@ textarea {
   transform: rotate(180deg);
 }
 
+/* 菜单挂到 body，用 fixed 定位，不被表格与抽屉的滚动容器裁切。 */
 .select-menu {
-  position: absolute;
+  position: fixed;
   z-index: 45;
-  top: calc(100% + 6px);
-  left: 0;
-  min-width: 100%;
   max-width: min(320px, calc(100vw - 32px));
   max-height: 280px;
   margin: 0;
@@ -1243,18 +1241,8 @@ textarea {
 }
 
 /* 带说明的选项需要更宽的菜单，紧凑按钮不再决定菜单宽度。 */
-.select.described .select-menu {
+.select-menu.described {
   min-width: min(232px, calc(100vw - 32px));
-}
-
-.select-menu.right {
-  right: 0;
-  left: auto;
-}
-
-.select-menu.drop-up {
-  top: auto;
-  bottom: calc(100% + 6px);
 }
 
 .select-option {
@@ -3051,11 +3039,42 @@ pre.log .lv-trace {
   border-bottom: 0;
 }
 
+/* 频道拖动落点。 */
+.ch-row.dragover {
+  background: var(--accent-weak);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 .ch-row .grip {
   color: var(--text3);
   cursor: grab;
   flex: none;
   padding-top: 2px;
+}
+
+/* 置顶按钮在悬停或键盘聚焦时出现；保留槽位，不推挤其他按钮。 */
+.ch-row .pin-top {
+  visibility: hidden;
+}
+
+.ch-row:hover .pin-top,
+.ch-row:focus-within .pin-top {
+  visibility: visible;
+}
+
+.ch-row .pin-top:disabled {
+  visibility: hidden;
+}
+
+/* 触摸设备没有悬停，直接显示置顶按钮。 */
+@media (hover: none) {
+  .ch-row .pin-top {
+    visibility: visible;
+  }
+
+  .ch-row .pin-top:disabled {
+    visibility: hidden;
+  }
 }
 
 /* 探测状态点。 */

@@ -1067,9 +1067,12 @@ export function PlaylistPage() {
                 )}
               </div>
               <div className="form-grid">
-                <Field label="播放方式" tip="选择播放器取流时经过哪条路径。">
+                <Field
+                  label="新分组工作模式"
+                  tip="只影响之后新建的同步分组。已有分组在「分组管理」里修改「工作模式」。"
+                >
                   <Select
-                    ariaLabel="播放方式"
+                    ariaLabel="新分组工作模式"
                     value={drawer.draft.playback_mode}
                     options={[
                       { value: 'auto', label: '自动选择', desc: '按源的类型自动选。' },
@@ -1083,9 +1086,12 @@ export function PlaylistPage() {
                     compact
                   />
                 </Field>
-                <Field label="清单格式" tip="输出给播放器的清单格式。">
+                <Field
+                  label="新分组清单格式"
+                  tip="只影响之后新建的同步分组。已有分组沿用分组自己的清单格式。"
+                >
                   <Select
-                    ariaLabel="清单格式"
+                    ariaLabel="新分组清单格式"
                     value={drawer.draft.format}
                     options={[
                       { value: 'auto', label: '自动', desc: '跟随源的类型。' },
@@ -1120,6 +1126,9 @@ export function PlaylistPage() {
                   <span className="hint">0 表示使用全局值</span>
                 </label>
               </div>
+              <p className="muted">
+                已有分组的工作模式与清单格式在「分组管理」里修改；这里只设置之后新建分组的默认值。
+              </p>
             </>
           )}
 

@@ -428,6 +428,12 @@ export function GroupsPage() {
   const [dragging, setDragging] = useState('');
   /** 拖动经过的分组 id。用于画落点。 */
   const [dropTarget, setDropTarget] = useState('');
+  /** 正在拖动的频道。只允许在同一分组内排序。 */
+  const [draggingChannel, setDraggingChannel] = useState<{ gid: string; cid: string } | null>(
+    null,
+  );
+  /** 拖动经过的频道 id。 */
+  const [channelDrop, setChannelDrop] = useState('');
   /** 标题栏按下时的元素。按下与松开不在同一元素时，click 落在共同祖先上。 */
   const headPress = useRef<EventTarget | null>(null);
   /** 解析脚本列表；打开频道弹窗时按需加载。 */
@@ -626,6 +632,28 @@ export function GroupsPage() {
       if (target < 0 || target >= channels.length) return false;
       const [moved] = channels.splice(index, 1);
       channels.splice(target, 0, moved);
+      return true;
+    });
+
+  /** 置顶：把频道移到所在分组的第一位。 */
+  const pinChannel = (gid: string, index: number) =>
+    reorder((list) => {
+      const channels = list.find((item) => item.id === gid)?.channels;
+      if (!channels || index <= 0 || index >= channels.length) return false;
+      const [moved] = channels.splice(index, 1);
+      channels.unshift(moved);
+      return true;
+    });
+
+  /** 拖动排序：把 `from` 处的频道移动到 `to` 处。 */
+  const moveChannelTo = (gid: string, from: number, to: number) =>
+    reorder((list) => {
+      const channels = list.find((item) => item.id === gid)?.channels;
+      if (!channels) return false;
+      if (from === to || from < 0 || to < 0) return false;
+      if (from >= channels.length || to >= channels.length) return false;
+      const [moved] = channels.splice(from, 1);
+      channels.splice(to, 0, moved);
       return true;
     });
 
@@ -1107,7 +1135,60 @@ export function GroupsPage() {
                   ? channel.url
                   : playUrl(group, channel, playToken);
               return (
-                <div className="ch-row" key={channel.id}>
+                <div
+                  className={`ch-row${
+                    channelDrop === channel.id && draggingChannel?.cid !== channel.id
+                      ? ' dragover'
+                      : ''
+                  }`}
+                  key={channel.id}
+                  onDragOver={(event) => {
+                    if (draggingChannel?.gid !== group.id) return;
+                    if (draggingChannel.cid === channel.id) return;
+                    event.preventDefault();
+                    if (channelDrop !== channel.id) setChannelDrop(channel.id);
+                  }}
+                  onDragLeave={(event) => {
+                    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      return;
+                    }
+                    if (channelDrop === channel.id) setChannelDrop('');
+                  }}
+                  onDrop={(event) => {
+                    // 分组拖动交给外层分组卡处理；这里只接频道拖动。
+                    if (!draggingChannel) return;
+                    event.preventDefault();
+                    if (draggingChannel.gid === group.id) {
+                      const from = channels.findIndex(
+                        (item) => item.id === draggingChannel.cid,
+                      );
+                      const to = channels.findIndex((item) => item.id === channel.id);
+                      if (from >= 0 && to >= 0) {
+                        void moveChannelTo(group.id, from, to);
+                      }
+                    }
+                    setDraggingChannel(null);
+                    setChannelDrop('');
+                  }}
+                >
+                  <span
+                    className="grip"
+                    draggable
+                    title="拖动排序"
+                    onDragStart={(event) => {
+                      setDraggingChannel({ gid: group.id, cid: channel.id });
+                      setChannelDrop('');
+                      event.dataTransfer.effectAllowed = 'move';
+                      // Firefox 需要写入数据才会开始拖动。
+                      event.dataTransfer.setData('text/plain', channel.id);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingChannel(null);
+                      setChannelDrop('');
+                    }}
+                  >
+                    <Icon name="grip" size={13} />
+                  </span>
                   <span
                     className={`dot${state?.ok === true ? ' ok' : state?.ok === false ? ' err' : ''}`}
                     title={state ? (state.ok ? '最近探测成功' : '最近探测失败') : '未启用主动探测'}
@@ -1148,6 +1229,15 @@ export function GroupsPage() {
                     </div>
                   </div>
                   <div className="ch-ops">
+                    <button
+                      className="icon-btn move pin-top"
+                      disabled={channelIndex === 0}
+                      title="置顶频道"
+                      aria-label="置顶频道"
+                      onClick={() => void pinChannel(group.id, channelIndex)}
+                    >
+                      <Icon name="pin" size={12} />
+                    </button>
                     <button
                       className="icon-btn move"
                       disabled={channelIndex === 0}

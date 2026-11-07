@@ -1,6 +1,13 @@
 /** 通用界面组件：页头、弹窗、确认框、提示条、徽章、字段。 */
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 import { Icon, type IconName } from './icons';
@@ -427,7 +434,8 @@ export function Select({
   const typed = useRef({ text: '', at: 0 });
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const [dropUp, setDropUp] = useState(false);
+  /** 菜单用 fixed 定位挂到 body，避免被表格/抽屉的滚动容器裁切。 */
+  const [menuPos, setMenuPos] = useState<CSSProperties | null>(null);
 
   const selected = options.findIndex((option) => option.value === value);
   const described = options.some((option) => Boolean(option.desc));
@@ -456,7 +464,21 @@ export function Select({
   const openMenu = () => {
     if (disabled) return;
     const rect = btnRef.current?.getBoundingClientRect();
-    if (rect) setDropUp(window.innerHeight - rect.bottom < 268 && rect.top > 268);
+    if (!rect) return;
+    // 下方放不下且上方有空间时向上展开。
+    const up = window.innerHeight - rect.bottom < 286 && rect.top > 286;
+    const maxWidth = Math.min(320, window.innerWidth - 32);
+    const minWidth = Math.min(Math.max(rect.width, described ? 232 : 0), maxWidth);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - maxWidth - 8));
+    setMenuPos({
+      position: 'fixed',
+      top: up ? 'auto' : rect.bottom + 6,
+      bottom: up ? window.innerHeight - rect.top + 6 : 'auto',
+      left: align === 'right' ? 'auto' : left,
+      right: align === 'right' ? Math.max(8, window.innerWidth - rect.right) : 'auto',
+      minWidth,
+      maxWidth,
+    });
     setActive(selected >= 0 ? selected : 0);
     setOpen(true);
   };
@@ -471,7 +493,10 @@ export function Select({
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+      }
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
@@ -482,7 +507,11 @@ export function Select({
   useEffect(() => {
     if (!open) return;
     const onMove = (event?: Event) => {
-      if (event && rootRef.current?.contains(event.target as Node)) return;
+      const target = event?.target as Node | undefined;
+      const inside =
+        rootRef.current?.contains(target ?? null) ||
+        menuRef.current?.contains(target ?? null);
+      if (event && inside) return;
       setOpen(false);
     };
     const onResize = () => setOpen(false);
@@ -594,40 +623,44 @@ export function Select({
         <Icon name="down" size={14} className="chev" />
       </button>
 
-      {open && (
-        <ul
-          ref={menuRef}
-          id={`${id}-menu`}
-          className={`select-menu${dropUp ? ' drop-up' : ''}${align === 'right' ? ' right' : ''}`}
-          role="listbox"
-          aria-label={ariaLabel}
-          onKeyDown={onMenuKeyDown}
-        >
-          {options.map((option, index) => (
-            <li
-              key={option.value}
-              ref={(node) => {
-                optionRefs.current[index] = node;
-              }}
-              role="option"
-              aria-selected={option.value === value}
-              tabIndex={-1}
-              className={`select-option${option.desc ? ' has-desc' : ''}${option.value === value ? ' selected' : ''}`}
-              onFocus={() => setActive(index)}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => choose(index)}
-            >
-              <span className="select-check" aria-hidden="true">
-                {option.value === value ? <Icon name="check" size={14} /> : null}
-              </span>
-              <span className="select-text">
-                <span className="select-label">{option.label}</span>
-                {option.desc ? <span className="select-desc">{option.desc}</span> : null}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {open &&
+        menuPos &&
+        createPortal(
+          <ul
+            ref={menuRef}
+            id={`${id}-menu`}
+            className={`select-menu${described ? ' described' : ''}`}
+            style={menuPos}
+            role="listbox"
+            aria-label={ariaLabel}
+            onKeyDown={onMenuKeyDown}
+          >
+            {options.map((option, index) => (
+              <li
+                key={option.value}
+                ref={(node) => {
+                  optionRefs.current[index] = node;
+                }}
+                role="option"
+                aria-selected={option.value === value}
+                tabIndex={-1}
+                className={`select-option${option.desc ? ' has-desc' : ''}${option.value === value ? ' selected' : ''}`}
+                onFocus={() => setActive(index)}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => choose(index)}
+              >
+                <span className="select-check" aria-hidden="true">
+                  {option.value === value ? <Icon name="check" size={14} /> : null}
+                </span>
+                <span className="select-text">
+                  <span className="select-label">{option.label}</span>
+                  {option.desc ? <span className="select-desc">{option.desc}</span> : null}
+                </span>
+              </li>
+            ))}
+          </ul>,
+          document.body,
+        )}
     </div>
   );
 }

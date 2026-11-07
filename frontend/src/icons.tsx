@@ -33,6 +33,7 @@ export type IconName =
   | 'more'
   | 'up'
   | 'down'
+  | 'pin'
   | 'sun'
   | 'moon'
   | 'search'
@@ -158,6 +159,14 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   up: <path d="m4.7 9.7 3.3-3.4 3.3 3.4" />,
   down: <path d="m4.7 6.3 3.3 3.4 3.3-3.4" />,
+  /* 置顶：顶部横线 + 向上箭头。 */
+  pin: (
+    <>
+      <path d="M3 2.8h10" />
+      <path d="M8 13.2V5.4" />
+      <path d="m4.9 8.5 3.1-3.1 3.1 3.1" />
+    </>
+  ),
   minus: <path d="M3.3 8h9.4" />,
   calendar: CALENDAR_GLYPH,
   sun: (
