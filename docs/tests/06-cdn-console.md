@@ -184,7 +184,8 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq .r
 
 依据：服务端每次 `GET /panel/api/cache/stats` 都重新计算（`src/http/routes/admin.rs:68`、`src/cache_gc.rs:283-333`）。
 
-面板同样显示该卡片。打开面板 → 「缓存状态」。卡片标题「CDN 推荐值」（`frontend/src/lowcfg.tsx:73`）。系统设置页也显示同一卡片（`frontend/src/settings.tsx:779`）。
+面板同样显示该卡片。打开面板 → 「缓存状态」。卡片标题「CDN 推荐值」（`frontend/src/lowcfg.tsx:83`）。
+卡片上的「立即估算」调用 `POST /panel/api/cdn/estimate`。系统设置页不再重复该卡片。
 
 徽标三值（`frontend/src/lowcfg.tsx:31-35`）：
 

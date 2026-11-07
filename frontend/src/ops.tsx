@@ -682,12 +682,15 @@ export function LogsPage() {
   );
 }
 
-/** 备份与恢复。`embedded` 用于设置页，不再渲染独立页头。 */
+/** 备份与恢复。`embedded` 用于设置页，不再渲染独立页头。
+ *  `bare` 去掉嵌入页头，由外层分组标题承担。 */
 export function BackupPage({
   embedded = false,
+  bare = false,
   onRestored,
 }: {
   embedded?: boolean;
+  bare?: boolean;
   onRestored?: () => void;
 }) {
   const [message, setMessage] = useState('');
@@ -752,12 +755,14 @@ export function BackupPage({
   return (
     <>
       {embedded ? (
-        <div className="embedded-head">
-          <div>
-            <h2>备份与恢复</h2>
-            <span className="muted">导出与回滚配置、脚本与资源</span>
+        bare ? null : (
+          <div className="embedded-head">
+            <div>
+              <h2>备份与恢复</h2>
+              <span className="muted">导出与回滚配置、脚本与资源</span>
+            </div>
           </div>
-        </div>
+        )
       ) : (
         <PageHead icon="download" title="备份与恢复" sub="导出与回滚配置、脚本与资源" />
       )}

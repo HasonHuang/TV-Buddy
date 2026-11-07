@@ -90,8 +90,13 @@
 
 基线：`reference/img/p12-settings.png`（目标同一分区的 10 张卡片）。
 一次 `GET /panel/api/config` 取整份配置到草稿，顶部「保存设置」一次 `PUT` 回去
-（对应目标的「修改后点击保存生效」）。卡片用两列多栏布局，卡片高度互不拉伸；
-字段为「标签 + ? ｜ 控件 ｜ 单位」横向行。页头吸顶，显示未保存项数。
+（对应目标的「修改后点击保存生效」）。卡片按功能类型分组（基础运行、缓存与回收、
+分发与伪装、监控与字幕、服务器互联、高级调优、备份与维护），组间留白；组内两列网格，
+宽卡片通栏，卡片高度互不拉伸。字段为「标签 + ? ｜ 控件 ｜ 单位」横向行。
+页头吸顶，显示未保存项数。
+
+系统状态（健康摘要、能力、DASH 会话与频道探测）在「概览」页底部；频道探测每页 10 条。
+缓存推荐值只在「缓存状态」页显示，设置页不再重复。
 
 | 卡片 | 配置段 | 字段 | 状态 |
 | --- | --- | --- | --- |
@@ -101,7 +106,7 @@
 | 监控 | `[health]`、`[stats]` | `enabled`、`interval_secs`、`timeout_secs`、`concurrency`；`enabled`、`online_window_secs` | ✅ |
 | 缓存配置 | `[cache]` | `backend`、`disk_path`、`disk_max_mb`、`memory_max_mb`；清空本地缓存 | ✅ |
 | 预载配置 | `[cache.prefetch]` | `enabled`、`concurrency`、`timeout`、`prefetch_limit`、`mpd_readahead`、`skip_tail` | ✅ |
-| 磁盘回收 | `[cache.gc]` | §11.2 的八个键；立即估算 | ✅ |
+| 磁盘回收 | `[cache.gc]` | §11.2 的八个键 | ✅ |
 | CDN 兜底 | `[cdn]` | §11.1 的键 | ✅ |
 | 切片缓存 | `[cache.segments]` | `global_max`、`per_channel_max`、`retain_count`（本实现扩展） | ✅ |
 | 字幕设置 | `[subtitle]` | `style.*`（开关 / 字号 / 颜色 / 字重 / 位置滑杆）、`translate.*`（机翻、目标语言多选、双语与译文上下、译轴、超时、MTranServer、API Key）+ 测试与清理译文缓存 | ✅（样式注入未实现，兼容保留） |

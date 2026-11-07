@@ -75,6 +75,7 @@ export function CachePage() {
   const [error, setError] = useState('');
   const [confirmFlush, setConfirmFlush] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [estimating, setEstimating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -88,6 +89,26 @@ export function CachePage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** 立即采样一次工作集，刷新 CDN 推荐值。 */
+  const estimate = async () => {
+    setEstimating(true);
+    setMessage('');
+    setError('');
+    try {
+      const result = await api<{ groups: number; failed: { gid: string; cid: string }[] }>(
+        'POST',
+        '/cdn/estimate',
+      );
+      const failed = result.failed.length;
+      setMessage(`估算完成：${result.groups} 个分组${failed ? `，失败 ${failed} 个` : ''}`);
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setEstimating(false);
+    }
+  };
 
   const flush = async () => {
     setBusy(true);
@@ -129,7 +150,13 @@ export function CachePage() {
           {busy ? '清理中…' : '清空缓存'}
         </button>
       </PageHead>
-      {stats && <RecommendCard recommend={stats.recommend} />}
+      {stats && (
+        <RecommendCard
+          recommend={stats.recommend}
+          onEstimate={() => void estimate()}
+          estimating={estimating}
+        />
+      )}
       <div className="card">
         <h2>
           缓存目录

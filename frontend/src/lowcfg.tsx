@@ -1,5 +1,5 @@
 /**
- * 低配置优化：缓存状态页的推荐摘要卡（只读）。
+ * 低配置优化：缓存状态页的推荐摘要卡。
  *
  * 依据 `docs/design/06-low-spec-optimization.md` §8。字段级设置表单已并入
  * `frontend/src/settings.tsx`——系统设置页统一编辑、统一保存整份配置。
@@ -56,8 +56,16 @@ function formatAgo(seconds: number | null): string {
   return `${Math.floor(seconds / 3600)} 小时前`;
 }
 
-/** 推荐摘要（缓存状态页，只读）。 */
-export function RecommendCard({ recommend }: { recommend: Recommend }) {
+/** 推荐摘要（缓存状态页）。`onEstimate` 提供立即估算入口。 */
+export function RecommendCard({
+  recommend,
+  onEstimate,
+  estimating = false,
+}: {
+  recommend: Recommend;
+  onEstimate?: () => void;
+  estimating?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
 
   const copyTtl = async () => {
@@ -82,13 +90,25 @@ export function RecommendCard({ recommend }: { recommend: Recommend }) {
             <span className="muted"> 尚未实测，先播放一个频道或点「立即估算」</span>
           )}
         </div>
-        <button
-          className="ghost"
-          title="复制推荐的缓存时长（秒）"
-          onClick={() => void copyTtl()}
-        >
-          {copied ? '已复制' : '复制缓存时长'}
-        </button>
+        <div className="row">
+          {onEstimate ? (
+            <button
+              className="ghost"
+              title="立即采样一次工作集，更新推荐值"
+              disabled={estimating}
+              onClick={onEstimate}
+            >
+              {estimating ? '估算中…' : '立即估算'}
+            </button>
+          ) : null}
+          <button
+            className="ghost"
+            title="复制推荐的缓存时长（秒）"
+            onClick={() => void copyTtl()}
+          >
+            {copied ? '已复制' : '复制缓存时长'}
+          </button>
+        </div>
       </div>
       <div className="rec">
         <div className="rec-item">

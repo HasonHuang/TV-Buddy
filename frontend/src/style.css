@@ -2290,6 +2290,27 @@ pre.log .lv-trace {
   margin-bottom: 0;
 }
 
+/* 概览底部的系统状态：与上方仪表盘留出一段间距。 */
+.overview-system {
+  margin-top: 18px;
+}
+
+/* 分页条：左侧统计，右侧翻页。 */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.pager .row {
+  gap: 6px;
+}
+
 /* 实时指标：一张卡里的五列数字，不再套一层小卡片。 */
 .metric-strip {
   display: grid;
@@ -3238,30 +3259,62 @@ pre code {
   padding-right: 12px;
 }
 
-/* 两列独立堆叠：用多栏布局，卡片不会被拉成等高。
+/* 按功能类型分组：分组之间留白，组内两列网格。
  *
- * 通栏卡片用 `column-span: all`，多栏在它前后自动重新平衡。
+ * 宽卡片（`wide`）与 `span-all` 外壳跨两列。组内不用多栏布局，
+ * 避免通栏卡片前后出现无法控制的空白带。
  */
-.settings-page .settings-grid {
-  columns: 2;
-  column-gap: 16px;
-}
-
-.settings-page .settings-grid > .card {
-  break-inside: avoid;
-  margin-bottom: 16px;
-}
-
-.settings-page .settings-grid > .span-all {
-  column-span: all;
-  margin-bottom: 16px;
-}
-
-.settings-page .settings-full {
+.settings-page .settings-sections {
   display: flex;
   flex-direction: column;
+  gap: 26px;
+}
+
+.settings-page .settings-section {
+  min-width: 0;
+}
+
+.settings-page .settings-section-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0 2px 10px;
+  min-width: 0;
+}
+
+.settings-page .settings-section-head h3 {
+  flex: none;
+  margin: 0;
+  color: var(--text2);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.settings-page .settings-section-head .muted {
+  min-width: 0;
+  font-size: 12px;
+}
+
+.settings-page .settings-section-head::after {
+  content: '';
+  flex: 1;
+  min-width: 24px;
+  height: 1px;
+  background: var(--line);
+}
+
+.settings-page .settings-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  margin-top: 16px;
+  align-items: start;
+}
+
+.settings-page .settings-cards > .card.wide,
+.settings-page .settings-cards > .span-all {
+  grid-column: 1 / -1;
 }
 
 /* 设置页卡片自己带 gap，不再叠加外边距。 */
@@ -3353,7 +3406,9 @@ pre code {
 }
 
 .settings-page .field.field-check > .check {
+  justify-content: flex-start;
   margin: 2px 0;
+  text-align: left;
 }
 
 .settings-page .field.field-check > .hint {
@@ -3377,8 +3432,75 @@ pre code {
 }
 
 @media (max-width: 1200px) {
-  .settings-page .settings-grid {
-    columns: 1;
+  .settings-page .settings-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 分享卡：基础项两列，角色设置分块。两列变窄时标签放到控件上方。 */
+.settings-page .share-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-page .share-basic {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 20px;
+  align-items: start;
+}
+
+.settings-page .share-role {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-page .share-role-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 8px;
+}
+
+.settings-page .share-role-head h3 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.settings-page .share-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  align-items: start;
+}
+
+.settings-page .share-fields .field {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin-bottom: 0;
+}
+
+.settings-page .share-fields .field > label {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.settings-page .share-fields .field > .hint {
+  grid-column: 1;
+}
+
+.settings-page .share-off {
+  margin: 8px 0 0;
+}
+
+@media (max-width: 900px) {
+  .settings-page .share-basic,
+  .settings-page .share-fields {
+    grid-template-columns: 1fr;
   }
 }
 

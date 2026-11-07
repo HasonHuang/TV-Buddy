@@ -9,6 +9,7 @@ import { EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
 import { AssetsPage } from './assets';
 import { SettingsPage } from './settings';
+import { SystemPage } from './system';
 import { LogosPage } from './logo';
 import { UsersPage } from './users';
 import { PlaylistPage } from './playlist';
@@ -369,6 +370,10 @@ function Overview({ features }: { features: Record<string, boolean> | null }) {
             </div>
           </section>
         </div>
+      </div>
+
+      <div className="overview-system">
+        <SystemPage embedded />
       </div>
 
       {error && <div className="msg err">{error}</div>}

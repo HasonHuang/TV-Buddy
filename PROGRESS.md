@@ -414,7 +414,7 @@
 | 保存栏 | 页头吸顶。显示未保存项数；`Ctrl/Cmd+S` 保存；离开分区与重新读取前弹确认 | `frontend/src/settings.tsx`、`panel.tsx` |
 | 提示 | 表单标签后缀 `?`。气泡挂到 `body`，fixed 定位，不被卡片裁切，也不撑出横向滚动条。按钮补 `title`/`aria-label` | `frontend/src/ui.tsx`、各页面 |
 | 确认框 | 原生 `window.confirm` 全部换成自研 `Confirm`；用户重置密码与台标重命名改用自研输入弹窗 | 各页面 |
-| 设置底部 | 内嵌的系统状态与备份卡片不再带独立页头；恢复备份后重新读取配置 | `system.tsx`、`ops.tsx` |
+| 设置分组 | 卡片按功能类型分组，组间留白；系统状态移到「概览」页底部，频道探测每页 10 条；备份卡片并入「备份与维护」分组 | `settings.tsx`、`system.tsx`、`ops.tsx`、`panel.tsx` |
 | 公开页 | 节目单改为独立两栏布局；解封页改为居中卡片；台标库去掉 760 px 窄容器 | `epg.tsx`、`unban.tsx`、`logo-main.tsx` |
 | 回归 | 1920 / 1440 / 1024 / 390 四档 `scrollWidth` 等于视口宽；弹窗仍为 540 px；分组与频道弹窗标签文本不变 | 本机独立实例截图 |
 

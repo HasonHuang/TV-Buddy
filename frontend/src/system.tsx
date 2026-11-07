@@ -1,6 +1,6 @@
 /** 系统状态：健康摘要、ffmpeg、解析脚本与回看缓冲。 */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from './api';
 import { Icon } from './icons';
@@ -51,6 +51,9 @@ type Timeshift = {
 /** DASH 会话阶段的中文名。 */
 const PHASES: Record<string, string> = { ready: '就绪', starting: '启动中' };
 
+/** 频道探测每页条数。条目多时不再把整页撑长。 */
+const PROBE_PAGE_SIZE = 10;
+
 function uptime(seconds: number): string {
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3600);
@@ -71,6 +74,7 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
   const [scan, setScan] = useState<{ kind: string; count: number; tracks: unknown[] } | null>(
     null,
   );
+  const [probePage, setProbePage] = useState(0);
   const { node, ok, err } = useToast();
 
   const load = useCallback(async () => {
@@ -108,6 +112,22 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
   }, [load]);
 
   const buffered = timeshift?.channels.reduce((sum, channel) => sum + channel.segments, 0) ?? 0;
+
+  // 探测条目按频道键排序，翻页时顺序稳定；条目变少时把页码收回到最后一页。
+  const probeEntries = useMemo(
+    () => Object.entries(health?.entries ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    [health],
+  );
+  const probePages = Math.max(1, Math.ceil(probeEntries.length / PROBE_PAGE_SIZE));
+  const safeProbePage = Math.min(probePage, probePages - 1);
+  useEffect(() => {
+    if (probePage > probePages - 1) setProbePage(probePages - 1);
+  }, [probePage, probePages]);
+  const probePageEntries = probeEntries.slice(
+    safeProbePage * PROBE_PAGE_SIZE,
+    (safeProbePage + 1) * PROBE_PAGE_SIZE,
+  );
+  const probeOk = probeEntries.filter(([, entry]) => entry.ok).length;
 
   /** 扫描任意 MPD：`POST /dash/scan-url {url}`，只解析不改配置。 */
   const scanMpd = async () => {
@@ -159,73 +179,74 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
         </PageHead>
       )}
       <div className="card">
+        <h2>运行与能力</h2>
         {health ? (
           <dl>
-            <dt>版本</dt>
-            <dd>{health.version}</dd>
-            <dt>运行时长</dt>
-            <dd>{uptime(health.uptime_secs)}</dd>
-            <dt>监听</dt>
-            <dd>{health.bind}</dd>
-            <dt>分组 / 频道</dt>
-            <dd>
-              {health.groups} / {health.channels}
-            </dd>
+            {embedded ? null : (
+              <>
+                <dt>版本</dt>
+                <dd>{health.version}</dd>
+                <dt>运行时长</dt>
+                <dd>{uptime(health.uptime_secs)}</dd>
+                <dt>监听</dt>
+                <dd>{health.bind}</dd>
+                <dt>分组 / 频道</dt>
+                <dd>
+                  {health.groups} / {health.channels}
+                </dd>
+              </>
+            )}
             <dt>面板会话</dt>
             <dd>{health.sessions}</dd>
             <dt>公开健康检查</dt>
             <dd>
               <code>{location.origin}/health</code>
             </dd>
+            <dt>ffmpeg</dt>
+            <dd>
+              {ffmpeg?.installed ? (
+                <>
+                  <Badge tone="ok">已安装</Badge>
+                  {ffmpeg.version ? (
+                    <span className="muted mono version"> {ffmpeg.version}</span>
+                  ) : null}
+                </>
+              ) : (
+                <Badge tone="warn">未安装（录制只能保留 TS）</Badge>
+              )}
+            </dd>
+            <dt>回看缓冲</dt>
+            <dd>
+              {timeshift?.enabled ? (
+                <Badge tone={timeshift.ready ? 'ok' : 'warn'}>
+                  {timeshift.channels.length} 个频道 / {buffered} 片
+                </Badge>
+              ) : (
+                <Badge tone="muted">未启用</Badge>
+              )}
+            </dd>
+            <dt>解析脚本</dt>
+            <dd>
+              {resolvers ? `${resolvers.count} 个` : '—'}
+              {resolvers?.scripts.map((script) => (
+                <div key={script.name} className="row between">
+                  <span className="muted">
+                    {script.name}（{Math.round(script.bytes / 1024)} KB）
+                  </span>
+                  <button
+                    className="ghost danger-text"
+                    title="删除这个解析脚本"
+                    onClick={() => setPendingRemove(script.name)}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </dd>
           </dl>
         ) : (
           <p className="muted">加载中…</p>
         )}
-      </div>
-
-      <div className="card">
-        <h2>能力</h2>
-        <dl>
-          <dt>ffmpeg</dt>
-          <dd>
-            {ffmpeg?.installed ? (
-              <>
-                <Badge tone="ok">已安装</Badge>
-                {ffmpeg.version ? <span className="muted mono version"> {ffmpeg.version}</span> : null}
-              </>
-            ) : (
-              <Badge tone="warn">未安装（录制只能保留 TS）</Badge>
-            )}
-          </dd>
-          <dt>回看缓冲</dt>
-          <dd>
-            {timeshift?.enabled ? (
-              <Badge tone={timeshift.ready ? 'ok' : 'warn'}>
-                {timeshift.channels.length} 个频道 / {buffered} 片
-              </Badge>
-            ) : (
-              <Badge tone="muted">未启用</Badge>
-            )}
-          </dd>
-          <dt>解析脚本</dt>
-          <dd>
-            {resolvers ? `${resolvers.count} 个` : '—'}
-            {resolvers?.scripts.map((script) => (
-              <div key={script.name} className="row between">
-                <span className="muted">
-                  {script.name}（{Math.round(script.bytes / 1024)} KB）
-                </span>
-                <button
-                  className="ghost danger-text"
-                  title="删除这个解析脚本"
-                  onClick={() => setPendingRemove(script.name)}
-                >
-                  删除
-                </button>
-              </div>
-            ))}
-          </dd>
-        </dl>
       </div>
 
       <div className="card">
@@ -293,28 +314,56 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
       <div className="card">
         <h2>频道探测</h2>
         {health?.enabled === false ? (
-          <p className="muted">未启用。可以在「系统设置」的「监控」卡片开启。</p>
-        ) : Object.keys(health?.entries ?? {}).length === 0 ? (
+          <p className="muted">未启用。可以在「系统设置」的「监控与字幕」分组开启。</p>
+        ) : probeEntries.length === 0 ? (
           <p className="muted">还没有探测结果。健康探测开启后会在这里显示。</p>
         ) : (
-          <dl>
-            {Object.entries(health?.entries ?? {}).map(([key, entry]) => (
-              <div key={key} style={{ display: 'contents' }}>
-                <dt className="mono">{key}</dt>
-                <dd>
-                  <Badge tone={entry.ok ? 'ok' : 'warn'}>
-                    {entry.ok ? '正常' : '异常'}
-                  </Badge>{' '}
-                  <span className="muted">
-                    {entry.latency_ms === null ? '—' : `${entry.latency_ms} ms`}
-                    {entry.http_status === null ? '' : ` / HTTP ${entry.http_status}`}
-                    {entry.error ? ` / ${entry.error}` : ''}
-                    {entry.consecutive_fails > 0 ? ` / 连败 ${entry.consecutive_fails}` : ''}
-                  </span>
-                </dd>
+          <>
+            <dl>
+              {probePageEntries.map(([key, entry]) => (
+                <div key={key} style={{ display: 'contents' }}>
+                  <dt className="mono">{key}</dt>
+                  <dd>
+                    <Badge tone={entry.ok ? 'ok' : 'warn'}>
+                      {entry.ok ? '正常' : '异常'}
+                    </Badge>{' '}
+                    <span className="muted">
+                      {entry.latency_ms === null ? '—' : `${entry.latency_ms} ms`}
+                      {entry.http_status === null ? '' : ` / HTTP ${entry.http_status}`}
+                      {entry.error ? ` / ${entry.error}` : ''}
+                      {entry.consecutive_fails > 0 ? ` / 连败 ${entry.consecutive_fails}` : ''}
+                    </span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {probeEntries.length > PROBE_PAGE_SIZE ? (
+              <div className="pager">
+                <span className="muted">
+                  共 {probeEntries.length} 条（正常 {probeOk} / 异常{' '}
+                  {probeEntries.length - probeOk}） · 第 {safeProbePage + 1} / {probePages} 页
+                </span>
+                <div className="row">
+                  <button
+                    className="ghost"
+                    title="查看上一页探测结果"
+                    disabled={safeProbePage === 0}
+                    onClick={() => setProbePage((page) => Math.max(0, page - 1))}
+                  >
+                    上一页
+                  </button>
+                  <button
+                    className="ghost"
+                    title="查看下一页探测结果"
+                    disabled={safeProbePage >= probePages - 1}
+                    onClick={() => setProbePage((page) => Math.min(probePages - 1, page + 1))}
+                  >
+                    下一页
+                  </button>
+                </div>
               </div>
-            ))}
-          </dl>
+            ) : null}
+          </>
         )}
       </div>
 
