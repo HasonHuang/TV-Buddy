@@ -650,6 +650,65 @@ a {
   flex: 1;
 }
 
+/* 表单网格：相关字段按列对齐，控件宽度统一。
+ *
+ * 短控件（下拉、数字、时间）共用 `--control-w`；网格只负责列与间距。
+ * 复选框放在控制行底部，和旁边的输入框对齐。
+ */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 16px;
+  align-items: start;
+  margin-bottom: 14px;
+}
+
+.form-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-grid.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.form-grid > label,
+.form-grid > .field {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+/* 复选框没有上方标签，贴到控制行底部，与相邻输入框对齐。 */
+.form-grid > .form-check {
+  align-self: end;
+  min-height: var(--control-h);
+  margin: 0;
+}
+
+.form-grid > .form-check > input {
+  flex: none;
+}
+
+@media (max-width: 1100px) {
+  .form-grid.four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .form-grid,
+  .form-grid.four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 460px) {
+  .form-grid,
+  .form-grid.two,
+  .form-grid.four {
+    grid-template-columns: 1fr;
+  }
+}
+
 .fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -1100,7 +1159,8 @@ textarea {
 
 .select.compact {
   flex: 0 0 auto;
-  width: 128px;
+  /* 与数字框、时间框同宽，短控件不再一大一小。 */
+  width: var(--control-w);
 }
 
 .select-btn {

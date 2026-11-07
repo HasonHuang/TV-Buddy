@@ -656,7 +656,7 @@ export function PlaylistPage() {
           <h2>全局设置</h2>
           <button onClick={() => void saveGlobal()}>保存全局设置</button>
         </div>
-        <div className="row">
+        <div className="form-grid four">
           <label>
             聚合缓存（秒）
             <Tip text="这段时间内重复读取源时，直接使用上次结果。" />
@@ -679,19 +679,21 @@ export function PlaylistPage() {
               compact
             />
           </Field>
-          <label style={{ alignSelf: 'end' }}>
+          <label className="check form-check">
             <input
               type="checkbox"
               checked={global.sync_enabled}
               onChange={(event) =>
                 setGlobal({ ...global, sync_enabled: event.target.checked })
               }
-            />{' '}
-            自动同步
-            <Tip text="关闭后，托管源不会按计划自动同步。你仍可在列表里手动同步。" />
+            />
+            <span>
+              自动同步
+              <Tip text="关闭后，托管源不会按计划自动同步。你仍可在列表里手动同步。" />
+            </span>
           </label>
         </div>
-        <div className="row">
+        <div className="form-grid four">
           <Field label="默认调度" tip="新建托管源默认使用的同步时间。">
             <Select
               ariaLabel="默认调度"
@@ -704,32 +706,35 @@ export function PlaylistPage() {
               compact
             />
           </Field>
-          <label>
-            默认间隔（秒）
-            <Tip text="两次同步之间等待的秒数。最短 300 秒。" />
-            <NumberBox
-              min={300}
-              value={global.sync_interval_secs}
-              onChange={(next) =>
-                setGlobal({
-                  ...global,
-                  sync_interval_secs: Number(next) || 21600,
-                })
-              }
-            />
-          </label>
-          <label>
-            默认每天时间
-            <Tip text="每天执行同步的时间。" />
-            <DateInput
-              type="time"
-              ariaLabel="默认每天时间"
-              value={global.sync_daily_at}
-              onChange={(next) => setGlobal({ ...global, sync_daily_at: next })}
-            />
-          </label>
+          {global.sync_schedule === 'daily' ? (
+            <label>
+              默认每天时间
+              <Tip text="每天执行同步的时间。" />
+              <DateInput
+                type="time"
+                ariaLabel="默认每天时间"
+                value={global.sync_daily_at}
+                onChange={(next) => setGlobal({ ...global, sync_daily_at: next })}
+              />
+            </label>
+          ) : (
+            <label>
+              默认间隔（秒）
+              <Tip text="两次同步之间等待的秒数。最短 300 秒。" />
+              <NumberBox
+                min={300}
+                value={global.sync_interval_secs}
+                onChange={(next) =>
+                  setGlobal({
+                    ...global,
+                    sync_interval_secs: Number(next) || 21600,
+                  })
+                }
+              />
+            </label>
+          )}
         </div>
-        <div className="row">
+        <div className="form-grid four">
           <label>
             单源频道上限
             <Tip text="一个托管源最多导入多少条频道。填 0 表示不限。" />
@@ -768,16 +773,18 @@ export function PlaylistPage() {
               }
             />
           </label>
-          <label style={{ alignSelf: 'end' }}>
+          <label className="check form-check">
             <input
               type="checkbox"
               checked={global.sync_allow_empty}
               onChange={(event) =>
                 setGlobal({ ...global, sync_allow_empty: event.target.checked })
               }
-            />{' '}
-            允许空清单清空
-            <Tip text="开启后，源返回 0 条时会清空本地频道。关闭时保留原频道，只标记待确认。" />
+            />
+            <span>
+              允许空清单清空
+              <Tip text="开启后，源返回 0 条时会清空本地频道。关闭时保留原频道，只标记待确认。" />
+            </span>
           </label>
         </div>
         <label>
@@ -816,7 +823,7 @@ export function PlaylistPage() {
         >
           {drawer.error && <p className="msg danger">{drawer.error}</p>}
           <h3>基本</h3>
-          <div className="row">
+          <div className="form-grid two">
             <label>
               名称
               <input
@@ -824,14 +831,16 @@ export function PlaylistPage() {
                 onChange={(event) => patch({ name: event.target.value })}
               />
             </label>
-            <label style={{ alignSelf: 'end' }}>
+            <label className="check form-check">
               <input
                 type="checkbox"
                 checked={drawer.draft.enabled}
                 onChange={(event) => patch({ enabled: event.target.checked })}
-              />{' '}
-              启用
-              <Tip text="关闭后，这个源不参与聚合，也不自动同步。" />
+              />
+              <span>
+                启用
+                <Tip text="关闭后，这个源不参与聚合，也不自动同步。" />
+              </span>
             </label>
           </div>
           <label>
@@ -866,7 +875,7 @@ export function PlaylistPage() {
           )}
           <hr className="divider" />
           <h3>分组</h3>
-          <div className="row">
+          <div className="form-grid">
             <Field label="分组方式" tip="选择如何整理源里的分组。">
               <Select
                 ariaLabel="分组方式"
@@ -990,7 +999,7 @@ export function PlaylistPage() {
               onChange={(event) => patch({ group_map: parseMap(event.target.value) })}
             />
           </label>
-          <div className="row">
+          <div className="form-grid two">
             <label>
               只保留
               <Tip text="只保留匹配的频道。开头写 group: 匹配分组，id: 匹配 tvg-id，url: 匹配地址。每行一条。" />
@@ -1013,8 +1022,12 @@ export function PlaylistPage() {
             <>
               <hr className="divider" />
               <h3>同步</h3>
-              <div className="row">
-                <Field label="调度" tip="这个源多久同步一次。">
+              <div className="form-grid">
+                <Field
+                  label="调度"
+                  tip="这个源多久同步一次。"
+                  hint={drawer.draft.schedule === 'inherit' ? '使用全局设置' : undefined}
+                >
                   <Select
                     ariaLabel="调度"
                     value={drawer.draft.schedule}
@@ -1027,27 +1040,33 @@ export function PlaylistPage() {
                     compact
                   />
                 </Field>
-                <label>
-                  间隔（秒）
-                  <NumberBox
-                    min={0}
-                    value={drawer.draft.sync_interval_secs}
-                    onChange={(next) => patch({ sync_interval_secs: Number(next) || 0 })}
-                  />
-                  <span className="hint">0 表示使用全局值</span>
-                </label>
-                <label>
-                  每天时间
-                  <DateInput
-                    type="time"
-                    ariaLabel="每天时间"
-                    value={drawer.draft.sync_daily_at}
-                    onChange={(next) => patch({ sync_daily_at: next })}
-                  />
-                  <span className="hint">留空表示使用全局值</span>
-                </label>
+                {drawer.draft.schedule === 'interval' && (
+                  <label>
+                    间隔（秒）
+                    <NumberBox
+                      min={0}
+                      value={drawer.draft.sync_interval_secs}
+                      onChange={(next) =>
+                        patch({ sync_interval_secs: Number(next) || 0 })
+                      }
+                    />
+                    <span className="hint">0 表示使用全局值</span>
+                  </label>
+                )}
+                {drawer.draft.schedule === 'daily' && (
+                  <label>
+                    每天时间
+                    <DateInput
+                      type="time"
+                      ariaLabel="每天时间"
+                      value={drawer.draft.sync_daily_at}
+                      onChange={(next) => patch({ sync_daily_at: next })}
+                    />
+                    <span className="hint">留空表示使用全局值</span>
+                  </label>
+                )}
               </div>
-              <div className="row">
+              <div className="form-grid">
                 <Field label="播放方式" tip="选择播放器取流时经过哪条路径。">
                   <Select
                     ariaLabel="播放方式"
@@ -1114,7 +1133,7 @@ export function PlaylistPage() {
               onChange={(event) => patch({ headers: lines(event.target.value) })}
             />
           </label>
-          <div className="row">
+          <div className="form-grid two">
             <label>
               代理类型
               <Tip text="读取源时使用的代理协议。一般不用填。" />
@@ -1142,7 +1161,7 @@ export function PlaylistPage() {
               />
             </label>
           </div>
-          <div className="row">
+          <div className="form-grid two">
             <label>
               代理用户名
               <Tip text="代理需要登录时填写。" />
