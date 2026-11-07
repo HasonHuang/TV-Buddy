@@ -64,13 +64,13 @@ export type HealthEntry = {
   ok: boolean;
 };
 
-const MODES: { value: string; label: string; desc: string }[] = [
-  { value: 'proxy', label: '服务器转发', desc: '视频经过本机。兼容性最好。' },
-  { value: 'remux', label: '服务器转封装', desc: '本机重新打包视频流。占用 CPU。' },
-  { value: 'dash', label: 'DASH 转发', desc: '处理 DASH 清单。源必须提供 MPD。' },
-  { value: 'redirect', label: '跳转源地址', desc: '播放器直接连源。会显示源地址。' },
-  { value: 'rewrite', label: '改写地址', desc: '本机改写清单地址，播放器再连源。' },
-  { value: 'passthrough', label: '原样直通', desc: '直接使用源地址。不经过本机。' },
+const MODES: { value: string; code: string; label: string; desc: string }[] = [
+  { value: 'proxy', code: 'PROXY', label: '服务器转发', desc: '视频经过本机。兼容性最好。' },
+  { value: 'remux', code: 'REMUX', label: '服务器转封装', desc: '本机重新打包视频流。占用 CPU。' },
+  { value: 'dash', code: 'DASH', label: 'DASH 转发', desc: '处理 DASH 清单。源必须提供 MPD。' },
+  { value: 'redirect', code: '302', label: '跳转源地址', desc: '播放器直接连源。会显示源地址。' },
+  { value: 'rewrite', code: 'REWRITE', label: '改写地址', desc: '本机改写清单地址，播放器再连源。' },
+  { value: 'passthrough', code: 'PASSTHROUGH', label: '原样直通', desc: '直接使用源地址。不经过本机。' },
 ];
 
 const ACCESS: { value: string; label: string; desc: string }[] = [
@@ -85,8 +85,9 @@ const FORMATS: { value: string; label: string; desc: string }[] = [
 ];
 
 /** 频道跟随源的规则说明。徽章与编辑表单共用。 */
-const FOLLOW_HINT = '每次同步会更新这个频道的名称、地址和台标。手动修改后自动固定。';
-const FIXED_HINT = '已固定，同步不再更新这个频道的名称、地址和台标。';
+const FOLLOW_HINT =
+  '每次同步会用来源里的名称、地址和台标覆盖这个频道。手动改过这些字段后，频道停止跟随，之后的同步不再覆盖。';
+const FIXED_HINT = '已停止跟随。同步不改名称、地址和台标。来源删除这个频道时，也会保留。';
 
 /** 分组标题栏里的控件。点击这些控件不切换折叠。 */
 const GROUP_HEAD_CONTROLS = 'button, input, select, textarea, a, .grip, .hover-tip';
@@ -96,9 +97,22 @@ function hitsControl(node: EventTarget | null): boolean {
   return node instanceof Element && node.closest(GROUP_HEAD_CONTROLS) !== null;
 }
 
-/** 模式徽标的中文名。 */
-function modeLabel(mode: string): string {
-  return MODES.find((item) => item.value === mode)?.label ?? mode;
+/** 模式徽标的短标识，如 `PROXY`、`302`。 */
+function modeCode(mode: string): string {
+  return MODES.find((item) => item.value === mode)?.code ?? mode.toUpperCase();
+}
+
+/** 中文名加短标识，如「服务器转发（PROXY）」。 */
+function modeText(mode: string): string {
+  const item = MODES.find((entry) => entry.value === mode);
+  if (!item) return mode;
+  return item.label.includes(item.code) ? item.label : `${item.label}（${item.code}）`;
+}
+
+/** 徽标的悬停说明。 */
+function modeTip(mode: string): string {
+  const item = MODES.find((entry) => entry.value === mode);
+  return item ? `${modeText(mode)}：${item.desc}` : mode;
 }
 
 /** 播放地址后缀由分组格式决定（S-URL-03）。 */
@@ -1012,7 +1026,9 @@ export function GroupsPage() {
                 <Badge tone="muted">本地</Badge>
               )}
               <div className="ops">
-                <span className={`badge mode ${group.mode}`}>{modeLabel(group.mode)}</span>
+                <HoverTip text={modeTip(group.mode)}>
+                  <span className={`badge mode ${group.mode}`}>{modeCode(group.mode)}</span>
+                </HoverTip>
                 <span className="count">{channels.length} 频道</span>
                 <button
                   className="icon-btn move"
@@ -1115,7 +1131,7 @@ export function GroupsPage() {
                           text={
                             channel.sync_follow === false
                               ? FIXED_HINT
-                              : `跟随源：${FOLLOW_HINT}`
+                              : `正在跟随来源。${FOLLOW_HINT}`
                           }
                         >
                           <Badge tone={channel.sync_follow === false ? 'warn' : 'info'}>
@@ -1242,11 +1258,18 @@ export function GroupsPage() {
             />
           </Field>
           <div className="fields">
-            <Field label="工作模式" tip="选择视频流的转发方式。">
+            <Field
+              label="工作模式"
+              tip="PROXY 兼容性最好。302 与 PASSTHROUGH 由播放器直连源，不经过本机。"
+            >
               <Select
                 ariaLabel="工作模式"
                 value={groupForm.form.mode}
-                options={MODES}
+                options={MODES.map((mode) => ({
+                  value: mode.value,
+                  label: modeText(mode.value),
+                  desc: mode.desc,
+                }))}
                 onChange={(next) =>
                   setGroupForm({
                     ...groupForm,
@@ -1348,7 +1371,7 @@ export function GroupsPage() {
             <div className="fields">
               <Field
                 label="订阅来源"
-                tip="跟随源时，同步会更新名称、地址和台标。关闭后固定为当前值。"
+                tip="开启时，同步用来源覆盖名称、地址和台标。关闭时保留当前值。"
                 hint={
                   channelForm.form.syncFollow
                     ? FOLLOW_HINT
