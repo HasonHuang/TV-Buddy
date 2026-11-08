@@ -97,6 +97,14 @@ function hitsControl(node: EventTarget | null): boolean {
   return node instanceof Element && node.closest(GROUP_HEAD_CONTROLS) !== null;
 }
 
+/** 直接切换拖动落点样式，避免拖动经过每一行都触发 React 重渲染。 */
+function highlightDrop(ref: { current: HTMLElement | null }, el: HTMLElement | null) {
+  if (ref.current === el) return;
+  ref.current?.classList.remove('dragover');
+  ref.current = el;
+  el?.classList.add('dragover');
+}
+
 /** 模式徽标的短标识，如 `PROXY`、`302`。 */
 function modeCode(mode: string): string {
   return MODES.find((item) => item.value === mode)?.code ?? mode.toUpperCase();
@@ -426,14 +434,13 @@ export function GroupsPage() {
   const [collapsed, setCollapsed] = useState<string[]>([]);
   /** 正在拖动的分组 id。为空表示没有拖动。 */
   const [dragging, setDragging] = useState('');
-  /** 拖动经过的分组 id。用于画落点。 */
-  const [dropTarget, setDropTarget] = useState('');
   /** 正在拖动的频道。只允许在同一分组内排序。 */
   const [draggingChannel, setDraggingChannel] = useState<{ gid: string; cid: string } | null>(
     null,
   );
-  /** 拖动经过的频道 id。 */
-  const [channelDrop, setChannelDrop] = useState('');
+  /** 拖动落点的 DOM 引用。直接用 class 画高亮，不走 state。 */
+  const groupDropRef = useRef<HTMLElement | null>(null);
+  const channelDropRef = useRef<HTMLElement | null>(null);
   /** 标题栏按下时的元素。按下与松开不在同一元素时，click 落在共同祖先上。 */
   const headPress = useRef<EventTarget | null>(null);
   /** 解析脚本列表；打开频道弹窗时按需加载。 */
@@ -598,8 +605,9 @@ export function GroupsPage() {
       const list = config.groups ?? [];
       if (!mutate(list)) return;
       await putConfig({ ...config, groups: list });
+      // 顺序只影响分组列表；直接更新本地状态，不必重拉探测与播放列表。
+      setGroups(list);
       ok('顺序已保存');
-      await load();
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
       // 保存冲突或失败时刷新，避免继续拿旧快照操作。
@@ -607,20 +615,24 @@ export function GroupsPage() {
     }
   };
 
-  const moveGroup = (index: number, delta: number) =>
+  /** 按 id 上移或下移分组，避免使用渲染快照里的下标。 */
+  const moveGroup = (gid: string, delta: number) =>
     reorder((list) => {
-      const target = index + delta;
-      if (target < 0 || target >= list.length) return false;
-      const [moved] = list.splice(index, 1);
-      list.splice(target, 0, moved);
+      const from = list.findIndex((item) => item.id === gid);
+      if (from < 0) return false;
+      const to = from + delta;
+      if (to < 0 || to >= list.length) return false;
+      const [moved] = list.splice(from, 1);
+      list.splice(to, 0, moved);
       return true;
     });
 
-  /** 拖动排序：把 `from` 处的分组移动到 `to` 处。 */
-  const moveGroupTo = (from: number, to: number) =>
+  /** 拖动排序：把分组 `gid` 移到目标分组 `targetGid` 的位置。 */
+  const moveGroupTo = (gid: string, targetGid: string) =>
     reorder((list) => {
-      if (from === to || from < 0 || to < 0) return false;
-      if (from >= list.length || to >= list.length) return false;
+      const from = list.findIndex((item) => item.id === gid);
+      const to = list.findIndex((item) => item.id === targetGid);
+      if (from < 0 || to < 0 || from === to) return false;
       const [moved] = list.splice(from, 1);
       list.splice(to, 0, moved);
       return true;
@@ -984,22 +996,32 @@ export function GroupsPage() {
         const isCollapsed = collapsed.includes(group.id);
         return (
           <div
-            className={`card flush group-card${dropTarget === group.id && dragging !== group.id ? ' dragover' : ''}`}
+            className="card flush group-card"
             key={group.id}
             onDragOver={(event) => {
               if (dragging === '') return;
               event.preventDefault();
-              if (dropTarget !== group.id) setDropTarget(group.id);
+              if (dragging === group.id) {
+                highlightDrop(groupDropRef, null);
+                return;
+              }
+              highlightDrop(groupDropRef, event.currentTarget);
             }}
-            onDragLeave={() => {
-              if (dropTarget === group.id) setDropTarget('');
+            onDragLeave={(event) => {
+              if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                return;
+              }
+              if (groupDropRef.current === event.currentTarget) {
+                highlightDrop(groupDropRef, null);
+              }
             }}
             onDrop={(event) => {
               event.preventDefault();
-              const from = groups.findIndex((item) => item.id === dragging);
-              if (from >= 0) void moveGroupTo(from, groupIndex);
+              if (dragging !== '' && dragging !== group.id) {
+                void moveGroupTo(dragging, group.id);
+              }
               setDragging('');
-              setDropTarget('');
+              highlightDrop(groupDropRef, null);
             }}
           >
             <div
@@ -1030,7 +1052,7 @@ export function GroupsPage() {
                 }}
                 onDragEnd={() => {
                   setDragging('');
-                  setDropTarget('');
+                  highlightDrop(groupDropRef, null);
                 }}
               >
                 <Icon name="grip" size={14} />
@@ -1065,7 +1087,7 @@ export function GroupsPage() {
                   className="icon-btn move"
                   disabled={groupIndex <= 0}
                   title="上移分组"
-                  onClick={() => void moveGroup(groupIndex, -1)}
+                  onClick={() => void moveGroup(group.id, -1)}
                 >
                   <Icon name="up" size={12} />
                 </button>
@@ -1073,7 +1095,7 @@ export function GroupsPage() {
                   className="icon-btn move"
                   disabled={groupIndex < 0 || groupIndex >= groups.length - 1}
                   title="下移分组"
-                  onClick={() => void moveGroup(groupIndex, 1)}
+                  onClick={() => void moveGroup(group.id, 1)}
                 >
                   <Icon name="down" size={12} />
                 </button>
@@ -1139,25 +1161,21 @@ export function GroupsPage() {
                   : playUrl(group, channel, playToken);
               return (
                 <div
-                  className={`ch-row${
-                    channelDrop === `${group.id}/${channel.id}` &&
-                    draggingChannel?.cid !== channel.id
-                      ? ' dragover'
-                      : ''
-                  }`}
+                  className="ch-row"
                   key={channel.id}
                   onDragOver={(event) => {
                     if (draggingChannel?.gid !== group.id) return;
                     if (draggingChannel.cid === channel.id) return;
                     event.preventDefault();
-                    const drop = `${group.id}/${channel.id}`;
-                    if (channelDrop !== drop) setChannelDrop(drop);
+                    highlightDrop(channelDropRef, event.currentTarget);
                   }}
                   onDragLeave={(event) => {
                     if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
                       return;
                     }
-                    if (channelDrop === `${group.id}/${channel.id}`) setChannelDrop('');
+                    if (channelDropRef.current === event.currentTarget) {
+                      highlightDrop(channelDropRef, null);
+                    }
                   }}
                   onDrop={(event) => {
                     // 分组拖动交给外层分组卡处理；这里只接频道拖动。
@@ -1167,7 +1185,7 @@ export function GroupsPage() {
                       void moveChannelTo(group.id, draggingChannel.cid, channel.id);
                     }
                     setDraggingChannel(null);
-                    setChannelDrop('');
+                    highlightDrop(channelDropRef, null);
                   }}
                 >
                   <span
@@ -1176,14 +1194,14 @@ export function GroupsPage() {
                     title="拖动排序"
                     onDragStart={(event) => {
                       setDraggingChannel({ gid: group.id, cid: channel.id });
-                      setChannelDrop('');
+                      highlightDrop(channelDropRef, null);
                       event.dataTransfer.effectAllowed = 'move';
                       // Firefox 需要写入数据才会开始拖动。
                       event.dataTransfer.setData('text/plain', channel.id);
                     }}
                     onDragEnd={() => {
                       setDraggingChannel(null);
-                      setChannelDrop('');
+                      highlightDrop(channelDropRef, null);
                     }}
                   >
                     <Icon name="grip" size={13} />
