@@ -68,7 +68,7 @@
 | `max_channels` | u64 | 0 | 0 继承全局 |
 | `merge_into` | BTreeMap\<string,string\> | 空 | 上游分组名 → 已有分组 id。显式并入 |
 
-`playback_mode` 与 `format` 只用于**新建**同步分组；已有分组的工作模式与清单格式在「分组管理」里修改。
+`playback_mode` 与 `format` 只用于**新建**同步分组；已有分组的工作模式与内容格式在「分组管理」里修改。
 
 校验：
 

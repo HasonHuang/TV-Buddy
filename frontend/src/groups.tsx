@@ -602,6 +602,8 @@ export function GroupsPage() {
       await load();
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
+      // 保存冲突或失败时刷新，避免继续拿旧快照操作。
+      await load();
     }
   };
 
@@ -624,34 +626,35 @@ export function GroupsPage() {
       return true;
     });
 
-  const moveChannel = (gid: string, index: number, delta: number) =>
+  /** 在最新配置里按 id 找频道，避免使用渲染快照里的下标。 */
+  const moveChannel = (gid: string, cid: string, delta: number) =>
     reorder((list) => {
       const channels = list.find((item) => item.id === gid)?.channels;
       if (!channels) return false;
-      const target = index + delta;
-      if (target < 0 || target >= channels.length) return false;
-      const [moved] = channels.splice(index, 1);
-      channels.splice(target, 0, moved);
+      const from = channels.findIndex((item) => item.id === cid);
+      if (from < 0) return false;
+      const to = from + delta;
+      if (to < 0 || to >= channels.length) return false;
+      const [moved] = channels.splice(from, 1);
+      channels.splice(to, 0, moved);
       return true;
     });
 
-  /** 置顶：把频道移到所在分组的第一位。 */
-  const pinChannel = (gid: string, index: number) =>
-    reorder((list) => {
-      const channels = list.find((item) => item.id === gid)?.channels;
-      if (!channels || index <= 0 || index >= channels.length) return false;
-      const [moved] = channels.splice(index, 1);
-      channels.unshift(moved);
-      return true;
-    });
-
-  /** 拖动排序：把 `from` 处的频道移动到 `to` 处。 */
-  const moveChannelTo = (gid: string, from: number, to: number) =>
+  /** 把频道移到目标频道的位置；`targetCid` 为空表示移到第一位。 */
+  const moveChannelTo = (gid: string, cid: string, targetCid: string | null) =>
     reorder((list) => {
       const channels = list.find((item) => item.id === gid)?.channels;
       if (!channels) return false;
-      if (from === to || from < 0 || to < 0) return false;
-      if (from >= channels.length || to >= channels.length) return false;
+      const from = channels.findIndex((item) => item.id === cid);
+      if (from < 0) return false;
+      if (targetCid === null) {
+        if (from === 0) return false;
+        const [moved] = channels.splice(from, 1);
+        channels.unshift(moved);
+        return true;
+      }
+      const to = channels.findIndex((item) => item.id === targetCid);
+      if (to < 0 || from === to) return false;
       const [moved] = channels.splice(from, 1);
       channels.splice(to, 0, moved);
       return true;
@@ -1137,7 +1140,8 @@ export function GroupsPage() {
               return (
                 <div
                   className={`ch-row${
-                    channelDrop === channel.id && draggingChannel?.cid !== channel.id
+                    channelDrop === `${group.id}/${channel.id}` &&
+                    draggingChannel?.cid !== channel.id
                       ? ' dragover'
                       : ''
                   }`}
@@ -1146,26 +1150,21 @@ export function GroupsPage() {
                     if (draggingChannel?.gid !== group.id) return;
                     if (draggingChannel.cid === channel.id) return;
                     event.preventDefault();
-                    if (channelDrop !== channel.id) setChannelDrop(channel.id);
+                    const drop = `${group.id}/${channel.id}`;
+                    if (channelDrop !== drop) setChannelDrop(drop);
                   }}
                   onDragLeave={(event) => {
                     if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
                       return;
                     }
-                    if (channelDrop === channel.id) setChannelDrop('');
+                    if (channelDrop === `${group.id}/${channel.id}`) setChannelDrop('');
                   }}
                   onDrop={(event) => {
                     // 分组拖动交给外层分组卡处理；这里只接频道拖动。
                     if (!draggingChannel) return;
                     event.preventDefault();
                     if (draggingChannel.gid === group.id) {
-                      const from = channels.findIndex(
-                        (item) => item.id === draggingChannel.cid,
-                      );
-                      const to = channels.findIndex((item) => item.id === channel.id);
-                      if (from >= 0 && to >= 0) {
-                        void moveChannelTo(group.id, from, to);
-                      }
+                      void moveChannelTo(group.id, draggingChannel.cid, channel.id);
                     }
                     setDraggingChannel(null);
                     setChannelDrop('');
@@ -1234,7 +1233,7 @@ export function GroupsPage() {
                       disabled={channelIndex === 0}
                       title="置顶频道"
                       aria-label="置顶频道"
-                      onClick={() => void pinChannel(group.id, channelIndex)}
+                      onClick={() => void moveChannelTo(group.id, channel.id, null)}
                     >
                       <Icon name="pin" size={12} />
                     </button>
@@ -1242,7 +1241,7 @@ export function GroupsPage() {
                       className="icon-btn move"
                       disabled={channelIndex === 0}
                       title="上移频道"
-                      onClick={() => void moveChannel(group.id, channelIndex, -1)}
+                      onClick={() => void moveChannel(group.id, channel.id, -1)}
                     >
                       <Icon name="up" size={12} />
                     </button>
@@ -1250,7 +1249,7 @@ export function GroupsPage() {
                       className="icon-btn move"
                       disabled={channelIndex >= channels.length - 1}
                       title="下移频道"
-                      onClick={() => void moveChannel(group.id, channelIndex, 1)}
+                      onClick={() => void moveChannel(group.id, channel.id, 1)}
                     >
                       <Icon name="down" size={12} />
                     </button>

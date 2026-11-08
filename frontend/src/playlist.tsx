@@ -1087,11 +1087,11 @@ export function PlaylistPage() {
                   />
                 </Field>
                 <Field
-                  label="新分组清单格式"
-                  tip="只影响之后新建的同步分组。已有分组沿用分组自己的清单格式。"
+                  label="新分组内容格式"
+                  tip="只影响之后新建的同步分组。已有分组沿用分组自己的内容格式。"
                 >
                   <Select
-                    ariaLabel="新分组清单格式"
+                    ariaLabel="新分组内容格式"
                     value={drawer.draft.format}
                     options={[
                       { value: 'auto', label: '自动', desc: '跟随源的类型。' },
@@ -1127,7 +1127,7 @@ export function PlaylistPage() {
                 </label>
               </div>
               <p className="muted">
-                已有分组的工作模式与清单格式在「分组管理」里修改；这里只设置之后新建分组的默认值。
+                已有分组的工作模式与内容格式在「分组管理」里修改；这里只设置之后新建分组的默认值。
               </p>
             </>
           )}

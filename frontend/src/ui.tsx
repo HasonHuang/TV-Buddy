@@ -390,6 +390,13 @@ export function Field({
   );
 }
 
+/* 下拉菜单的几何参数；只在这里维护，CSS 不再重复写死。 */
+const MENU_MAX_WIDTH = 320;
+const MENU_MAX_HEIGHT = 280;
+const MENU_MIN_DESCRIBED_WIDTH = 232;
+const MENU_GAP = 6;
+const MENU_MARGIN = 8;
+
 /** 自绘下拉框。
  *
  * 原生 `<select>` 的样式受系统限制，各平台外观不一。这里用按钮 + 列表实现，
@@ -465,19 +472,37 @@ export function Select({
     if (disabled) return;
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
-    // 下方放不下且上方有空间时向上展开。
-    const up = window.innerHeight - rect.bottom < 286 && rect.top > 286;
-    const maxWidth = Math.min(320, window.innerWidth - 32);
-    const minWidth = Math.min(Math.max(rect.width, described ? 232 : 0), maxWidth);
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - maxWidth - 8));
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const spaceRight = viewportW - rect.left - MENU_MARGIN;
+    const spaceLeft = rect.right - MENU_MARGIN;
+    const spaceBelow = viewportH - rect.bottom - MENU_GAP;
+    const spaceAbove = rect.top - MENU_GAP;
+    const wantWidth = Math.max(rect.width, described ? MENU_MIN_DESCRIBED_WIDTH : 0);
+    const maxPossibleWidth = Math.max(MENU_MARGIN * 2, viewportW - MENU_MARGIN * 2);
+    // 宽控件（例如长文件名下拉）的菜单至少与控制同宽，最多不超过视口。
+    const widthCap = Math.min(Math.max(MENU_MAX_WIDTH, rect.width), maxPossibleWidth);
+    const minWidth = Math.min(wantWidth, widthCap);
+    // 右侧放不下最小宽度时，改为与按钮右缘对齐，避免整体推到按钮左侧。
+    const rightAligned =
+      align === 'right' || (spaceRight < minWidth && spaceLeft > spaceRight);
+    const availableWidth = rightAligned ? spaceLeft : spaceRight;
+    const maxWidth = Math.max(minWidth, Math.min(widthCap, availableWidth));
+    // 上下都放不下时选空间较大的一侧，并限制高度，保证末尾选项可达。
+    const up = spaceBelow < MENU_MAX_HEIGHT && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(
+      80,
+      Math.min(MENU_MAX_HEIGHT, up ? spaceAbove : spaceBelow),
+    );
     setMenuPos({
       position: 'fixed',
-      top: up ? 'auto' : rect.bottom + 6,
-      bottom: up ? window.innerHeight - rect.top + 6 : 'auto',
-      left: align === 'right' ? 'auto' : left,
-      right: align === 'right' ? Math.max(8, window.innerWidth - rect.right) : 'auto',
+      top: up ? 'auto' : rect.bottom + MENU_GAP,
+      bottom: up ? viewportH - rect.top + MENU_GAP : 'auto',
+      left: rightAligned ? 'auto' : Math.max(MENU_MARGIN, rect.left),
+      right: rightAligned ? Math.max(MENU_MARGIN, viewportW - rect.right) : 'auto',
       minWidth,
       maxWidth,
+      maxHeight,
     });
     setActive(selected >= 0 ? selected : 0);
     setOpen(true);
@@ -521,6 +546,29 @@ export function Select({
       window.removeEventListener('resize', onResize);
       window.removeEventListener('scroll', onMove, true);
     };
+  }, [open]);
+
+  // 按钮被上方异步内容顶走时关闭菜单，避免 fixed 菜单停在旧位置。
+  useEffect(() => {
+    if (!open) return;
+    const anchor = btnRef.current;
+    if (!anchor) return;
+    const start = anchor.getBoundingClientRect();
+    let frame = 0;
+    const tick = () => {
+      const current = anchor.getBoundingClientRect();
+      if (
+        Math.abs(current.top - start.top) > 1 ||
+        Math.abs(current.left - start.left) > 1 ||
+        current.width !== start.width
+      ) {
+        setOpen(false);
+        return;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [open]);
 
   const move = (next: number) => {
@@ -567,7 +615,8 @@ export function Select({
         close(true);
         return;
       case 'Tab':
-        close();
+        // 菜单挂在 body 末尾；先把焦点还给按钮，默认 Tab 才会落到下一个字段。
+        close(true);
         return;
       default:
         break;
@@ -595,7 +644,7 @@ export function Select({
   return (
     <div
       ref={rootRef}
-      className={`select${described ? ' described' : ''}${compact || width !== undefined ? ' compact' : ''}${open ? ' open' : ''}${className ? ` ${className}` : ''}`}
+      className={`select${compact || width !== undefined ? ' compact' : ''}${open ? ' open' : ''}${className ? ` ${className}` : ''}`}
       style={width !== undefined ? { width } : undefined}
     >
       <button
@@ -629,7 +678,7 @@ export function Select({
           <ul
             ref={menuRef}
             id={`${id}-menu`}
-            className={`select-menu${described ? ' described' : ''}`}
+            className="select-menu"
             style={menuPos}
             role="listbox"
             aria-label={ariaLabel}
