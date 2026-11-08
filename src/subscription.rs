@@ -1488,12 +1488,13 @@ fn channel_id_base(entry: &Entry, key: &str) -> String {
 }
 
 fn display_name(entry: &Entry) -> String {
-    trim_opt(entry.tvg_name.as_deref())
-        .or_else(|| {
-            let name = entry.name.trim();
-            (!name.is_empty()).then(|| name.to_string())
-        })
-        .unwrap_or_else(|| entry.url.trim().to_string())
+    // `#EXTINF` 逗号后的名称是播放器与面板的显示名。
+    // `tvg-name` 是 EPG 匹配用的元数据，可能丢掉 `(字幕)`、`4K` 等后缀。
+    let name = entry.name.trim();
+    if !name.is_empty() {
+        return name.to_string();
+    }
+    trim_opt(entry.tvg_name.as_deref()).unwrap_or_else(|| entry.url.trim().to_string())
 }
 
 fn trim_opt(value: Option<&str>) -> Option<String> {
@@ -1705,6 +1706,47 @@ mod tests {
         assert_eq!(config.groups[0].origin, "sync");
         assert_eq!(config.groups[0].source_id, "s1");
         assert_eq!(config.groups[0].access, "public");
+    }
+
+    #[test]
+    fn display_name_keeps_extinf_suffix() {
+        let mut item = entry("翡翠台(字幕)", "港台", "a", "http://up/a.m3u8");
+        item.tvg_name = Some("翡翠台".into());
+        assert_eq!(display_name(&item), "翡翠台(字幕)");
+
+        let mut fallback = Entry {
+            url: "http://up/b.m3u8".into(),
+            ..Entry::default()
+        };
+        fallback.tvg_name = Some("翡翠台4K".into());
+        assert_eq!(display_name(&fallback), "翡翠台4K");
+
+        let url_only = Entry {
+            url: "http://up/c.m3u8".into(),
+            ..Entry::default()
+        };
+        assert_eq!(display_name(&url_only), "http://up/c.m3u8");
+    }
+
+    #[test]
+    fn sync_keeps_channel_name_suffixes() {
+        let mut config = config_with_source();
+        let source = source();
+        let mut first = entry("翡翠台(字幕)", "港台", "a", "http://up/a.m3u8");
+        first.tvg_name = Some("翡翠台".into());
+        let mut second = entry("翡翠台4K(字幕)", "港台", "b", "http://up/b.m3u8");
+        second.tvg_name = Some("翡翠台".into());
+        run(&mut config, &source, &[first, second]);
+        let names: Vec<&str> = config.groups[0]
+            .channels
+            .iter()
+            .map(|channel| channel.name.as_str())
+            .collect();
+        assert_eq!(names, ["翡翠台(字幕)", "翡翠台4K(字幕)"]);
+        assert_eq!(
+            config.groups[0].channels[0].extra["tvg_name"], "翡翠台",
+            "tvg-name 仍保留为元数据"
+        );
     }
 
     #[test]
