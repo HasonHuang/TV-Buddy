@@ -5,7 +5,8 @@
 //! - `start`：打开频道的回看缓冲；
 //! - `stop`：关闭回看缓冲。
 //!
-//! 规则只扫描未来 48 小时的节目。条件对节目标题做大小写不敏感的子串匹配。
+//! 规则只扫描生成的节目单窗口（`[epg].future_days`，最多 48 小时）。
+//! 条件对节目标题做大小写不敏感的子串匹配。
 
 use std::{sync::Arc, time::Duration};
 
@@ -19,10 +20,15 @@ use crate::{
     state::AppState,
 };
 
-/// 规则扫描窗口。
-const LOOKAHEAD_SECS: i64 = 48 * 3_600;
+/// 规则最多扫描 48 小时。
+const MAX_LOOKAHEAD_SECS: i64 = 48 * 3_600;
 /// 开始/停止动作的生效窗口。防止一个节目被反复触发。
 const ACTION_WINDOW_SECS: i64 = 180;
+
+/// 实际可扫描窗口。受生成的节目单范围限制。
+fn lookahead_secs(config: &crate::config::Config) -> i64 {
+    (config.epg.future_days.max(0) * 86_400).min(MAX_LOOKAHEAD_SECS)
+}
 
 /// 起规则引擎（每 30 秒扫描）。
 pub fn spawn(state: Arc<AppState>) {
@@ -50,11 +56,11 @@ async fn tick(state: &Arc<AppState>) -> Result<()> {
     if rules.is_empty() {
         return Ok(());
     }
-    let data = match epg::load_generated(&config) {
-        Ok(data) => data,
-        Err(_) => return Ok(()),
+    let Some(data) = epg::load_generated_cached(state) else {
+        return Ok(());
     };
     let now = epg::now_secs() as i64;
+    let lookahead = lookahead_secs(&config);
     for rule in rules {
         let Some(channel) = channel_of(&config, &rule.gid, &rule.cid) else {
             continue;
@@ -71,7 +77,7 @@ async fn tick(state: &Arc<AppState>) -> Result<()> {
             let Some(stop) = epg::parse_time(&programme.stop) else {
                 continue;
             };
-            if start > now + LOOKAHEAD_SECS {
+            if start > now + lookahead {
                 continue;
             }
             // 停止动作要等节目结束后才触发，所以允许刚结束的节目进入循环。
@@ -330,7 +336,7 @@ fn condition_has_leaf(condition: &Condition) -> bool {
         || condition.groups.iter().any(condition_has_leaf)
 }
 
-/// 预览未来 48 小时的命中节目。
+/// 预览节目单窗口内的命中节目。
 pub fn preview(state: &AppState, rule: &Rule) -> Result<Value> {
     let config = state.snapshot();
     if !config.epg.enabled {
@@ -339,8 +345,9 @@ pub fn preview(state: &AppState, rule: &Rule) -> Result<Value> {
     let channel = channel_of(&config, &rule.gid, &rule.cid).context("频道不存在")?;
     let out_id = epg::channel_out_id(channel);
     let binding = state.epg_store.binding(&rule.gid, &rule.cid);
-    let data = epg::load_generated(&config).context("节目单尚未生成，请先采集")?;
+    let data = epg::load_generated_cached(state).context("节目单尚未生成，请先采集")?;
     let now = epg::now_secs() as i64;
+    let lookahead = lookahead_secs(&config);
     let offset = config.server.timezone_offset_hours as i64;
     let mut matches_out = Vec::new();
     for programme in data
@@ -354,7 +361,7 @@ pub fn preview(state: &AppState, rule: &Rule) -> Result<Value> {
         let Some(stop) = epg::parse_time(&programme.stop) else {
             continue;
         };
-        if stop <= now || start > now + LOOKAHEAD_SECS {
+        if stop <= now || start > now + lookahead {
             continue;
         }
         let title = title_of(programme);
@@ -379,6 +386,7 @@ pub fn preview(state: &AppState, rule: &Rule) -> Result<Value> {
         "channel_id": out_id,
         "bound": binding.is_some(),
         "binding": binding,
+        "lookahead_secs": lookahead,
         "matches": matches_out,
         "total": matches_out.len(),
     }))
@@ -431,6 +439,17 @@ mod tests {
         assert!(text.starts_with("比赛/CCTV5/"));
         assert!(text.contains("2026-01-01"));
         assert!(text.contains("08:00"));
+    }
+
+    #[test]
+    fn lookahead_is_capped_by_generated_window() {
+        let mut config = crate::config::Config::default();
+        config.epg.future_days = 1;
+        assert_eq!(lookahead_secs(&config), 86_400);
+        config.epg.future_days = 5;
+        assert_eq!(lookahead_secs(&config), 48 * 3_600);
+        config.epg.future_days = 0;
+        assert_eq!(lookahead_secs(&config), 0);
     }
 
     #[test]

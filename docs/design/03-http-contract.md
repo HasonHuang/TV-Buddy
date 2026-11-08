@@ -371,7 +371,7 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 | `POST` | `/panel/api/epg/bindings/{gid}/{cid}/copy` | Bearer | `{"from_gid","from_cid"}`；复制另一频道的绑定 |
 | `GET` | `/panel/api/epg/rules` | Bearer | `[{rule,group_name,channel_name}]` |
 | `POST` | `/panel/api/epg/rules` | Bearer | 新增或更新规则。`id` 为空表示新增 |
-| `POST` | `/panel/api/epg/rules/preview` | Bearer | 同规则对象；返回未来 48 小时的命中节目 |
+| `POST` | `/panel/api/epg/rules/preview` | Bearer | 同规则对象；返回 `lookahead_secs` 与节目单未来窗口内的命中节目（最多 48 小时） |
 | `DELETE` | `/panel/api/epg/rules/{id}` | Bearer | 删除规则与它生成的待执行任务 |
 | `POST` | `/panel/api/epg/extra` | Bearer | `{"action":"add","source_id","source_channel_id","out_id","out_name"}`；`{"action":"remove","source_id","source_channel_id"}`；批量 `items[]` |
 | `GET` | `/panel/api/epg/match-report` | Bearer | `text/plain`：`matched_count=… empty_count=… extra_count=…` + 表格 |

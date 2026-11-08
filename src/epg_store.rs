@@ -510,6 +510,11 @@ impl Store {
         if rule.id.is_empty() {
             rule.id = uuid::Uuid::new_v4().to_string();
             rule.created_at_ms = now;
+        } else if rule.created_at_ms == 0 {
+            // 面板更新可能不带创建时间。保留库里原值。
+            if let Some(existing) = self.rule(&rule.id) {
+                rule.created_at_ms = existing.created_at_ms;
+            }
         }
         rule.updated_at_ms = now;
         let order = self
@@ -541,15 +546,24 @@ impl Store {
     // ---- 迁移 ----
 
     /// 源表为空时，把配置文档里的旧源导入表。
+    /// 把配置文档里的旧源导入表。返回成功导入的下标。
+    ///
+    /// 表里已有的源直接算成功。失败的源保留在配置里，下次启动再试。
     pub fn import_config_sources(
         &self,
         sources: &[crate::config::model::EpgSource],
-    ) -> Result<usize> {
-        if !read(&self.sources).is_empty() {
-            return Ok(0);
-        }
-        let mut count = 0usize;
-        for source in sources {
+    ) -> Result<Vec<usize>> {
+        let mut imported = Vec::new();
+        for (index, source) in sources.iter().enumerate() {
+            let id = if source.id.trim().is_empty() {
+                legacy_source_id(source)
+            } else {
+                source.id.trim().to_string()
+            };
+            if self.source(&id).is_some() {
+                imported.push(index);
+                continue;
+            }
             let urls = if source.url.trim().is_empty() {
                 Vec::new()
             } else {
@@ -560,7 +574,7 @@ impl Store {
                 }]
             };
             let converted = Source {
-                id: source.id.clone(),
+                id,
                 name: source.name.clone(),
                 enabled: source.enabled,
                 kind: source.kind.clone(),
@@ -574,18 +588,18 @@ impl Store {
                 cron: source.cron.clone(),
                 extra: source.extra.clone(),
             };
-            if self.save_source(converted).is_ok() {
-                count += 1;
+            match self.save_source(converted) {
+                Ok(_) => imported.push(index),
+                Err(error) => {
+                    tracing::warn!(source = %source.name, %error, "导入旧 EPG 源失败");
+                }
             }
         }
-        Ok(count)
+        Ok(imported)
     }
 
     /// 绑定表为空时，把旧的 `mappings.json` 导入表。
     pub fn import_legacy_mappings(&self, cache_dir: &Path) -> Result<usize> {
-        if !read(&self.bindings).is_empty() {
-            return Ok(0);
-        }
         let path = cache_dir.join("epg").join("mappings.json");
         let Ok(text) = std::fs::read_to_string(&path) else {
             return Ok(0);
@@ -594,10 +608,15 @@ impl Store {
             return Ok(0);
         };
         let mut count = 0usize;
+        let mut failed = 0usize;
         for (key, mapping) in map {
             let Some((gid, cid)) = key.split_once('/') else {
+                failed += 1;
                 continue;
             };
+            if self.binding(gid, cid).is_some() {
+                continue;
+            }
             let binding = Binding {
                 gid: gid.to_string(),
                 cid: cid.to_string(),
@@ -607,11 +626,15 @@ impl Store {
                 upstream_display_name: mapping.source_display_name,
                 updated_at_ms: 0,
             };
-            if self.set_binding(binding).is_ok() {
-                count += 1;
+            match self.set_binding(binding) {
+                Ok(_) => count += 1,
+                Err(error) => {
+                    tracing::warn!(key = %key, %error, "导入旧 EPG 映射失败");
+                    failed += 1;
+                }
             }
         }
-        if count > 0 {
+        if failed == 0 {
             // 改名留底。否则用户清空绑定后重启会再次导入旧映射。
             let _ = std::fs::rename(&path, path.with_extension("json.migrated"));
         }
@@ -771,6 +794,14 @@ fn normalize_condition(condition: &mut Condition) {
         .retain(|group| !group.keywords.is_empty() || !group.groups.is_empty());
 }
 
+/// 旧源没有 ID 时生成稳定 ID。重试导入不会产生重复行。
+fn legacy_source_id(source: &crate::config::model::EpgSource) -> String {
+    use sha2::{Digest, Sha256};
+    let key = format!("{}|{}|{}", source.name, source.url, source.script);
+    let digest = Sha256::digest(key.as_bytes());
+    format!("legacy-{}", hex::encode(&digest[..8]))
+}
+
 /// 把旧源的 cron 换算成刷新秒数。只识别 `0 */N * * *`。
 fn cron_interval_secs(cron: &str) -> Option<u64> {
     let parts: Vec<&str> = cron.split_whitespace().collect();
@@ -910,6 +941,87 @@ mod tests {
         assert_eq!(saved.condition.keywords, vec!["直播"]);
         assert_eq!(saved.condition.groups.len(), 1);
         assert_eq!(saved.name_template, "{program.title} {datetime}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn import_keeps_failed_sources_out_of_the_result() {
+        let (store, dir) = store("import");
+        let valid = crate::config::model::EpgSource {
+            id: "s1".into(),
+            name: "有效".into(),
+            kind: "xml".into(),
+            url: "https://example.com/epg.xml".into(),
+            ..crate::config::model::EpgSource::default()
+        };
+        let invalid = crate::config::model::EpgSource {
+            id: "s2".into(),
+            name: "无地址".into(),
+            kind: "xml".into(),
+            ..crate::config::model::EpgSource::default()
+        };
+        let imported = store
+            .import_config_sources(&[valid, invalid])
+            .expect("导入");
+        assert_eq!(imported, vec![0], "失败的源不应从配置移除");
+        assert!(store.source("s1").is_some());
+        assert!(store.source("s2").is_none());
+
+        // 第二次导入：已存在的源算成功，失败项仍保留。
+        let valid = crate::config::model::EpgSource {
+            id: "s1".into(),
+            name: "有效".into(),
+            kind: "xml".into(),
+            url: "https://example.com/epg.xml".into(),
+            ..crate::config::model::EpgSource::default()
+        };
+        let invalid = crate::config::model::EpgSource {
+            id: "s2".into(),
+            name: "无地址".into(),
+            kind: "xml".into(),
+            ..crate::config::model::EpgSource::default()
+        };
+        let imported = store
+            .import_config_sources(&[valid, invalid])
+            .expect("再导入");
+        assert_eq!(imported, vec![0]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn updating_rule_keeps_created_at() {
+        let (store, dir) = store("rule-created");
+        let saved = store
+            .save_rule(Rule {
+                name: "规则".into(),
+                gid: "g".into(),
+                cid: "c".into(),
+                condition: Condition {
+                    keywords: vec!["新闻".into()],
+                    ..Condition::default()
+                },
+                action: "record".into(),
+                ..Rule::default()
+            })
+            .expect("保存");
+        assert!(saved.created_at_ms > 0);
+
+        let updated = store
+            .save_rule(Rule {
+                id: saved.id.clone(),
+                created_at_ms: 0,
+                name: "改名".into(),
+                gid: "g".into(),
+                cid: "c".into(),
+                condition: Condition {
+                    keywords: vec!["新闻".into()],
+                    ..Condition::default()
+                },
+                action: "record".into(),
+                ..Rule::default()
+            })
+            .expect("更新");
+        assert_eq!(updated.created_at_ms, saved.created_at_ms);
         let _ = std::fs::remove_dir_all(dir);
     }
 

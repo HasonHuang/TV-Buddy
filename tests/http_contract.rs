@@ -6170,3 +6170,35 @@ async fn epg_config_sources_bindings_and_rules() {
         .unwrap();
     assert_eq!(deleted["ok"], true);
 }
+
+#[tokio::test]
+async fn deleting_last_epg_source_clears_output() {
+    let fixture = fixture_with(true).await;
+    epg::refresh(&fixture.state).await.expect("采集应成功");
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let sources: serde_json::Value = fixture
+        .client
+        .get(format!("{}/panel/api/epg/sources", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("源列表")
+        .text()
+        .await
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("解析源"))
+        .unwrap();
+    let id = sources[0]["id"].as_str().expect("源 ID").to_string();
+    let response = fixture
+        .client
+        .delete(format!("{}/panel/api/epg/sources/{id}", fixture.base))
+        .header("authorization", auth)
+        .send()
+        .await
+        .expect("删除源");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 没有源后旧节目单必须失效，不能继续下发。
+    let response = fetch(&fixture, &fixture.sub(&fixture.token, "epg.xml")).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}

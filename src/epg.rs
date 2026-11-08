@@ -510,6 +510,40 @@ pub fn output_file(config: &Config) -> PathBuf {
     output_dir(Path::new(&config.cache.disk_path)).join("epg.xml")
 }
 
+/// 删除已生成的节目单与快照。没有可用源时调用。
+///
+/// 只删文件，不动 raw 缓存。重新添加源后可以再生成。
+pub fn clear_generated(state: &AppState) -> Result<()> {
+    let config = state.snapshot();
+    let directory = output_dir(Path::new(&config.cache.disk_path));
+    for name in ["epg.xml", "epg.xml.gz", "viewer.json"] {
+        match fs::remove_file(directory.join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).with_context(|| format!("删 {name} 失败")),
+        }
+    }
+    *state
+        .epg
+        .generated
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = None;
+    state.epg.channels.store(0, Ordering::SeqCst);
+    state.epg.programmes.store(0, Ordering::SeqCst);
+    state.epg.kept.store(0, Ordering::SeqCst);
+    *state
+        .epg
+        .match_rows
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Vec::new();
+    *state
+        .epg
+        .last_error
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some("没有可用的 EPG 源".into());
+    Ok(())
+}
+
 /// 采集源正文的来源。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceMode {
@@ -547,7 +581,30 @@ pub async fn regenerate(state: &Arc<AppState>) -> Result<Summary> {
     run(state, SourceMode::CacheOnly).await
 }
 
+/// 按全局 cron 采集。只抓使用全局节奏的源，其余源读 raw 缓存。
+pub async fn refresh_managed(state: &Arc<AppState>) -> Result<Summary> {
+    let ids: HashSet<String> = state
+        .epg_store
+        .sources()
+        .into_iter()
+        .filter(uses_global_schedule)
+        .map(|source| source.id)
+        .collect();
+    if ids.is_empty() {
+        bail!("没有使用全局节奏的 EPG 源");
+    }
+    run_with_ids(state, SourceMode::Fetch, Some(&ids)).await
+}
+
 async fn run(state: &Arc<AppState>, mode: SourceMode) -> Result<Summary> {
+    run_with_ids(state, mode, None).await
+}
+
+async fn run_with_ids(
+    state: &Arc<AppState>,
+    mode: SourceMode,
+    fetch_ids: Option<&HashSet<String>>,
+) -> Result<Summary> {
     let config = state.snapshot();
     if !config.epg.enabled {
         bail!("EPG 未启用");
@@ -557,7 +614,7 @@ async fn run(state: &Arc<AppState>, mode: SourceMode) -> Result<Summary> {
     }
     let _guard = RunningGuard(&state.epg.running);
 
-    let result = collect(state, &config, mode).await;
+    let result = collect(state, &config, mode, fetch_ids).await;
     record_result(state, &result);
     result
 }
@@ -581,7 +638,7 @@ pub async fn refresh_source(state: &Arc<AppState>, source_id: &str) -> Result<Su
     let _guard = RunningGuard(&state.epg.running);
 
     let result = match source_document(state, &config, &source, SourceMode::Fetch).await {
-        Ok(_) => collect(state, &config, SourceMode::CacheOnly).await,
+        Ok(_) => collect(state, &config, SourceMode::CacheOnly, None).await,
         Err(error) => Err(error),
     };
     record_result(state, &result);
@@ -618,9 +675,25 @@ fn record_result(state: &Arc<AppState>, result: &Result<Summary>) {
     }
 }
 
-async fn collect(state: &Arc<AppState>, config: &Config, mode: SourceMode) -> Result<Summary> {
+async fn collect(
+    state: &Arc<AppState>,
+    config: &Config,
+    mode: SourceMode,
+    fetch_ids: Option<&HashSet<String>>,
+) -> Result<Summary> {
     let targets = channel_targets(config);
     let mappings = mappings(state);
+    // 手工绑定优先。自动匹配不得覆盖手工绑定的源。
+    let manual_source: HashMap<usize, String> = mappings
+        .iter()
+        .filter_map(|(key, mapping)| {
+            let (gid, cid) = key.split_once('/')?;
+            let index = targets
+                .iter()
+                .position(|target| target.gid == gid && target.cid == cid)?;
+            Some((index, mapping.source_id.clone()))
+        })
+        .collect();
     let mut rows: Vec<MatchRow> = targets
         .iter()
         .map(|target| MatchRow {
@@ -650,7 +723,14 @@ async fn collect(state: &Arc<AppState>, config: &Config, mode: SourceMode) -> Re
     let mut viewer_meta: HashMap<String, ViewerMeta> = HashMap::new();
 
     for source in enabled_sources(state) {
-        let document = match source_document(state, config, &source, mode).await {
+        let source_mode = if mode == SourceMode::Fetch
+            && fetch_ids.is_some_and(|ids| !ids.contains(&source.id))
+        {
+            SourceMode::CacheOnly
+        } else {
+            mode
+        };
+        let document = match source_document(state, config, &source, source_mode).await {
             Ok(document) => document,
             Err(error) => {
                 errors.push(format!("{}：{error:#}", source.name));
@@ -663,7 +743,24 @@ async fn collect(state: &Arc<AppState>, config: &Config, mode: SourceMode) -> Re
             &targets, &document, &mappings, &source.id, config, past, future,
         );
         for candidate in &candidates {
-            let row = &mut rows[candidate.target];
+            let target = &targets[candidate.target];
+            let claimed = seen.contains(&target.out_id);
+            if !candidate.manual {
+                // 手工绑定到别的源时，自动匹配不能抢先占用输出频道。
+                if let Some(manual_source_id) = manual_source.get(&candidate.target) {
+                    if manual_source_id != &source.id {
+                        continue;
+                    }
+                }
+                // 输出频道已有更高优先级的源。后面的源不再追加节目。
+                if claimed {
+                    continue;
+                }
+            } else if claimed {
+                // 相同输出频道的多个本地频道只保留频道顺序中的第一个。
+                continue;
+            }
+            let owns_channel = owners.get(&candidate.channel_id) == Some(&candidate.target);
             let display_name = document
                 .channels
                 .iter()
@@ -671,43 +768,42 @@ async fn collect(state: &Arc<AppState>, config: &Config, mode: SourceMode) -> Re
                 .and_then(|channel| channel.names.first())
                 .map(|(_, name)| name.clone())
                 .unwrap_or_default();
-            if row.source_id.is_empty() || candidate.manual {
-                row.via = candidate.via.clone();
-                row.source_id = source.id.clone();
-                row.raw_channel_id = candidate.channel_id.clone();
-                row.upstream_display_name = display_name;
-                row.programmes = if owners.get(&candidate.channel_id) == Some(&candidate.target) {
-                    source_programmes
-                        .get(&candidate.channel_id)
-                        .map(Vec::len)
-                        .unwrap_or(0)
-                } else {
-                    0
-                };
+            let row = &mut rows[candidate.target];
+            row.via = candidate.via.clone();
+            row.source_id = source.id.clone();
+            row.raw_channel_id = candidate.channel_id.clone();
+            row.upstream_display_name = display_name;
+            row.programmes = if owns_channel {
+                source_programmes
+                    .get(&candidate.channel_id)
+                    .map(Vec::len)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            if claimed {
+                continue;
             }
-            let target = &targets[candidate.target];
-            if !seen.contains(&target.out_id) {
-                seen.insert(target.out_id.clone());
-                viewer_meta.insert(
-                    target.out_id.clone(),
-                    ViewerMeta {
-                        name: target.name.clone(),
-                        source_id: source.id.clone(),
-                        source_name: source.name.clone(),
-                    },
-                );
-                channels.push(Channel {
-                    id: target.out_id.clone(),
-                    names: vec![(None, target.name.clone())],
-                    raw_children: document
-                        .channels
-                        .iter()
-                        .find(|channel| channel.id == candidate.channel_id)
-                        .map(|channel| channel.raw_children.clone())
-                        .unwrap_or_default(),
-                });
-            }
-            if owners.get(&candidate.channel_id) == Some(&candidate.target) {
+            seen.insert(target.out_id.clone());
+            viewer_meta.insert(
+                target.out_id.clone(),
+                ViewerMeta {
+                    name: target.name.clone(),
+                    source_id: source.id.clone(),
+                    source_name: source.name.clone(),
+                },
+            );
+            channels.push(Channel {
+                id: target.out_id.clone(),
+                names: vec![(None, target.name.clone())],
+                raw_children: document
+                    .channels
+                    .iter()
+                    .find(|channel| channel.id == candidate.channel_id)
+                    .map(|channel| channel.raw_children.clone())
+                    .unwrap_or_default(),
+            });
+            if owns_channel {
                 for programme in source_programmes
                     .get(&candidate.channel_id)
                     .into_iter()
@@ -763,6 +859,16 @@ async fn collect(state: &Arc<AppState>, config: &Config, mode: SourceMode) -> Re
         }
     }
 
+    // 源可能在采集途中被删除或停用。此时清掉旧输出，避免继续下发过期节目单。
+    if !state
+        .epg_store
+        .sources()
+        .iter()
+        .any(|source| source.enabled)
+    {
+        clear_generated(state)?;
+        bail!("没有可用的 EPG 源");
+    }
     if sources == 0 {
         if errors.is_empty() {
             bail!("没有可用的 EPG 源");
@@ -1034,6 +1140,11 @@ fn match_source(
     (candidates, owners, source_programmes)
 }
 
+/// 源是否使用全局 cron 采集。
+fn uses_global_schedule(source: &crate::epg_store::Source) -> bool {
+    source.enabled && source.refresh_secs == 0 && source.cron.trim().is_empty()
+}
+
 /// 启用中的源，按优先级升序。同优先级保持表内顺序。
 fn enabled_sources(state: &AppState) -> Vec<crate::epg_store::Source> {
     let mut list: Vec<_> = state
@@ -1065,8 +1176,36 @@ async fn source_document(
             bail!("已禁止脚本源");
         }
         let status_started = crate::users::model::now_ms();
-        let body = run_script(config, source).await?;
-        let mut document = parse(&body).context("解析失败")?;
+        let body = match run_script(config, source).await {
+            Ok(body) => body,
+            Err(error) => {
+                let status = SourceStatus {
+                    last_fetch_started_at_ms: Some(status_started),
+                    last_fetch_finished_at_ms: Some(crate::users::model::now_ms()),
+                    last_fetch_ok: false,
+                    last_error: Some(format!("{error:#}")),
+                    ..SourceStatus::default()
+                };
+                store_source_status(state, &source.id, status);
+                return Err(error);
+            }
+        };
+        let mut document = match parse(&body) {
+            Ok(document) => document,
+            Err(error) => {
+                let status = SourceStatus {
+                    last_fetch_started_at_ms: Some(status_started),
+                    last_fetch_finished_at_ms: Some(crate::users::model::now_ms()),
+                    last_fetch_ok: false,
+                    last_error: Some(format!("解析失败 {error:#}")),
+                    ..SourceStatus::default()
+                };
+                store_source_status(state, &source.id, status);
+                return Err(error.context("解析失败"));
+            }
+        };
+        // 先平移时区，再算覆盖区间。面板显示的时间与节目时间一致。
+        shift_document(&mut document, source.tz_shift_mins);
         let status = build_source_status(&document, status_started, true, None, Vec::new());
         store_source_status(state, &source.id, status);
         if let Some(path) = raw_file(Path::new(&config.cache.disk_path), &source.id) {
@@ -1075,7 +1214,6 @@ async fn source_document(
             }
             let _ = fs::write(path, body.as_bytes());
         }
-        shift_document(&mut document, source.tz_shift_mins);
         return Ok(document);
     }
     if source.kind != "xml" {
@@ -1186,12 +1324,13 @@ async fn source_document(
         store_source_status(state, &source.id, status);
         bail!("{}", errors.join("；"));
     }
+    // 先平移时区，再算覆盖区间。面板显示的时间与节目时间一致。
+    shift_document(&mut merged, source.tz_shift_mins);
     let mut status = build_source_status(&merged, started, true, None, statuses);
     status.last_fetch_finished_at_ms = Some(finished);
     status.last_error = (!errors.is_empty()).then(|| errors.join("；"));
     status.cache_headers = cache_headers;
     store_source_status(state, &source.id, status);
-    shift_document(&mut merged, source.tz_shift_mins);
     Ok(merged)
 }
 
@@ -1664,15 +1803,22 @@ pub fn spawn(state: Arc<AppState>) {
                 .and_then(|next| next.first().copied())
                 .unwrap_or(fallback_due);
             if global_due <= now {
-                match refresh(&state).await {
-                    Ok(summary) => tracing::info!(
-                        channels = summary.channels,
-                        programmes = summary.kept,
-                        "EPG 采集完成"
-                    ),
-                    Err(error) => tracing::warn!(%error, "EPG 采集失败"),
+                let has_global = state
+                    .epg_store
+                    .sources()
+                    .into_iter()
+                    .any(|source| uses_global_schedule(&source));
+                if has_global {
+                    match refresh_managed(&state).await {
+                        Ok(summary) => tracing::info!(
+                            channels = summary.channels,
+                            programmes = summary.kept,
+                            "EPG 采集完成"
+                        ),
+                        Err(error) => tracing::warn!(%error, "EPG 采集失败"),
+                    }
+                    continue;
                 }
-                continue;
             }
             let sources = state.epg_store.sources();
             for source in sources.iter().filter(|source| source.enabled) {
@@ -2850,6 +2996,25 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].via, "id");
         assert_eq!(candidates[0].channel_id, "CCTV1");
+    }
+
+    #[test]
+    fn global_schedule_only_uses_default_sources() {
+        let mut source = crate::epg_store::Source {
+            enabled: true,
+            refresh_secs: 0,
+            cron: String::new(),
+            ..crate::epg_store::Source::default()
+        };
+        assert!(uses_global_schedule(&source));
+        source.refresh_secs = 3_600;
+        assert!(!uses_global_schedule(&source), "显式间隔不跟全局 cron");
+        source.refresh_secs = 0;
+        source.cron = "0 3 * * *".into();
+        assert!(!uses_global_schedule(&source), "源 cron 不跟全局 cron");
+        source.cron.clear();
+        source.enabled = false;
+        assert!(!uses_global_schedule(&source), "停用源不采集");
     }
 
     #[test]

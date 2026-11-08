@@ -739,7 +739,7 @@ ls scripts/smoke-*.sh
 | `PUT`/`DELETE` | `/panel/api/epg/bindings/:gid/:cid` | 手工绑定或清除 |
 | `POST` | `/panel/api/epg/bindings/:gid/:cid/copy` | 复用其他频道的绑定 |
 | `GET`/`POST` | `/panel/api/epg/rules` | 关键字规则列表、新增或更新 |
-| `POST` | `/panel/api/epg/rules/preview` | 预览未来 48 小时的命中 |
+| `POST` | `/panel/api/epg/rules/preview` | 预览节目单未来窗口内的命中（最多 48 小时） |
 | `DELETE` | `/panel/api/epg/rules/:id` | 删除规则与它生成的待执行任务 |
 
 </details>

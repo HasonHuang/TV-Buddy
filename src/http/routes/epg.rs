@@ -284,6 +284,20 @@ fn spawn_regenerate(state: &Arc<AppState>) {
     });
 }
 
+/// 源改动后刷新输出。没有启用的源时清掉旧节目单。
+fn refresh_after_change(state: &Arc<AppState>) {
+    if state
+        .epg_store
+        .sources()
+        .iter()
+        .any(|source| source.enabled)
+    {
+        spawn_regenerate(state);
+    } else if let Err(error) = epg::clear_generated(state) {
+        tracing::warn!(%error, "清理 EPG 输出失败");
+    }
+}
+
 /// `POST /panel/api/epg/regenerate`——按 raw 缓存重新匹配并生成。
 pub async fn regenerate(
     PanelAuth(_): PanelAuth,
@@ -727,7 +741,10 @@ pub async fn source_save(
     Json(source): Json<Source>,
 ) -> Result<Json<Value>, ApiError> {
     match state.epg_store.save_source(source) {
-        Ok(source) => Ok(Json(json!({ "ok": true, "source": source }))),
+        Ok(source) => {
+            refresh_after_change(&state);
+            Ok(Json(json!({ "ok": true, "source": source })))
+        }
         Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
     }
 }
@@ -739,7 +756,10 @@ pub async fn source_delete(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     match state.epg_store.delete_source(&id) {
-        Ok(true) => Ok(Json(json!({ "ok": true }))),
+        Ok(true) => {
+            refresh_after_change(&state);
+            Ok(Json(json!({ "ok": true })))
+        }
         Ok(false) => Err(ApiError::not_found("EPG 源不存在")),
         Err(error) => Err(ApiError::internal(format!("{error:#}"))),
     }

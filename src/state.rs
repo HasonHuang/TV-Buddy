@@ -126,11 +126,15 @@ impl AppState {
         let users = crate::users::UserStore::attach(conn.clone())?;
         let epg_store = crate::epg_store::Store::attach(conn)?;
         let epg = crate::epg::EpgState::load(&cache_dir);
-        // 旧配置里的 `[[epg.sources]]` 与 `mappings.json` 只在表为空时导入一次。
+        // 旧配置里的 `[[epg.sources]]` 逐条导入。成功的从配置移除，失败的保留。
         match epg_store.import_config_sources(&config.epg.sources) {
-            Ok(count) if count > 0 => {
-                // 源已经进表。清掉旧字段，避免下次启动重复导入。
-                config.epg.sources.clear();
+            Ok(imported) if !imported.is_empty() => {
+                // 只移除已进表的源。失败的源保留，下次启动再试。
+                let mut imported = imported;
+                imported.sort_unstable();
+                for index in imported.into_iter().rev() {
+                    config.epg.sources.remove(index);
+                }
                 match config_store.save(&config) {
                     Ok(revision) => config.revision = revision,
                     Err(error) => tracing::warn!(%error, "清理旧 EPG 源配置失败"),

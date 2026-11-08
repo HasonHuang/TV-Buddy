@@ -1136,6 +1136,7 @@ type RuleDraft = {
   output_dir: string;
   name_template: string;
   enabled: boolean;
+  created_at_ms: number;
 };
 
 function ruleDraft(rule?: Rule, key = ''): RuleDraft {
@@ -1151,6 +1152,7 @@ function ruleDraft(rule?: Rule, key = ''): RuleDraft {
       output_dir: '',
       name_template: '{program.title} {datetime}',
       enabled: true,
+      created_at_ms: 0,
     };
   }
   return {
@@ -1164,6 +1166,7 @@ function ruleDraft(rule?: Rule, key = ''): RuleDraft {
     output_dir: rule.output_dir ?? '',
     name_template: rule.name_template || '{program.title} {datetime}',
     enabled: rule.enabled,
+    created_at_ms: rule.created_at_ms ?? 0,
   };
 }
 
@@ -1179,7 +1182,12 @@ function RuleModal({
   onSaved: () => void;
 }) {
   const [draft, setDraft] = useState<RuleDraft>(() => ruleDraft(rule));
-  const [preview, setPreview] = useState<{ bound: boolean; matches: PreviewMatch[]; note?: string } | null>(null);
+  const [preview, setPreview] = useState<{
+    bound: boolean;
+    matches: PreviewMatch[];
+    lookahead_secs?: number;
+    note?: string;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -1199,7 +1207,7 @@ function RuleModal({
       output_dir: draft.output_dir,
       name_template: draft.name_template,
       enabled: draft.enabled,
-      created_at_ms: 0,
+      created_at_ms: draft.created_at_ms,
       updated_at_ms: 0,
     };
   };
@@ -1208,12 +1216,16 @@ function RuleModal({
     setBusy(true);
     setError('');
     try {
-      const result = await api<{ bound: boolean; matches: PreviewMatch[] }>(
-        'POST',
-        '/epg/rules/preview',
-        payload(),
-      );
-      setPreview({ bound: result.bound, matches: result.matches ?? [] });
+      const result = await api<{
+        bound: boolean;
+        matches: PreviewMatch[];
+        lookahead_secs?: number;
+      }>('POST', '/epg/rules/preview', payload());
+      setPreview({
+        bound: result.bound,
+        matches: result.matches ?? [],
+        lookahead_secs: result.lookahead_secs,
+      });
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -1280,7 +1292,7 @@ function RuleModal({
 
       <Field
         label="匹配条件"
-        tip="对节目标题做大小写不敏感的子串匹配。规则只匹配未来 48 小时的节目。"
+        tip="对节目标题做大小写不敏感的子串匹配。规则只扫描生成节目单的未来窗口。"
       >
         <ConditionEditor value={draft.condition} onChange={(next) => set({ condition: next })} />
       </Field>
@@ -1337,7 +1349,10 @@ function RuleModal({
       {preview && (
         <div className="rule-preview">
           <div className="row between">
-            <strong>未来 48 小时命中：{preview.matches.length} 条</strong>
+            <strong>
+              未来 {Math.round((preview.lookahead_secs ?? 0) / 3600)} 小时命中：
+              {preview.matches.length} 条
+            </strong>
             <button className="ghost" onClick={() => setPreview(null)}>
               收起
             </button>
