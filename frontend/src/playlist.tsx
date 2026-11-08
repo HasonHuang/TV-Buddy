@@ -863,7 +863,7 @@ export function PlaylistPage() {
         </div>
         <label>
           全局排除
-          <Tip text="这些名字不会出现在聚合和同步结果里。每行一条。" />
+          <Tip text="这些名字不会出现在聚合和同步结果里。每行一条。支持 *（任意长度）和 ?（一个字符）通配符。" />
           <textarea
             aria-label="全局排除关键词"
             value={(global.global_exclude ?? []).join('\n')}
@@ -1135,7 +1135,7 @@ export function PlaylistPage() {
           <div className="form-grid two">
             <label>
               只保留
-              <Tip text="只保留匹配的频道。开头写 group: 匹配分组，id: 匹配 tvg-id，url: 匹配地址。每行一条。" />
+              <Tip text="只保留匹配的频道。每行一条。支持 *（任意长度）和 ?（一个字符）。开头可写 group: 匹配分组，id: 匹配 tvg-id，url: 精确匹配地址。不含通配符时按子串匹配。" />
               <textarea
                 value={drawer.draft.include.join('\n')}
                 onChange={(event) => patch({ include: lines(event.target.value) })}
@@ -1143,7 +1143,7 @@ export function PlaylistPage() {
             </label>
             <label>
               排除
-              <Tip text="匹配的频道会被排除。在列表里删除托管频道时，会自动写入这里。" />
+              <Tip text="匹配的频道会被排除。支持 * 与 ? 通配符。在列表里删除托管频道时，会自动写入这里。" />
               <textarea
                 value={drawer.draft.exclude.join('\n')}
                 onChange={(event) => patch({ exclude: lines(event.target.value) })}

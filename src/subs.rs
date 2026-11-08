@@ -23,7 +23,7 @@ pub struct PreviewSource {
     pub merge_new: BTreeMap<String, String>,
     /// 未出现在 `group_map` 的分组：`drop` 或 `keep`。空值按 `drop` 处理。
     pub unlisted_groups: String,
-    /// 频道名白名单；支持 `group:` 与 `id:` 前缀。
+    /// 频道名白名单；支持 `group:` / `id:` / `url:` 前缀与 `*`、`?` 通配符。
     pub include: Vec<String>,
     pub exclude: Vec<String>,
 }
@@ -277,21 +277,23 @@ pub fn select_entries<'a>(
     // 阶段二：全局排除。
     let after_global: Vec<Selected<'_>> = selected
         .into_iter()
-        .filter(|item| !matches_filter(global_exclude, item))
+        .filter(|item| !matches_filter(global_exclude, &item.filter_item()))
         .collect();
     let after_global_exclude = after_global.len();
 
     // 阶段三：源白名单。
     let after_include: Vec<Selected<'_>> = after_global
         .into_iter()
-        .filter(|item| source.include.is_empty() || matches_filter(&source.include, item))
+        .filter(|item| {
+            source.include.is_empty() || matches_filter(&source.include, &item.filter_item())
+        })
         .collect();
     let after_include_count = after_include.len();
 
     // 阶段四：源黑名单。
     let kept: Vec<Selected<'_>> = after_include
         .into_iter()
-        .filter(|item| !matches_filter(&source.exclude, item))
+        .filter(|item| !matches_filter(&source.exclude, &item.filter_item()))
         .collect();
     let kept_count = kept.len();
 
@@ -316,6 +318,27 @@ pub struct Selected<'a> {
     pub group: String,
 }
 
+impl Selected<'_> {
+    fn filter_item(&self) -> FilterItem<'_> {
+        FilterItem {
+            name: &self.entry.name,
+            original: &self.original,
+            group: &self.group,
+            tvg_id: self.entry.tvg_id.as_deref().unwrap_or_default(),
+            url: &self.entry.url,
+        }
+    }
+}
+
+/// 过滤需要的频道字段。预检、托管同步与聚合共用。
+pub(crate) struct FilterItem<'a> {
+    pub name: &'a str,
+    pub original: &'a str,
+    pub group: &'a str,
+    pub tvg_id: &'a str,
+    pub url: &'a str,
+}
+
 fn group_of(entry: &Entry) -> String {
     match entry.group_title.as_deref().map(str::trim) {
         Some(group) if !group.is_empty() => group.to_string(),
@@ -323,38 +346,148 @@ fn group_of(entry: &Entry) -> String {
     }
 }
 
-/// 过滤词命中：频道名包含、`group:` 新旧分组名包含、`id:` 精确匹配 `tvg-id`、
-/// `url:` 精确匹配地址。
-fn matches_filter(patterns: &[String], item: &Selected<'_>) -> bool {
-    let id = item.entry.tvg_id.as_deref().unwrap_or_default();
+/// 过滤词命中规则。
+///
+/// 不含 `*` 或 `?` 时保持原语义：裸词与 `group:` 是子串，`id:` 是精确匹配。
+/// 含通配符时按整串匹配。`idname:` 与 `url:` 始终精确匹配。
+pub(crate) fn matches_filter(patterns: &[String], item: &FilterItem<'_>) -> bool {
     patterns
         .iter()
         .map(|pattern| pattern.trim())
         .filter(|pattern| !pattern.is_empty())
         .any(|pattern| {
             if let Some(want) = pattern.strip_prefix("group:") {
-                let want = want.trim().to_lowercase();
-                item.original.to_lowercase().contains(&want)
-                    || item.group.to_lowercase().contains(&want)
+                let want = want.trim();
+                glob_or_contains(want, item.original) || glob_or_contains(want, item.group)
             } else if let Some(want) = pattern.strip_prefix("id:") {
-                id.to_lowercase() == want.trim().to_lowercase()
+                glob_or_equals(want.trim(), item.tvg_id)
             } else if let Some(want) = pattern.strip_prefix("idname:") {
                 // `idname:<小写 tvg-id>\u{1f}<小写名称>`：同 id 多条时按名称区分。
                 want.split_once('\u{1f}')
                     .is_some_and(|(want_id, want_name)| {
-                        id.eq_ignore_ascii_case(want_id.trim())
-                            && item.entry.name.trim().to_lowercase()
-                                == want_name.trim().to_lowercase()
+                        item.tvg_id.eq_ignore_ascii_case(want_id.trim())
+                            && item.name.trim().to_lowercase() == want_name.trim().to_lowercase()
                     })
             } else if let Some(want) = pattern.strip_prefix("url:") {
-                item.entry.url.trim() == want.trim()
+                item.url.trim() == want.trim()
             } else {
-                item.entry
-                    .name
-                    .to_lowercase()
-                    .contains(&pattern.to_lowercase())
+                glob_or_contains(pattern, item.name)
             }
         })
+}
+
+/// 模式是否含通配符。
+fn has_wildcard(pattern: &str) -> bool {
+    pattern.contains('*') || pattern.contains('?')
+}
+
+/// 子串匹配；含通配符时改为整串 glob。
+fn glob_or_contains(pattern: &str, text: &str) -> bool {
+    if has_wildcard(pattern) {
+        wildcard_match(pattern, text)
+    } else {
+        text.to_lowercase().contains(&pattern.to_lowercase())
+    }
+}
+
+/// 精确匹配；含通配符时改为整串 glob。
+fn glob_or_equals(pattern: &str, text: &str) -> bool {
+    if has_wildcard(pattern) {
+        wildcard_match(pattern, text)
+    } else {
+        text.to_lowercase() == pattern.to_lowercase()
+    }
+}
+
+enum WildcardToken {
+    Char(char),
+    One,
+    Many,
+}
+
+/// 简单 glob：`*` 匹配任意长度，`?` 匹配一个 Unicode 字符。
+///
+/// `\*`、`\?`、`\\` 表示字面字符。其它反斜杠按字面保留。
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pattern = compile_wildcard(pattern);
+    let text: Vec<char> = text.to_lowercase().chars().collect();
+    wildcard_tokens(&pattern, &text)
+}
+
+fn compile_wildcard(pattern: &str) -> Vec<WildcardToken> {
+    let mut tokens = Vec::new();
+    let mut chars = pattern.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => match chars.next() {
+                Some('*') => push_literal(&mut tokens, '*'),
+                Some('?') => push_literal(&mut tokens, '?'),
+                Some('\\') => push_literal(&mut tokens, '\\'),
+                Some(other) => {
+                    push_literal(&mut tokens, '\\');
+                    push_literal(&mut tokens, other);
+                }
+                None => push_literal(&mut tokens, '\\'),
+            },
+            '*' => tokens.push(WildcardToken::Many),
+            '?' => tokens.push(WildcardToken::One),
+            other => push_literal(&mut tokens, other),
+        }
+    }
+    tokens
+}
+
+fn push_literal(tokens: &mut Vec<WildcardToken>, ch: char) {
+    for lower in ch.to_lowercase() {
+        tokens.push(WildcardToken::Char(lower));
+    }
+}
+
+fn wildcard_tokens(pattern: &[WildcardToken], text: &[char]) -> bool {
+    let (mut p, mut t) = (0, 0);
+    let mut star: Option<usize> = None;
+    let mut mark = 0;
+    while t < text.len() {
+        match pattern.get(p) {
+            Some(WildcardToken::Char(ch)) if *ch == text[t] => {
+                p += 1;
+                t += 1;
+            }
+            Some(WildcardToken::One) => {
+                p += 1;
+                t += 1;
+            }
+            Some(WildcardToken::Many) => {
+                star = Some(p);
+                mark = t;
+                p += 1;
+            }
+            _ => {
+                let Some(star_pos) = star else {
+                    return false;
+                };
+                p = star_pos + 1;
+                mark += 1;
+                t = mark;
+            }
+        }
+    }
+    while matches!(pattern.get(p), Some(WildcardToken::Many)) {
+        p += 1;
+    }
+    p == pattern.len()
+}
+
+/// 转义通配符字符。自动生成的 `id:` 排除键使用。
+pub(crate) fn escape_glob(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '*' | '?' | '\\') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -606,5 +739,122 @@ mod tests {
         let result = preview(&entries, &source, &[], 5);
         assert_eq!(result.sample[0].group, "(无分组)");
         assert_eq!(result.sample[0].tvg_id, "");
+    }
+
+    fn wildcard_entries() -> Vec<Entry> {
+        vec![
+            entry("CCTV-1", "港台", "a"),
+            entry("CCTV-10", "港台", "b"),
+            entry("翡翠台(字幕)", "港台", "c"),
+            entry("凤凰卫视", "香港", "d"),
+        ]
+    }
+
+    #[test]
+    fn wildcard_matches_full_string() {
+        assert!(wildcard_match("CCTV-?", "cctv-1"));
+        assert!(!wildcard_match("CCTV-?", "CCTV-10"));
+        assert!(wildcard_match("翡翠*", "翡翠台(字幕)"));
+        assert!(wildcard_match("*体育*", "CCTV-5体育"));
+        assert!(wildcard_match("*", ""));
+        assert!(wildcard_match("a*b*c", "axxbyyc"));
+        assert!(wildcard_match("a\\?b", "a?b"));
+        assert!(!wildcard_match("a\\?b", "axb"));
+        assert!(wildcard_match("a\\*b", "a*b"));
+        assert!(wildcard_match(&escape_glob("a?b"), "a?b"));
+        assert!(!wildcard_match(&escape_glob("a?b"), "axb"));
+    }
+
+    #[test]
+    fn preview_filters_with_wildcards() {
+        let source = PreviewSource {
+            include: vec!["CCTV-?".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        let result = preview(&wildcard_entries(), &source, &[], 5);
+        assert_eq!(result.kept, 1);
+        assert_eq!(result.sample[0].name, "CCTV-1");
+
+        let source = PreviewSource {
+            include: vec!["*翡翠*".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        assert_eq!(preview(&wildcard_entries(), &source, &[], 5).kept, 1);
+
+        let source = PreviewSource {
+            include: vec!["group:港*".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        assert_eq!(preview(&wildcard_entries(), &source, &[], 5).kept, 3);
+
+        let source = PreviewSource {
+            include: vec!["cctv*".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        assert_eq!(preview(&wildcard_entries(), &source, &[], 5).kept, 2);
+
+        let source = PreviewSource {
+            include: vec!["*".into()],
+            exclude: vec!["CCTV-*".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        assert_eq!(preview(&wildcard_entries(), &source, &[], 5).kept, 2);
+
+        let source = PreviewSource {
+            exclude: vec!["*".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        assert_eq!(preview(&wildcard_entries(), &source, &[], 5).kept, 0);
+    }
+
+    #[test]
+    fn wildcard_id_and_exact_url_and_idname() {
+        let source = PreviewSource {
+            include: vec!["id:a*".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        assert_eq!(preview(&wildcard_entries(), &source, &[], 5).kept, 1);
+
+        let source = PreviewSource {
+            include: vec!["id:a?".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        assert_eq!(preview(&wildcard_entries(), &source, &[], 5).kept, 0);
+
+        let entries = vec![Entry {
+            name: "带参数".into(),
+            url: "http://up/x?y=1".into(),
+            tvg_id: Some("q".into()),
+            group_title: Some("组".into()),
+            ..Entry::default()
+        }];
+        let source = PreviewSource {
+            exclude: vec!["url:http://up/x?y=1".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        assert_eq!(preview(&entries, &source, &[], 5).kept, 0);
+
+        let source = PreviewSource {
+            include: vec!["url:http://up/x?y=2".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        assert_eq!(preview(&entries, &source, &[], 5).kept, 0);
+
+        let source = PreviewSource {
+            exclude: vec!["idname:q\u{1f}带参数".into()],
+            unlisted_groups: "keep".into(),
+            ..PreviewSource::default()
+        };
+        assert_eq!(preview(&entries, &source, &[], 5).kept, 0);
     }
 }

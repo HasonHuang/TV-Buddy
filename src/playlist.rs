@@ -13,7 +13,7 @@ use crate::{
         model::{Channel, Group, PlaylistSource},
         Config,
     },
-    subs::GroupRules,
+    subs::{matches_filter, FilterItem, GroupRules},
 };
 
 /// 渲染某个用户的订阅。
@@ -332,7 +332,9 @@ mod tests {
 ///
 /// 保留 `#EXTINF` 及其附属 `#` 行和原始 URL；不改写地址，也不加 Token。
 /// 过滤词：`group:<文本>` 匹配 `group-title`，`id:<文本>` 匹配 `tvg-id`，
-/// 其余按频道名匹配。都不区分大小写，空列表表示不过滤。
+/// `url:<文本>` 精确匹配地址，其余按频道名匹配。含 `*` 或 `?` 的通配符
+/// 按整串匹配。名称、分组与 id 不区分大小写；`url:` 区分大小写。
+/// 空列表表示不过滤。
 pub fn aggregate(source: &PlaylistSource, global_exclude: &[String], body: &str) -> String {
     let mut seen = HashSet::new();
     aggregate_seen(source, global_exclude, body, &mut seen).0
@@ -388,9 +390,16 @@ pub fn aggregate_seen(
         let Some(group) = rules.target(&original) else {
             continue;
         };
-        if (!source.include.is_empty() && !matches(&source.include, &meta, &original, &group))
-            || matches(&source.exclude, &meta, &original, &group)
-            || matches(global_exclude, &meta, &original, &group)
+        let item = FilterItem {
+            name: &meta.0,
+            original: &original,
+            group: &group,
+            tvg_id: &meta.2,
+            url: trimmed,
+        };
+        if (!source.include.is_empty() && !matches_filter(&source.include, &item))
+            || matches_filter(&source.exclude, &item)
+            || matches_filter(global_exclude, &item)
         {
             continue;
         }
@@ -470,30 +479,6 @@ fn attr(line: &str, key: &str) -> Option<String> {
     let rest = &line[start..];
     let end = rest.find('"')?;
     Some(rest[..end].to_string())
-}
-
-/// 是否有任一过滤词命中。`group:` 同时匹配原分组与映射后的分组。
-fn matches(
-    patterns: &[String],
-    meta: &(String, String, String),
-    original: &str,
-    group: &str,
-) -> bool {
-    let (name, _, id) = meta;
-    patterns
-        .iter()
-        .map(|pattern| pattern.trim())
-        .filter(|pattern| !pattern.is_empty())
-        .any(|pattern| {
-            if let Some(want) = pattern.strip_prefix("group:") {
-                let want = want.trim().to_lowercase();
-                original.to_lowercase().contains(&want) || group.to_lowercase().contains(&want)
-            } else if let Some(want) = pattern.strip_prefix("id:") {
-                id.to_lowercase() == want.trim().to_lowercase()
-            } else {
-                name.to_lowercase().contains(&pattern.to_lowercase())
-            }
-        })
 }
 
 #[cfg(test)]
@@ -579,6 +564,45 @@ mod aggregate_tests {
             ..PlaylistSource::default()
         };
         assert!(aggregate(&source, &[], BODY).is_empty());
+    }
+
+    const WILD_BODY: &str = "#EXTM3U\n#EXTINF:-1 tvg-id=\"a\" group-title=\"新闻\",CCTV-1\nhttp://a/1.m3u8\n#EXTINF:-1 tvg-id=\"b\" group-title=\"体育\",CCTV-10\nhttp://a/10.m3u8\n#EXTINF:-1 tvg-id=\"c\" group-title=\"影视\",翡翠台(字幕)\nhttp://a/jade.m3u8?x=1\n";
+
+    #[test]
+    fn wildcard_filters_apply_to_aggregate() {
+        let out = aggregate(&source(&["CCTV-?"], &[]), &[], WILD_BODY);
+        assert!(out.contains("CCTV-1"), "{out}");
+        assert!(!out.contains("CCTV-10"), "{out}");
+
+        let out = aggregate(&source(&["*翡翠*"], &[]), &[], WILD_BODY);
+        assert!(out.contains("翡翠台(字幕)"), "{out}");
+
+        let out = aggregate(&source(&["group:体*"], &[]), &[], WILD_BODY);
+        assert!(out.contains("CCTV-10"), "{out}");
+        assert!(!out.lines().any(|line| line.ends_with(",CCTV-1")), "{out}");
+
+        let out = aggregate(&source(&[], &["CCTV-*"]), &[], WILD_BODY);
+        assert!(!out.contains("CCTV-1"), "{out}");
+        assert!(!out.contains("CCTV-10"), "{out}");
+    }
+
+    #[test]
+    fn url_and_idname_filters_apply_to_aggregate() {
+        let out = aggregate(
+            &source(&["url:http://a/jade.m3u8?x=1"], &[]),
+            &[],
+            WILD_BODY,
+        );
+        assert!(out.contains("翡翠台(字幕)"), "{out}");
+        assert!(!out.contains("CCTV-1"), "{out}");
+
+        let out = aggregate(&source(&["idname:a\u{1f}CCTV-1"], &[]), &[], WILD_BODY);
+        assert!(out.contains("CCTV-1"), "{out}");
+        assert!(!out.contains("CCTV-10"), "{out}");
+
+        let out = aggregate(&source(&["id:a*"], &[]), &[], WILD_BODY);
+        assert!(out.contains("CCTV-1"), "{out}");
+        assert!(!out.contains("CCTV-10"), "{out}");
     }
 
     #[test]

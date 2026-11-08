@@ -1213,7 +1213,7 @@ fn exclude_with_index(config: &mut Config, channel: &Channel, index: &ExcludeInd
                 .unwrap_or(0)
                 <= 1
             {
-                Some(format!("id:{lower}"))
+                Some(format!("id:{}", subs::escape_glob(&lower)))
             } else if !name.is_empty()
                 && index
                     .names

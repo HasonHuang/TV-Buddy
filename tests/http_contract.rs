@@ -2925,6 +2925,49 @@ async fn playlist_aggregates_sources_with_filters() {
 }
 
 #[tokio::test]
+async fn aggregate_filters_support_wildcards() {
+    let extra = r#"{"playlist":{"sources":[{"id":"s1","name":"远端源","url":"{upstream}/extra.m3u8","enabled":true,"unlisted_groups":"keep","include":["*频道"],"exclude":["*跳过*","*全局*"]}]}}"#;
+    let fixture = fixture_with_extra(extra).await;
+    let body = fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u"))
+        .await
+        .text()
+        .await
+        .expect("读正文");
+    assert!(body.contains("远端频道"), "{body}");
+    assert!(!body.contains("跳过频道"), "{body}");
+    assert!(!body.contains("全局排除"), "{body}");
+}
+
+#[tokio::test]
+async fn subs_preview_supports_wildcards() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let request = serde_json::json!({
+        "source": {
+            "url": format!("{}/extra.m3u8", fixture.upstream),
+            "include": ["*频道"],
+            "exclude": ["*跳过*"]
+        }
+    });
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/subs/preview", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(request.to_string())
+        .send()
+        .await
+        .expect("预检");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["kept"], 1, "{body}");
+    assert_eq!(body["trace"]["after_include"], 2, "{body}");
+    assert_eq!(body["trace"]["after_exclude"], 1, "{body}");
+}
+
+#[tokio::test]
 async fn playlist_dedups_urls_across_sources() {
     let extra = r#"{"playlist":{"sources":[{"id":"s1","name":"源一","url":"{upstream}/extra.m3u8","enabled":true,"unlisted_groups":"keep"},{"id":"s2","name":"源二","url":"{upstream}/extra.m3u8","enabled":true,"unlisted_groups":"keep"}]}}"#;
     let fixture = fixture_with_extra(extra).await;
