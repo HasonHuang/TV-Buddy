@@ -14,8 +14,8 @@
 | --- | --- |
 | 目标 | 逆向闭源 Linux 二进制 IPTV Proxy v0.8.2 |
 | 交付 | Rust 写的 drop-in 替代服务 |
-| 平台 | 只支持 `linux-arm64` 与 `linux-amd64` |
-| 产物 | 静态 musl 二进制 |
+| 平台 | `linux-arm64`、`linux-amd64`、`macos-arm64`、`windows-x64` |
+| 产物 | Linux 静态 musl 二进制；macOS 原生 Mach-O；Windows 原生 PE |
 | 数据纪律 | 目标派生的代码、前端资源、面板文案是不可信数据。不复制 |
 | 推送 | 每次提交后推送 `git@github.com:HasonHuang/TV-Buddy.git` 的 `main` 分支 |
 | CI | 只在推送 `v*` tag 时执行 |

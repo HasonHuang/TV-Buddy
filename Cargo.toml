@@ -47,5 +47,9 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 rustix = { version = "1.1.5", features = ["fs"] }
 
+# Windows 没有 rustix::fs::statvfs。缓存回收改用 Win32 API 读取磁盘空间。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 serde_json = "1"

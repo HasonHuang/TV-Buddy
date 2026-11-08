@@ -105,6 +105,7 @@ pub fn plan(
 /// 用 `f_bavail` 而非 `f_bfree`：前者是扣除保留块后**非特权用户真正可写**的块数，
 /// 才是回收该看的量。乘数用 `f_frsize`（POSIX 规定块计数以 fundamental
 /// fragment size 计），为 0 时退回 `f_bsize`。
+#[cfg(not(windows))]
 fn fs_space(dir: &Path) -> Option<(u64, u64)> {
     let vfs = rustix::fs::statvfs(dir).ok()?;
     let unit = if vfs.f_frsize != 0 {
@@ -119,6 +120,37 @@ fn fs_space(dir: &Path) -> Option<(u64, u64)> {
         vfs.f_blocks.saturating_mul(unit) / MB,
         vfs.f_bavail.saturating_mul(unit) / MB,
     ))
+}
+
+/// Windows 版本。`rustix::fs` 不提供 Windows 实现，改用 Win32 API。
+///
+/// `free_to_caller` 对应 `f_bavail`：当前用户真正可写的空间。
+#[cfg(windows)]
+fn fs_space(dir: &Path) -> Option<(u64, u64)> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let wide: Vec<u16> = dir
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut free_to_caller = 0u64;
+    let mut total = 0u64;
+    let mut _total_free = 0u64;
+    // SAFETY: `wide` 是以 NUL 结尾的 UTF-16 路径。三个输出指针都指向有效的 u64。
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free_to_caller,
+            &mut total,
+            &mut _total_free,
+        )
+    };
+    if ok == 0 || total == 0 {
+        return None;
+    }
+    Some((total / MB, free_to_caller / MB))
 }
 
 /// 统计目录内的文件数与总字节数（递归）。

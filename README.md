@@ -13,7 +13,7 @@
 
 TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、缓存、再分发 HLS/DASH 流，并提供工程单、录制、回看、台标库、安全管控与备份恢复。
 
-服务只用一个静态链接的二进制运行。前端资源内嵌在二进制中，不需要 Node 或数据库。默认监听 `9900` 端口。
+服务只用一个二进制运行。Linux 版本静态链接。前端资源内嵌在二进制中，不需要 Node 或数据库。默认监听 `9900` 端口。
 
 - **行为兼容**：配置键面、面板接口与播放链路对齐闭源 IPTV Proxy v0.8.2。可直接替换运行。
 - **低配置可跑**：1 vCPU / 128 MB 内存 / 1 GB 磁盘即可运行，配合前置 CDN 承载多观众。见 [低配置部署](#低配置部署)。
@@ -85,19 +85,51 @@ TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、�
 
 ## 支持平台
 
-| 平台 | 架构 | 产物 |
-| --- | --- | --- |
-| Linux | amd64（x86_64） | 静态 musl 二进制 |
-| Linux | arm64（aarch64） | 静态 musl 二进制 |
+| 平台 | 架构 | 产物 | 服务管理 |
+| --- | --- | --- | --- |
+| Linux | amd64（x86_64） | 静态 musl 二进制 | systemd / OpenRC |
+| Linux | arm64（aarch64） | 静态 musl 二进制 | systemd / OpenRC |
+| macOS | arm64（Apple Silicon） | 原生 Mach-O 二进制 | 手动运行 / launchd |
+| Windows | x64 | 原生 PE 二进制 | 手动运行 / 任务计划程序 |
 
-运行服务只需一个静态二进制。以下能力为可选，用到时才需要：
+Linux 版本是静态链接的 musl 二进制。macOS 与 Windows 版本是系统原生二进制。
+
+以下能力为可选，用到时才需要：
 
 | 依赖 | 用于 |
 | --- | --- |
 | `ffmpeg` | DASH 录制、素材转换 |
-| systemd 或 OpenRC | 开机自启（安装脚本自动选择） |
+| systemd 或 OpenRC | Linux 开机自启（安装脚本自动选择） |
+| Python 3 | EPG 脚本源（默认命令名 `python3`） |
 
-> macOS 与 Windows 不在支持范围。开发机上可以跑单元测试与契约测试。
+### macOS 与 Windows
+
+这两个平台的发布包只含二进制和运行说明，不含 `install.sh`。`install.sh` 只支持 Linux。
+
+macOS arm64：
+
+```bash
+tar -xzf tv-buddy-<version>-macos-arm64.tar.gz
+cd tv-buddy-<version>-macos-arm64
+xattr -d com.apple.quarantine ./tv-buddy   # 未签名，首次运行需要
+./tv-buddy ./tv-buddy.db
+```
+
+Windows x64：
+
+```powershell
+Expand-Archive tv-buddy-<version>-windows-x64.zip
+cd tv-buddy-<version>-windows-x64
+.\tv-buddy.exe .\tv-buddy.db
+```
+
+限制：
+
+- 两个包都未签名。macOS 会被 Gatekeeper 拦截；Windows 会出现 SmartScreen 提示。
+- 不注册系统服务。需要开机自启时，macOS 用 launchd，Windows 用任务计划程序或 NSSM。
+- Windows 的数据库权限依赖所在目录的 ACL。请把 `tv-buddy.db` 放在用户目录，不要放在共享目录。
+- EPG 脚本默认调用 `python3`。Windows 上请安装 Python，并确保命令名是 `python3`，或修改脚本配置。
+- Docker 镜像仍是 Linux。macOS 的 Docker Desktop 运行 `linux/arm64` 镜像；Windows 的 Docker Desktop（WSL2）运行 `linux/amd64` 镜像。
 
 ---
 
@@ -744,7 +776,7 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 
 ## 已知限制
 
-- **平台**：只支持 Linux amd64 与 arm64。
+- **平台**：Linux amd64/arm64、macOS arm64、Windows x64。macOS 与 Windows 不提供系统服务集成。
 - **Remux**：纯 Rust 切片。冷启动时在首批切片产出前返回 `503 remux warming up`，不是恒 503。
 - **DASH**：已把 MPD 转成 HLS。需要 `SegmentTimeline`，或 `SegmentTemplate@duration` 加总时长。CENC/ClearKey 不解密，按原字节代理。
 - **缓存**：无容量上限校验。`cache.backend=memory` 只回显，实际仍落盘。
