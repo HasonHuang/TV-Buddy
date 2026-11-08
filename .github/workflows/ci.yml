@@ -231,3 +231,138 @@ jobs:
           fail_on_unmatched_files: true
           # 带后缀的 tag（如 -beta.1）发布为预发布，不会被 /releases/latest 选中。
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # Docker Hub 镜像。
+  #
+  # 多架构用原生 runner 各编译一次。不要用 QEMU 模拟 arm64 跑 Rust：
+  # release 配置开了 LTO，模拟构建会非常慢，容易超过作业时限。
+  # 两个架构先按 digest 推送，再由 docker-merge 合成 manifest。
+  #
+  # 仓库 Secrets 需要配置：
+  #   DOCKERHUB_USERNAME   Docker Hub 用户名
+  #   DOCKERHUB_TOKEN      Docker Hub 访问令牌（Read & Write）
+  # 镜像名固定为 <DOCKERHUB_USERNAME>/tv-buddy。
+  docker-build:
+    name: Docker 镜像 ${{ matrix.arch }}
+    needs: release
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    env:
+      IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/tv-buddy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: 构建并推送 ${{ matrix.arch }}
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          build-args: |
+            TV_BUDDY_VERSION=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.title=TV Buddy
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+          # 按 digest 推送，不带 tag。合并阶段再统一打 tag。
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          # 关闭 provenance/SBOM。开启时 digest 指向带附加清单的 index，
+          # 两个架构再合并会得到嵌套 index，Docker 拉取时可能无法解析。
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=docker-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=docker-${{ matrix.arch }}
+      - name: 记录 digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          [ -n "$DIGEST" ] || { echo "构建没有返回 digest" >&2; exit 1; }
+          mkdir -p "$RUNNER_TEMP/digests"
+          printf '%s@%s\n' "$IMAGE" "$DIGEST" > "$RUNNER_TEMP/digests/${{ matrix.arch }}.txt"
+          cat "$RUNNER_TEMP/digests/${{ matrix.arch }}.txt"
+      - name: 冒烟运行
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          cid=$(docker run -d --platform "linux/${{ matrix.arch }}" "$IMAGE@$DIGEST")
+          ok=0
+          i=0
+          # 健康检查在镜像里定义了 start-period=10s、interval=30s。
+          # 最多等 60s，够启动并完成一次探测。
+          while [ "$i" -lt 30 ]; do
+            status=$(docker inspect -f \
+              '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+              "$cid")
+            [ "$status" = healthy ] && { ok=1; break; }
+            [ "$status" = exited ] && break
+            sleep 2
+            i=$((i + 1))
+          done
+          if [ "$ok" -ne 1 ]; then
+            docker logs "$cid" || true
+            docker rm -fv "$cid" >/dev/null 2>&1 || true
+            echo "容器健康检查未通过：${status:-unknown}" >&2
+            exit 1
+          fi
+          docker rm -fv "$cid" >/dev/null
+          echo "健康检查通过"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/${{ matrix.arch }}.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-merge:
+    name: Docker 合并多架构
+    needs: docker-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: docker-digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: 合并 manifest 并打标签
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/tv-buddy
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          sources=$(cat "$RUNNER_TEMP"/digests/*.txt)
+          [ -n "$sources" ] || { echo "没有可合并的 digest" >&2; exit 1; }
+          # 镜像版本号与发布包一致，去掉 tag 的前导 v。
+          set -- -t "${IMAGE}:${version}" -t "${IMAGE}:${GITHUB_REF_NAME}"
+          # 预发布 tag（含 -）不打 latest。
+          case "$GITHUB_REF_NAME" in
+            *-*) ;;
+            *) set -- "$@" -t "${IMAGE}:latest" ;;
+          esac
+          # $sources 必须按空白拆分，才能一次传入多个 digest。
+          # shellcheck disable=SC2086
+          docker buildx imagetools create "$@" $sources
+          docker buildx imagetools inspect "${IMAGE}:${version}"

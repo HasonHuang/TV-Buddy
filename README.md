@@ -220,6 +220,25 @@ docker run -d --name tv-buddy -p 9900:9900 -v /srv/tv-buddy:/data tv-buddy
 
 `tests/manual/local/docker-compose.yml` 复用同一份 `Dockerfile` 的 `local-test` 目标，验证安装流程。
 
+### Docker Hub 自动发布
+
+推送 `v*` 标签时，CI 先跑测试和发布包，再构建 `linux/amd64` 与 `linux/arm64` 镜像并推送到 Docker Hub。两个架构用原生 runner 各自编译，最后合并成一个 manifest。
+
+仓库需要配置两个 Secrets：
+
+| Secret | 用途 |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hub 用户名 |
+| `DOCKERHUB_TOKEN` | Docker Hub 访问令牌，权限选 Read & Write |
+
+镜像名是 `<DOCKERHUB_USERNAME>/tv-buddy`。稳定版本打 `latest`，预发布版本（tag 含 `-`）只打版本号。
+
+```bash
+docker pull <DOCKERHUB_USERNAME>/tv-buddy:latest
+docker run -d --name tv-buddy -p 9900:9900 -v tv-buddy-data:/data \
+  <DOCKERHUB_USERNAME>/tv-buddy:latest
+```
+
 ---
 
 ## 首次使用
