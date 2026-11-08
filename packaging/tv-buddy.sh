@@ -376,7 +376,7 @@ release_asset_url() { # $1=arch $2=json
     printf '%s\n' "$2" \
         | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
         | sed 's/.*"\(https[^"]*\)"/\1/' \
-        | grep -e "-$1\.tar\.gz\$" \
+        | grep -e "-linux-$1\.tar\.gz\$" \
         | head -n 1
 }
 
@@ -417,17 +417,15 @@ release_url() {
     fi
 
     [ -n "$tag" ] || return 1
-    # 产物名前缀：tv-buddy-*；旧版本用过 tv-buddy-*，一并试。
-    for prefix in tv-buddy tv-buddy; do
-        for candidate in "$tag" "v${tag#v}"; do
-            url="https://github.com/$GITHUB_REPO/releases/download/$candidate/${prefix}-${candidate#v}-$arch.tar.gz"
-            if command -v curl >/dev/null 2>&1; then
-                code=$(curl -fsSL -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)
-                [ "$code" = "200" ] || continue
-            fi
-            printf '%s' "$url"
-            return 0
-        done
+    # 产物名：tv-buddy-<version>-linux-<arch>.tar.gz
+    for candidate in "$tag" "v${tag#v}"; do
+        url="https://github.com/$GITHUB_REPO/releases/download/$candidate/tv-buddy-${candidate#v}-linux-$arch.tar.gz"
+        if command -v curl >/dev/null 2>&1; then
+            code=$(curl -fsSL -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)
+            [ "$code" = "200" ] || continue
+        fi
+        printf '%s' "$url"
+        return 0
     done
     return 1
 }
@@ -459,7 +457,7 @@ update_source() {
     arch=$(detect_arch)
     for dir in "$BASE_DIR/dist" "$BASE_DIR/../dist"; do
         [ -d "$dir" ] || continue
-        latest=$(ls -t "$dir"/tv-buddy-*-"$arch".tar.gz 2>/dev/null | head -n 1 || true)
+        latest=$(ls -t "$dir"/tv-buddy-*-linux-"$arch".tar.gz 2>/dev/null | head -n 1 || true)
         if [ -n "$latest" ]; then
             extract_binary "$latest"
             return

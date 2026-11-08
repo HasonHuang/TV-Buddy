@@ -72,7 +72,7 @@ jobs:
           scripts/smoke-cli.sh
 
   release:
-    name: 发布包 ${{ matrix.name }}
+    name: 发布包 Linux ${{ matrix.name }}
     # 测试全绿后再出包，避免把坏版本发到 Release。
     needs: [frontend, rust]
     runs-on: ${{ matrix.runner }}
@@ -136,9 +136,9 @@ jobs:
           PY
       - name: 打包
         run: |
-          # 版本取 tag（去掉前缀 v）：$PRODUCT_SLUG-<version>-<arch>.tar.gz[.sha256]
+          # 版本取 tag（去掉前缀 v）：$PRODUCT_SLUG-<version>-linux-<arch>.tar.gz[.sha256]
           VERSION="${GITHUB_REF_NAME#v}"
-          NAME="${PRODUCT_SLUG}-${VERSION}-${{ matrix.name }}"
+          NAME="${PRODUCT_SLUG}-${VERSION}-linux-${{ matrix.name }}"
           STAGE="out/${NAME}"
           mkdir -p "$STAGE"
           # 包内可执行文件名沿用二进制产物名，安装脚本按它查找。
@@ -158,7 +158,7 @@ jobs:
       - name: 冒烟解包
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          NAME="${PRODUCT_SLUG}-${VERSION}-${{ matrix.name }}"
+          NAME="${PRODUCT_SLUG}-${VERSION}-linux-${{ matrix.name }}"
           mkdir -p check
           tar -C check -xzf "out/${NAME}.tar.gz"
           for f in tv-buddy tv-buddy.sh tv-buddy.service tv-buddy.openrc install.sh; do
@@ -185,7 +185,7 @@ jobs:
           echo "包内容 OK"
       - uses: actions/upload-artifact@v4
         with:
-          name: tv-buddy-${{ matrix.name }}
+          name: tv-buddy-linux-${{ matrix.name }}
           path: |
             out/*.tar.gz
             out/*.tar.gz.sha256

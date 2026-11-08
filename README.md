@@ -132,7 +132,7 @@ curl -fsSL https://raw.githubusercontent.com/HasonHuang/TV-Buddy/main/install.sh
 脚本按如下步骤工作：
 
 1. 读取 `uname -m`，选 `amd64` 或 `arm64`。
-2. 从最新 Release 下载 `tv-buddy-<version>-<arch>.tar.gz`。
+2. 从最新 Release 下载 `tv-buddy-<version>-linux-<arch>.tar.gz`。
 3. 校验同名 `.sha256` 文件。
 4. 解包到 `/opt/tv-buddy`。
 5. 注册 systemd 或 OpenRC 服务。
@@ -153,8 +153,8 @@ sudo sh install.sh --version v2026.0.0 --repo HasonHuang/TV-Buddy
 
 ```bash
 # 1) 下载并解包
-tar -xzf tv-buddy-<version>-arm64.tar.gz
-cd tv-buddy-<version>-arm64
+tar -xzf tv-buddy-<version>-linux-arm64.tar.gz
+cd tv-buddy-<version>-linux-arm64
 
 # 2) 安装（包内自带 install.sh，不再下载）
 sudo ./install.sh
@@ -165,7 +165,7 @@ sudo ./install.sh
 | 场景 | 命令 |
 | --- | --- |
 | 从仓库本地构建包安装 | `sudo ./install.sh --local` |
-| 指定归档 | `sudo ./install.sh --archive dist/tv-buddy-<version>-arm64.tar.gz` |
+| 指定归档 | `sudo ./install.sh --archive dist/tv-buddy-<version>-linux-arm64.tar.gz` |
 | 指定 URL | `sudo ./install.sh --archive https://example.com/pkg.tar.gz` |
 | 只装文件，不注册服务 | `./install.sh --prefix "$HOME/tv-buddy" --no-service` |
 | 自定义目录并启动 | `sudo ./install.sh --prefix /srv/tv-buddy` |
@@ -612,13 +612,13 @@ scripts/build-release.sh            # amd64 与 arm64 两个静态 musl 包
 scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
 ```
 
-产物在 `dist/tv-buddy-<version>-<arch>.tar.gz`，含二进制、启停脚本、安装脚本与服务单元。CI 产出的资产名与本地一致。
+产物在 `dist/tv-buddy-<version>-linux-<arch>.tar.gz`，含二进制、启停脚本、安装脚本与服务单元。CI 产出的资产名与本地一致。
 
 构建用 Docker `rust:1-alpine`。镜像宿主三元组即 `*-linux-musl`，直接产出静态二进制。容器无外网，依赖来自宿主 `~/.cargo` 缓存。
 
 ### 发布
 
-GitHub Actions 只在推送 `v*` tag 时执行。流水线三阶段：前端构建 → 格式/静态检查/测试 → 交叉编译。通过后自动创建 Release 并上传 `tv-buddy-<version>-<arch>.tar.gz` 与 `.sha256`。
+GitHub Actions 只在推送 `v*` tag 时执行。流水线三阶段：前端构建 → 格式/静态检查/测试 → 交叉编译。通过后自动创建 Release 并上传 `tv-buddy-<version>-linux-<arch>.tar.gz` 与 `.sha256`。
 
 ```bash
 git tag v2026.4.0

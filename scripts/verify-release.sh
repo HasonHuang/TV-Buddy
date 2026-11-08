@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ARCH=${1:-arm64}
-TARBALL=$(ls -1 dist/tv-buddy-*-"$ARCH".tar.gz 2>/dev/null | tail -1)
+TARBALL=$(ls -1 dist/tv-buddy-*-linux-"$ARCH".tar.gz 2>/dev/null | tail -1)
 [ -n "$TARBALL" ] || { echo "找不到 arch=$ARCH 的发布包"; exit 1; }
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT

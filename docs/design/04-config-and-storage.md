@@ -236,10 +236,10 @@
 | 产物校验 | `scripts/verify-release.sh`：`ldd` 无动态依赖、能启动、`/health` 返回 `ok` | `scripts/verify-release.sh` |
 | 服务 | systemd 单元；Alpine 用 OpenRC | S-ENV-04 |
 
-发布包内容（`dist/tv-buddy-<version>-<arch>.tar.gz`）：
+发布包内容（`dist/tv-buddy-<version>-linux-<arch>.tar.gz`）：
 
 ```text
-tv-buddy-<version>-<arch>/
+tv-buddy-<version>-linux-<arch>/
 ├─ tv-buddy            静态 musl 二进制
 ├─ tv-buddy.sh         管理 CLI（菜单、启停、端口、密码、更新、卸载）
 ├─ install.sh          安装到 /opt/tv-buddy，注册服务

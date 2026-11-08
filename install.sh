@@ -6,7 +6,7 @@
 #   指定版本：sudo sh install.sh --version v2026.3.0
 #   发布包目录：sudo ./install.sh                 # 用旁边的已解包文件，不再下载
 #   仓库根目录：sudo ./install.sh --local         # 改用 dist/ 中最新的同架构包
-#   指定安装包：sudo ./install.sh --archive /path/to/tv-buddy-<version>-<arch>.tar.gz
+#   指定安装包：sudo ./install.sh --archive /path/to/tv-buddy-<version>-linux-<arch>.tar.gz
 #   低配机器：  sudo ./install.sh --low-spec   # 写入省内存/省 CPU 的参数
 #   远程安装包：sudo ./install.sh --archive https://example.com/tv-buddy.tar.gz
 #
@@ -220,7 +220,7 @@ release_asset_url() { # $1=arch $2=json
     printf '%s\n' "$2" \
         | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
         | sed 's/.*"\(https[^"]*\)"/\1/' \
-        | grep -e "-$1\.tar\.gz\$" \
+        | grep -e "-linux-$1\.tar\.gz\$" \
         | head -n 1
 }
 
@@ -264,9 +264,9 @@ release_url() {
     fi
 
     [ -n "$tag" ] || return 1
-    # 产物名：tv-buddy-<version>-<arch>.tar.gz
+    # 产物名：tv-buddy-<version>-linux-<arch>.tar.gz
     for candidate in "$tag" "v${tag#v}"; do
-        url="https://github.com/$GITHUB_REPO/releases/download/$candidate/tv-buddy-${candidate#v}-$arch.tar.gz"
+        url="https://github.com/$GITHUB_REPO/releases/download/$candidate/tv-buddy-${candidate#v}-linux-$arch.tar.gz"
         if command -v curl >/dev/null 2>&1; then
             code=$(curl -fsSL -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)
             [ "$code" = "200" ] || continue
@@ -322,7 +322,7 @@ elif [ -x "$SCRIPT_DIR/tv-buddy" ]; then
     BIN_SRC=$SCRIPT_DIR/tv-buddy
 elif [ "$USE_DIST" = 1 ]; then
     # 显式要求用本地构建产物（仓库根目录的开发流程）。
-    LATEST=$(ls -t "$SCRIPT_DIR"/dist/tv-buddy-*-"$ARCH".tar.gz 2>/dev/null | head -n 1 || true)
+    LATEST=$(ls -t "$SCRIPT_DIR"/dist/tv-buddy-*-linux-"$ARCH".tar.gz 2>/dev/null | head -n 1 || true)
     [ -n "$LATEST" ] || fail "未找到本地安装包。先运行 scripts/build-release.sh ${ARCH}，或去掉 --local 直接从 Release 安装"
     verify_digest "$LATEST"
     extract_archive "$LATEST"

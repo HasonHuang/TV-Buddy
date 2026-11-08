@@ -98,7 +98,7 @@ echo "$TAG"
 用已下载的发布包安装。`<version>` 是 tag 去掉前缀 `v`，`<arch>` 是 `amd64` 或 `arm64`：
 
 ```bash
-sudo sh install.sh --archive "/root/tv-buddy-<version>-<arch>.tar.gz" --low-spec
+sudo sh install.sh --archive "/root/tv-buddy-<version>-linux-<arch>.tar.gz" --low-spec
 ```
 
 或者直接从 Release 装指定 tag：
@@ -107,7 +107,7 @@ sudo sh install.sh --archive "/root/tv-buddy-<version>-<arch>.tar.gz" --low-spec
 sudo sh install.sh --version "$TAG"
 ```
 
-包名格式为 `tv-buddy-<version>-<arch>.tar.gz`（`.github/workflows/ci.yml`）。
+包名格式为 `tv-buddy-<version>-linux-<arch>.tar.gz`（`.github/workflows/ci.yml`）。
 
 预期输出包含：
 

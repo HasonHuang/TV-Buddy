@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 构建发布产物：两个 musl 目标 → dist/tv-buddy-<version>-<arch>.tar.gz
+# 构建发布产物：两个 musl 目标 → dist/tv-buddy-<version>-linux-<arch>.tar.gz
 #
 # 用 Docker + rust:1-alpine：Alpine 镜像的宿主三元组本身就是 *-unknown-linux-musl，
 # 因此直接 `cargo build --release` 就得到静态 musl 二进制。
@@ -47,7 +47,7 @@ package() { # 参数：架构（amd64/arm64）
     -e TV_BUDDY_VERSION="$VERSION" \
     "$IMAGE" cargo build --release --offline
 
-  local stage="$OUT/tv-buddy-$VERSION-$platform"
+  local stage="$OUT/tv-buddy-$VERSION-linux-$platform"
   rm -rf "$stage"
   install -d "$stage"
   install -m 0755 "target/pack-$platform/release/tv-buddy" "$stage/tv-buddy"
@@ -55,9 +55,9 @@ package() { # 参数：架构（amd64/arm64）
   install -m 0755 install.sh "$stage/install.sh"
   install -m 0644 packaging/tv-buddy.service "$stage/tv-buddy.service"
   install -m 0755 packaging/tv-buddy.openrc "$stage/tv-buddy.openrc"
-  tar -C "$OUT" -czf "$OUT/tv-buddy-$VERSION-$platform.tar.gz" "tv-buddy-$VERSION-$platform"
-  ( cd "$OUT" && shasum -a 256 "tv-buddy-$VERSION-$platform.tar.gz" > "tv-buddy-$VERSION-$platform.tar.gz.sha256" )
-  echo "    产物：$OUT/tv-buddy-$VERSION-$platform.tar.gz"
+  tar -C "$OUT" -czf "$OUT/tv-buddy-$VERSION-linux-$platform.tar.gz" "tv-buddy-$VERSION-linux-$platform"
+  ( cd "$OUT" && shasum -a 256 "tv-buddy-$VERSION-linux-$platform.tar.gz" > "tv-buddy-$VERSION-linux-$platform.tar.gz.sha256" )
+  echo "    产物：$OUT/tv-buddy-$VERSION-linux-$platform.tar.gz"
 }
 
 if [ "$#" -gt 0 ]; then

@@ -79,7 +79,7 @@ echo "exit=$?"
 预期输出。尖括号内的值随版本与网络变化：
 
 ```text
-下载：https://github.com/HasonHuang/TV-Buddy/releases/download/<tag>/tv-buddy-<version>-<arch>.tar.gz
+下载：https://github.com/HasonHuang/TV-Buddy/releases/download/<tag>/tv-buddy-<version>-linux-<arch>.tar.gz
 校验通过：pkg.tar.gz
 （首次启动时创建数据库并生成管理员口令文件）
 命令：/usr/local/bin/tv-buddy
@@ -93,7 +93,7 @@ exit=0
 
 说明：
 
-- `<version>` 是 tag 去掉前缀 `v`。资产名由工作流生成：`tv-buddy-<version>-<arch>.tar.gz`（`.github/workflows/ci.yml:137-138`）。
+- `<version>` 是 tag 去掉前缀 `v`。资产名由工作流的 Linux 打包步骤生成：`tv-buddy-<version>-linux-<arch>.tar.gz`（`.github/workflows/ci.yml`）。
 - `初始口令：` 行按 `$PREFIX/cache/` 拼接（`install.sh:433`）。程序写入的路径固定是「数据库所在目录 + `/cache/admin_initial_credentials.txt`」（`src/main.rs:106-117`），数据库路径又是 `$PREFIX/tv-buddy.db`，两者一致。改过 `cache.disk_path` 不影响该文件。
 - `下载：` 行的 URL 可能来自 Release 资产列表，也可能由 tag 拼接（`install.sh:212-270`）。仓库只有预发布版本时，脚本先打印 `未找到正式版，改用最新 Release：<asset>`（`install.sh:253`）。
 - `校验通过：pkg.tar.gz` 打印的是临时文件名，不是 Release 资产名（`install.sh:172`、`install.sh:293`、`install.sh:326`）。Release 缺少同名 `.sha256` 时不打印该行（`install.sh:160`、`install.sh:294-298`）。
