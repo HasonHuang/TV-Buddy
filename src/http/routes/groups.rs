@@ -85,6 +85,7 @@ pub async fn update_group(
         .group(&gid)
         .ok_or_else(|| ApiError::not_found("Group not found"))?;
     let updated: Group = merge_into(group, &body)?;
+    let offline_changed = group.offline_on_fail != updated.offline_on_fail;
 
     state
         .mutate(|config| {
@@ -96,6 +97,9 @@ pub async fn update_group(
             Ok(())
         })
         .map_err(|err| ApiError::internal(err.to_string()))?;
+    if offline_changed {
+        state.health.forget_group(&gid);
+    }
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -118,6 +122,7 @@ pub async fn delete_group(
             Ok(())
         })
         .map_err(|err| ApiError::internal(err.to_string()))?;
+    state.health.forget_group(&gid);
     tracing::info!(group = %gid, "删除分组");
     Ok(Json(json!({ "ok": true })))
 }
@@ -170,6 +175,7 @@ pub async fn create_channel(
             Ok(())
         })
         .map_err(|err| ApiError::internal(err.to_string()))?;
+    state.health.forget(&gid, &id);
     tracing::info!(group = %gid, channel = %id, "新建频道");
     Ok(Json(json!({ "ok": true })))
 }
@@ -187,13 +193,15 @@ pub async fn update_channel(
         .and_then(|group| group.channels.iter().find(|channel| channel.id == cid))
         .ok_or_else(|| ApiError::not_found("Channel not found"))?;
     let mut updated: Channel = merge_into(channel, &body)?;
+    let upstream_changed = subscription::upstream_differs(channel, &updated);
     // 改上游字段后固定。请求体显式带 `sync_follow` 时以请求为准。
-    if !channel.source_id.is_empty()
-        && body.get("sync_follow").is_none()
-        && subscription::upstream_differs(channel, &updated)
-    {
+    if !channel.source_id.is_empty() && body.get("sync_follow").is_none() && upstream_changed {
         updated.sync_follow = false;
     }
+    let offline_changed = channel.offline_on_fail != updated.offline_on_fail;
+    // 解析脚本或上游地址变化后，旧探测结果不再代表这个频道。
+    let resolver_changed = crate::resolver::Setting::from_channel(channel)
+        != crate::resolver::Setting::from_channel(&updated);
 
     state
         .mutate(|config| {
@@ -209,6 +217,9 @@ pub async fn update_channel(
             Ok(())
         })
         .map_err(|err| ApiError::internal(err.to_string()))?;
+    if offline_changed || upstream_changed || resolver_changed {
+        state.health.forget(&gid, &cid);
+    }
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -237,6 +248,7 @@ pub async fn delete_channel(
             Ok(())
         })
         .map_err(|err| ApiError::internal(err.to_string()))?;
+    state.health.forget(&gid, &cid);
     tracing::info!(group = %gid, channel = %cid, "删除频道");
     Ok(Json(json!({ "ok": true })))
 }
@@ -334,6 +346,11 @@ fn import(
             Ok(())
         })
         .map_err(|err| ApiError::internal(format!("{err:#}")))?;
+
+    // 覆盖导入可能换掉频道地址。丢掉旧探测结果，按在线处理到下一轮探测。
+    for group in &groups {
+        state.health.forget_group(&group.id);
+    }
 
     Ok(Json(json!({
         "ok": true,
@@ -516,6 +533,7 @@ pub async fn import_m3u(
         draft.channels.push(channel);
     }
     let parsed_groups = drafts.len();
+    let draft_ids: Vec<String> = drafts.iter().map(|draft| draft.id.clone()).collect();
 
     let mut added_groups = 0usize;
     let mut merged_channels = 0usize;
@@ -581,6 +599,11 @@ pub async fn import_m3u(
             Ok(())
         })
         .map_err(|err| ApiError::internal(format!("{err:#}")))?;
+
+    // 替换导入会换掉频道地址与设置。丢掉旧探测结果。
+    for gid in &draft_ids {
+        state.health.forget_group(gid);
+    }
 
     Ok(Json(json!({
         "ok": true,

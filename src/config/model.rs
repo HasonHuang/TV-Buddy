@@ -132,6 +132,21 @@ impl Config {
         }
         cfg
     }
+
+    /// 频道是否启用「探测失败下线」。
+    ///
+    /// 频道级三态优先，缺省继承分组级。只影响订阅清单，不影响播放。
+    pub fn offline_on_fail_for(&self, gid: &str, cid: &str) -> bool {
+        let Some(group) = self.group(gid) else {
+            return false;
+        };
+        group
+            .channels
+            .iter()
+            .find(|channel| channel.id == cid)
+            .and_then(|channel| channel.offline_on_fail)
+            .unwrap_or(group.offline_on_fail)
+    }
 }
 
 /// `[server]`。
@@ -971,6 +986,10 @@ pub struct Group {
     /// 分组级预取覆盖；缺省继承全局。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefetch: Option<PrefetchOverrideCfg>,
+    /// 探测失败下线。开启后，组内探测失败的频道不进订阅。
+    ///
+    /// 频道级 `offline_on_fail` 优先。默认关闭。
+    pub offline_on_fail: bool,
     /// `manual` 或 `sync`。手工分组不写该键。
     #[serde(skip_serializing_if = "is_manual")]
     pub origin: String,
@@ -1001,6 +1020,7 @@ impl Default for Group {
             headers: Vec::new(),
             proxy: None,
             prefetch: None,
+            offline_on_fail: false,
             origin: "manual".into(),
             source_id: String::new(),
             source_group: String::new(),
@@ -1024,6 +1044,9 @@ pub struct Channel {
     /// 频道级预取覆盖；覆盖分组级与全局。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefetch: Option<PrefetchOverrideCfg>,
+    /// 探测失败下线。缺省继承分组级。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offline_on_fail: Option<bool>,
     pub selected_tracks: Vec<String>,
     pub dash_mode: String,
     pub livestream: bool,
@@ -1059,6 +1082,7 @@ impl Default for Channel {
             headers: Vec::new(),
             proxy: None,
             prefetch: None,
+            offline_on_fail: None,
             selected_tracks: Vec::new(),
             dash_mode: "continuous".into(),
             livestream: false,
@@ -1449,6 +1473,51 @@ mod tests {
             "http://group:8080"
         );
         assert!(config.proxy_for("missing", "c").is_none());
+    }
+
+    #[test]
+    fn offline_on_fail_inherits_group_and_channel_overrides_it() {
+        let mut config = Config::default();
+        let mut group = Group {
+            id: "g".into(),
+            offline_on_fail: true,
+            ..Group::default()
+        };
+        group.channels.push(Channel {
+            id: "inherit".into(),
+            ..Channel::default()
+        });
+        group.channels.push(Channel {
+            id: "off".into(),
+            offline_on_fail: Some(false),
+            ..Channel::default()
+        });
+        group.channels.push(Channel {
+            id: "on".into(),
+            offline_on_fail: Some(true),
+            ..Channel::default()
+        });
+        config.groups.push(Group {
+            id: "quiet".into(),
+            ..Group::default()
+        });
+        config.groups[0].channels.push(Channel {
+            id: "force".into(),
+            offline_on_fail: Some(true),
+            ..Channel::default()
+        });
+        config.groups[0].channels.push(Channel {
+            id: "inherit".into(),
+            ..Channel::default()
+        });
+        config.groups.push(group);
+
+        assert!(config.offline_on_fail_for("g", "inherit"));
+        assert!(!config.offline_on_fail_for("g", "off"));
+        assert!(config.offline_on_fail_for("g", "on"));
+        assert!(config.offline_on_fail_for("quiet", "force"));
+        assert!(!config.offline_on_fail_for("quiet", "inherit"));
+        assert!(!config.offline_on_fail_for("missing", "c"));
     }
 
     #[test]

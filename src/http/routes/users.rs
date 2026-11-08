@@ -454,20 +454,21 @@ pub async fn me(
     let token = ensure_web_token(&state, &user)?;
     let config = state.snapshot();
     let base = crate::http::ext::base_url(&headers);
-    let groups: Vec<Value> = crate::playlist::user_view(&config, &user, &base, &token)
-        .iter()
-        .map(|group| {
-            json!({
-                "id": group.id,
-                "name": group.name,
-                "channels": group.channels.iter().map(|channel| json!({
-                    "id": channel.id,
-                    "name": channel.name,
-                    "url": channel.url,
-                })).collect::<Vec<_>>(),
+    let groups: Vec<Value> =
+        crate::playlist::user_view(&config, &user, &base, &token, Some(&state.health))
+            .iter()
+            .map(|group| {
+                json!({
+                    "id": group.id,
+                    "name": group.name,
+                    "channels": group.channels.iter().map(|channel| json!({
+                        "id": channel.id,
+                        "name": channel.name,
+                        "url": channel.url,
+                    })).collect::<Vec<_>>(),
+                })
             })
-        })
-        .collect();
+            .collect();
     Ok(Json(json!({
         "user": user_view(&user),
         "token": token,

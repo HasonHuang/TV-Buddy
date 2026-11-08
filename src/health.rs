@@ -9,6 +9,7 @@
 //!
 //! 周期取 `[health].interval_secs`，超时取 `timeout_secs`，并发取 `concurrency`。
 //! 探测只读，不改配置，也不影响播放链路。
+//! 结果供 `/panel/api/health` 与「探测失败下线」使用。
 
 use std::{
     collections::HashMap,
@@ -18,7 +19,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::state::AppState;
+use crate::{config::model::Channel, state::AppState};
 
 /// 一条频道的探测结果。
 #[derive(Debug, Clone, Serialize)]
@@ -66,6 +67,40 @@ impl Health {
             .unwrap_or_else(|error| error.into_inner())
             .get(&key(gid, cid))
             .cloned()
+    }
+
+    /// 最近一次探测是否失败。
+    ///
+    /// 没有探测记录时返回 `false`。新频道与刚启动的服务按在线处理，
+    /// 等第一轮探测写结果后再判断。
+    pub fn failed(&self, gid: &str, cid: &str) -> bool {
+        self.entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(&key(gid, cid))
+            .is_some_and(|entry| !entry.ok)
+    }
+
+    /// 丢弃一个频道的结果。改探测设置后调用，避免用旧结果判定下线。
+    pub fn forget(&self, gid: &str, cid: &str) {
+        self.entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&key(gid, cid));
+    }
+
+    /// 丢弃一个分组的结果。分组级设置变化时调用。
+    pub fn forget_group(&self, gid: &str) {
+        let prefix = format!("{gid}/");
+        self.entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .retain(|key, _| !key.starts_with(&prefix));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_for_test(&self, gid: &str, cid: &str, ok: bool) {
+        self.record(gid, cid, ok, ok.then_some(200), None, Some(1));
     }
 
     fn record(
@@ -116,14 +151,25 @@ pub fn spawn(state: Arc<AppState>) {
             let timeout = Duration::from_secs(config.health.timeout_secs.max(1));
             let concurrency = config.health.concurrency.clamp(1, 32) as usize;
             let interval = Duration::from_secs(config.health.interval_secs.max(10));
-            let targets: Vec<(String, String, String)> = config
+            // 只有启用「探测失败下线」的频道才解析脚本。其余频道保持旧行为：
+            // 直接探测 `channel.url`，不额外运行 python3。
+            let targets: Vec<(String, String, String, Option<Channel>)> = config
                 .groups
                 .iter()
                 .flat_map(|group| {
                     group
                         .channels
                         .iter()
-                        .map(|channel| (group.id.clone(), channel.id.clone(), channel.url.clone()))
+                        .map(|channel| {
+                            // 与 `Config::offline_on_fail_for` 同序。
+                            let resolve = channel.offline_on_fail.unwrap_or(group.offline_on_fail);
+                            (
+                                group.id.clone(),
+                                channel.id.clone(),
+                                channel.url.clone(),
+                                resolve.then(|| channel.clone()),
+                            )
+                        })
                         .collect::<Vec<_>>()
                 })
                 .collect();
@@ -131,15 +177,47 @@ pub fn spawn(state: Arc<AppState>) {
 
             let mut chunk = targets.into_iter();
             loop {
-                let batch: Vec<(String, String, String)> =
+                let batch: Vec<(String, String, String, Option<Channel>)> =
                     chunk.by_ref().take(concurrency).collect();
                 if batch.is_empty() {
                     break;
                 }
                 let mut handles = Vec::with_capacity(batch.len());
-                for (gid, cid, url) in batch {
+                for (gid, cid, fallback, channel) in batch {
                     let state = state.clone();
                     handles.push(tokio::spawn(async move {
+                        let url = match channel {
+                            Some(channel) => {
+                                match crate::resolver::resolve(&state, &gid, &cid, &channel).await {
+                                    Ok(Some(url)) => url,
+                                    Ok(None) => fallback,
+                                    Err(error) => {
+                                        state.health.record(
+                                            &gid,
+                                            &cid,
+                                            false,
+                                            None,
+                                            Some(format!("解析失败: {error}")),
+                                            None,
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
+                            None => fallback,
+                        };
+                        if url.trim().is_empty() {
+                            state.health.record(
+                                &gid,
+                                &cid,
+                                false,
+                                None,
+                                Some("频道没有上游地址".to_string()),
+                                None,
+                            );
+                            return;
+                        }
+                        // 延迟只算 HTTP 往返，不含解析脚本。
                         let started = Instant::now();
                         let result = state
                             .http_for(&gid, &cid)
@@ -209,5 +287,31 @@ mod tests {
         let health = Health::new();
         assert!(health.get("x", "y").is_none());
         assert!(health.snapshot().is_empty());
+        assert!(!health.failed("x", "y"), "没有记录按在线处理");
+    }
+
+    #[test]
+    fn failed_follows_latest_result() {
+        let health = Health::new();
+        health.record_for_test("g", "c", false);
+        assert!(health.failed("g", "c"));
+        health.record_for_test("g", "c", true);
+        assert!(!health.failed("g", "c"), "探测成功立即恢复");
+    }
+
+    #[test]
+    fn forget_removes_channel_and_group_entries() {
+        let health = Health::new();
+        health.record_for_test("g1", "c1", false);
+        health.record_for_test("g1", "c2", false);
+        health.record_for_test("g2", "c1", false);
+
+        health.forget("g1", "c1");
+        assert!(!health.failed("g1", "c1"));
+        assert!(health.failed("g1", "c2"));
+
+        health.forget_group("g1");
+        assert!(!health.failed("g1", "c2"));
+        assert!(health.failed("g2", "c1"), "只清指定分组");
     }
 }

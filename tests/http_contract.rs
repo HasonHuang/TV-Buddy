@@ -2287,6 +2287,94 @@ async fn m3u_import_creates_groups_and_channels() {
 }
 
 #[tokio::test]
+async fn offline_switch_round_trips_through_group_api() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    // 分组开关。
+    let response = fixture
+        .client
+        .put(format!("{}/panel/api/groups/pg", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(json!({ "offline_on_fail": true }).to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 频道显式关闭。
+    let response = fixture
+        .client
+        .put(format!("{}/panel/api/groups/pg/channels/c1", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(json!({ "offline_on_fail": false }).to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let export = |fixture: &Fixture, auth: &str| {
+        fixture
+            .client
+            .get(format!("{}/panel/api/groups/export", fixture.base))
+            .header("authorization", auth)
+            .send()
+    };
+    let groups: serde_json::Value = serde_json::from_str(
+        &export(&fixture, &auth)
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let pg = groups
+        .as_array()
+        .expect("分组数组")
+        .iter()
+        .find(|group| group["id"] == "pg")
+        .expect("应有 pg");
+    assert_eq!(pg["offline_on_fail"], true);
+    assert_eq!(pg["channels"][0]["offline_on_fail"], false);
+
+    // `null` 清空频道覆盖，回到继承分组。
+    let response = fixture
+        .client
+        .put(format!("{}/panel/api/groups/pg/channels/c1", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(json!({ "offline_on_fail": null }).to_string())
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let groups: serde_json::Value = serde_json::from_str(
+        &export(&fixture, &auth)
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let pg = groups
+        .as_array()
+        .expect("分组数组")
+        .iter()
+        .find(|group| group["id"] == "pg")
+        .expect("应有 pg");
+    assert!(
+        pg["channels"][0].get("offline_on_fail").is_none(),
+        "清空后应省略该键"
+    );
+}
+
+#[tokio::test]
 async fn logo_library_upload_serve_and_delete() {
     let fixture = fixture().await;
     let token = login(&fixture).await;

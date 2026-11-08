@@ -51,7 +51,7 @@ pub async fn playlist(
 
     let config = state.snapshot();
     let base = base_url(&headers);
-    let local = playlist::render_user(&config, &user, &base, &token);
+    let local = playlist::render_user(&config, &user, &base, &token, Some(&state.health));
     let extra = aggregate_sources(&state, &config, &user).await;
     let body = playlist::compose(local, extra, &config.playlist.merge_position);
     (

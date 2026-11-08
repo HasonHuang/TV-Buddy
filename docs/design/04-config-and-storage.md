@@ -100,8 +100,17 @@
 | --- | --- | --- |
 | `Group` | `origin`（`manual` / `sync`） | `manual` 时省略 |
 | `Group` | `source_id`、`source_group` | 空时省略 |
+| `Group` | `offline_on_fail`（默认 false） | 总是写出 |
 | `Channel` | `source_id`、`source_key` | 空时省略 |
 | `Channel` | `sync_follow`（默认 true） | true 时省略，只写 false |
+| `Channel` | `offline_on_fail`（三态） | 未设置时省略，表示继承分组 |
+
+「探测失败下线」只在 `[health].enabled = true` 时生效。
+有效值按频道级 > 分组级解析（`Config::offline_on_fail_for`）。
+频道最近一次探测失败（`/panel/api/health` 的 `entries["<gid>/<cid>"].ok = false`）时，
+它不进订阅清单与「我的订阅」页。探测成功后立即恢复。
+没有探测记录（新频道、刚启动）按在线处理。
+该开关只影响清单，不拦截播放。
 
 ### 1.4 归一与并发
 

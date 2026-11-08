@@ -748,6 +748,7 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 - 导入分组默认跳过 `source_id` 非空的分组。`include_synced=true` 才覆盖。
 - 删除同步频道或分组时，自动写入源 `exclude`。有 `tvg-id` 用 `id:`，否则用 `url:`。
 - 编辑同步频道的上游字段且未显式传 `sync_follow` 时，自动置 `false`。
+- 分组与频道可设 `offline_on_fail`。订阅渲染按 `/panel/api/health` 的最近结果隐藏探测失败的频道；接口形状不变。
 
 ## 7. 错误串对照
 

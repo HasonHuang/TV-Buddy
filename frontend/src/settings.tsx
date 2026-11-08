@@ -1157,7 +1157,7 @@ export function SettingsPage({
                     <BoolPick
                       label="健康探测"
                       path="health.enabled"
-                      tip="定期检查频道源是否可用；关闭后分组页不显示状态点。"
+                      tip="定期检查频道源是否可用；关闭后分组页不显示状态点，也不下线频道。"
                     />
                     <Num
                       label="探测周期"

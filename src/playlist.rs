@@ -13,6 +13,7 @@ use crate::{
         model::{Channel, Group, PlaylistSource},
         Config,
     },
+    health::Health,
     subs::{matches_filter, FilterItem, GroupRules},
 };
 
@@ -20,8 +21,15 @@ use crate::{
 ///
 /// 范围按用户的可见分组与频道过滤。管理员等同全部。
 /// 归档组（`access = "archived"`）一律跳过：归档表示停播。
+/// 开启「探测失败下线」的频道在最近一次探测失败时也跳过。
 /// `token` 是该用户自己的访问令牌，会附到播放地址上。
-pub fn render_user(config: &Config, user: &crate::users::User, base: &str, token: &str) -> String {
+pub fn render_user(
+    config: &Config,
+    user: &crate::users::User,
+    base: &str,
+    token: &str,
+    health: Option<&Health>,
+) -> String {
     let epg_path = format!("/sub/{token}/epg.xml.gz");
     let mut body = header(config, base, &epg_path);
     for group in &config.groups {
@@ -32,10 +40,26 @@ pub fn render_user(config: &Config, user: &crate::users::User, base: &str, token
             if !user.can_see_channel(&group.id, &channel.id) {
                 continue;
             }
+            if offline(config, health, group, channel) {
+                continue;
+            }
             push_entry(&mut body, group, channel, base, Some(token));
         }
     }
     body
+}
+
+/// 频道是否因探测失败而不进订阅。
+///
+/// 三个条件同时成立才下线：探测已启用、有效开关为开、最近一次探测失败。
+/// 没有探测记录按在线处理。
+fn offline(config: &Config, health: Option<&Health>, group: &Group, channel: &Channel) -> bool {
+    if !config.health.enabled {
+        return false;
+    }
+    // 与 `Config::offline_on_fail_for` 同序：频道级优先，缺省继承分组级。
+    let enabled = channel.offline_on_fail.unwrap_or(group.offline_on_fail);
+    enabled && health.is_some_and(|health| health.failed(&group.id, &channel.id))
 }
 
 /// 一个用户可见的频道，供面板「我的订阅」页展示。
@@ -58,12 +82,14 @@ pub struct UserGroup {
 /// 面板「我的订阅」用的可见范围。
 ///
 /// 与 [`render_user`] 共用同一套判定（归档组跳过、分组可见、频道可见、
-/// 非 `passthrough` 都带令牌、`passthrough` 给上游地址），避免两处规则漂移。
+/// 探测失败下线、非 `passthrough` 都带令牌、`passthrough` 给上游地址），
+/// 避免两处规则漂移。
 pub fn user_view(
     config: &Config,
     user: &crate::users::User,
     base: &str,
     token: &str,
+    health: Option<&Health>,
 ) -> Vec<UserGroup> {
     let mut groups = Vec::new();
     for group in &config.groups {
@@ -73,6 +99,9 @@ pub fn user_view(
         let mut channels = Vec::new();
         for channel in &group.channels {
             if !user.can_see_channel(&group.id, &channel.id) {
+                continue;
+            }
+            if offline(config, health, group, channel) {
                 continue;
             }
             channels.push(UserChannel {
@@ -238,7 +267,7 @@ mod tests {
             group("g1", "public", "proxy"),
             group("g4", "archived", "proxy"),
         ]);
-        let body = render_user(&config, &admin(), "http://host", "tok");
+        let body = render_user(&config, &admin(), "http://host", "tok", None);
         assert!(body.contains("http://host/l/tok/g1/c1.m3u8"));
         assert!(!body.contains("?token="), "订阅条目不用查询参数");
         assert!(!body.contains("/g4/"), "归档组停播，不进订阅");
@@ -250,7 +279,7 @@ mod tests {
             group("g1", "public", "proxy"),
             group("g2", "public", "proxy"),
         ]);
-        let body = render_user(&config, &plain(&["g1"]), "http://host", "tok");
+        let body = render_user(&config, &plain(&["g1"]), "http://host", "tok", None);
         assert!(body.contains("/g1/"));
         assert!(!body.contains("/g2/"));
     }
@@ -258,14 +287,14 @@ mod tests {
     #[test]
     fn open_group_entry_has_token() {
         let config = config_with(vec![group("g3", "open", "proxy")]);
-        let body = render_user(&config, &admin(), "http://host", "tok");
+        let body = render_user(&config, &admin(), "http://host", "tok", None);
         assert!(body.contains("http://host/l/tok/g3/c1.m3u8\n"));
     }
 
     #[test]
     fn passthrough_uses_upstream_url() {
         let config = config_with(vec![group("g5", "public", "passthrough")]);
-        let body = render_user(&config, &admin(), "http://host", "tok");
+        let body = render_user(&config, &admin(), "http://host", "tok", None);
         assert!(body.contains("http://upstream/x.m3u8"));
         assert!(!body.contains("/g5/c1"));
     }
@@ -274,7 +303,7 @@ mod tests {
     fn epg_header_points_at_own_subscription() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.epg.enabled = true;
-        let body = render_user(&config, &admin(), "http://host/", "tok");
+        let body = render_user(&config, &admin(), "http://host/", "tok", None);
         let first = body.lines().next().unwrap();
         assert_eq!(
             first,
@@ -285,7 +314,7 @@ mod tests {
     #[test]
     fn epg_header_is_absent_when_disabled() {
         let config = config_with(vec![group("g1", "public", "proxy")]);
-        let body = render_user(&config, &admin(), "http://host", "tok");
+        let body = render_user(&config, &admin(), "http://host", "tok", None);
         let first = body.lines().next().unwrap();
         assert_eq!(first, "#EXTM3U");
     }
@@ -294,7 +323,7 @@ mod tests {
     fn header_lines_are_emitted() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.server.m3u_header_lines = vec!["#EXTVLCOPT:http-user-agent=Rea/1.0".into()];
-        let body = render_user(&config, &admin(), "http://host", "tok");
+        let body = render_user(&config, &admin(), "http://host", "tok", None);
         let first = body.lines().nth(1).unwrap();
         assert_eq!(first, "#EXTVLCOPT:http-user-agent=Rea/1.0");
     }
@@ -303,7 +332,7 @@ mod tests {
     fn mpd_format_uses_mpd_ext() {
         let mut config = config_with(vec![group("g6", "public", "dash")]);
         config.groups[0].format = "mpd".into();
-        let body = render_user(&config, &admin(), "http://host", "tok");
+        let body = render_user(&config, &admin(), "http://host", "tok", None);
         assert!(body.contains("http://host/l/tok/g6/c1.mpd"));
     }
 
@@ -314,7 +343,7 @@ mod tests {
             group("g2", "public", "proxy"),
             group("g4", "archived", "proxy"),
         ]);
-        let groups = user_view(&config, &plain(&["g1", "g2"]), "http://host", "tok");
+        let groups = user_view(&config, &plain(&["g1", "g2"]), "http://host", "tok", None);
         assert_eq!(groups.len(), 2, "归档组不进视图");
         assert_eq!(groups[0].id, "g1");
         assert_eq!(groups[0].channels[0].url, "http://host/l/tok/g1/c1.m3u8");
@@ -324,7 +353,67 @@ mod tests {
     fn user_view_skips_empty_groups() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.groups[0].channels.clear();
-        assert!(user_view(&config, &admin(), "http://host", "tok").is_empty());
+        assert!(user_view(&config, &admin(), "http://host", "tok", None).is_empty());
+    }
+
+    #[test]
+    fn failed_probe_hides_channel_when_group_switch_is_on() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.groups[0].offline_on_fail = true;
+        let health = Health::new();
+
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health));
+        assert!(body.contains("/g1/"), "没有探测记录时按在线处理");
+
+        health.record_for_test("g1", "c1", false);
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health));
+        assert!(!body.contains("/g1/"), "探测失败后不进订阅");
+
+        health.record_for_test("g1", "c1", true);
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health));
+        assert!(body.contains("/g1/"), "探测成功后恢复");
+    }
+
+    #[test]
+    fn channel_switch_overrides_group_switch() {
+        let mut config = config_with(vec![
+            group("g1", "public", "proxy"),
+            group("g2", "public", "proxy"),
+        ]);
+        config.groups[0].offline_on_fail = true;
+        config.groups[0].channels[0].offline_on_fail = Some(false);
+        config.groups[1].channels[0].offline_on_fail = Some(true);
+
+        let health = Health::new();
+        health.record_for_test("g1", "c1", false);
+        health.record_for_test("g2", "c1", false);
+
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health));
+        assert!(body.contains("/g1/"), "频道级关闭覆盖分组级开启");
+        assert!(!body.contains("/g2/"), "频道级开启覆盖分组级关闭");
+    }
+
+    #[test]
+    fn offline_rule_requires_health_enabled() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.groups[0].offline_on_fail = true;
+        config.health.enabled = false;
+        let health = Health::new();
+        health.record_for_test("g1", "c1", false);
+
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health));
+        assert!(body.contains("/g1/"), "探测关闭时不下线");
+    }
+
+    #[test]
+    fn user_view_applies_offline_rule() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.groups[0].offline_on_fail = true;
+        let health = Health::new();
+        health.record_for_test("g1", "c1", false);
+
+        let groups = user_view(&config, &admin(), "http://host", "tok", Some(&health));
+        assert!(groups.is_empty(), "频道全部下线时分组也不显示");
     }
 }
 

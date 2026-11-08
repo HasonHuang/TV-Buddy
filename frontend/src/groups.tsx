@@ -35,6 +35,8 @@ export type Channel = {
   sync_follow?: boolean;
   /** 本地回看（`常驻` 徽章的来源）。 */
   livestream?: boolean;
+  /** 探测失败下线；缺省继承分组。 */
+  offline_on_fail?: boolean;
   /** DASH 轨道选择；空数组 = 全轨道（`全轨道` 徽章的来源）。 */
   selected_tracks?: string[];
   [key: string]: unknown;
@@ -50,6 +52,8 @@ export type Group = {
   origin?: string;
   source_id?: string;
   source_group?: string;
+  /** 分组级「探测失败下线」。频道可单独覆盖。 */
+  offline_on_fail?: boolean;
   channels?: Channel[];
   [key: string]: unknown;
 };
@@ -164,6 +168,7 @@ type GroupForm = {
   format: string;
   headers: string;
   proxy: ProxyForm;
+  offlineOnFail: boolean;
 };
 type ChannelForm = {
   id: string;
@@ -180,6 +185,8 @@ type ChannelForm = {
   livestream: boolean;
   timeshiftHours: string;
   timeshiftMaxGb: string;
+  /** `''` = 跟随分组；`on` / `off` = 显式覆盖。 */
+  offlineOnFail: '' | 'on' | 'off';
   headers: string;
   proxy: ProxyForm;
   /** 来源源 id；空表示本地频道。 */
@@ -207,6 +214,12 @@ const PREFETCH_OPTIONS: { value: PrefetchForm['state']; label: string; desc: str
   { value: 'inherit', label: '只覆盖数量与并发', desc: '开关仍跟随上一级。' },
   { value: 'on', label: '开启预取', desc: '为这个分组开启预取。' },
   { value: 'off', label: '关闭预取', desc: '为这个分组关闭预取。' },
+];
+
+const OFFLINE_OPTIONS: { value: ChannelForm['offlineOnFail']; label: string; desc: string }[] = [
+  { value: '', label: '跟随分组', desc: '使用分组里的「探测失败下线」设置。' },
+  { value: 'on', label: '开启', desc: '探测失败后从订阅清单里移除。' },
+  { value: 'off', label: '关闭', desc: '始终留在订阅清单里。' },
 ];
 
 function emptyProxy(): ProxyForm {
@@ -433,6 +446,8 @@ export function GroupsPage() {
   const [importText, setImportText] = useState('');
   const [m3uMode, setM3uMode] = useState<'append' | 'merge' | 'replace'>('append');
   const [health, setHealth] = useState<Record<string, HealthEntry>>({});
+  /** `[health].enabled`。关闭时不按探测结果下线。 */
+  const [healthEnabled, setHealthEnabled] = useState(true);
   const [tracks, setTracks] = useState<{ gid: string; cid: string; body: string } | null>(null);
   /** 多选：批量删除与批量导出。 */
   const [multi, setMulti] = useState(false);
@@ -469,7 +484,11 @@ export function GroupsPage() {
     try {
       setGroups(await api<Group[]>('GET', '/groups/export'));
       // 逐频道探测结果；未启用探测时为空对象。
-      const body = await api<{ entries?: Record<string, HealthEntry> }>('GET', '/health');
+      const body = await api<{ enabled?: boolean; entries?: Record<string, HealthEntry> }>(
+        'GET',
+        '/health',
+      );
+      setHealthEnabled(body.enabled !== false);
       setHealth(body.entries ?? {});
       const playlist = await api<{ sources?: { id: string; name: string }[] }>(
         'GET',
@@ -528,6 +547,7 @@ export function GroupsPage() {
       headers: textToHeaders(form.headers),
       proxy: proxyPayload(form.proxy),
       prefetch: prefetchPayload(prefetch),
+      offline_on_fail: form.offlineOnFail,
     };
     try {
       if (isNew) {
@@ -559,6 +579,8 @@ export function GroupsPage() {
       livestream: form.livestream,
       timeshift_hours: form.livestream ? Number(form.timeshiftHours) || 0 : 0,
       timeshift_max_gb: form.livestream ? Number(form.timeshiftMaxGb) || 0 : 0,
+      // `null` 清空覆盖，回到跟随分组。
+      offline_on_fail: form.offlineOnFail === '' ? null : form.offlineOnFail === 'on',
       headers: textToHeaders(form.headers),
       proxy: proxyPayload(form.proxy),
       prefetch: prefetchPayload(prefetch),
@@ -864,6 +886,7 @@ export function GroupsPage() {
             format: group.format,
             headers: headersToText(group.headers),
             proxy: proxyForm(group.proxy),
+            offlineOnFail: group.offline_on_fail === true,
           }
         : {
             id: '',
@@ -873,6 +896,7 @@ export function GroupsPage() {
             format: 'hls',
             headers: '',
             proxy: emptyProxy(),
+            offlineOnFail: false,
           },
       prefetch: prefetchForm(group?.prefetch),
       isNew: !group,
@@ -899,6 +923,12 @@ export function GroupsPage() {
             livestream: channel.livestream === true,
             timeshiftHours: String(channel.timeshift_hours ?? 4),
             timeshiftMaxGb: String(channel.timeshift_max_gb ?? 0),
+            offlineOnFail:
+              channel.offline_on_fail === true
+                ? 'on'
+                : channel.offline_on_fail === false
+                  ? 'off'
+                  : '',
             headers: headersToText(channel.headers),
             proxy: proxyForm(channel.proxy),
             sourceId: channel.source_id ?? '',
@@ -919,6 +949,7 @@ export function GroupsPage() {
             livestream: false,
             timeshiftHours: '4',
             timeshiftMaxGb: '0',
+            offlineOnFail: '',
             headers: '',
             proxy: emptyProxy(),
             sourceId: '',
@@ -1140,6 +1171,11 @@ export function GroupsPage() {
               ) : (
                 <Badge tone="muted">本地</Badge>
               )}
+              {group.offline_on_fail === true && (
+                <HoverTip text="组内探测失败的频道不进订阅。频道可以单独覆盖。">
+                  <Badge tone="warn">失败下线</Badge>
+                </HoverTip>
+              )}
               <div className="ops">
                 <HoverTip text={modeTip(group.mode)}>
                   <span className={`badge mode ${group.mode}`}>{modeCode(group.mode)}</span>
@@ -1214,6 +1250,9 @@ export function GroupsPage() {
             {!isCollapsed &&
               channels.map((channel, channelIndex) => {
               const state = health[`${group.id}/${channel.id}`];
+              const offlineOnFail =
+                channel.offline_on_fail ?? (group.offline_on_fail === true);
+              const offline = healthEnabled && offlineOnFail && state?.ok === false;
               const logo = text(channel, 'logo') || text(channel, 'tvg_logo');
               const tvgId = text(channel, 'tvg_id');
               const allTracks = group.mode === 'dash' && (channel.selected_tracks ?? []).length === 0;
@@ -1294,6 +1333,11 @@ export function GroupsPage() {
                       <span>{channel.name || channel.id}</span>
                       <span className="cid">[{channel.id}]</span>
                       {state?.ok === false && <Badge tone="warn">异常</Badge>}
+                      {offline && (
+                        <HoverTip text="最近一次探测失败，已从订阅清单移除。探测成功后自动恢复。">
+                          <Badge tone="danger">已下线</Badge>
+                        </HoverTip>
+                      )}
                       {channel.livestream === true && <Badge tone="info">回看</Badge>}
                       {allTracks && <Badge tone="muted">全部轨道</Badge>}
                     </div>
@@ -1495,6 +1539,22 @@ export function GroupsPage() {
                 })
               }
               width={200}
+            />
+          </Field>
+          <Field
+            label="探测失败下线"
+            tip="开启后，组内最近一次探测失败的频道不出现在订阅里。探测成功后自动恢复。频道可以单独覆盖。"
+            hint="默认关闭。需要启用健康探测。"
+          >
+            <Switch
+              label="探测失败下线"
+              checked={groupForm.form.offlineOnFail}
+              onChange={(offlineOnFail) =>
+                setGroupForm({
+                  ...groupForm,
+                  form: { ...groupForm.form, offlineOnFail },
+                })
+              }
             />
           </Field>
           <NetworkBlock
@@ -1767,6 +1827,30 @@ export function GroupsPage() {
               </div>
             )}
           </details>
+
+          <hr className="divider" />
+          <div className="section-title">探测下线</div>
+          <Field
+            label="探测失败下线"
+            tip="开启后，最近一次探测失败时，这个频道不出现在订阅清单里。探测成功后自动恢复。"
+            hint="默认跟随分组。需要启用健康探测。"
+          >
+            <Select
+              ariaLabel="探测失败下线"
+              value={channelForm.form.offlineOnFail}
+              options={OFFLINE_OPTIONS}
+              onChange={(next) =>
+                setChannelForm({
+                  ...channelForm,
+                  form: {
+                    ...channelForm.form,
+                    offlineOnFail: next as ChannelForm['offlineOnFail'],
+                  },
+                })
+              }
+              width={200}
+            />
+          </Field>
 
           <NetworkBlock
             summary="网络配置 · 留空则使用分组配置"
