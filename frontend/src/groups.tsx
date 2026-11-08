@@ -92,9 +92,16 @@ const FIXED_HINT = '已停止跟随。同步不改名称、地址和台标。来
 /** 分组标题栏里的控件。点击这些控件不切换折叠。 */
 const GROUP_HEAD_CONTROLS = 'button, input, select, textarea, a, .grip, .hover-tip';
 
+/** 频道行里的操作控件。点击这些控件不切换选中。 */
+const CHANNEL_ROW_CONTROLS = 'button, input, select, textarea, a, .grip';
+
 /** 事件起点或终点落在控件上时返回 true。 */
 function hitsControl(node: EventTarget | null): boolean {
   return node instanceof Element && node.closest(GROUP_HEAD_CONTROLS) !== null;
+}
+
+function hitsChannelControl(node: EventTarget | null): boolean {
+  return node instanceof Element && node.closest(CHANNEL_ROW_CONTROLS) !== null;
 }
 
 /** 直接切换拖动落点样式，避免拖动经过每一行都触发 React 重渲染。 */
@@ -430,6 +437,8 @@ export function GroupsPage() {
   /** 多选：批量删除与批量导出。 */
   const [multi, setMulti] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  /** 选中的频道。分组单独记录，删除时再合并。 */
+  const [selectedChannels, setSelectedChannels] = useState<{ gid: string; cid: string }[]>([]);
   /** 已折叠的分组 id。只影响本页显示，不写回配置。 */
   const [collapsed, setCollapsed] = useState<string[]>([]);
   /** 正在拖动的分组 id。为空表示没有拖动。 */
@@ -479,6 +488,25 @@ export function GroupsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 分组或频道被单独删除后，清掉已失效的选中项。
+  useEffect(() => {
+    const groupIds = new Set(groups.map((group) => group.id));
+    const channelIds = new Map(
+      groups.map((group) => [
+        group.id,
+        new Set((group.channels ?? []).map((channel) => channel.id)),
+      ]),
+    );
+    setSelected((current) => {
+      const next = current.filter((gid) => groupIds.has(gid));
+      return next.length === current.length ? current : next;
+    });
+    setSelectedChannels((current) => {
+      const next = current.filter((item) => channelIds.get(item.gid)?.has(item.cid) ?? false);
+      return next.length === current.length ? current : next;
+    });
+  }, [groups]);
 
   const loadScripts = useCallback(async () => {
     try {
@@ -760,6 +788,17 @@ export function GroupsPage() {
     );
   };
 
+  const toggleChannelSelected = (gid: string, cid: string) => {
+    setSelectedChannels((current) =>
+      current.some((item) => item.gid === gid && item.cid === cid)
+        ? current.filter((item) => !(item.gid === gid && item.cid === cid))
+        : [...current, { gid, cid }],
+    );
+  };
+
+  const isChannelSelected = (gid: string, cid: string) =>
+    selectedChannels.some((item) => item.gid === gid && item.cid === cid);
+
   /** 折叠或展开一个分组的频道列表。 */
   const toggleCollapsed = (gid: string) => {
     setCollapsed((current) =>
@@ -786,14 +825,27 @@ export function GroupsPage() {
     }
   };
 
-  /** 批量删除：逐个 `DELETE /groups/{gid}`。 */
+  /** 批量删除：先删频道，再删分组。分组内的频道随分组一起删除。 */
   const removeSelected = async () => {
+    const groupIds = selected;
+    const channels = selectedChannels.filter((item) => !groupIds.includes(item.gid));
+    if (groupIds.length === 0 && channels.length === 0) return;
     try {
-      for (const gid of selected) {
+      for (const item of channels) {
+        await api('DELETE', `/groups/${item.gid}/channels/${item.cid}`);
+      }
+      for (const gid of groupIds) {
         await api('DELETE', `/groups/${gid}`);
       }
-      ok(`已删除 ${selected.length} 个分组`);
+      const removed = [
+        groupIds.length > 0 ? `${groupIds.length} 个分组` : '',
+        channels.length > 0 ? `${channels.length} 个频道` : '',
+      ]
+        .filter(Boolean)
+        .join('、');
+      ok(`已删除 ${removed}`);
       setSelected([]);
+      setSelectedChannels([]);
       setMulti(false);
       await load();
     } catch (error) {
@@ -887,6 +939,13 @@ export function GroupsPage() {
         );
       })
     : groups;
+  const selectedLooseChannels = selectedChannels.filter((item) => !selected.includes(item.gid));
+  const selectionText = [
+    selected.length > 0 ? `${selected.length} 个分组` : '',
+    selectedChannels.length > 0 ? `${selectedChannels.length} 个频道` : '',
+  ]
+    .filter(Boolean)
+    .join('、');
 
   return (
     <>
@@ -942,10 +1001,11 @@ export function GroupsPage() {
         </button>
         <button
           className={multi ? '' : 'ghost'}
-          title="进入批量导出与批量删除模式"
+          title="进入批量选择模式，可批量删除分组或频道"
           onClick={() => {
             setMulti(!multi);
             setSelected([]);
+            setSelectedChannels([]);
           }}
         >
           <Icon name="check" size={14} />
@@ -957,21 +1017,23 @@ export function GroupsPage() {
         </button>
       </PageHead>
 
-      {multi && selected.length > 0 && (
+      {multi && (selected.length > 0 || selectedChannels.length > 0) && (
         <div className="card">
           <div className="row between">
-            <span>已选 {selected.length} 个分组</span>
+            <span>已选 {selectionText}</span>
             <div className="row">
-              <button
-                className="ghost"
-                title="导出已选分组为 JSON"
-                onClick={() => void exportSelected()}
-              >
-                批量导出
-              </button>
+              {selected.length > 0 && (
+                <button
+                  className="ghost"
+                  title="导出已选分组为 JSON"
+                  onClick={() => void exportSelected()}
+                >
+                  批量导出
+                </button>
+              )}
               <button
                 className="ghost danger-text"
-                title="删除已选分组及其全部频道"
+                title="删除已选分组与频道"
                 onClick={() => setConfirmBatch(true)}
               >
                 批量删除
@@ -1161,8 +1223,15 @@ export function GroupsPage() {
                   : playUrl(group, channel, playToken);
               return (
                 <div
-                  className="ch-row"
+                  className={`ch-row${multi ? ' selectable' : ''}${
+                    isChannelSelected(group.id, channel.id) ? ' selected' : ''
+                  }`}
                   key={channel.id}
+                  onClickCapture={(event) => {
+                    if (!multi) return;
+                    if (hitsChannelControl(event.target)) return;
+                    toggleChannelSelected(group.id, channel.id);
+                  }}
                   onDragOver={(event) => {
                     if (draggingChannel?.gid !== group.id) return;
                     if (draggingChannel.cid === channel.id) return;
@@ -1206,6 +1275,16 @@ export function GroupsPage() {
                   >
                     <Icon name="grip" size={13} />
                   </span>
+                  {multi && (
+                    <input
+                      className="ch-select"
+                      type="checkbox"
+                      title="选择频道"
+                      aria-label={`选择频道 ${channel.name || channel.id}`}
+                      checked={isChannelSelected(group.id, channel.id)}
+                      onChange={() => toggleChannelSelected(group.id, channel.id)}
+                    />
+                  )}
                   <span
                     className={`dot${state?.ok === true ? ' ok' : state?.ok === false ? ' err' : ''}`}
                     title={state ? (state.ok ? '最近探测成功' : '最近探测失败') : '未启用主动探测'}
@@ -1788,9 +1867,15 @@ export function GroupsPage() {
 
       {confirmBatch ? (
         <Confirm
-          title="批量删除分组？"
-          text={`将删除选中的 ${selected.length} 个分组及其全部频道。这个操作不能撤销。`}
-          confirmText="删除选中分组"
+          title="批量删除选中项？"
+          text={
+            selected.length > 0 && selectedLooseChannels.length > 0
+              ? `将删除选中的 ${selected.length} 个分组及其全部频道，以及 ${selectedLooseChannels.length} 个其他频道。这个操作不能撤销。`
+              : selected.length > 0
+                ? `将删除选中的 ${selected.length} 个分组及其全部频道。这个操作不能撤销。`
+                : `将删除选中的 ${selectedLooseChannels.length} 个频道。这个操作不能撤销。`
+          }
+          confirmText="删除选中项"
           onCancel={() => setConfirmBatch(false)}
           onConfirm={() => {
             setConfirmBatch(false);

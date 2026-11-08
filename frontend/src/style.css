@@ -3033,6 +3033,19 @@ pre.log .lv-trace {
   border-bottom: 0;
 }
 
+/* 多选模式：整行可点，选中行高亮。 */
+.ch-row.selectable {
+  cursor: pointer;
+}
+
+.ch-row.selected {
+  background: var(--accent-weak);
+}
+
+.ch-row .ch-select {
+  margin-top: 3px;
+}
+
 /* 频道拖动落点。 */
 .ch-row.dragover {
   background: var(--accent-weak);
