@@ -540,7 +540,13 @@ async fn fixture_with_options(
     let admin = state.users.find_by_username("admin").expect("初始管理员");
     let token = state
         .users
-        .create_token(&admin.id, tv_buddy::users::Purpose::Device, None, None)
+        .create_token(
+            &admin.id,
+            tv_buddy::users::Purpose::Device,
+            None,
+            None,
+            None,
+        )
         .expect("建测试令牌")
         .token;
 
@@ -567,7 +573,7 @@ async fn fixture_with_options(
         user = state.users.create_user(user).expect("建普通用户");
         state
             .users
-            .create_token(&user.id, tv_buddy::users::Purpose::Device, None, None)
+            .create_token(&user.id, tv_buddy::users::Purpose::Device, None, None, None)
             .expect("建普通用户令牌")
             .token
     };
@@ -865,6 +871,117 @@ async fn sub_routes_404_on_bad_token() {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
+}
+
+#[tokio::test]
+async fn device_token_can_be_customized_and_renamed() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let admin = fixture
+        .state
+        .users
+        .find_by_username("admin")
+        .expect("管理员");
+
+    let create = |body: &'static str| {
+        fixture
+            .client
+            .post(format!(
+                "{}/panel/api/users/{}/tokens",
+                fixture.base, admin.id
+            ))
+            .header("authorization", &auth)
+            .header("content-type", "application/json")
+            .body(body)
+    };
+
+    let response = create(r#"{"label":"客厅","token":"living-room"}"#)
+        .send()
+        .await
+        .expect("建自定义凭证");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["token"]["token"], "living-room");
+    assert_eq!(
+        body["token"]["playlist_url"],
+        "/sub/living-room/playlist.m3u"
+    );
+
+    let old = fixture
+        .client
+        .get(format!("{}/sub/living-room/playlist.m3u", fixture.base))
+        .send()
+        .await
+        .expect("旧凭证订阅");
+    assert_eq!(old.status(), StatusCode::OK);
+
+    let renamed = fixture
+        .client
+        .put(format!(
+            "{}/panel/api/users/{}/tokens/living-room",
+            fixture.base, admin.id
+        ))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(r#"{"token":"bedroom1"}"#)
+        .send()
+        .await
+        .expect("改凭证");
+    assert_eq!(renamed.status(), StatusCode::OK);
+
+    let old = fixture
+        .client
+        .get(format!("{}/sub/living-room/playlist.m3u", fixture.base))
+        .send()
+        .await
+        .expect("旧凭证订阅");
+    assert_eq!(old.status(), StatusCode::NOT_FOUND);
+    let new = fixture
+        .client
+        .get(format!("{}/sub/bedroom1/playlist.m3u", fixture.base))
+        .send()
+        .await
+        .expect("新凭证订阅");
+    assert_eq!(new.status(), StatusCode::OK);
+
+    let duplicate = create(r#"{"token":"bedroom1"}"#)
+        .send()
+        .await
+        .expect("重复凭证");
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+
+    let invalid = create(r#"{"token":"short"}"#)
+        .send()
+        .await
+        .expect("非法凭证");
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let web = fixture
+        .state
+        .users
+        .create_token(
+            &admin.id,
+            tv_buddy::users::Purpose::WebUiLinks,
+            Some("面板".into()),
+            None,
+            None,
+        )
+        .expect("建面板令牌");
+    let rejected = fixture
+        .client
+        .put(format!(
+            "{}/panel/api/users/{}/tokens/{}",
+            fixture.base, admin.id, web.token
+        ))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(r#"{"token":"panel-link"}"#)
+        .send()
+        .await
+        .expect("改面板令牌");
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

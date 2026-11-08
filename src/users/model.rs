@@ -3,7 +3,30 @@
 //! 字段名与 mpd-hls 的 `struct User with 10 elements` 对齐
 //! （`docs/design/09-users-and-devices.md` §2）。
 
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+
+/// 自定义设备凭证的最小长度。
+pub const TOKEN_MIN_LEN: usize = 8;
+/// 自定义设备凭证的最大长度。
+pub const TOKEN_MAX_LEN: usize = 64;
+
+/// 校验并归一化自定义设备凭证。
+///
+/// 凭证直接进入 URL 路径，所以只允许 ASCII 字母、数字、`_` 与 `-`。
+pub fn normalize_device_token(raw: &str) -> Result<String> {
+    let value = raw.trim();
+    if value.len() < TOKEN_MIN_LEN || value.len() > TOKEN_MAX_LEN {
+        bail!("凭证长度须为 {TOKEN_MIN_LEN}–{TOKEN_MAX_LEN} 个字符");
+    }
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        bail!("凭证只能包含字母、数字、下划线和连字符");
+    }
+    Ok(value.to_string())
+}
 
 /// 当前毫秒时间戳。
 pub fn now_ms() -> i64 {
@@ -176,5 +199,26 @@ mod tests {
         };
         assert!(token.is_expired(100));
         assert!(!token.is_expired(99));
+    }
+
+    #[test]
+    fn custom_token_accepts_safe_characters() {
+        assert_eq!(
+            normalize_device_token("  living-room_2  ").expect("合法"),
+            "living-room_2"
+        );
+        assert_eq!(
+            normalize_device_token("12345678").expect("合法"),
+            "12345678"
+        );
+    }
+
+    #[test]
+    fn custom_token_rejects_bad_shape() {
+        assert!(normalize_device_token("short").is_err());
+        assert!(normalize_device_token(&"a".repeat(TOKEN_MAX_LEN + 1)).is_err());
+        assert!(normalize_device_token("living room").is_err());
+        assert!(normalize_device_token("翡翠台").is_err());
+        assert!(normalize_device_token("a/b").is_err());
     }
 }

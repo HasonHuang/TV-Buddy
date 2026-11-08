@@ -64,6 +64,8 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | `expires_at_ms` | number? | `null` = 永不过期 |
 | `last_seen_at_ms` | number? | 最近使用 |
 
+本实现另外允许自定义设备凭证：8–64 位 ASCII 字母、数字、`_` 或 `-`。`web_ui_links` 凭证不可改。
+
 本机实例：3 个用户，7 个 token。`device` 4 个，`web_ui_links` 3 个。
 
 启动时清理过期 token：`purged expired access tokens on startup`。
@@ -87,9 +89,19 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/api/users/:id/tokens` | 列表 |
-| POST | `/api/users/:id/tokens` | 新建 |
-| PUT | `/api/users/:id/tokens/:token` | 改名称或有效期 |
+| POST | `/api/users/:id/tokens` | 新建。可带 `token` 自定义凭证 |
+| PUT | `/api/users/:id/tokens/:token` | 改名称、有效期或凭证 |
 | DELETE | `/api/users/:id/tokens/:token` | 撤销 |
+
+本实现的请求字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `label` | 设备名称。可空。 |
+| `ttl_secs` | 有效期（秒）。缺省或 `null` 表示永不过期。 |
+| `token` | POST：可选自定义凭证。缺省、空串或纯空白表示随机生成。PUT：可选新凭证。缺省表示不改。 |
+
+只改凭证时，PUT 只发送 `{"token":"<新凭证>"}`。名称与有效期不变。旧凭证立即失效。
 
 ### 3.3 订阅入口
 
@@ -143,8 +155,11 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 字段：
 
 - 设备名称（`label`）
+- 自定义凭证（可选。8–64 位字母、数字、`_`、`-`。留空随机生成）
 - 有效期：`1h` / `6h` / `12h` / `7d` / `30d` / `90d` / `1y` / `2y` / `3y` / 永不过期 / 自定义
 - 列表：每个令牌显示订阅地址，可复制、可撤销
+- 设备行另有「改凭证」。修改后旧订阅地址立即失效。
+- `web_ui_links` 行标为「面板」，不显示「改凭证」。
 
 订阅地址即 `/sub/<token>/playlist.m3u`。
 
@@ -264,6 +279,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 面板分权 | `guard::admin_gate`；`PanelUser` 每次请求重读角色 | 完成（`v2026.7`） |
 | 「我的订阅」页 | 普通用户登录后的唯一分区；订阅地址、EPG 地址、可见频道 | 完成（`v2026.7`） |
 | 令牌维护 | 启动清理过期令牌；每 60 秒把 `last_seen_at_ms` 落盘 | 完成（`v2026.7`） |
+| 自定义凭证 | 设备凭证可自定义或修改；旧凭证立即失效 | 完成（`v2026.30`） |
 | 订阅路径令牌 | 条目改为 `/l/<token>/<gid>/<cid>.<ext>`；旧 `?token=` 兼容 | 完成（`v2026.8`） |
 | 切片路径签名 | 时间窗共享签名；面板可改密钥；CDN 可共享缓存 | 完成（`v2026.8`） |
 

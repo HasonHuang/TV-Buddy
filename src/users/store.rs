@@ -13,14 +13,14 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
-        RwLock,
+        Mutex, RwLock,
     },
 };
 
 use anyhow::{Context, Result};
 use rusqlite::params;
 
-use super::model::{now_ms, AccessToken, Purpose, Role, User};
+use super::model::{normalize_device_token, now_ms, AccessToken, Purpose, Role, User};
 use crate::db::SharedConn;
 
 const USERS: &str = "users";
@@ -32,6 +32,8 @@ pub struct UserStore {
     conn: SharedConn,
     users: RwLock<Vec<User>>,
     tokens: RwLock<Vec<AccessToken>>,
+    /// 串行化令牌写操作，避免凭证改名与 `last_seen` 落盘交叉。
+    token_lock: Mutex<()>,
     /// `last_seen_at_ms` 有未落盘的改动。
     dirty: AtomicBool,
 }
@@ -43,6 +45,7 @@ impl UserStore {
             conn,
             users: RwLock::new(Vec::new()),
             tokens: RwLock::new(Vec::new()),
+            token_lock: Mutex::new(()),
             dirty: AtomicBool::new(false),
         };
         store.reload()?;
@@ -145,6 +148,7 @@ impl UserStore {
 
     /// 删除用户，同时删除其全部令牌。
     pub fn delete_user(&self, id: &str) -> Result<bool> {
+        let _guard = self.token_lock.lock().unwrap_or_else(|e| e.into_inner());
         if self.find_user(id).is_none() {
             return Ok(false);
         }
@@ -188,33 +192,70 @@ impl UserStore {
     /// 按令牌值查找。过期令牌返回 `None`。
     pub fn find_token(&self, token: &str) -> Option<AccessToken> {
         let now = now_ms();
-        let found = self
-            .tokens
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .find(|item| item.token == token)
-            .cloned()?;
+        let found = self.find_token_any(token)?;
         if found.is_expired(now) {
             return None;
         }
         Some(found)
     }
 
+    /// 按令牌值查找，包含已过期但尚未清理的记录。
+    fn find_token_any(&self, token: &str) -> Option<AccessToken> {
+        self.tokens
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|item| item.token == token)
+            .cloned()
+    }
+
+    /// 令牌值是否已被占用。包含已过期记录。
+    pub(crate) fn token_exists(&self, token: &str) -> bool {
+        self.tokens
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|item| item.token == token)
+    }
+
     /// 新建令牌。`ttl_ms` 为 `None` 表示永不过期。
+    ///
+    /// `custom` 有值时使用自定义凭证。为空时生成 12 位随机令牌。
     pub fn create_token(
         &self,
         user_id: &str,
         purpose: Purpose,
         label: Option<String>,
         ttl_ms: Option<i64>,
+        custom: Option<&str>,
     ) -> Result<AccessToken> {
+        let _guard = self.token_lock.lock().unwrap_or_else(|e| e.into_inner());
         if self.find_user(user_id).is_none() {
             anyhow::bail!("用户不存在");
         }
         let now = now_ms();
-        let mut token = AccessToken {
-            token: super::password::random_token(),
+        let token_value = match custom {
+            Some(raw) => {
+                let value = normalize_device_token(raw)?;
+                if self.token_exists(&value) {
+                    anyhow::bail!("凭证已被使用");
+                }
+                value
+            }
+            None => {
+                let mut value = super::password::random_token();
+                // 冲突概率极低，仍重试几次。
+                for _ in 0..5 {
+                    if !self.token_exists(&value) {
+                        break;
+                    }
+                    value = super::password::random_token();
+                }
+                value
+            }
+        };
+        let token = AccessToken {
+            token: token_value,
             user_id: user_id.to_string(),
             purpose,
             label,
@@ -222,13 +263,6 @@ impl UserStore {
             expires_at_ms: ttl_ms.map(|ttl| now.saturating_add(ttl)),
             last_seen_at_ms: None,
         };
-        // 冲突概率极低，仍重试几次。
-        for _ in 0..5 {
-            if self.find_token(&token.token).is_none() {
-                break;
-            }
-            token.token = super::password::random_token();
-        }
         let id = uuid::Uuid::new_v4().to_string();
         let order = self.next_order(TOKENS)?;
         self.write_row(TOKENS, &id, order, &token, now)?;
@@ -245,8 +279,9 @@ impl UserStore {
         label: Option<String>,
         ttl_ms: Option<i64>,
     ) -> Result<AccessToken> {
+        let _guard = self.token_lock.lock().unwrap_or_else(|e| e.into_inner());
         let existing = self
-            .find_token(token)
+            .find_token_any(token)
             .with_context(|| format!("令牌不存在: {token}"))?;
         let next = AccessToken {
             label: label.or(existing.label.clone()),
@@ -270,8 +305,45 @@ impl UserStore {
         Ok(next)
     }
 
+    /// 改令牌凭证。保留 label、有效期与 `last_seen_at_ms`。
+    ///
+    /// 旧凭证立即失效。新凭证不能与其他令牌重复，含已过期记录。
+    pub fn rename_token(&self, old: &str, new: &str) -> Result<AccessToken> {
+        let _guard = self.token_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let existing = self
+            .find_token_any(old)
+            .with_context(|| format!("令牌不存在: {old}"))?;
+        let value = normalize_device_token(new)?;
+        if value == existing.token {
+            return Ok(existing);
+        }
+        if self.token_exists(&value) {
+            anyhow::bail!("凭证已被使用");
+        }
+        let next = AccessToken {
+            token: value,
+            ..existing
+        };
+        let now = now_ms();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(row_id) = row_id_of(&conn, TOKENS, "token", old)? else {
+            anyhow::bail!("令牌不存在: {old}");
+        };
+        conn.execute(
+            &format!("UPDATE {TOKENS} SET config_json = ?1, updated_at_ms = ?2 WHERE id = ?3"),
+            params![serde_json::to_string(&next)?, now, row_id],
+        )?;
+        drop(conn);
+        let mut list = self.tokens.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(slot) = list.iter_mut().find(|item| item.token == old) {
+            *slot = next.clone();
+        }
+        Ok(next)
+    }
+
     /// 撤销令牌。
     pub fn revoke_token(&self, token: &str) -> Result<bool> {
+        let _guard = self.token_lock.lock().unwrap_or_else(|e| e.into_inner());
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let Some(row_id) = row_id_of(&conn, TOKENS, "token", token)? else {
             return Ok(false);
@@ -320,6 +392,7 @@ impl UserStore {
         if !self.dirty.swap(false, Ordering::Relaxed) {
             return Ok(());
         }
+        let _guard = self.token_lock.lock().unwrap_or_else(|e| e.into_inner());
         let snapshot = self.all_tokens();
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let tx = conn.unchecked_transaction()?;
@@ -568,7 +641,7 @@ mod tests {
         let (store, dir) = temp_store("cascade");
         let user = store.create_user(sample_user("bob")).expect("新建");
         store
-            .create_token(&user.id, Purpose::Device, None, None)
+            .create_token(&user.id, Purpose::Device, None, None, None)
             .expect("建令牌");
         assert_eq!(store.list_tokens(&user.id).len(), 1);
         store.delete_user(&user.id).expect("删除");
@@ -581,12 +654,100 @@ mod tests {
         let (store, dir) = temp_store("tokens");
         let user = store.create_user(sample_user("carol")).expect("新建");
         let token = store
-            .create_token(&user.id, Purpose::Device, Some("TV".into()), Some(1000))
+            .create_token(
+                &user.id,
+                Purpose::Device,
+                Some("TV".into()),
+                Some(1000),
+                None,
+            )
             .expect("建令牌");
         assert_eq!(token.token.len(), 12);
         assert!(store.find_token(&token.token).is_some());
         store.revoke_token(&token.token).expect("撤销");
         assert!(store.find_token(&token.token).is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn custom_token_is_used_and_unique() {
+        let (store, dir) = temp_store("custom-token");
+        let user = store.create_user(sample_user("dave")).expect("新建");
+        let token = store
+            .create_token(&user.id, Purpose::Device, None, None, Some("living-room"))
+            .expect("建令牌");
+        assert_eq!(token.token, "living-room");
+        assert!(store.find_token("living-room").is_some());
+
+        let error = store
+            .create_token(&user.id, Purpose::Device, None, None, Some("living-room"))
+            .expect_err("重复应失败");
+        assert!(error.to_string().contains("已被使用"));
+
+        let expired = store
+            .create_token(
+                &user.id,
+                Purpose::Device,
+                None,
+                Some(-1000),
+                Some("old-device"),
+            )
+            .expect("建过期令牌");
+        assert!(store.find_token(&expired.token).is_none());
+        assert!(store.token_exists(&expired.token));
+        assert!(store
+            .create_token(&user.id, Purpose::Device, None, None, Some("old-device"))
+            .is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rename_token_preserves_fields_and_updates_lookup() {
+        let (store, dir) = temp_store("rename-token");
+        let user = store.create_user(sample_user("erin")).expect("新建");
+        let token = store
+            .create_token(
+                &user.id,
+                Purpose::Device,
+                Some("TV".into()),
+                Some(1000),
+                Some("living-room"),
+            )
+            .expect("建令牌");
+        let renamed = store.rename_token("living-room", "bedroom1").expect("改名");
+        assert_eq!(renamed.token, "bedroom1");
+        assert_eq!(renamed.label.as_deref(), Some("TV"));
+        assert_eq!(renamed.expires_at_ms, token.expires_at_ms);
+        assert!(store.find_token("living-room").is_none());
+        assert!(store.find_token("bedroom1").is_some());
+        assert_eq!(
+            store
+                .rename_token("bedroom1", "bedroom1")
+                .expect("同名")
+                .token,
+            "bedroom1"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn expired_token_can_be_renamed() {
+        let (store, dir) = temp_store("rename-expired");
+        let user = store.create_user(sample_user("frank")).expect("新建");
+        store
+            .create_token(
+                &user.id,
+                Purpose::Device,
+                None,
+                Some(-1000),
+                Some("old-device"),
+            )
+            .expect("建过期令牌");
+        let renamed = store
+            .rename_token("old-device", "new-device")
+            .expect("改名");
+        assert_eq!(renamed.token, "new-device");
+        assert!(store.find_token("new-device").is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

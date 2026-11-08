@@ -183,12 +183,18 @@ check "坏令牌 EPG 404" "404" "$(code "$B/sub/nope/epg.xml")"
 
 # --- 令牌管理 ---
 check "建设备令牌 200" "200" \
-  "$(code -X POST "${A[@]}" -d '{"label":"电视","ttl_secs":3600}' "$B/panel/api/users/$UID_/tokens")"
+  "$(code -X POST "${A[@]}" -d '{"label":"电视","ttl_secs":3600,"token":"smoke-device"}' "$B/panel/api/users/$UID_/tokens")"
 DTOK=$(jget 'd["token"]["token"]')
+check "自定义凭证生效" "smoke-device" "$DTOK"
 check "设备令牌用途" "device" "$(jget 'd["token"]["purpose"]')"
 check "设备令牌可订阅" "200" "$(code "$B/sub/$DTOK/playlist.m3u")"
-check "撤销设备令牌 200" "200" "$(code -X DELETE "${A[@]}" "$B/panel/api/users/$UID_/tokens/$DTOK")"
-check "撤销后订阅 404" "404" "$(code "$B/sub/$DTOK/playlist.m3u")"
+check "修改凭证 200" "200" \
+  "$(code -X PUT "${A[@]}" -d '{"token":"smoke-device2"}' "$B/panel/api/users/$UID_/tokens/$DTOK")"
+check "旧凭证订阅 404" "404" "$(code "$B/sub/smoke-device/playlist.m3u")"
+check "新凭证可订阅" "200" "$(code "$B/sub/smoke-device2/playlist.m3u")"
+check "撤销设备令牌 200" "200" \
+  "$(code -X DELETE "${A[@]}" "$B/panel/api/users/$UID_/tokens/smoke-device2")"
+check "撤销后订阅 404" "404" "$(code "$B/sub/smoke-device2/playlist.m3u")"
 
 # --- 改密踢会话 ---
 check "重置口令 200" "200" \

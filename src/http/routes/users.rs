@@ -16,7 +16,10 @@ use serde_json::{json, Value};
 use crate::{
     http::{error::ApiError, ext::PanelUser},
     state::AppState,
-    users::{model::now_ms, AccessToken, Purpose, Role, User},
+    users::{
+        model::{normalize_device_token, now_ms},
+        AccessToken, Purpose, Role, User,
+    },
 };
 
 fn require_admin(user: &PanelUser) -> Result<(), ApiError> {
@@ -107,6 +110,9 @@ pub struct TokenReq {
     /// 有效期（秒）。缺省或 `null` 表示永不过期。
     #[serde(default)]
     pub ttl_secs: Option<i64>,
+    /// 自定义凭证。缺省、空串或纯空白表示随机生成。
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,6 +121,9 @@ pub struct TokenUpdateReq {
     pub label: Option<String>,
     #[serde(default)]
     pub ttl_secs: Option<i64>,
+    /// 新凭证。缺省表示不改。
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 fn parse_role(raw: Option<String>, fallback: Role) -> Role {
@@ -325,9 +334,21 @@ pub async fn create_token(
         .ttl_secs
         .filter(|secs| *secs > 0)
         .map(|secs| secs * 1000);
+    let custom = req
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(raw) = custom {
+        let value = normalize_device_token(raw)
+            .map_err(|error| ApiError::bad_request(format!("{error}")))?;
+        if state.users.token_exists(&value) {
+            return Err(ApiError::conflict("凭证已被使用"));
+        }
+    }
     let token = state
         .users
-        .create_token(&id, Purpose::Device, req.label, ttl_ms)
+        .create_token(&id, Purpose::Device, req.label, ttl_ms, custom)
         .map_err(|error| ApiError::bad_request(format!("{error}")))?;
     Ok(Json(json!({ "ok": true, "token": token_view(&token) })))
 }
@@ -340,22 +361,50 @@ pub async fn update_token(
     Json(req): Json<TokenUpdateReq>,
 ) -> Result<Json<Value>, ApiError> {
     require_admin(&actor)?;
-    if !state
+    let target = state
         .users
         .list_tokens(&id)
-        .iter()
-        .any(|item| item.token == token)
-    {
-        return Err(ApiError::not_found("令牌不存在"));
+        .into_iter()
+        .find(|item| item.token == token)
+        .ok_or_else(|| ApiError::not_found("令牌不存在"))?;
+
+    let new_token = match req.token.as_deref() {
+        Some(raw) => {
+            if raw.trim().is_empty() {
+                return Err(ApiError::bad_request("凭证不能为空"));
+            }
+            if target.purpose != Purpose::Device {
+                return Err(ApiError::bad_request("只能修改设备凭证"));
+            }
+            let value = normalize_device_token(raw)
+                .map_err(|error| ApiError::bad_request(format!("{error}")))?;
+            if value != token && state.users.token_exists(&value) {
+                return Err(ApiError::conflict("凭证已被使用"));
+            }
+            Some(value)
+        }
+        None => None,
+    };
+
+    // 只改凭证时不动名称与有效期。
+    let mut saved = match new_token {
+        Some(value) => state
+            .users
+            .rename_token(&token, &value)
+            .map_err(|error| ApiError::bad_request(format!("{error}")))?,
+        None => target,
+    };
+
+    if req.label.is_some() || req.ttl_secs.is_some() {
+        let ttl_ms = req
+            .ttl_secs
+            .filter(|secs| *secs > 0)
+            .map(|secs| secs * 1000);
+        saved = state
+            .users
+            .update_token(&saved.token, req.label, ttl_ms)
+            .map_err(|error| ApiError::bad_request(format!("{error}")))?;
     }
-    let ttl_ms = req
-        .ttl_secs
-        .filter(|secs| *secs > 0)
-        .map(|secs| secs * 1000);
-    let saved = state
-        .users
-        .update_token(&token, req.label, ttl_ms)
-        .map_err(|error| ApiError::bad_request(format!("{error}")))?;
     Ok(Json(json!({ "ok": true, "token": token_view(&saved) })))
 }
 
@@ -438,6 +487,7 @@ fn ensure_web_token(state: &AppState, user: &User) -> Result<String, ApiError> {
             &user.id,
             Purpose::WebUiLinks,
             Some("面板链接".to_string()),
+            None,
             None,
         )
         .map(|token| token.token)
