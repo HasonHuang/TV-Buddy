@@ -45,7 +45,10 @@
 | `[health]`/`[stats]` | `enabled`、`interval_secs`、`online_window_secs` | 健康与指标 |
 | `[assets]` | `map`（原始 URL → 本地 HLS 入口） | 占位/错误视频转换 |
 | `[epg]` | `enabled`、`cron`、`public_viewer_enabled`、`keep_days`、`future_days`、`keep_yesterday`、`match_by_name`、`allow_scripts`、`python_bin`、`script_timeout_secs`、`record_pad_before_secs`、`record_pad_after_secs` | 节目单采集与浏览 |
-| `[[epg.sources]]` | `id`、`name`、`kind`、`enabled`、`url`、`script`、`cron`、`timeout_secs`、`tz_shift_mins` | 节目单源 |
+| `[[epg.sources]]` | 仅旧配置。启动时导入 `epg_sources` 表，然后清空 | 节目单源迁移 |
+| `epg_sources` | `id`、`name`、`kind`、`enabled`、`urls[]{url,priority,user_agent,headers}`、`refresh_secs`、`priority`、`script`、`output_files`、`timeout_secs`、`tz_shift_mins`、`cron` | 面板管理。保存即生效 |
+| `epg_bindings` | `gid`、`cid`、`source_id`、`raw_channel_id`、`origin`、`upstream_display_name` | 频道绑定。`origin` 为 `auto` 或 `manual` |
+| `epg_rules` | `name`、`gid`、`cid`、`condition`、`action`、`lead_secs`、`tail_secs`、`output_dir`、`name_template`、`enabled` | 关键字规则 |
 | `[epg.translate]` | `enabled`、`url`/`mtran_url`、`token`/`mtran_token`、`source`、`target(s)`、`mtran_batch` | EPG 机翻 |
 | `[subtitle.translate]` | `enabled`、`url`、`token`、`source`、`target(s)`、`batch` | 字幕机翻 |
 | `[playlist]` | `merge_ttl_secs`、`merge_position`、`global_exclude`、`sync_*` | 聚合缓存参数、插入位置、全局排除与同步默认值。见 §1.2 |
@@ -126,7 +129,7 @@
 | `[cache.prefetch]`/`[cache.dash]` | 下一次媒体清单刷新/抓取生效 | 本实现 |
 | `[cdn]` | 立即（下一请求按新头值与 `public_base`） | 本实现 |
 | `[cache.remux]` | 新会话生效；已有会话保留旧参数 | 本实现 |
-| `[epg]` | **需重启**（`enabled` 与源列表在启动时读取） | F-008 |
+| `[epg]` | **需重启**（`enabled` 与 `cron` 在启动时读取）。源、绑定与规则存表，保存即生效 | F-008 |
 | `[epg.translate]`/`[subtitle.translate]` | 立即（下次翻译生效） | 设计决策 |
 | `[playlist]`/`[[playlist.sources]]` | 立即；源正文按源级 TTL 复用 | F-020 |
 | `[panel]` | 立即（新会话按新口令） | 设计决策 |

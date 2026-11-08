@@ -22,6 +22,8 @@ pub mod dash_hls;
 pub mod dash_timeshift;
 pub mod db;
 pub mod epg;
+pub mod epg_rules;
+pub mod epg_store;
 pub mod health;
 pub mod http;
 pub mod logging;

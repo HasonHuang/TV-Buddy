@@ -75,7 +75,11 @@ function sizeText(bytes: number): string {
 
 /** 下载任务产物（带 Bearer）。 */
 async function download(name: string): Promise<void> {
-  const response = await fetch(`/panel/api/schedule/download/${encodeURIComponent(name)}`, {
+  const path = name
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/');
+  const response = await fetch(`/panel/api/schedule/download/${path}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);

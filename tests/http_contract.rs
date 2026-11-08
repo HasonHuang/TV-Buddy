@@ -5917,3 +5917,168 @@ async fn cache_stats_includes_recommendation() {
     assert_eq!(body["recommend"]["source"], "fallback", "{body}");
     assert!(body["recommend"]["disk_cap_mb"].is_u64(), "{body}");
 }
+
+#[tokio::test]
+async fn epg_config_sources_bindings_and_rules() {
+    let fixture = fixture_with(true).await;
+    epg::refresh(&fixture.state).await.expect("采集应成功");
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let client = &fixture.client;
+
+    // 旧配置里的源在启动时导入新表。
+    let sources: serde_json::Value = client
+        .get(format!("{}/panel/api/epg/sources", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("源列表")
+        .text()
+        .await
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("解析源"))
+        .unwrap();
+    assert_eq!(sources.as_array().map(Vec::len), Some(1));
+    let source_id = sources[0]["id"].as_str().expect("源 ID").to_string();
+
+    // 新源可写库并立即出现在列表里。
+    let created: serde_json::Value = client
+        .post(format!("{}/panel/api/epg/sources", fixture.base))
+        .header("authorization", auth.clone())
+        .body(
+            serde_json::to_string(&serde_json::json!({
+                "name": "第二源",
+                "kind": "xml",
+                "enabled": true,
+                "urls": [{ "url": "http://example.invalid/epg.xml", "priority": 1 }]
+            }))
+            .expect("序列化源"),
+        )
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .expect("新增源")
+        .text()
+        .await
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("解析新增源"))
+        .unwrap();
+    assert_eq!(created["ok"], true);
+    let second_id = created["source"]["id"]
+        .as_str()
+        .expect("新源 ID")
+        .to_string();
+
+    // 手工绑定覆盖自动匹配。
+    let bound: serde_json::Value = client
+        .put(format!("{}/panel/api/epg/bindings/pg/c1", fixture.base))
+        .header("authorization", auth.clone())
+        .body(
+            serde_json::to_string(&serde_json::json!({
+                "source_id": source_id,
+                "raw_channel_id": "cctv1"
+            }))
+            .expect("序列化绑定"),
+        )
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .expect("绑定")
+        .text()
+        .await
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("解析绑定"))
+        .unwrap();
+    assert_eq!(bound["mapping"]["source_channel_id"], "cctv1");
+
+    let bindings: serde_json::Value = client
+        .get(format!("{}/panel/api/epg/bindings", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("绑定列表")
+        .text()
+        .await
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("解析绑定列表"))
+        .unwrap();
+    let item = &bindings["items"][0];
+    assert_eq!(item["origin"], "manual");
+    assert_eq!(item["raw_channel_id"], "cctv1");
+
+    // 规则保存与预览。
+    let rule_body = serde_json::json!({
+        "name": "录制新闻",
+        "gid": "pg",
+        "cid": "c1",
+        "condition": { "op": "all", "keywords": ["新闻"], "groups": [] },
+        "action": "record",
+        "enabled": true
+    });
+    let saved: serde_json::Value = client
+        .post(format!("{}/panel/api/epg/rules", fixture.base))
+        .header("authorization", auth.clone())
+        .body(serde_json::to_string(&rule_body).expect("序列化规则"))
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .expect("保存规则")
+        .text()
+        .await
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("解析规则"))
+        .unwrap();
+    assert_eq!(saved["ok"], true);
+    let rule_id = saved["rule"]["id"].as_str().expect("规则 ID").to_string();
+
+    let preview: serde_json::Value = client
+        .post(format!("{}/panel/api/epg/rules/preview", fixture.base))
+        .header("authorization", auth.clone())
+        .body(serde_json::to_string(&rule_body).expect("序列化规则"))
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .expect("预览")
+        .text()
+        .await
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("解析预览"))
+        .unwrap();
+    assert_eq!(preview["ok"], true);
+    assert!(preview["total"].as_u64().unwrap_or(0) >= 1);
+
+    let rules: serde_json::Value = client
+        .get(format!("{}/panel/api/epg/rules", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("规则列表")
+        .text()
+        .await
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("解析规则列表"))
+        .unwrap();
+    assert_eq!(rules.as_array().map(Vec::len), Some(1));
+
+    // 删除规则。
+    let removed: serde_json::Value = client
+        .delete(format!("{}/panel/api/epg/rules/{rule_id}", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("删除规则")
+        .text()
+        .await
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("解析删除"))
+        .unwrap();
+    assert_eq!(removed["ok"], true);
+
+    // 删除源会清掉绑定。
+    let deleted: serde_json::Value = client
+        .delete(format!(
+            "{}/panel/api/epg/sources/{second_id}",
+            fixture.base
+        ))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("删除源")
+        .text()
+        .await
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("解析删除源"))
+        .unwrap();
+    assert_eq!(deleted["ok"], true);
+}

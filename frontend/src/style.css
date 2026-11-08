@@ -3909,3 +3909,116 @@ pre code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
 }
+
+/* EPG 配置页：页内 Tab、源 URL 行、绑定选择器与条件树。 */
+.tabs {
+  display: flex;
+  gap: 4px;
+  width: max-content;
+  max-width: 100%;
+  overflow: auto;
+  padding: 4px;
+  margin-bottom: 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.tab {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text2);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.tab:hover {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+.tab.active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+}
+
+.source-url-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 320px;
+}
+
+.source-urls {
+  margin: 12px 0;
+}
+
+.source-url {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+.binding-list {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.binding-item {
+  display: flex;
+  color: var(--text);
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  height: auto;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.binding-item:last-child {
+  border-bottom: 0;
+}
+
+.binding-item:hover {
+  background: var(--panel-3);
+}
+
+.condition-node {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+.condition-group {
+  margin-top: 4px;
+  margin-left: 14px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line-strong);
+}
+
+.rule-preview {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+}

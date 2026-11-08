@@ -15,7 +15,7 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 
-use crate::{config::Config, logo};
+use crate::{config::Config, epg_store::Snapshot as EpgSnapshot, logo};
 
 /// 备份根目录。
 const ROOT: &str = "tv-buddy-backup";
@@ -38,8 +38,14 @@ pub fn scope(value: &str) -> &'static str {
 
 /// 生成 gzip(tar) 备份。
 ///
-/// 配置写成包内 `config.json`。运行时没有配置文件可读。
-pub fn create(config: &Config, cache_dir: &str, include: &str, version: &str) -> Result<Vec<u8>> {
+/// 配置写成包内 `config.json`。EPG 源、绑定与规则写成 `epg.json`。
+pub fn create(
+    config: &Config,
+    cache_dir: &str,
+    epg: &EpgSnapshot,
+    include: &str,
+    version: &str,
+) -> Result<Vec<u8>> {
     let scope = scope(include);
     let cache = Path::new(cache_dir);
     let mut entries: Vec<tar::Entry> = Vec::new();
@@ -49,6 +55,10 @@ pub fn create(config: &Config, cache_dir: &str, include: &str, version: &str) ->
         entries.push(tar::Entry {
             name: format!("{ROOT}/config.json"),
             data: text.into_bytes(),
+        });
+        entries.push(tar::Entry {
+            name: format!("{ROOT}/epg.json"),
+            data: serde_json::to_vec_pretty(epg).context("序列化 EPG 配置失败")?,
         });
         push_dir(
             &mut entries,
@@ -108,16 +118,18 @@ pub fn file_name() -> String {
     )
 }
 
-/// 解包并校验备份：返回配置与报告，最后落盘台标。
+/// 解包并校验备份：返回配置、EPG 配置与报告，最后落盘台标。
 ///
-/// 包内必须有 `config.json`。返回的配置由调用方写入数据库并替换快照。
-pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Report)> {
+/// 包内必须有 `config.json`。旧备份没有 `epg.json` 时 EPG 配置返回 `None`。
+/// 返回的配置由调用方写入数据库并替换快照。
+pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Option<EpgSnapshot>, Report)> {
     let mut decoder = flate2::read::GzDecoder::new(data);
     let mut raw = Vec::new();
     decoder.read_to_end(&mut raw).context("解压失败")?;
     let entries = tar::parse(&raw).context("读取 tar 失败")?;
 
     let mut config_json: Option<String> = None;
+    let mut epg_json: Option<String> = None;
     let mut logos: Vec<(String, Vec<u8>)> = Vec::new();
     let mut report = Report::default();
 
@@ -131,6 +143,10 @@ pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Report)> {
             .to_string();
         if name == "config.json" {
             config_json = Some(String::from_utf8(entry.data).context("配置不是 UTF-8")?);
+            continue;
+        }
+        if name == "epg.json" {
+            epg_json = Some(String::from_utf8(entry.data).context("EPG 配置不是 UTF-8")?);
             continue;
         }
         if let Some((_, file)) = entry.name.rsplit_once("/logos/") {
@@ -161,7 +177,14 @@ pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Report)> {
         }
     }
 
-    Ok((config, report))
+    let epg = match epg_json {
+        Some(text) => {
+            Some(serde_json::from_str::<EpgSnapshot>(&text).context("备份 EPG 配置不合法")?)
+        }
+        None => None,
+    };
+
+    Ok((config, epg, report))
 }
 
 fn push_file(entries: &mut Vec<tar::Entry>, path: &Path, name: &str) -> Result<()> {
@@ -243,14 +266,17 @@ mod tests {
 
         let mut config = Config::default();
         config.server.not_found_url = "http://a/404.mp4".into();
-        let data = create(&config, &cache.to_string_lossy(), "all", "test").unwrap();
+        let epg = EpgSnapshot::default();
+        let data = create(&config, &cache.to_string_lossy(), &epg, "all", "test").unwrap();
         assert_eq!(&data[..2], &[0x1f, 0x8b]);
 
-        let (restored, report) = restore(&cache.to_string_lossy(), &data).unwrap();
+        let (restored, epg, report) = restore(&cache.to_string_lossy(), &data).unwrap();
         assert!(report
             .files
             .iter()
             .any(|file| file.ends_with("config.json")));
+        assert!(report.files.iter().any(|file| file.ends_with("epg.json")));
+        assert!(epg.is_some());
         assert!(report
             .files
             .iter()

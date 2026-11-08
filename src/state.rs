@@ -76,6 +76,8 @@ pub struct AppState {
     pub health: crate::health::Health,
     /// 节目单状态。
     pub epg: crate::epg::EpgState,
+    /// EPG 源、绑定与关键字规则（SQLite）。
+    pub epg_store: crate::epg_store::Store,
     /// IP 统计与封禁。
     pub ip_guard: crate::auth::IpGuard,
     /// 每 IP 播放会话上限与空闲超时。
@@ -117,11 +119,29 @@ impl AppState {
             config_store.save(&config)?;
         }
         // `save` 可能补了密钥；以库里的版本进快照。
-        let config = config_store.load()?.unwrap_or(config);
+        let mut config = config_store.load()?.unwrap_or(config);
         if !config.auth.token_enabled {
             tracing::warn!("auth.token_enabled=false：播放地址不校验令牌。建议在面板安全页开启。");
         }
-        let users = crate::users::UserStore::attach(conn)?;
+        let users = crate::users::UserStore::attach(conn.clone())?;
+        let epg_store = crate::epg_store::Store::attach(conn)?;
+        let epg = crate::epg::EpgState::load(&cache_dir);
+        // 旧配置里的 `[[epg.sources]]` 与 `mappings.json` 只在表为空时导入一次。
+        match epg_store.import_config_sources(&config.epg.sources) {
+            Ok(count) if count > 0 => {
+                // 源已经进表。清掉旧字段，避免下次启动重复导入。
+                config.epg.sources.clear();
+                match config_store.save(&config) {
+                    Ok(revision) => config.revision = revision,
+                    Err(error) => tracing::warn!(%error, "清理旧 EPG 源配置失败"),
+                }
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, "导入旧 EPG 源失败"),
+        }
+        if let Err(error) = epg_store.import_legacy_mappings(&cache_dir) {
+            tracing::warn!(%error, "导入旧 EPG 映射失败");
+        }
         let offset_hours = config.server.timezone_offset_hours as i64;
         ensure_cache_dirs(&cache_dir);
         let segments = SegmentIndex::new();
@@ -154,7 +174,8 @@ impl AppState {
             schedule: Arc::new(crate::schedule::Store::load(&cache_dir, offset_hours)),
             timeshift: Arc::new(crate::timeshift::Manager::default()),
             modes: AddressCache::new(),
-            epg: crate::epg::EpgState::load(&cache_dir),
+            epg,
+            epg_store,
             cache_dir,
             stats: Stats::default(),
             metrics: Arc::new(crate::metrics::Metrics::new()),

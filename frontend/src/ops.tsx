@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, apiText, getToken, putConfig } from './api';
+import { EpgBindingsTab, EpgRulesTab, EpgSourcesTab } from './epg';
 import { Icon } from './icons';
 import { Confirm, Field, NumberBox, PageHead, Select, Tip } from './ui';
 
@@ -1221,7 +1222,7 @@ function EpgCronCard({ onChanged }: { onChanged: () => void }) {
     try {
       const config = await api<Record<string, unknown>>('GET', '/config');
       const epg = (config.epg ?? {}) as Record<string, unknown>;
-      // `[epg]` 段（含源列表）在启动时读取，改 cron 也不会立刻换调度；界面上写明。
+      // `[epg]` 段在启动时读取，改 cron 也不会立刻换调度；界面上写明。
       await putConfig({ ...config, epg: { ...epg, cron: expr.trim() } });
       setSaved(expr.trim());
       setNote('采集节奏已保存；[epg] 段需重启后重新排程');
@@ -1301,6 +1302,7 @@ export function EpgPanelPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<'bindings' | 'sources' | 'rules' | 'advanced'>('bindings');
 
   const load = useCallback(async () => {
     try {
@@ -1418,15 +1420,6 @@ export function EpgPanelPage() {
         title="节目指南"
         sub={status?.enabled ? '已开启' : '已关闭'}
       >
-        <a
-          className="ghost"
-          href="/epg"
-          target="_blank"
-          rel="noreferrer"
-          title="在新标签页打开公开节目单"
-        >
-          浏览页面
-        </a>
         <button
           className="ghost"
           title="重新读取采集状态与映射"
@@ -1451,6 +1444,31 @@ export function EpgPanelPage() {
           {busy ? '采集中…' : '立即采集'}
         </button>
       </PageHead>
+      <div className="tabs" role="tablist">
+        {(
+          [
+            ['bindings', '频道绑定'],
+            ['sources', 'EPG 源'],
+            ['rules', '关键字规则'],
+            ['advanced', '高级'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            className={tab === id ? 'tab active' : 'tab'}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'bindings' && <EpgBindingsTab />}
+      {tab === 'sources' && <EpgSourcesTab />}
+      {tab === 'rules' && <EpgRulesTab />}
+      {tab === 'advanced' && (
+        <>
       <div className="card">
         <h2>节目单状态</h2>
         <dl>
@@ -1642,6 +1660,8 @@ export function EpgPanelPage() {
         </table>
         </div>
       </div>
+        </>
+      )}
     </>
   );
 }

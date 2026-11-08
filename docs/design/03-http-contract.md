@@ -360,7 +360,19 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 | `POST` | `/panel/api/epg/refresh` | Bearer | 同步采集一次；`{"ok":true,"msg":"采集完成","channels","programmes"}`；失败 → `500` + 原因 |
 | `POST` | `/panel/api/epg/regenerate` | Bearer | 只读 `<cache>/epg/raw/` 重新匹配并生成，不重新下载；`{"ok":true,"channels","programmes"}` |
 | `GET` | `/panel/api/epg/mappings` | Bearer | `{"mappings":{"gid/cid":{"source_id","source_channel_id","source_name","source_display_name"}},"extra":[{"source_id","source_channel_id","out_id","out_name"}]}` |
-| `POST` | `/panel/api/epg/mapping` | Bearer | `{"gid","cid","source_id","source_channel_id"}`；两者留空 → 清除 |
+| `POST` | `/panel/api/epg/mapping` | Bearer | `{"gid","cid","source_id","source_channel_id"}`；两者留空 → 清除。写 `manual` 绑定 |
+| `GET` | `/panel/api/epg/sources` | Bearer | 源数组。每项含配置与运行时状态：`last_fetch_*`、`channels`、`programmes`、`coverage_*`、`url_statuses` |
+| `POST` | `/panel/api/epg/sources` | Bearer | 新增或更新源。`id` 为空表示新增 |
+| `DELETE` | `/panel/api/epg/sources/{id}` | Bearer | 删除源及其绑定 |
+| `POST` | `/panel/api/epg/sources/{id}/refresh` | Bearer | 只采集一个源 |
+| `GET` | `/panel/api/epg/bindings` | Bearer | `{"items":[{gid,cid,name,group_name,out_id,source_id,source_name,raw_channel_id,upstream_display_name,origin,match_via,programmes}],"bound","total"}` |
+| `PUT` | `/panel/api/epg/bindings/{gid}/{cid}` | Bearer | `{"source_id","raw_channel_id"}`；写 `manual` 绑定 |
+| `DELETE` | `/panel/api/epg/bindings/{gid}/{cid}` | Bearer | 清除绑定并重新匹配 |
+| `POST` | `/panel/api/epg/bindings/{gid}/{cid}/copy` | Bearer | `{"from_gid","from_cid"}`；复制另一频道的绑定 |
+| `GET` | `/panel/api/epg/rules` | Bearer | `[{rule,group_name,channel_name}]` |
+| `POST` | `/panel/api/epg/rules` | Bearer | 新增或更新规则。`id` 为空表示新增 |
+| `POST` | `/panel/api/epg/rules/preview` | Bearer | 同规则对象；返回未来 48 小时的命中节目 |
+| `DELETE` | `/panel/api/epg/rules/{id}` | Bearer | 删除规则与它生成的待执行任务 |
 | `POST` | `/panel/api/epg/extra` | Bearer | `{"action":"add","source_id","source_channel_id","out_id","out_name"}`；`{"action":"remove","source_id","source_channel_id"}`；批量 `items[]` |
 | `GET` | `/panel/api/epg/match-report` | Bearer | `text/plain`：`matched_count=… empty_count=… extra_count=…` + 表格 |
 | `GET` | `/panel/api/epg/scripts` | Bearer | `{"python":<版本或 null>,"scripts":[{"name","size"}]}` |

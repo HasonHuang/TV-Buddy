@@ -24,8 +24,15 @@ pub async fn backup(
 ) -> Result<Response, ApiError> {
     let config = state.snapshot();
     let include = params.get("include").map(String::as_str).unwrap_or("all");
-    let data = backup::create(&config, &config.cache.disk_path, include, crate::VERSION)
-        .map_err(|error| ApiError::internal(format!("{error:#}")))?;
+    let epg = state.epg_store.snapshot();
+    let data = backup::create(
+        &config,
+        &config.cache.disk_path,
+        &epg,
+        include,
+        crate::VERSION,
+    )
+    .map_err(|error| ApiError::internal(format!("{error:#}")))?;
     let name = backup::file_name();
     let mut response = ([(header::CONTENT_TYPE, "application/gzip")], data).into_response();
     let disposition = HeaderValue::from_str(&format!("attachment; filename=\"{name}\""))
@@ -46,7 +53,7 @@ pub async fn restore(
         return Err(ApiError::bad_request("备份内容为空"));
     }
     let current = state.snapshot();
-    let (restored, report) = backup::restore(&current.cache.disk_path, &body)
+    let (restored, epg, report) = backup::restore(&current.cache.disk_path, &body)
         .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
 
     // 覆盖前把当前配置另存到库文件旁，便于手工回退。
@@ -56,9 +63,21 @@ pub async fn restore(
             tracing::warn!(%error, path = %path.display(), "写配置备份失败");
         }
     }
+    if let Ok(text) = serde_json::to_string_pretty(&state.epg_store.snapshot()) {
+        let path = state.db_path.with_extension("db.bak.epg.json");
+        if let Err(error) = std::fs::write(&path, text) {
+            tracing::warn!(%error, path = %path.display(), "写 EPG 配置备份失败");
+        }
+    }
     state
         .save_config(restored.clone(), None)
         .map_err(|error| ApiError::internal(format!("写入配置失败: {error:#}")))?;
+    if let Some(epg) = epg {
+        state
+            .epg_store
+            .replace_all(epg)
+            .map_err(|error| ApiError::internal(format!("写入 EPG 配置失败: {error:#}")))?;
+    }
     Ok(Json(json!({
         "ok": true,
         "config_reloaded": true,

@@ -39,14 +39,46 @@ pub struct EpgState {
     pub last_success: Mutex<Option<u64>>,
     /// 最近一次错误。
     pub last_error: Mutex<Option<String>>,
-    /// 手工映射：键 `gid/cid`。
-    pub mappings: Mutex<HashMap<String, Mapping>>,
     /// 额外频道：不进本地频道表，但写入节目单输出。
     pub extras: Mutex<Vec<Extra>>,
     /// 最近一次匹配报告。
     pub match_rows: Mutex<Vec<MatchRow>>,
+    /// 每个源的采集状态。键是源 ID。
+    pub source_status: Mutex<HashMap<String, SourceStatus>>,
     /// 已生成节目单的解析结果，按文件 mtime 与长度失效。
     pub generated: Mutex<Option<Generated>>,
+}
+
+/// 单个 URL 的采集状态。
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct UrlStatus {
+    pub url: String,
+    pub priority: i64,
+    pub last_fetch_started_at_ms: Option<i64>,
+    pub last_fetch_finished_at_ms: Option<i64>,
+    pub last_fetch_ok: bool,
+    pub last_error: Option<String>,
+    pub channels: usize,
+    pub programmes: usize,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+/// 一个源的采集状态。
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct SourceStatus {
+    pub last_fetch_started_at_ms: Option<i64>,
+    pub last_fetch_finished_at_ms: Option<i64>,
+    pub last_fetch_ok: bool,
+    pub last_error: Option<String>,
+    pub channels: usize,
+    pub programmes: usize,
+    pub coverage_start_ms: Option<i64>,
+    pub coverage_end_ms: Option<i64>,
+    pub urls: Vec<UrlStatus>,
+    /// 最近一次成功采集的 ETag / Last-Modified 快照，供条件请求复用。
+    #[serde(skip)]
+    pub cache_headers: HashMap<String, (Option<String>, Option<String>)>,
 }
 
 /// 缓存的解析结果。
@@ -130,9 +162,12 @@ pub struct MatchRow {
     pub gid: String,
     pub cid: String,
     pub name: String,
+    pub group_name: String,
     pub out_id: String,
     pub via: String,
     pub source_id: String,
+    pub raw_channel_id: String,
+    pub upstream_display_name: String,
     pub programmes: usize,
 }
 
@@ -286,14 +321,9 @@ fn viewer_snapshot(
 }
 
 impl EpgState {
-    /// 载入缓存的映射表。
+    /// 载入缓存的额外频道。
     pub fn load(cache_dir: &Path) -> Self {
         let state = Self::default();
-        if let Ok(text) = fs::read_to_string(mapping_file(cache_dir)) {
-            if let Ok(mappings) = serde_json::from_str::<HashMap<String, Mapping>>(&text) {
-                *state.mappings.lock().unwrap_or_else(|e| e.into_inner()) = mappings;
-            }
-        }
         if let Ok(text) = fs::read_to_string(extra_file(cache_dir)) {
             if let Ok(extras) = serde_json::from_str::<Vec<Extra>>(&text) {
                 *state.extras.lock().unwrap_or_else(|e| e.into_inner()) = extras;
@@ -301,10 +331,6 @@ impl EpgState {
         }
         state
     }
-}
-
-fn mapping_file(cache_dir: &Path) -> PathBuf {
-    output_dir(cache_dir).join("mappings.json")
 }
 
 fn extra_file(cache_dir: &Path) -> PathBuf {
@@ -329,15 +355,14 @@ pub fn add_extra(
     out_id: &str,
     out_name: &str,
 ) -> Result<Extra> {
-    let config = state.snapshot();
     let source_id = source_id.trim();
     let source_channel_id = source_channel_id.trim();
     if source_id.is_empty() || source_channel_id.is_empty() {
         bail!("缺少 source_id/source_channel_id");
     }
-    if !config
-        .epg
-        .sources
+    if !state
+        .epg_store
+        .sources()
         .iter()
         .any(|source| source.id == source_id)
     {
@@ -386,14 +411,26 @@ fn save_extras(state: &AppState, extras: &[Extra]) -> Result<()> {
     Ok(())
 }
 
-/// 读取映射快照。
+/// 读取手工映射快照。自动绑定不参与匹配，只用于面板展示。
 pub fn mappings(state: &AppState) -> HashMap<String, Mapping> {
+    let names = state.epg_store.source_names();
     state
-        .epg
-        .mappings
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
+        .epg_store
+        .bindings()
+        .into_iter()
+        .filter(|binding| binding.manual())
+        .map(|binding| {
+            (
+                binding.key(),
+                Mapping {
+                    source_id: binding.source_id.clone(),
+                    source_channel_id: binding.raw_channel_id.clone(),
+                    source_name: names.get(&binding.source_id).cloned().unwrap_or_default(),
+                    source_display_name: binding.upstream_display_name.clone(),
+                },
+            )
+        })
+        .collect()
 }
 
 /// 设置或清除手工映射；`source_id`/`source_channel_id` 为空表示清除。
@@ -413,40 +450,28 @@ pub fn set_mapping(
     }
     let source_id = source_id.trim();
     let source_channel_id = source_channel_id.trim();
-    let mut map = state.epg.mappings.lock().unwrap_or_else(|e| e.into_inner());
-    let key = format!("{gid}/{cid}");
     if source_id.is_empty() || source_channel_id.is_empty() {
-        map.remove(&key);
-        save_mappings(state, &map)?;
+        state.epg_store.remove_binding(gid, cid)?;
         return Ok(None);
     }
-    let Some(source) = config
-        .epg
-        .sources
-        .iter()
-        .find(|source| source.id == source_id)
-    else {
+    let Some(source) = state.epg_store.source(source_id) else {
         bail!("EPG 源不存在");
     };
-    let mapping = Mapping {
-        source_id: source_id.to_string(),
-        source_channel_id: source_channel_id.to_string(),
-        source_name: source.name.clone(),
-        source_display_name: String::new(),
-    };
-    map.insert(key, mapping.clone());
-    save_mappings(state, &map)?;
-    Ok(Some(mapping))
-}
-
-fn save_mappings(state: &AppState, mappings: &HashMap<String, Mapping>) -> Result<()> {
-    let path = mapping_file(Path::new(&state.cache_dir));
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let text = serde_json::to_string_pretty(mappings)?;
-    fs::write(path, text)?;
-    Ok(())
+    let binding = state.epg_store.set_binding(crate::epg_store::Binding {
+        gid: gid.to_string(),
+        cid: cid.to_string(),
+        source_id: source.id.clone(),
+        raw_channel_id: source_channel_id.to_string(),
+        origin: "manual".into(),
+        upstream_display_name: String::new(),
+        updated_at_ms: 0,
+    })?;
+    Ok(Some(Mapping {
+        source_id: binding.source_id,
+        source_channel_id: binding.raw_channel_id,
+        source_name: source.name,
+        source_display_name: binding.upstream_display_name,
+    }))
 }
 
 /// 一次采集的摘要。
@@ -503,6 +528,15 @@ fn raw_file(cache_dir: &Path, source_id: &str) -> Option<PathBuf> {
     Some(raw_dir(cache_dir).join(format!("{name}.xml")))
 }
 
+/// 同一源内某条 URL 的 raw 缓存。文件名带 URL 短哈希，改顺序不影响缓存。
+fn raw_url_file(cache_dir: &Path, source_id: &str, url: &str) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let name = crate::logo::sanitize(source_id)?;
+    let digest = Sha256::digest(url.as_bytes());
+    let tag = hex::encode(&digest[..4]);
+    Some(raw_dir(cache_dir).join(format!("{name}-{tag}.xml")))
+}
+
 /// 触发一次采集。未启用或已在采集时返回错误。
 pub async fn refresh(state: &Arc<AppState>) -> Result<Summary> {
     run(state, SourceMode::Fetch).await
@@ -534,11 +568,10 @@ pub async fn refresh_source(state: &Arc<AppState>, source_id: &str) -> Result<Su
     if !config.epg.enabled {
         bail!("EPG 未启用");
     }
-    let Some(source) = config
-        .epg
-        .sources
-        .iter()
-        .find(|source| source.enabled && source.id == source_id)
+    let Some(source) = state
+        .epg_store
+        .source(source_id)
+        .filter(|source| source.enabled)
     else {
         bail!("EPG 源不存在或未启用");
     };
@@ -547,7 +580,7 @@ pub async fn refresh_source(state: &Arc<AppState>, source_id: &str) -> Result<Su
     }
     let _guard = RunningGuard(&state.epg.running);
 
-    let result = match source_body(state, &config, source, SourceMode::Fetch).await {
+    let result = match source_document(state, &config, &source, SourceMode::Fetch).await {
         Ok(_) => collect(state, &config, SourceMode::CacheOnly).await,
         Err(error) => Err(error),
     };
@@ -594,6 +627,7 @@ async fn collect(state: &Arc<AppState>, config: &Config, mode: SourceMode) -> Re
             gid: target.gid.clone(),
             cid: target.cid.clone(),
             name: target.name.clone(),
+            group_name: target.group_name.clone(),
             out_id: target.out_id.clone(),
             via: if duplicate_out_ids(&targets, &target.out_id) {
                 "duplicate".into()
@@ -612,53 +646,36 @@ async fn collect(state: &Arc<AppState>, config: &Config, mode: SourceMode) -> Re
     let mut programmes: Vec<Programme> = Vec::new();
     let mut sources = 0usize;
     let mut errors: Vec<String> = Vec::new();
-    let mut mapping_displays: HashMap<(String, String), String> = HashMap::new();
     let mut documents: HashMap<String, DocumentData> = HashMap::new();
     let mut viewer_meta: HashMap<String, ViewerMeta> = HashMap::new();
 
-    for source in config.epg.sources.iter().filter(|source| source.enabled) {
-        let body = match source_body(state, config, source, mode).await {
-            Ok(body) => body,
+    for source in enabled_sources(state) {
+        let document = match source_document(state, config, &source, mode).await {
+            Ok(document) => document,
             Err(error) => {
                 errors.push(format!("{}：{error:#}", source.name));
                 continue;
             }
         };
         sources += 1;
-        let mut document = match parse(&body) {
-            Ok(document) => document,
-            Err(error) => {
-                errors.push(format!("{}：解析失败 {error:#}", source.name));
-                continue;
-            }
-        };
-        shift_document(&mut document, source.tz_shift_mins);
         documents.insert(source.id.clone(), document.clone());
-        for mapping in mappings.values() {
-            if mapping.source_id != source.id {
-                continue;
-            }
-            if let Some(channel) = document
-                .channels
-                .iter()
-                .find(|channel| channel.id == mapping.source_channel_id)
-            {
-                if let Some((_, name)) = channel.names.first() {
-                    mapping_displays.insert(
-                        (mapping.source_id.clone(), mapping.source_channel_id.clone()),
-                        name.clone(),
-                    );
-                }
-            }
-        }
         let (candidates, owners, source_programmes) = match_source(
             &targets, &document, &mappings, &source.id, config, past, future,
         );
         for candidate in &candidates {
             let row = &mut rows[candidate.target];
+            let display_name = document
+                .channels
+                .iter()
+                .find(|channel| channel.id == candidate.channel_id)
+                .and_then(|channel| channel.names.first())
+                .map(|(_, name)| name.clone())
+                .unwrap_or_default();
             if row.source_id.is_empty() || candidate.manual {
                 row.via = candidate.via.clone();
                 row.source_id = source.id.clone();
+                row.raw_channel_id = candidate.channel_id.clone();
+                row.upstream_display_name = display_name;
                 row.programmes = if owners.get(&candidate.channel_id) == Some(&candidate.target) {
                     source_programmes
                         .get(&candidate.channel_id)
@@ -786,26 +803,61 @@ async fn collect(state: &Arc<AppState>, config: &Config, mode: SourceMode) -> Re
     ) {
         tracing::warn!(path = %viewer_file.display(), %error, "写入公开频道表失败");
     }
+    // 采集结果写回自动绑定。手工绑定保持不变。
+    let manual_keys = state.epg_store.manual_keys();
+    let auto: Vec<crate::epg_store::Binding> = rows
+        .iter()
+        .filter(|row| {
+            !row.source_id.is_empty()
+                && row.via != "none"
+                && row.via != "duplicate"
+                && !manual_keys.contains(&format!("{}/{}", row.gid, row.cid))
+        })
+        .map(|row| crate::epg_store::Binding {
+            gid: row.gid.clone(),
+            cid: row.cid.clone(),
+            source_id: row.source_id.clone(),
+            raw_channel_id: row.raw_channel_id.clone(),
+            origin: "auto".into(),
+            upstream_display_name: row.upstream_display_name.clone(),
+            updated_at_ms: 0,
+        })
+        .collect();
+    if let Err(error) = state.epg_store.replace_auto_bindings(auto) {
+        tracing::warn!(%error, "写入自动 EPG 绑定失败");
+    }
+    let matched_names: HashMap<String, String> = rows
+        .iter()
+        .filter(|row| !row.upstream_display_name.is_empty())
+        .map(|row| {
+            (
+                format!("{}/{}", row.gid, row.cid),
+                row.upstream_display_name.clone(),
+            )
+        })
+        .collect();
+    for mut binding in state
+        .epg_store
+        .bindings()
+        .into_iter()
+        .filter(|binding| binding.manual())
+    {
+        let Some(name) = matched_names.get(&binding.key()) else {
+            continue;
+        };
+        if binding.upstream_display_name == *name {
+            continue;
+        }
+        binding.upstream_display_name = name.clone();
+        if let Err(error) = state.epg_store.set_binding(binding) {
+            tracing::warn!(%error, "更新手工绑定显示名失败");
+        }
+    }
     *state
         .epg
         .match_rows
         .lock()
         .unwrap_or_else(|error| error.into_inner()) = rows;
-    if !mapping_displays.is_empty() {
-        let mut map = state
-            .epg
-            .mappings
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        for mapping in map.values_mut() {
-            if let Some(name) = mapping_displays
-                .get(&(mapping.source_id.clone(), mapping.source_channel_id.clone()))
-            {
-                mapping.source_display_name = name.clone();
-            }
-        }
-        let _ = save_mappings(state, &map);
-    }
 
     Ok(Summary {
         channels: channels.len(),
@@ -820,6 +872,7 @@ struct Target {
     gid: String,
     cid: String,
     name: String,
+    group_name: String,
     out_id: String,
     tvg_id: Option<String>,
     normalized: String,
@@ -841,6 +894,7 @@ fn channel_targets(config: &Config) -> Vec<Target> {
                 gid: group.id.clone(),
                 cid: channel.id.clone(),
                 name: channel.name.clone(),
+                group_name: group.name.clone(),
                 out_id: channel_out_id(channel),
                 tvg_id: tvg_id.map(|value| value.to_lowercase()),
                 normalized: normalize_name(&channel.name),
@@ -936,8 +990,12 @@ fn match_source(
                 .tvg_id
                 .as_ref()
                 .and_then(|tvg_id| by_id.get(tvg_id).copied());
+            let by_name_id = by_id.get(&target.name.trim().to_lowercase()).copied();
             if let Some(channel) = by_tvg {
                 (Some(channel), "tvg-id", false)
+            } else if let Some(channel) = by_name_id {
+                // 源用频道 id 等于推流频道名时也能精确匹配。
+                (Some(channel), "id", false)
             } else if config.epg.match_by_name {
                 match by_name.get(&target.normalized) {
                     Some(channel) => (Some(*channel), "name", false),
@@ -958,7 +1016,11 @@ fn match_source(
     }
     let mut owners: HashMap<String, usize> = HashMap::new();
     for candidate in &candidates {
-        owners.insert(candidate.channel_id.clone(), candidate.target);
+        // 多个本地频道绑定同一个源频道时，节目只归频道顺序中的第一个。
+        // 这样导出的节目表只有一份，播放器的 tvg-id 相同也不会重复。
+        owners
+            .entry(candidate.channel_id.clone())
+            .or_insert(candidate.target);
     }
     let mut source_programmes: HashMap<String, Vec<Programme>> = HashMap::new();
     for programme in &document.programmes {
@@ -972,52 +1034,337 @@ fn match_source(
     (candidates, owners, source_programmes)
 }
 
-/// 取 EPG 源正文：`xml` 抓 URL；`script` 跑 `<cache>/epg/scripts/` 下的 Python。
-///
-/// `Fetch` 会把正文写入 `<cache>/epg/raw/<source_id>.xml`；`CacheOnly` 只读该文件。
-async fn source_body(
-    state: &Arc<AppState>,
-    config: &Config,
-    source: &crate::config::model::EpgSource,
-    mode: SourceMode,
-) -> Result<String> {
-    if mode == SourceMode::CacheOnly {
-        let path =
-            raw_file(Path::new(&config.cache.disk_path), &source.id).context("源 ID 不合法")?;
-        return fs::read_to_string(&path)
-            .with_context(|| format!("缺少缓存 {}，请先采集", path.display()));
-    }
-    if source.kind == "script" && !config.epg.allow_scripts {
-        bail!("已禁止脚本源");
-    }
-    let body = match source.kind.as_str() {
-        "xml" => {
-            if source.url.trim().is_empty() {
-                bail!("缺少 url");
-            }
-            let response = state
-                .http
-                .get(source.url.trim())
-                .send()
-                .await
-                .context("抓取失败")?
-                .error_for_status()
-                .context("上游状态异常")?;
-            response.text().await.context("读取正文失败")?
-        }
-        "script" => run_script(config, source).await?,
-        other => bail!("未知源类型 {other}"),
-    };
-    if let Some(path) = raw_file(Path::new(&config.cache.disk_path), &source.id) {
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        let _ = fs::write(path, body.as_bytes());
-    }
-    Ok(body)
+/// 启用中的源，按优先级升序。同优先级保持表内顺序。
+fn enabled_sources(state: &AppState) -> Vec<crate::epg_store::Source> {
+    let mut list: Vec<_> = state
+        .epg_store
+        .sources()
+        .into_iter()
+        .filter(|source| source.enabled)
+        .collect();
+    list.sort_by_key(|source| source.priority);
+    list
 }
 
-async fn run_script(config: &Config, source: &crate::config::model::EpgSource) -> Result<String> {
+/// 取一个源的合并文档。
+///
+/// `Fetch` 会抓取或执行脚本，并写 raw 缓存；`CacheOnly` 只读 raw 缓存。
+async fn source_document(
+    state: &Arc<AppState>,
+    config: &Config,
+    source: &crate::epg_store::Source,
+    mode: SourceMode,
+) -> Result<DocumentData> {
+    if mode == SourceMode::CacheOnly {
+        let mut document = load_raw_document(config, source).context("缺少缓存，请先采集")?;
+        shift_document(&mut document, source.tz_shift_mins);
+        return Ok(document);
+    }
+    if source.kind == "script" {
+        if !config.epg.allow_scripts {
+            bail!("已禁止脚本源");
+        }
+        let status_started = crate::users::model::now_ms();
+        let body = run_script(config, source).await?;
+        let mut document = parse(&body).context("解析失败")?;
+        let status = build_source_status(&document, status_started, true, None, Vec::new());
+        store_source_status(state, &source.id, status);
+        if let Some(path) = raw_file(Path::new(&config.cache.disk_path), &source.id) {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let _ = fs::write(path, body.as_bytes());
+        }
+        shift_document(&mut document, source.tz_shift_mins);
+        return Ok(document);
+    }
+    if source.kind != "xml" {
+        bail!("未知源类型 {}", source.kind);
+    }
+    if source.urls.is_empty() {
+        bail!("缺少 URL");
+    }
+    let directory = Path::new(&config.cache.disk_path);
+    let previous = state
+        .epg
+        .source_status
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(&source.id)
+        .cloned()
+        .unwrap_or_default();
+    let mut urls = source.urls.clone();
+    urls.sort_by_key(|url| url.priority);
+    let started = crate::users::model::now_ms();
+    let mut merged = DocumentData::default();
+    let mut statuses: Vec<UrlStatus> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+    let mut cache_headers = HashMap::new();
+    for url in &urls {
+        if url.url.trim().is_empty() {
+            continue;
+        }
+        let file = raw_url_file(directory, &source.id, &url.url);
+        let previous_url = previous
+            .urls
+            .iter()
+            .find(|item| item.url == url.url.trim())
+            .cloned()
+            .unwrap_or_default();
+        let mut status = UrlStatus {
+            url: url.url.trim().to_string(),
+            priority: url.priority,
+            last_fetch_started_at_ms: Some(crate::users::model::now_ms()),
+            ..UrlStatus::default()
+        };
+        let fetched = fetch_url(state, url, &previous_url).await;
+        match fetched {
+            Ok(Fetched::Body {
+                body,
+                etag,
+                last_modified,
+            }) => match parse(&body) {
+                Ok(document) => {
+                    if let Some(path) = &file {
+                        if let Some(parent) = path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        let _ = fs::write(path, body.as_bytes());
+                    }
+                    status.last_fetch_ok = true;
+                    status.channels = document.channels.len();
+                    status.programmes = document.programmes.len();
+                    status.etag = etag.clone();
+                    status.last_modified = last_modified.clone();
+                    cache_headers.insert(url.url.trim().to_string(), (etag, last_modified));
+                    merge_document(&mut merged, document);
+                }
+                Err(error) => {
+                    status.last_error = Some(format!("解析失败 {error:#}"));
+                    errors.push(format!("{}：{}", url.url.trim(), error));
+                }
+            },
+            Ok(Fetched::NotModified) => {
+                if let Some(document) = file.as_deref().and_then(read_raw_document) {
+                    status.last_fetch_ok = true;
+                    status.channels = document.channels.len();
+                    status.programmes = document.programmes.len();
+                    status.etag = previous_url.etag.clone();
+                    status.last_modified = previous_url.last_modified.clone();
+                    cache_headers.insert(
+                        url.url.trim().to_string(),
+                        (
+                            previous_url.etag.clone(),
+                            previous_url.last_modified.clone(),
+                        ),
+                    );
+                    merge_document(&mut merged, document);
+                } else {
+                    status.last_error = Some("上游 304，但没有缓存".into());
+                    errors.push(format!("{}：上游 304，但没有缓存", url.url.trim()));
+                }
+            }
+            Err(error) => {
+                status.last_error = Some(format!("{error:#}"));
+                errors.push(format!("{}：{error:#}", url.url.trim()));
+            }
+        }
+        status.last_fetch_finished_at_ms = Some(crate::users::model::now_ms());
+        statuses.push(status);
+    }
+    let finished = crate::users::model::now_ms();
+    if merged.channels.is_empty() {
+        let status = SourceStatus {
+            last_fetch_started_at_ms: Some(started),
+            last_fetch_finished_at_ms: Some(finished),
+            last_fetch_ok: false,
+            last_error: Some(errors.join("；")),
+            urls: statuses,
+            cache_headers,
+            ..SourceStatus::default()
+        };
+        store_source_status(state, &source.id, status);
+        bail!("{}", errors.join("；"));
+    }
+    let mut status = build_source_status(&merged, started, true, None, statuses);
+    status.last_fetch_finished_at_ms = Some(finished);
+    status.last_error = (!errors.is_empty()).then(|| errors.join("；"));
+    status.cache_headers = cache_headers;
+    store_source_status(state, &source.id, status);
+    shift_document(&mut merged, source.tz_shift_mins);
+    Ok(merged)
+}
+
+enum Fetched {
+    Body {
+        body: String,
+        etag: Option<String>,
+        last_modified: Option<String>,
+    },
+    NotModified,
+}
+
+async fn fetch_url(
+    state: &AppState,
+    url: &crate::epg_store::SourceUrl,
+    previous: &UrlStatus,
+) -> Result<Fetched> {
+    let mut request = state.http.get(url.url.trim());
+    if !url.user_agent.trim().is_empty() {
+        request = request.header(reqwest::header::USER_AGENT, url.user_agent.trim());
+    }
+    for header in &url.headers {
+        let name = reqwest::header::HeaderName::from_bytes(header.name.as_bytes());
+        let value = reqwest::header::HeaderValue::from_str(&header.value);
+        if let (Ok(name), Ok(value)) = (name, value) {
+            request = request.header(name, value);
+        }
+    }
+    if let Some(etag) = previous.etag.as_deref() {
+        if let Ok(value) = reqwest::header::HeaderValue::from_str(etag) {
+            request = request.header(reqwest::header::IF_NONE_MATCH, value);
+        }
+    }
+    if let Some(modified) = previous.last_modified.as_deref() {
+        if let Ok(value) = reqwest::header::HeaderValue::from_str(modified) {
+            request = request.header(reqwest::header::IF_MODIFIED_SINCE, value);
+        }
+    }
+    let response = request.send().await.context("抓取失败")?;
+    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(Fetched::NotModified);
+    }
+    let response = response.error_for_status().context("上游状态异常")?;
+    let etag = response
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let last_modified = response
+        .headers()
+        .get(reqwest::header::LAST_MODIFIED)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let bytes = response.bytes().await.context("读取正文失败")?;
+    let body = decode_body(&bytes);
+    Ok(Fetched::Body {
+        body,
+        etag,
+        last_modified,
+    })
+}
+
+/// 解压 gzip 正文；不是 gzip 时按 UTF-8 读取。
+fn decode_body(bytes: &[u8]) -> String {
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        let mut decoder = flate2::read::GzDecoder::new(bytes);
+        let mut text = String::new();
+        if std::io::Read::read_to_string(&mut decoder, &mut text).is_ok() {
+            return text;
+        }
+    }
+    String::from_utf8_lossy(bytes).to_string()
+}
+
+fn build_source_status(
+    document: &DocumentData,
+    started: i64,
+    ok: bool,
+    error: Option<String>,
+    urls: Vec<UrlStatus>,
+) -> SourceStatus {
+    let mut coverage_start: Option<i64> = None;
+    let mut coverage_end: Option<i64> = None;
+    for programme in &document.programmes {
+        if let Some(start) = parse_time(&programme.start) {
+            let start = start.saturating_mul(1_000);
+            coverage_start = Some(coverage_start.map_or(start, |value| value.min(start)));
+        }
+        if let Some(stop) = parse_time(&programme.stop) {
+            let stop = stop.saturating_mul(1_000);
+            coverage_end = Some(coverage_end.map_or(stop, |value| value.max(stop)));
+        }
+    }
+    SourceStatus {
+        last_fetch_started_at_ms: Some(started),
+        last_fetch_finished_at_ms: Some(crate::users::model::now_ms()),
+        last_fetch_ok: ok,
+        last_error: error,
+        channels: document.channels.len(),
+        programmes: document.programmes.len(),
+        coverage_start_ms: coverage_start,
+        coverage_end_ms: coverage_end,
+        urls,
+        cache_headers: HashMap::new(),
+    }
+}
+
+fn store_source_status(state: &AppState, source_id: &str, status: SourceStatus) {
+    state
+        .epg
+        .source_status
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(source_id.to_string(), status);
+}
+
+/// 合并同一个源内多个 URL 的文档。
+///
+/// 同一 `channel id` 只保留先到者。先到者由 URL 优先级决定。
+fn merge_document(merged: &mut DocumentData, next: DocumentData) {
+    let mut seen: HashSet<String> = merged
+        .channels
+        .iter()
+        .map(|channel| channel.id.to_lowercase())
+        .collect();
+    let mut accepted: HashSet<String> = HashSet::new();
+    for channel in next.channels {
+        if seen.insert(channel.id.to_lowercase()) {
+            accepted.insert(channel.id.clone());
+            merged.channels.push(channel);
+        }
+    }
+    merged.programmes.extend(
+        next.programmes
+            .into_iter()
+            .filter(|programme| accepted.contains(&programme.channel)),
+    );
+}
+
+/// 读 raw 缓存并合并。缺文件时返回 `None`。
+fn load_raw_document(config: &Config, source: &crate::epg_store::Source) -> Option<DocumentData> {
+    let directory = Path::new(&config.cache.disk_path);
+    if source.kind == "xml" && !source.urls.is_empty() {
+        let mut urls = source.urls.clone();
+        urls.sort_by_key(|url| url.priority);
+        let mut merged = DocumentData::default();
+        let mut found = false;
+        for url in &urls {
+            let Some(document) = raw_url_file(directory, &source.id, &url.url)
+                .as_deref()
+                .and_then(read_raw_document)
+            else {
+                continue;
+            };
+            found = true;
+            merge_document(&mut merged, document);
+        }
+        if found {
+            return Some(merged);
+        }
+    }
+    raw_file(directory, &source.id)
+        .as_deref()
+        .and_then(read_raw_document)
+}
+
+fn read_raw_document(path: &Path) -> Option<DocumentData> {
+    let bytes = fs::read(path).ok()?;
+    let body = decode_body(&bytes);
+    parse(&body).ok()
+}
+
+async fn run_script(config: &Config, source: &crate::epg_store::Source) -> Result<String> {
     let name = crate::logo::sanitize(&source.script).context("脚本名不合法")?;
     let dir = Path::new(&config.cache.disk_path)
         .join("epg")
@@ -1327,26 +1674,43 @@ pub fn spawn(state: Arc<AppState>) {
                 }
                 continue;
             }
-            for source in config
-                .epg
-                .sources
-                .iter()
-                .filter(|source| source.enabled && !source.cron.trim().is_empty())
-            {
-                let due = cron_preview(&source.cron, now, offset, 1)
-                    .ok()
-                    .and_then(|next| next.first().copied());
-                if due.is_some_and(|due| due <= now) {
-                    match refresh_source(&state, &source.id).await {
-                        Ok(summary) => tracing::info!(
-                            source = %source.name,
-                            channels = summary.channels,
-                            programmes = summary.kept,
-                            "EPG 单源采集完成"
-                        ),
-                        Err(error) => {
-                            tracing::warn!(source = %source.name, %error, "EPG 单源采集失败")
-                        }
+            let sources = state.epg_store.sources();
+            for source in sources.iter().filter(|source| source.enabled) {
+                let last = state
+                    .epg
+                    .source_status
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .get(&source.id)
+                    .and_then(|status| {
+                        status
+                            .last_fetch_started_at_ms
+                            .or(status.last_fetch_finished_at_ms)
+                    });
+                let due = if source.refresh_secs > 0 {
+                    last.is_none_or(|at| {
+                        at + source.refresh_secs.saturating_mul(1_000) as i64 <= now * 1_000
+                    })
+                } else if !source.cron.trim().is_empty() {
+                    cron_preview(&source.cron, now, offset, 1)
+                        .ok()
+                        .and_then(|next| next.first().copied())
+                        .is_some_and(|due| due <= now)
+                } else {
+                    false
+                };
+                if !due {
+                    continue;
+                }
+                match refresh_source(&state, &source.id).await {
+                    Ok(summary) => tracing::info!(
+                        source = %source.name,
+                        channels = summary.channels,
+                        programmes = summary.kept,
+                        "EPG 单源采集完成"
+                    ),
+                    Err(error) => {
+                        tracing::warn!(source = %source.name, %error, "EPG 单源采集失败")
                     }
                 }
             }
@@ -1504,11 +1868,9 @@ fn shift_document(document: &mut DocumentData, minutes: i64) {
     }
 }
 
-/// 读取单个源的 raw 缓存并解析。
-fn raw_document(config: &Config, source_id: &str) -> Option<DocumentData> {
-    let path = raw_file(Path::new(&config.cache.disk_path), source_id)?;
-    let body = fs::read_to_string(path).ok()?;
-    parse(&body).ok()
+fn raw_document(state: &AppState, source: &crate::epg_store::Source) -> Option<DocumentData> {
+    let config = state.snapshot();
+    load_raw_document(&config, source)
 }
 
 fn title_text(programme: &Programme) -> String {
@@ -1574,23 +1936,23 @@ pub fn programmes_for(config: &Config, channel: &str) -> Result<Value> {
 
 /// 源频道搜索；`source_id = "__all__"` 时跨全部启用源。
 pub fn source_channels(
-    config: &Config,
+    state: &AppState,
     source_id: &str,
     query: &str,
     offset: usize,
     limit: usize,
 ) -> Value {
     let query = query.trim().to_lowercase();
-    let sources: Vec<_> = config
-        .epg
-        .sources
-        .iter()
+    let sources: Vec<_> = state
+        .epg_store
+        .sources()
+        .into_iter()
         .filter(|source| source.enabled)
         .filter(|source| source_id == "__all__" || source.id == source_id)
         .collect();
     let mut items = Vec::new();
     for source in sources {
-        let Some(document) = raw_document(config, &source.id) else {
+        let Some(document) = raw_document(state, &source) else {
             continue;
         };
         for channel in &document.channels {
@@ -1622,7 +1984,8 @@ pub fn source_channels(
 }
 
 /// 按名称相似度推荐源频道。
-pub fn suggest(config: &Config, gid: &str, cid: &str, limit: usize) -> Result<Value> {
+pub fn suggest(state: &AppState, gid: &str, cid: &str, limit: usize) -> Result<Value> {
+    let config = state.snapshot();
     let Some(group) = config.group(gid) else {
         bail!("分组不存在");
     };
@@ -1630,8 +1993,13 @@ pub fn suggest(config: &Config, gid: &str, cid: &str, limit: usize) -> Result<Va
         bail!("频道不存在");
     };
     let mut suggestions = Vec::new();
-    for source in config.epg.sources.iter().filter(|source| source.enabled) {
-        let Some(document) = raw_document(config, &source.id) else {
+    for source in state
+        .epg_store
+        .sources()
+        .into_iter()
+        .filter(|source| source.enabled)
+    {
+        let Some(document) = raw_document(state, &source) else {
             continue;
         };
         for candidate in &document.channels {
@@ -1660,9 +2028,13 @@ pub fn suggest(config: &Config, gid: &str, cid: &str, limit: usize) -> Result<Va
 }
 
 /// 时间偏移预览：取源第一条节目，返回原文与本机时间、偏移后时间。
-pub fn tz_preview(config: &Config, source_id: &str, shift_secs: i64) -> Value {
+pub fn tz_preview(state: &AppState, source_id: &str, shift_secs: i64) -> Value {
+    let config = state.snapshot();
     let offset = config.server.timezone_offset_hours as i64;
-    let Some(document) = raw_document(config, source_id) else {
+    let Some(source) = state.epg_store.source(source_id) else {
+        return json!({ "ok": false, "error": "EPG 源不存在" });
+    };
+    let Some(document) = raw_document(state, &source) else {
         return json!({ "ok": false, "error": "该源暂无采集数据" });
     };
     let item = document.programmes.iter().find_map(|programme| {
@@ -2329,7 +2701,7 @@ mod tests {
     }
 
     #[test]
-    fn match_source_prefers_tvg_then_name_and_last_owner_wins() {
+    fn match_source_prefers_tvg_then_name_and_first_owner_wins() {
         let mut config = Config::default();
         let mut group = crate::config::model::Group::default();
         group.id = "g".into();
@@ -2373,7 +2745,7 @@ mod tests {
         assert_eq!(candidates[0].via, "tvg-id");
         assert_eq!(candidates[1].via, "name");
         assert_eq!(candidates[3].via, "name", "tvg_id 未命中时回退名称");
-        assert_eq!(owners["cctv1"], 3, "配置顺序最后的同名频道获得节目");
+        assert_eq!(owners["cctv1"], 0, "配置顺序最靠前的同名频道获得节目");
         assert_eq!(programmes["cctv1"].len(), 2);
         assert_eq!(programmes["cctv3"].len(), 1);
     }
@@ -2415,6 +2787,69 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].via, "manual");
         assert_eq!(candidates[0].channel_id, "only");
+    }
+
+    #[test]
+    fn merge_document_keeps_first_url_channel() {
+        let mut merged = parse(
+            r#"<tv><channel id="1"><display-name>CCTV1</display-name></channel>
+<programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="1"><title>A</title></programme></tv>"#,
+        )
+        .expect("解析");
+        let next = parse(
+            r#"<tv><channel id="1"><display-name>CCTV1 备用</display-name></channel>
+<channel id="2"><display-name>CCTV2</display-name></channel>
+<programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="1"><title>B</title></programme>
+<programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="2"><title>C</title></programme></tv>"#,
+        )
+        .expect("解析");
+        merge_document(&mut merged, next);
+        assert_eq!(merged.channels.len(), 2);
+        let titles: Vec<&str> = merged
+            .programmes
+            .iter()
+            .map(|programme| {
+                programme
+                    .texts
+                    .iter()
+                    .find(|(name, _, _)| name == "title")
+                    .map(|(_, _, text)| text.as_str())
+                    .unwrap_or("")
+            })
+            .collect();
+        assert!(titles.contains(&"A"));
+        assert!(titles.contains(&"C"));
+        assert!(!titles.contains(&"B"), "低优先级 URL 的同频道节目应丢弃");
+    }
+
+    #[test]
+    fn matches_channel_id_equal_to_channel_name() {
+        let mut config = Config::default();
+        let mut group = crate::config::model::Group::default();
+        group.id = "g".into();
+        let mut channel = crate::config::model::Channel::default();
+        channel.id = "c1".into();
+        channel.name = "CCTV1".into();
+        group.channels = vec![channel];
+        config.groups.push(group);
+        let targets = channel_targets(&config);
+        let document = parse(
+            r#"<tv><channel id="CCTV1"></channel>
+<programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="CCTV1"><title>A</title></programme></tv>"#,
+        )
+        .expect("解析");
+        let (candidates, _, _) = match_source(
+            &targets,
+            &document,
+            &HashMap::new(),
+            "s1",
+            &config,
+            0,
+            4_000_000_000,
+        );
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].via, "id");
+        assert_eq!(candidates[0].channel_id, "CCTV1");
     }
 
     #[test]

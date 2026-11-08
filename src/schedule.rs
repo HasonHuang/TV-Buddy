@@ -42,6 +42,12 @@ pub struct Task {
     pub created_at: String,
     pub file_size: u64,
     pub record_secs: u64,
+    /// 生成此任务的关键字规则 ID。空表示手工任务。
+    pub rule_id: String,
+    /// 规则命中的节目开始时间（原始 XMLTV 串）。用于去重。
+    pub programme_start: String,
+    /// 录制子目录（相对 `<cache>/recordings`）。
+    pub output_dir: String,
 }
 
 impl Default for Task {
@@ -62,6 +68,9 @@ impl Default for Task {
             created_at: String::new(),
             file_size: 0,
             record_secs: 0,
+            rule_id: String::new(),
+            programme_start: String::new(),
+            output_dir: String::new(),
         }
     }
 }
@@ -172,6 +181,25 @@ impl Store {
         Ok(self.stop_flag(&task.id))
     }
 
+    /// 规则是否已为这个节目建过任务。
+    pub fn has_rule_task(&self, rule_id: &str, programme_start: &str) -> bool {
+        self.lock()
+            .iter()
+            .any(|task| task.rule_id == rule_id && task.programme_start == programme_start)
+    }
+
+    /// 删除规则生成的待执行任务。返回删除数量。
+    pub fn remove_rule_tasks(&self, rule_id: &str) -> usize {
+        let mut tasks = self.lock();
+        let before = tasks.len();
+        tasks.retain(|task| task.rule_id != rule_id || task.status != "pending");
+        let removed = before - tasks.len();
+        if removed > 0 {
+            self.persist(&tasks);
+        }
+        removed
+    }
+
     fn stop_flag(&self, id: &str) -> bool {
         let running = self.running.lock().unwrap_or_else(|e| e.into_inner());
         match running.get(id) {
@@ -209,9 +237,17 @@ impl Store {
 
     /// 产物路径（下载用）；拒绝路径穿越。
     pub fn file(&self, name: &str) -> Option<PathBuf> {
-        let safe = crate::logo::sanitize(name)?;
-        let path = self.recordings.join(safe);
-        path.is_file().then_some(path)
+        let mut path = self.recordings.clone();
+        let mut any = false;
+        for segment in name
+            .split(['/', '\\'])
+            .filter(|part| !part.trim().is_empty())
+        {
+            let safe = crate::logo::sanitize(segment)?;
+            path.push(safe);
+            any = true;
+        }
+        (any && path.is_file()).then_some(path)
     }
 
     /// 时区偏移（小时）。
@@ -229,6 +265,45 @@ impl Store {
                     .unwrap_or(false)
         })
     }
+}
+
+/// 任务产物的目录与文件名主干。
+///
+/// `output_dir` 与任务名里的 `/` 都转成子目录。每段都经 `sanitize`，
+/// 所以不会跳出 `<cache>/recordings`。
+fn task_output_path(cache_dir: &Path, task: &Task) -> (PathBuf, String) {
+    let mut dir = cache_dir.join("recordings");
+    for segment in task
+        .output_dir
+        .split(['/', '\\'])
+        .filter(|part| !part.trim().is_empty())
+    {
+        if let Some(safe) = crate::logo::sanitize(segment) {
+            dir.push(safe);
+        }
+    }
+    let mut parts: Vec<String> = task
+        .name
+        .split(['/', '\\'])
+        .filter_map(crate::logo::sanitize)
+        .collect();
+    let stem = parts.pop().unwrap_or_else(|| "record".into());
+    for part in parts {
+        dir.push(part);
+    }
+    (dir, stem)
+}
+
+/// 产物相对 `<cache>/recordings` 的路径，下载接口用。
+fn relative_recording_path(cache_dir: &Path, path: &Path) -> String {
+    let root = cache_dir.join("recordings");
+    path.strip_prefix(&root)
+        .map(|value| value.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_default()
+        })
 }
 
 /// 起调度任务（每 10 秒扫描）。
@@ -356,12 +431,8 @@ async fn record(state: Arc<AppState>, task: Task, end: i64, stop: Arc<AtomicBool
         return fail(&state, &task, &reason);
     }
     let stamp = now_epoch();
-    let stem = format!(
-        "{}_{}",
-        crate::logo::sanitize(&task.name).unwrap_or_else(|| "record".into()),
-        stamp
-    );
-    let dir = Path::new(&state.cache_dir).join("recordings");
+    let (dir, stem_base) = task_output_path(&state.cache_dir, &task);
+    let stem = format!("{stem_base}_{stamp}");
     let _ = fs::create_dir_all(&dir);
     let ts = dir.join(format!("{stem}.ts"));
     if let Err(error) = fs::write(&ts, &merged) {
@@ -387,10 +458,7 @@ async fn record(state: Arc<AppState>, task: Task, end: i64, stop: Arc<AtomicBool
         }
     }
     let size = fs::metadata(&output).map(|meta| meta.len()).unwrap_or(0);
-    let name = output
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let name = relative_recording_path(&state.cache_dir, &output);
     state.schedule.set(&task.id, |task| {
         task.status = "finished".into();
         task.output_file = name;
@@ -447,7 +515,7 @@ async fn record_dash(
     if !matches!(probe, Ok(output) if output.status.success()) {
         return fail(state, task, "ffmpeg 不可用");
     }
-    let dir = Path::new(&state.cache_dir).join("recordings");
+    let (dir, stem_base) = task_output_path(&state.cache_dir, task);
     if let Err(error) = fs::create_dir_all(&dir) {
         return fail(state, task, &format!("建录制目录失败: {error}"));
     }
@@ -566,11 +634,7 @@ async fn record_dash(
     };
 
     let stamp = now_epoch();
-    let stem = format!(
-        "{}_{}",
-        crate::logo::sanitize(&task.name).unwrap_or_else(|| "record".into()),
-        stamp
-    );
+    let stem = format!("{stem_base}_{stamp}");
     let output = dir.join(format!("{stem}.mkv"));
     let mut command = tokio::process::Command::new("ffmpeg");
     command.kill_on_drop(true);
@@ -607,10 +671,7 @@ async fn record_dash(
     }
     let record_secs = started.elapsed().as_secs();
     let size = fs::metadata(&output).map(|meta| meta.len()).unwrap_or(0);
-    let name = output
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let name = relative_recording_path(&state.cache_dir, &output);
     let _ = fs::remove_dir_all(&temp);
     state.schedule.set(&task.id, |task| {
         task.status = "finished".into();

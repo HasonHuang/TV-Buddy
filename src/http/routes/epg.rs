@@ -14,7 +14,8 @@ use axum::{
 use serde_json::{json, Value};
 
 use crate::{
-    epg,
+    epg, epg_rules,
+    epg_store::{Binding, Rule, Source},
     http::{error::ApiError, ext::PanelAuth},
     state::AppState,
 };
@@ -45,7 +46,7 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
     Json(json!({
         "enabled": config.epg.enabled,
         "running": state.epg.running.load(std::sync::atomic::Ordering::SeqCst),
-        "sources": config.epg.sources.len(),
+        "sources": state.epg_store.sources().len(),
         "channels": state.epg.channels.load(std::sync::atomic::Ordering::SeqCst),
         "programmes": state.epg.programmes.load(std::sync::atomic::Ordering::SeqCst),
         "kept": state.epg.kept.load(std::sync::atomic::Ordering::SeqCst),
@@ -106,8 +107,14 @@ pub async fn mapping(
         &text("source_id"),
         &text("source_channel_id"),
     ) {
-        Ok(Some(mapping)) => Ok(Json(json!({ "ok": true, "mapping": mapping }))),
-        Ok(None) => Ok(Json(json!({ "ok": true, "cleared": true }))),
+        Ok(Some(mapping)) => {
+            spawn_regenerate(&state);
+            Ok(Json(json!({ "ok": true, "mapping": mapping })))
+        }
+        Ok(None) => {
+            spawn_regenerate(&state);
+            Ok(Json(json!({ "ok": true, "cleared": true })))
+        }
         Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
     }
 }
@@ -336,8 +343,7 @@ pub async fn suggest(
     State(state): State<Arc<AppState>>,
     Path((gid, cid)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
-    let config = state.snapshot();
-    match epg::suggest(&config, &gid, &cid, 10) {
+    match epg::suggest(&state, &gid, &cid, 10) {
         Ok(value) => Ok(Json(value)),
         Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
     }
@@ -359,9 +365,8 @@ pub async fn source_channels(
         .get("limit")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(60);
-    let config = state.snapshot();
     Json(epg::source_channels(
-        &config, &source_id, query, offset, limit,
+        &state, &source_id, query, offset, limit,
     ))
 }
 
@@ -376,8 +381,7 @@ pub async fn tz_preview(
         .get("shift")
         .and_then(|value| value.trim().parse::<i64>().ok())
         .unwrap_or(0);
-    let config = state.snapshot();
-    Json(epg::tz_preview(&config, &source_id, shift_mins * 60))
+    Json(epg::tz_preview(&state, &source_id, shift_mins * 60))
 }
 
 fn title_of(programme: &epg::Programme) -> String {
@@ -674,4 +678,295 @@ pub async fn translate_clear(
         }
     }
     Json(json!({ "ok": true, "cleared": cleared }))
+}
+
+// ---- EPG 配置：源、绑定、关键字规则 ----
+
+/// `GET /panel/api/epg/sources`——源列表与运行时状态。
+pub async fn sources(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
+    let statuses = state
+        .epg
+        .source_status
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    let items: Vec<Value> = state
+        .epg_store
+        .sources()
+        .into_iter()
+        .map(|source| {
+            let status = statuses.get(&source.id).cloned().unwrap_or_default();
+            let mut value = serde_json::to_value(&source).unwrap_or_else(|_| json!({}));
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "last_fetch_started_at_ms".into(),
+                    json!(status.last_fetch_started_at_ms),
+                );
+                object.insert(
+                    "last_fetch_finished_at_ms".into(),
+                    json!(status.last_fetch_finished_at_ms),
+                );
+                object.insert("last_fetch_ok".into(), json!(status.last_fetch_ok));
+                object.insert("last_error".into(), json!(status.last_error));
+                object.insert("channels".into(), json!(status.channels));
+                object.insert("programmes".into(), json!(status.programmes));
+                object.insert("coverage_start_ms".into(), json!(status.coverage_start_ms));
+                object.insert("coverage_end_ms".into(), json!(status.coverage_end_ms));
+                object.insert("url_statuses".into(), json!(status.urls));
+            }
+            value
+        })
+        .collect();
+    Json(json!(items))
+}
+
+/// `POST /panel/api/epg/sources`——新增或更新一个源。
+pub async fn source_save(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(source): Json<Source>,
+) -> Result<Json<Value>, ApiError> {
+    match state.epg_store.save_source(source) {
+        Ok(source) => Ok(Json(json!({ "ok": true, "source": source }))),
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
+}
+
+/// `DELETE /panel/api/epg/sources/{id}`——删除源及其绑定。
+pub async fn source_delete(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    match state.epg_store.delete_source(&id) {
+        Ok(true) => Ok(Json(json!({ "ok": true }))),
+        Ok(false) => Err(ApiError::not_found("EPG 源不存在")),
+        Err(error) => Err(ApiError::internal(format!("{error:#}"))),
+    }
+}
+
+/// `POST /panel/api/epg/sources/{id}/refresh`——只采集一个源。
+pub async fn source_refresh(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    match epg::refresh_source(&state, &id).await {
+        Ok(summary) => Ok(Json(json!({
+            "ok": true,
+            "channels": summary.channels,
+            "programmes": summary.kept,
+        }))),
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
+}
+
+/// `GET /panel/api/epg/bindings`——全部本地频道与绑定状态。
+pub async fn bindings(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
+    let config = state.snapshot();
+    let bindings: HashMap<String, Binding> = state
+        .epg_store
+        .bindings()
+        .into_iter()
+        .map(|binding| (binding.key(), binding))
+        .collect();
+    let sources = state.epg_store.source_names();
+    let matches: HashMap<String, epg::MatchRow> = state
+        .epg
+        .match_rows
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .iter()
+        .map(|row| (format!("{}/{}", row.gid, row.cid), row.clone()))
+        .collect();
+    let mut items = Vec::new();
+    for group in &config.groups {
+        for channel in &group.channels {
+            let key = format!("{}/{}", group.id, channel.id);
+            let binding = bindings.get(&key);
+            let matched = matches.get(&key);
+            items.push(json!({
+                "gid": group.id,
+                "cid": channel.id,
+                "name": channel.name,
+                "group_id": group.id,
+                "group_name": group.name,
+                "out_id": epg::channel_out_id(channel),
+                "source_id": binding.map(|value| value.source_id.clone()).unwrap_or_default(),
+                "source_name": binding
+                    .and_then(|value| sources.get(&value.source_id).cloned())
+                    .unwrap_or_default(),
+                "raw_channel_id": binding.map(|value| value.raw_channel_id.clone()).unwrap_or_default(),
+                "upstream_display_name": binding
+                    .map(|value| value.upstream_display_name.clone())
+                    .unwrap_or_default(),
+                "origin": binding.map(|value| value.origin.clone()).unwrap_or_else(|| "none".into()),
+                "updated_at_ms": binding.map(|value| value.updated_at_ms).unwrap_or(0),
+                "match_via": matched.map(|row| row.via.clone()).unwrap_or_default(),
+                "programmes": matched.map(|row| row.programmes).unwrap_or(0),
+            }));
+        }
+    }
+    let bound = items
+        .iter()
+        .filter(|item| {
+            item["origin"]
+                .as_str()
+                .is_some_and(|origin| origin != "none")
+        })
+        .count();
+    let total = items.len();
+    Json(json!({ "items": items, "bound": bound, "total": total }))
+}
+
+/// `PUT /panel/api/epg/bindings/{gid}/{cid}`——手工绑定或清除。
+pub async fn binding_set(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path((gid, cid)): Path<(String, String)>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let text = |key: &str| {
+        body.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    match epg::set_mapping(
+        &state,
+        &gid,
+        &cid,
+        &text("source_id"),
+        &text("raw_channel_id"),
+    ) {
+        Ok(Some(mapping)) => {
+            spawn_regenerate(&state);
+            Ok(Json(json!({ "ok": true, "mapping": mapping })))
+        }
+        Ok(None) => {
+            spawn_regenerate(&state);
+            Ok(Json(json!({ "ok": true, "cleared": true })))
+        }
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
+}
+
+/// `DELETE /panel/api/epg/bindings/{gid}/{cid}`——清除绑定。
+pub async fn binding_delete(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path((gid, cid)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    match state.epg_store.remove_binding(&gid, &cid) {
+        Ok(removed) => {
+            if removed {
+                spawn_regenerate(&state);
+            }
+            Ok(Json(json!({ "ok": true, "removed": removed })))
+        }
+        Err(error) => Err(ApiError::internal(format!("{error:#}"))),
+    }
+}
+
+/// `POST /panel/api/epg/bindings/{gid}/{cid}/copy`——复用另一个频道的绑定。
+pub async fn binding_copy(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path((gid, cid)): Path<(String, String)>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let from_gid = body
+        .get("from_gid")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let from_cid = body
+        .get("from_cid")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let Some(binding) = state.epg_store.binding(from_gid, from_cid) else {
+        return Err(ApiError::not_found("源频道没有绑定"));
+    };
+    match epg::set_mapping(
+        &state,
+        &gid,
+        &cid,
+        &binding.source_id,
+        &binding.raw_channel_id,
+    ) {
+        Ok(_) => {
+            spawn_regenerate(&state);
+            Ok(Json(json!({ "ok": true })))
+        }
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
+}
+
+/// `GET /panel/api/epg/rules`——关键字规则列表。
+pub async fn rules(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
+    let config = state.snapshot();
+    let items: Vec<Value> = state
+        .epg_store
+        .rules()
+        .into_iter()
+        .map(|rule| {
+            let group = config.group(&rule.gid);
+            let channel = group
+                .and_then(|group| group.channels.iter().find(|channel| channel.id == rule.cid));
+            json!({
+                "rule": rule,
+                "group_name": group.map(|group| group.name.clone()).unwrap_or_default(),
+                "channel_name": channel.map(|channel| channel.name.clone()).unwrap_or_default(),
+            })
+        })
+        .collect();
+    Json(json!(items))
+}
+
+/// `POST /panel/api/epg/rules`——新增或更新规则。
+pub async fn rule_save(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(rule): Json<Rule>,
+) -> Result<Json<Value>, ApiError> {
+    if let Err(error) = epg_rules::validate(&state, &rule) {
+        return Err(ApiError::bad_request(format!("{error:#}")));
+    }
+    match state.epg_store.save_rule(rule) {
+        Ok(rule) => Ok(Json(json!({ "ok": true, "rule": rule }))),
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
+}
+
+/// `DELETE /panel/api/epg/rules/{id}`——删除规则与待执行任务。
+pub async fn rule_delete(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    match state.epg_store.delete_rule(&id) {
+        Ok(true) => {
+            let removed = state.schedule.remove_rule_tasks(&id);
+            Ok(Json(json!({ "ok": true, "removed_tasks": removed })))
+        }
+        Ok(false) => Err(ApiError::not_found("规则不存在")),
+        Err(error) => Err(ApiError::internal(format!("{error:#}"))),
+    }
+}
+
+/// `POST /panel/api/epg/rules/preview`——预览未来 48 小时的命中。
+pub async fn rule_preview(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Json(rule): Json<Rule>,
+) -> Result<Json<Value>, ApiError> {
+    if let Err(error) = epg_rules::validate(&state, &rule) {
+        return Err(ApiError::bad_request(format!("{error:#}")));
+    }
+    match epg_rules::preview(&state, &rule) {
+        Ok(value) => Ok(Json(value)),
+        Err(error) => Err(ApiError::bad_request(format!("{error:#}"))),
+    }
 }

@@ -76,7 +76,31 @@ fn init_schema(conn: &Connection) -> Result<()> {
              updated_at_ms BIGINT NOT NULL
          );
          CREATE INDEX IF NOT EXISTS access_tokens_order_idx
-             ON access_tokens (sort_order, id);",
+             ON access_tokens (sort_order, id);
+         CREATE TABLE IF NOT EXISTS epg_sources (
+             id TEXT PRIMARY KEY NOT NULL,
+             sort_order BIGINT NOT NULL,
+             config_json TEXT NOT NULL,
+             updated_at_ms BIGINT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS epg_sources_order_idx
+             ON epg_sources (sort_order, id);
+         CREATE TABLE IF NOT EXISTS epg_bindings (
+             id TEXT PRIMARY KEY NOT NULL,
+             sort_order BIGINT NOT NULL,
+             config_json TEXT NOT NULL,
+             updated_at_ms BIGINT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS epg_bindings_order_idx
+             ON epg_bindings (sort_order, id);
+         CREATE TABLE IF NOT EXISTS epg_rules (
+             id TEXT PRIMARY KEY NOT NULL,
+             sort_order BIGINT NOT NULL,
+             config_json TEXT NOT NULL,
+             updated_at_ms BIGINT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS epg_rules_order_idx
+             ON epg_rules (sort_order, id);",
     )
     .context("建表失败")?;
     Ok(())

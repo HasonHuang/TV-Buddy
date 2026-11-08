@@ -107,7 +107,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(routes::schedule::from_epg),
         )
         .route(
-            "/panel/api/schedule/download/:filename",
+            "/panel/api/schedule/download/*filename",
             get(routes::schedule::download),
         )
         .route(
@@ -298,6 +298,36 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/epg/regenerate", post(routes::epg::regenerate))
         .route("/panel/api/epg/mappings", get(routes::epg::mappings))
         .route("/panel/api/epg/mapping", post(routes::epg::mapping))
+        .route(
+            "/panel/api/epg/sources",
+            get(routes::epg::sources).post(routes::epg::source_save),
+        )
+        .route(
+            "/panel/api/epg/sources/:id",
+            delete(routes::epg::source_delete),
+        )
+        .route(
+            "/panel/api/epg/sources/:id/refresh",
+            post(routes::epg::source_refresh),
+        )
+        .route("/panel/api/epg/bindings", get(routes::epg::bindings))
+        .route(
+            "/panel/api/epg/bindings/:gid/:cid",
+            put(routes::epg::binding_set).delete(routes::epg::binding_delete),
+        )
+        .route(
+            "/panel/api/epg/bindings/:gid/:cid/copy",
+            post(routes::epg::binding_copy),
+        )
+        .route(
+            "/panel/api/epg/rules",
+            get(routes::epg::rules).post(routes::epg::rule_save),
+        )
+        .route(
+            "/panel/api/epg/rules/preview",
+            post(routes::epg::rule_preview),
+        )
+        .route("/panel/api/epg/rules/:id", delete(routes::epg::rule_delete))
         .route("/panel/api/epg/extra", post(routes::epg::extra))
         .route("/panel/api/epg/scripts", get(routes::epg::scripts_list))
         .route("/panel/api/epg/script", post(routes::epg::script_save))

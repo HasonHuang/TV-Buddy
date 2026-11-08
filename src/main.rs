@@ -68,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
         Err(error) => tracing::error!(%error, "初始化管理员失败"),
     }
     epg::spawn(state.clone());
+    tv_buddy::epg_rules::spawn(state.clone());
     tv_buddy::share::spawn(state.clone());
     tv_buddy::schedule::spawn(state.clone());
     tv_buddy::cache_gc::spawn(state.clone());

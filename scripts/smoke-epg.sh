@@ -210,11 +210,39 @@ check "MTran 不可达时报告失败" "False" \
     -H 'content-type: application/json' -d '{"text":"hello"}' | \
     python3 -c 'import json,sys;print(json.load(sys.stdin).get("ok"))')"
 
+# --- EPG 配置：源、绑定、关键字规则 ---
+curl -s -o /dev/null -X POST -H "$A" "$B/panel/api/epg/refresh"
+check "旧配置源已导入新表" "1" \
+  "$(curl -s -H "$A" "$B/panel/api/epg/sources" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if len(d)==1 and d[0]["name"]=="本地源" else 0)')"
+check "自动绑定已写入" "1" \
+  "$(curl -s -H "$A" "$B/panel/api/epg/bindings" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if any(i["origin"]=="auto" for i in d["items"]) else 0)')"
+
+NEW_SOURCE=$(curl -s -X POST -H "$A" -H 'content-type: application/json' \
+  -d '{"name":"第二源","kind":"xml","enabled":true,"urls":[{"url":"http://127.0.0.1:'"$UP"'/epg.xml","priority":1}]}' \
+  "$B/panel/api/epg/sources" | python3 -c 'import json,sys;print(json.load(sys.stdin)["source"]["id"])')
+check "新增源已写库" "1" \
+  "$(curl -s -H "$A" "$B/panel/api/epg/sources" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if any(s["id"]=="'"$NEW_SOURCE"'" for s in d) else 0)')"
+check "删除源 200" "200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "$A" "$B/panel/api/epg/sources/$NEW_SOURCE")"
+
+RULE=$(curl -s -X POST -H "$A" -H 'content-type: application/json' \
+  -d '{"name":"录制新闻","gid":"g1","cid":"c1","condition":{"op":"all","keywords":["新闻"],"groups":[]},"action":"record","enabled":true}' \
+  "$B/panel/api/epg/rules")
+RULE_ID=$(printf '%s' "$RULE" | python3 -c 'import json,sys;print(json.load(sys.stdin)["rule"]["id"])')
+check "规则已保存" "录制新闻" \
+  "$(printf '%s' "$RULE" | python3 -c 'import json,sys;print(json.load(sys.stdin)["rule"]["name"])')"
+check "规则预览命中" "1" \
+  "$(curl -s -X POST -H "$A" -H 'content-type: application/json' \
+    -d '{"gid":"g1","cid":"c1","condition":{"op":"all","keywords":["新闻"],"groups":[]},"action":"record"}' \
+    "$B/panel/api/epg/rules/preview" | python3 -c 'import json,sys;print(1 if json.load(sys.stdin)["total"]>=1 else 0)')"
+check "删除规则 200" "200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "$A" "$B/panel/api/epg/rules/$RULE_ID")"
+
 # 前端已内嵌这两张卡片（ASCII needle）。
 ASSET=$(curl -s -H "$A" "$B/panel" | grep -oE '/__assets/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
 PJS=$(curl -s "$B$ASSET")
 for needle in 'epg/cron-preview' 'epg/translate/run' 'epg/translate/clear-engine' \
-  'epg/translate/mtran/test' 'mtran_max_per_round'; do
+  'epg/translate/mtran/test' 'mtran_max_per_round' 'epg/sources' 'epg/bindings' 'epg/rules'; do
   case "$PJS" in
     *"$needle"*) printf 'ok   %s\n' "EPG 页包含 $needle" ;;
     *) printf 'FAIL EPG 页缺少 %s\n' "$needle"; fail=1 ;;

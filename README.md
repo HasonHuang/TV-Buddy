@@ -57,8 +57,14 @@ TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、�
 
 ### 节目单（EPG）
 
+- 源管理：面板「节目指南 → EPG 源」。一个源可挂多个 URL，按优先级合并。
+- 单个 URL 可设 User-Agent 与请求头。源可设刷新间隔、优先级与启用开关。
+- 健康状态：每个源与每个 URL 显示最近一次采集结果、频道数、节目数与覆盖时间。
+- 绑定：源刷新后按频道 ID 或显示名精确匹配。未匹配的频道可在「频道绑定」手动选择。
+- 绑定可复用其他频道的 EPG。手工绑定优先于自动绑定。
+- 关键字规则：节目标题命中关键字时自动开始、停止或录制。
+- 规则条件支持全部满足、任一满足、全部不满足，可嵌套。
 - 采集：XML 源与脚本源。
-- 匹配：按频道名自动匹配，可手工映射。
 - 翻译：接 MTranServer，批量翻译标题与描述。
 - 输出：`/sub/<令牌>/epg.xml`，面板「节目指南」。
 - 订阅注入：开启后自动写入 `x-tvg-url`。
@@ -355,7 +361,8 @@ http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 | `[[groups]]` | `mode`、`format`、`mpd_keep_seconds` | 分组行为 |
 
 生效方式：面板保存立即生效；`tv-buddy config set` 之后调用 `POST /panel/api/reload` 或重启。
-`[epg]` 与 `[cache].disk_path` 需要重启。
+`[cache].disk_path` 需要重启。EPG 源、绑定与规则已迁入面板与数据库，保存即生效。
+`[epg]` 的其余键仍需要重启。
 
 ### 翻译服务
 
@@ -724,6 +731,15 @@ ls scripts/smoke-*.sh
 | `POST` | `/panel/api/dash/scan-url` | 解析任意 MPD |
 | `GET` | `/panel/api/epg/{status,mappings,match-report}` | EPG 状态、映射与匹配报告 |
 | `POST` | `/panel/api/epg/{refresh,mapping}` | 立即采集、设置或清除映射 |
+| `GET`/`POST` | `/panel/api/epg/sources` | 源列表、新增或更新源 |
+| `DELETE` | `/panel/api/epg/sources/:id` | 删除源及其绑定 |
+| `POST` | `/panel/api/epg/sources/:id/refresh` | 只采集一个源 |
+| `GET` | `/panel/api/epg/bindings` | 全部频道的绑定状态 |
+| `PUT`/`DELETE` | `/panel/api/epg/bindings/:gid/:cid` | 手工绑定或清除 |
+| `POST` | `/panel/api/epg/bindings/:gid/:cid/copy` | 复用其他频道的绑定 |
+| `GET`/`POST` | `/panel/api/epg/rules` | 关键字规则列表、新增或更新 |
+| `POST` | `/panel/api/epg/rules/preview` | 预览未来 48 小时的命中 |
+| `DELETE` | `/panel/api/epg/rules/:id` | 删除规则与它生成的待执行任务 |
 
 </details>
 
