@@ -896,7 +896,7 @@ async fn device_token_can_be_customized_and_renamed() {
             .body(body)
     };
 
-    let response = create(r#"{"label":"客厅","token":"living-room"}"#)
+    let response = create(r#"{"label":"客厅","ttl_secs":3600,"token":"living-room"}"#)
         .send()
         .await
         .expect("建自定义凭证");
@@ -908,6 +908,7 @@ async fn device_token_can_be_customized_and_renamed() {
         body["token"]["playlist_url"],
         "/sub/living-room/playlist.m3u"
     );
+    let expires = body["token"]["expires_at_ms"].as_i64().expect("应有有效期");
 
     let old = fixture
         .client
@@ -930,6 +931,10 @@ async fn device_token_can_be_customized_and_renamed() {
         .await
         .expect("改凭证");
     assert_eq!(renamed.status(), StatusCode::OK);
+    let renamed_body: serde_json::Value =
+        serde_json::from_str(&renamed.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(renamed_body["token"]["token"], "bedroom1");
+    assert_eq!(renamed_body["token"]["expires_at_ms"], expires);
 
     let old = fixture
         .client

@@ -10,7 +10,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 
 use crate::{
@@ -119,11 +119,21 @@ pub struct TokenReq {
 pub struct TokenUpdateReq {
     #[serde(default)]
     pub label: Option<String>,
-    #[serde(default)]
-    pub ttl_secs: Option<i64>,
+    /// `None` = 未提供（保留原有效期）；`Some(None)` = 永不过期；
+    /// `Some(Some(secs))` = 新的有效期。
+    #[serde(default, deserialize_with = "present_i64")]
+    pub ttl_secs: Option<Option<i64>>,
     /// 新凭证。缺省表示不改。
     #[serde(default)]
     pub token: Option<String>,
+}
+
+/// 区分「字段缺省」与「字段为 null」。
+fn present_i64<'de, D>(deserializer: D) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<i64>::deserialize(deserializer).map(Some)
 }
 
 fn parse_role(raw: Option<String>, fallback: Role) -> Role {
@@ -398,8 +408,7 @@ pub async fn update_token(
     if req.label.is_some() || req.ttl_secs.is_some() {
         let ttl_ms = req
             .ttl_secs
-            .filter(|secs| *secs > 0)
-            .map(|secs| secs * 1000);
+            .map(|value| value.filter(|secs| *secs > 0).map(|secs| secs * 1000));
         saved = state
             .users
             .update_token(&saved.token, req.label, ttl_ms)

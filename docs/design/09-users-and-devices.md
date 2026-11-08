@@ -98,7 +98,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 字段 | 说明 |
 | --- | --- |
 | `label` | 设备名称。可空。 |
-| `ttl_secs` | 有效期（秒）。缺省或 `null` 表示永不过期。 |
+| `ttl_secs` | 有效期（秒）。POST：缺省或 `null` 表示永不过期。PUT：缺省表示不改；`null` 表示永不过期。 |
 | `token` | POST：可选自定义凭证。缺省、空串或纯空白表示随机生成。PUT：可选新凭证。缺省表示不改。 |
 
 只改凭证时，PUT 只发送 `{"token":"<新凭证>"}`。名称与有效期不变。旧凭证立即失效。

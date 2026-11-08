@@ -272,23 +272,29 @@ impl UserStore {
         Ok(token)
     }
 
-    /// 改令牌的名称或有效期。`ttl_ms` 为 `None` 表示改为永不过期。
+    /// 改令牌的名称或有效期。
+    ///
+    /// `ttl_ms = None` 保留原有效期；`Some(None)` 改为永不过期；
+    /// `Some(Some(ms))` 设为新的有效期。
     pub fn update_token(
         &self,
         token: &str,
         label: Option<String>,
-        ttl_ms: Option<i64>,
+        ttl_ms: Option<Option<i64>>,
     ) -> Result<AccessToken> {
         let _guard = self.token_lock.lock().unwrap_or_else(|e| e.into_inner());
         let existing = self
             .find_token_any(token)
             .with_context(|| format!("令牌不存在: {token}"))?;
+        let now = now_ms();
         let next = AccessToken {
             label: label.or(existing.label.clone()),
-            expires_at_ms: ttl_ms.map(|ttl| now_ms().saturating_add(ttl)),
+            expires_at_ms: match ttl_ms {
+                None => existing.expires_at_ms,
+                Some(value) => value.map(|ttl| now.saturating_add(ttl)),
+            },
             ..existing
         };
-        let now = now_ms();
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let Some(row_id) = row_id_of(&conn, TOKENS, "token", token)? else {
             anyhow::bail!("令牌不存在: {token}");
@@ -748,6 +754,31 @@ mod tests {
             .expect("改名");
         assert_eq!(renamed.token, "new-device");
         assert!(store.find_token("new-device").is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn update_token_can_keep_or_replace_expiry() {
+        let (store, dir) = temp_store("update-ttl");
+        let user = store.create_user(sample_user("grace")).expect("新建");
+        let token = store
+            .create_token(&user.id, Purpose::Device, None, Some(1000), None)
+            .expect("建令牌");
+
+        let kept = store
+            .update_token(&token.token, Some("新名字".into()), None)
+            .expect("改名称");
+        assert_eq!(kept.expires_at_ms, token.expires_at_ms);
+
+        let never = store
+            .update_token(&token.token, None, Some(None))
+            .expect("改为永不过期");
+        assert_eq!(never.expires_at_ms, None);
+
+        let later = store
+            .update_token(&token.token, None, Some(Some(5000)))
+            .expect("改有效期");
+        assert!(later.expires_at_ms.is_some());
         let _ = std::fs::remove_dir_all(dir);
     }
 }
