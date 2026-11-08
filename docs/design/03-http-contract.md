@@ -635,17 +635,19 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 | --- | --- | --- | --- |
 | GET | `/subs/status`、`/panel/api/subs/status` | — | `{"sources":[{"id","name","url","enabled","mode","error","channels","groups","last_ok","last_try","last_sync","added","updated","removed","skipped_removals","needs_review","zero_blocked","shrink_permille","duration_ms","syncing","next_sync","ttl"}],"sync":{"enabled","schedule","interval_secs","daily_at"}}` |
 | POST | `/subs/groups`、`/panel/api/subs/groups` | `{"url":"<m3u>"}` | `{"groups":[{"name","count"}],"total":<n>}` |
-| POST | `/subs/preview`、`/panel/api/subs/preview` | `{"source":{"id"?,"url"?,"mode"?,"group_map":{…},"group_mode"?,"merge_group"?,"unlisted_groups"?,"include"?,"exclude"?,"headers"?,"proxy"?}}` | `{"kept","sample":[{"name","group","tvg_id"}]×≤5,"sync"?,"trace":{"total","after_group","after_global_exclude","after_include","after_exclude","dropped_groups","out_groups":[{"name","count"}]}}` |
+| POST | `/subs/preview`、`/panel/api/subs/preview` | `{"source":{"id"?,"url"?,"mode"?,"group_map":{…},"group_mode"?,"merge_group"?,"merge_into":{…}?,"merge_new":{…}?,"unlisted_groups"?,"include"?,"exclude"?,"headers"?,"proxy"?}}` | `{"kept","sample":[{"name","group","tvg_id"}]×≤5,"sync"?,"trace":{"total","after_group","after_global_exclude","after_include","after_exclude","dropped_groups","out_groups":[{"name","count"}]}}` |
 
 规则：
 
 - `source.id` 命中 `[playlist].sources` 时，未提供的字段用配置补齐。
-- `group_map` 是选择集：键命中即选中；未列出的分组按 `unlisted_groups` 处理：`drop` 或 `keep`（默认）。本实现把「映射为空、模式不是 `map`、值为 `drop`」的旧配置在加载时归一为 `keep`，避免零频道。目标默认值为 `drop`。
+- `group_map` 是选择集：键命中即选中；未列出的分组按 `unlisted_groups` 处理：`drop` 或 `keep`（默认）。本实现把「映射为空、模式不是 `map`、没有显式目标、值为 `drop`」的旧配置在加载时归一为 `keep`，避免零频道。目标默认值为 `drop`。
 - `group_mode`：`keep`（默认/未知值）保留原名；`map` 使用映射值，空值保留原名；`merge` 在 `merge_group` 非空时统一分组。
+- `merge_into`：上游分组名 → 已有分组 id。它优先于 `merge_new`，且命中的分组不参与「映射外丢弃」。
+- `merge_new`：上游分组名 → 新组名。命中的分组不参与「映射外丢弃」；新组名参与 `group:` 过滤。只有 `mode=sync` 时使用；聚合预检忽略这两个字段，与聚合清单一致。
 - 未带 `group-title` 的条目分组名为 `(无分组)`。
 - 顺序固定：分组选择/改名 → `global_exclude` → 源 `include` → 源 `exclude`。
 - `trace` 的 `after_group` 只计分组阶段；`after_global_exclude`、`after_include`、`after_exclude` 均在分组与全局排除之后，按各自阶段累计。
-- 过滤词：频道名包含；`group:<文本>` 同时匹配原分组与映射分组；`id:<tvg-id>` 精确匹配；`url:<完整地址>` 精确匹配。
+- 过滤词：频道名包含；`group:<文本>` 同时匹配原分组、映射分组与 `merge_new` 新组名；`id:<tvg-id>` 精确匹配；`url:<完整地址>` 精确匹配。
 - 所有处理器需要管理员会话。公开路径与 `/panel/api` 别名受同一保护。
 - 抓取超时 25 秒，正文上限 16 MiB。托管源预检使用草稿源的请求头与代理。
 - `sample` 最多 5 条。

@@ -37,6 +37,8 @@ impl PreviewSource {
         if self.unlisted_groups == "drop"
             && self.group_map.is_empty()
             && self.group_mode.trim() != "map"
+            && self.merge_into.is_empty()
+            && self.merge_new.is_empty()
         {
             self.unlisted_groups = "keep".to_string();
         }
@@ -189,17 +191,6 @@ pub fn group_counts(entries: &[Entry]) -> Vec<Count> {
         .collect()
 }
 
-/// 预检显示的组名，与选择阶段一致。`merge_new` 已在 `GroupRules` 中解析。
-fn preview_group(source: &PreviewSource, item: &Selected<'_>) -> String {
-    source
-        .merge_new
-        .get(&item.original)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .unwrap_or(item.group.as_str())
-        .to_string()
-}
-
 /// 预检：分组选择/改名 → 全局排除 → 源白名单 → 源黑名单。
 pub fn preview(
     entries: &[Entry],
@@ -211,7 +202,7 @@ pub fn preview(
 
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for item in &selected.kept {
-        *counts.entry(preview_group(source, item)).or_insert(0) += 1;
+        *counts.entry(item.group.clone()).or_insert(0) += 1;
     }
     let out_groups = counts
         .into_iter()
@@ -224,7 +215,7 @@ pub fn preview(
         .take(sample_limit)
         .map(|item| Sample {
             name: item.entry.name.clone(),
-            group: preview_group(source, item),
+            group: item.group.clone(),
             tvg_id: item.entry.tvg_id.clone().unwrap_or_default(),
         })
         .collect();
@@ -390,6 +381,15 @@ mod tests {
     }
 
     #[test]
+    fn normalize_keeps_drop_with_explicit_target() {
+        let mut source = PreviewSource::default();
+        source.unlisted_groups = "drop".into();
+        source.merge_new.insert("新闻".into(), "合集".into());
+        source.normalize();
+        assert_eq!(source.unlisted_groups, "drop");
+    }
+
+    #[test]
     fn counts_by_group() {
         assert_eq!(
             group_counts(&sample_entries()),
@@ -450,6 +450,24 @@ mod tests {
             3
         );
         assert_eq!(result.dropped_groups, vec!["别的组"]);
+    }
+
+    #[test]
+    fn merge_into_priority_wins_in_preview() {
+        let source = PreviewSource {
+            merge_into: BTreeMap::from([("远端组".to_string(), "g".to_string())]),
+            merge_new: BTreeMap::from([("远端组".to_string(), "新组".to_string())]),
+            ..PreviewSource::default()
+        };
+        let result = preview(&sample_entries(), &source, &[], 5);
+        assert_eq!(
+            result.out_groups,
+            vec![Count {
+                name: "远端组".into(),
+                count: 3
+            }],
+            "merge_into 优先，不应显示 merge_new 的组名"
+        );
     }
 
     #[test]

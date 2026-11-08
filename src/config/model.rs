@@ -1233,7 +1233,7 @@ pub struct PlaylistSource {
     /// `merge` 模式的目标分组名；空值表示保留原名。
     pub merge_group: String,
     /// 未出现在 `group_map` 的分组：`drop` 或 `keep`（默认）。
-    /// 旧配置在映射为空且模式不是 `map` 时，会把 `drop` 归一为 `keep`。
+    /// 旧配置在映射为空、模式不是 `map` 且没有显式目标时，会把 `drop` 归一为 `keep`。
     pub unlisted_groups: String,
     /// 频道名白名单；支持 `group:` / `id:` / `url:` 前缀。
     pub include: Vec<String>,
@@ -1297,9 +1297,12 @@ impl PlaylistSource {
             self.unlisted_groups = "keep".to_string();
         }
         // 旧默认值 drop + 空映射只会得到零频道。保留原名与合并模式改为 keep。
+        // 有显式目标时 drop 有意义：只导入指定的分组。
         if self.unlisted_groups == "drop"
             && self.group_map.is_empty()
             && self.group_mode.trim() != "map"
+            && self.merge_into.is_empty()
+            && self.merge_new.is_empty()
         {
             self.unlisted_groups = "keep".to_string();
         }
@@ -1818,6 +1821,13 @@ mod tests {
         mapped.unlisted_groups = "drop".into();
         mapped.normalize();
         assert_eq!(mapped.unlisted_groups, "drop");
+
+        // 有显式目标时，drop 表示只导入这些目标。
+        let mut explicit = PlaylistSource::default();
+        explicit.unlisted_groups = "drop".into();
+        explicit.merge_new.insert("新闻".into(), "合集".into());
+        explicit.normalize();
+        assert_eq!(explicit.unlisted_groups, "drop");
     }
 
     #[test]

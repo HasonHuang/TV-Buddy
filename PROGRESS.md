@@ -452,7 +452,7 @@
 | 配置字段 | 新增 `merge_new`（上游分组 → 新组名）；`merge_into` 优先于它 | `config/model.rs`、`config.rs` |
 | 目标解析 | 每个上游分组可选保持默认、合并到新组、并入已有组。多个上游分组用同一个新组名时共用一组 | `subscription.rs` |
 | 同步更新 | 频道仍按 `source_id + source_key` 配对。已有组不改名称、模式、格式、权限与代理 | `subscription.rs` |
-| 移组 | 目标切换时保留频道 ID，按上游顺序追加到目标组末尾。空的同步组自动删除 | `subscription.rs` |
+| 移组 | 目标切换时保留频道 ID，按计划顺序追加到目标组末尾。新组按计划顺序建立，空的同步组自动删除 | `subscription.rs` |
 | 多源同组 | 显式并入已有组时不写分组级同步标记，避免多个源互相覆盖 | `subscription.rs` |
 | 界面 | 分组表增加目标方式、新组名输入与已有组下拉。目标未选完整时阻止保存 | `playlist.tsx`、`style.css` |
 

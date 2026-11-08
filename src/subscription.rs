@@ -40,8 +40,6 @@ pub struct PlannedGroup {
     pub name: String,
     /// `merge_into` 指定的已有分组 id；空值表示按源独立建组。
     pub merge_id: String,
-    /// `merge_new` 指定的新组名（不含前缀）；空值表示没有单独指定。
-    pub new_name: String,
     pub count: usize,
 }
 
@@ -257,7 +255,6 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
                 target: target.clone(),
                 name,
                 merge_id,
-                new_name: merge_new,
                 count: 1,
             }),
         }
@@ -314,6 +311,14 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
                         && group.source_id == source.id
                         && sync_marker(group, SYNC_TARGET_KEY) == planned.target
                 })
+            })
+        } else if planned.target.starts_with("new:") {
+            // 新组身份只认标记。首次同步不复用 source_group 匹配的旧组，
+            // 否则旧频道留在原位，合并后的顺序不再按上游条目。
+            groups.iter().position(|group| {
+                group.origin == "sync"
+                    && group.source_id == source.id
+                    && sync_marker(group, SYNC_TARGET_KEY) == planned.target
             })
         } else {
             // 先按身份标记找，避免旧同名分组抢先命中导致分组 ID 漂移。
@@ -482,6 +487,13 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
             }
             group.channels = kept;
         }
+        // 多个来源分组合并到同一目标时，按计划顺序落位。
+        moved.sort_by_key(|channel| {
+            plan_index
+                .get(&canonical_key(&channel.source_key))
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
         for mut channel in moved {
             let Some(&pidx) = plan_index.get(&canonical_key(&channel.source_key)) else {
                 continue;
@@ -634,6 +646,13 @@ pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
                         && sync_marker(group, SYNC_TARGET_KEY) == planned_group.target
                 })
             })
+        } else if planned_group.target.starts_with("new:") {
+            // 与 apply 一致：新组身份只认标记。
+            config.groups.iter().position(|group| {
+                group.origin == "sync"
+                    && group.source_id == source.id
+                    && sync_marker(group, SYNC_TARGET_KEY) == planned_group.target
+            })
         } else {
             config.groups.iter().position(|group| {
                 group.origin == "sync"
@@ -669,8 +688,9 @@ pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
         let planned_group = plan.groups.iter().any(|planned| {
             (!planned.merge_id.is_empty() && planned.merge_id == group.id)
                 || sync_marker(group, SYNC_TARGET_KEY) == planned.target
-                || planned.original == group.source_group
-                || (group.source_group.is_empty() && group.name == planned.name)
+                || (!planned.target.starts_with("new:")
+                    && (planned.original == group.source_group
+                        || (group.source_group.is_empty() && group.name == planned.name)))
         });
         if planned_group {
             continue;
@@ -2045,6 +2065,31 @@ mod tests {
             .map(|channel| channel.id.as_str())
             .collect();
         assert_eq!(ids, ["c1", "c2", "c3"], "移动后保持上游顺序");
+    }
+
+    #[test]
+    fn merging_groups_keeps_plan_order_when_moving() {
+        let mut config = config_with_source();
+        let source = source();
+        let entries = urls(&[
+            ("c1", "新闻", "http://up/1.m3u8"),
+            ("c2", "体育", "http://up/2.m3u8"),
+            ("c3", "新闻", "http://up/3.m3u8"),
+        ]);
+        run(&mut config, &source, &entries);
+        let mut merged = source.clone();
+        merged.merge_new.insert("新闻".into(), "合集".into());
+        merged.merge_new.insert("体育".into(), "合集".into());
+        run(&mut config, &merged, &entries);
+
+        assert_eq!(config.groups.len(), 1);
+        assert_eq!(config.groups[0].name, "合集");
+        let ids: Vec<&str> = config.groups[0]
+            .channels
+            .iter()
+            .map(|channel| channel.id.as_str())
+            .collect();
+        assert_eq!(ids, ["c1", "c2", "c3"], "跨组移动也按计划顺序落位");
     }
 
     #[test]

@@ -417,8 +417,26 @@ export function PlaylistPage() {
         headers: drawer.draft.headers,
         proxy: drawer.draft.proxy?.addr.trim() ? drawer.draft.proxy : undefined,
       });
-      setDrawer((current) => (current ? { ...current, groups: data.groups ?? [] } : current));
-      ok(`读到 ${(data.groups ?? []).length} 个分组、${data.total} 个频道`);
+      const nextGroups = data.groups ?? [];
+      setDrawer((current) => {
+        if (!current) return current;
+        // 源分组变化后，清掉已不存在分组的目标项，避免保存时被空值拦住。
+        const names = new Set(nextGroups.map((group) => group.name));
+        return {
+          ...current,
+          groups: nextGroups,
+          draft: {
+            ...current.draft,
+            merge_into: Object.fromEntries(
+              Object.entries(current.draft.merge_into).filter(([name]) => names.has(name)),
+            ),
+            merge_new: Object.fromEntries(
+              Object.entries(current.draft.merge_new).filter(([name]) => names.has(name)),
+            ),
+          },
+        };
+      });
+      ok(`读到 ${nextGroups.length} 个分组、${data.total} 个频道`);
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     }
@@ -581,15 +599,21 @@ export function PlaylistPage() {
   );
 
   // 后端 GroupRules 的可见结果：map 模式 + 空映射 + 丢弃 → 零频道。
+  // 显式目标不受「映射外丢弃」影响，所以存在目标时不再提示零频道。
   const draft = drawer?.draft;
   const draftMapEmpty = draft ? Object.keys(draft.group_map).length === 0 : true;
+  const hasExplicitTargets =
+    draft?.mode === 'sync' &&
+    (Object.keys(draft.merge_into).length > 0 || Object.keys(draft.merge_new).length > 0);
   const showUnlistedGroups =
-    draft !== undefined && (draft.group_mode === 'map' || !draftMapEmpty);
+    draft !== undefined &&
+    (draft.group_mode === 'map' || !draftMapEmpty || hasExplicitTargets);
   const dropsAllGroups =
     draft !== undefined &&
     draft.group_mode === 'map' &&
     draft.unlisted_groups === 'drop' &&
-    draftMapEmpty;
+    draftMapEmpty &&
+    !hasExplicitTargets;
 
   return (
     <>

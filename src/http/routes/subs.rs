@@ -268,6 +268,14 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
     candidate.exclude = source.exclude.clone();
     candidate.normalize();
 
+    // 聚合输出不读取显式目标。预检与聚合清单保持一致。
+    if candidate.mode != "sync" {
+        source.merge_into.clear();
+        source.merge_new.clear();
+        candidate.merge_into.clear();
+        candidate.merge_new.clear();
+    }
+
     // 与「读取分组」同一套抓取参数：请求头、代理、按模式选超时。
     let text = fetch_for(&state, &candidate, &config.playlist).await?;
     let entries = m3u::parse(&text);
