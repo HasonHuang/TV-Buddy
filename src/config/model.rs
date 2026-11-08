@@ -1264,6 +1264,8 @@ pub struct PlaylistSource {
     pub max_channels: u64,
     /// 上游分组名 → 已有分组 id。显式并入。
     pub merge_into: BTreeMap<String, String>,
+    /// 上游分组名 → 新组名。显式合并到新组；同名的新组合并为一组。
+    pub merge_new: BTreeMap<String, String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -1330,6 +1332,7 @@ impl Default for PlaylistSource {
             proxy: None,
             max_channels: 0,
             merge_into: BTreeMap::new(),
+            merge_new: BTreeMap::new(),
             extra: Extra::new(),
         }
     }

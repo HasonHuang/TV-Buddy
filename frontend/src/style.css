@@ -1863,6 +1863,20 @@ a.compact {
   text-align: right;
 }
 
+/* 订阅源分组的目标选择：方式、新组名或已有组。 */
+.target-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+  max-width: 240px;
+}
+
+.target-picker .select.compact,
+.target-picker input {
+  width: 100%;
+}
+
 /* --- 键值列表 --- */
 
 dl {

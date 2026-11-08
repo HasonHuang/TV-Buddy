@@ -67,6 +67,7 @@
 | `proxy` | Option\<ProxyCfg\> | 空 | 抓取 M3U 的代理 |
 | `max_channels` | u64 | 0 | 0 继承全局 |
 | `merge_into` | BTreeMap\<string,string\> | 空 | 上游分组名 → 已有分组 id。显式并入 |
+| `merge_new` | BTreeMap\<string,string\> | 空 | 上游分组名 → 新组名。显式合并到新组；同名共用一组 |
 
 `playback_mode` 与 `format` 只用于**新建**同步分组；已有分组的工作模式与内容格式在「分组管理」里修改。
 
@@ -79,6 +80,8 @@
 - `playback_mode` 不含 `passthrough` 时才允许托管源。
 - `format` ∈ `auto` / `hls` / `mpd`。`position` ∈ 空 / `top` / `bottom`。
 - `merge_into` 的键与值都不能为空。
+- `merge_new` 的键与值都不能为空。
+- 同一个上游分组同时出现在两张表中时，`merge_into` 优先。
 
 ### 3.2 全局配置 `[playlist]`
 
@@ -172,12 +175,14 @@
 
 ### 4.3 分组 ID
 
-1. `merge_into` 命中已有分组时使用该分组。
-2. 否则按 `(source_id, source_group)` 查找。找不到时按 `(source_id, 空 source_group, 同名)` 兼容旧数据。
-3. 新建分组用 `m3u::group_id(目标名)`。冲突时用 `s-<hash8>`。
-4. `group_prefix` 只影响显示名，不影响 ID。
-5. 分组身份：`merge_into` 为 `gid:<id>`；`merge` 模式为 `merge:<目标名>`；其余为 `group:<上游分组>`。同一身份只建一个分组。
-6. 同步分组在 `extra` 记 `sync_name`（显示名基线）与 `sync_target`（身份）。转为手工或改挂其他源时清除。
+1. `merge_into` 命中已有分组时使用该分组。只按 id 查找，不按名称。
+2. `merge_into` 的目标不存在时，按 `sync_target=gid:<id>` 找回上次建立的同步组。找不到才新建，避免每次同步重复建组。
+3. `merge_new` 命中时使用 `new:<新组名>` 身份。同一上游分组只认一个显式目标。
+4. 否则按 `(source_id, source_group)` 查找。找不到时按 `(source_id, 空 source_group, 同名)` 兼容旧数据。
+5. 新建分组用 `m3u::group_id(目标名)`。冲突时用 `s-<hash8>`。
+6. `group_prefix` 只影响显示名，不影响 ID。
+7. 分组身份：`merge_into` 为 `gid:<id>`；`merge_new` 为 `new:<新组名>`；`merge` 模式为 `merge:<目标名>`；其余为 `group:<上游分组>`。同一身份只建一个分组。
+8. 同步分组在 `extra` 记 `sync_name`（显示名基线）与 `sync_target`（身份）。显式并入已有组时不写这两个标记，也不改名；转为手工或改挂其他源时清除。
 
 ## 5 同步算法
 
@@ -186,10 +191,12 @@
 纯函数。不抓取，不写配置。
 
 1. `select_entries` 与预检共用。顺序：分组选择/改名 → 全局排除 → 源 `include` → 源 `exclude`。
+   - `merge_into` / `merge_new` 命中的上游分组是显式目标，不参与「映射外丢弃」。
+   - `merge_new` 的新组名参与分组过滤；`merge_into` 的目标组名要到配置里解析，过滤仍用上游或映射名。
 2. 收集其他来源（含手工）已占用的 URL。同址外部条目丢弃。
 3. 同源重复 URL 丢弃。计数记入 `skipped_duplicates`。
-4. 生成目标分组名：`group_prefix` 加映射后的分组名。前缀为空时保留原名。
-5. `merge_into` 命中时指向已有分组 id。
+4. 生成目标分组名：`group_prefix` 加映射后的分组名；`merge_new` 命中时用新组名。前缀为空时保留原名。
+5. 目标优先级：`merge_into`（已有组 id）→ `merge_new`（新组名）→ `merge_group` / `group_map` / 原名。
 6. 新分组属性：
    - `access=public`、`origin=sync`、`source_id`、`source_group`。
    - `playback_mode=auto`：URL 以 `.mpd` 结尾用 `dash`，否则用 `proxy`。
@@ -202,11 +209,12 @@
 
 1. 校验源仍存在、`mode=sync`、源配置未变。否则中止。
 2. 解析或创建目标分组。同一身份的上游分组共用一个分组。
-   - 配置改名（`group_map`、`merge_group`、`group_prefix`）只作用于未手工改名的分组。
+   - 显式并入已有组（`merge_into`）：保留目标组的名称、模式、格式、权限与代理，只更新频道。
+   - 配置改名（`group_map`、`merge_group`、`group_prefix`）只作用于未手工改名的同步组。
    - 旧分组没有 `sync_name` 基线：记录基线，不覆盖现有名称。
 3. 就地更新：计划内、`sync_follow=true` 的频道更新上游字段。
 4. 删除：计划外、`sync_follow=true` 的本源频道删除。
-5. 移动：目标分组变化时移动频道。保留原频道 ID。
+5. 移动：目标分组变化时移动频道。保留原频道 ID，并按上游顺序追加到目标组末尾。
 6. 新增：计划内、当前不存在的频道新增。
 7. 分组清理：
    - 本源同步分组且无频道：删除。
@@ -499,7 +507,8 @@
 - 新增、删除、改 URL、改名、移组。
 - 固定频道不覆盖、不删除。
 - 删除后防回流（`id:` / `idname:` / `url:`）。
-- 每源独立分组、`merge_into`、不自动合并。
+- 每源独立分组、`merge_into`、`merge_new`、不自动合并。
+- 新建组与已有组混用、同名新组共用一组、目标切换与移组顺序。
 - 空组删除、只剩手工转手工、多源并组保留。
 - 空清单拦截、`force`、`sync_allow_empty`。
 - 缩水比例。

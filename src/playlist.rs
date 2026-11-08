@@ -6,7 +6,7 @@
 //! 只有一种订阅：`/sub/:token/playlist.m3u`。令牌即身份，范围由用户决定。
 //! 全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用。
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::{
     config::{
@@ -347,10 +347,15 @@ pub fn aggregate_seen(
     body: &str,
     seen: &mut HashSet<String>,
 ) -> (String, usize) {
+    // 显式目标只用于托管同步；聚合模式保持原有分组规则。
+    let no_merge_into = BTreeMap::new();
+    let no_merge_new = BTreeMap::new();
     let rules = GroupRules {
         group_map: &source.group_map,
         group_mode: &source.group_mode,
         merge_group: &source.merge_group,
+        merge_into: &no_merge_into,
+        merge_new: &no_merge_new,
         unlisted_groups: &source.unlisted_groups,
     };
     let mut out = String::new();

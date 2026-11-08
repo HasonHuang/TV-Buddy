@@ -46,6 +46,7 @@ type Source = {
   } | null;
   max_channels: number;
   merge_into: Record<string, string>;
+  merge_new: Record<string, string>;
 };
 
 type GlobalCfg = {
@@ -169,6 +170,7 @@ function blankSource(): Source {
     proxy: null,
     max_channels: 0,
     merge_into: {},
+    merge_new: {},
   };
 }
 
@@ -208,10 +210,31 @@ function proxyDraft(
   };
 }
 
+/** 去掉未填完整的目标项，避免把空键或空值发给后端。 */
+function cleanTargets(map: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(map)
+      .map(([from, to]) => [from.trim(), to.trim()] as const)
+      .filter(([from, to]) => from !== '' && to !== ''),
+  );
+}
+
 /** 保存前清掉空地址代理，避免每轮抓取都告警。 */
 function cleanSource(source: Source): Source {
   const proxy = source.proxy?.addr.trim() ? source.proxy : null;
-  return { ...source, proxy };
+  return {
+    ...source,
+    proxy,
+    merge_into: cleanTargets(source.merge_into),
+    merge_new: cleanTargets(source.merge_new),
+  };
+}
+
+/** 每一行的目标方式。已选已有组时优先，与后端一致。 */
+function targetModeOf(source: Source, name: string): 'default' | 'new' | 'existing' {
+  if (Object.prototype.hasOwnProperty.call(source.merge_into, name)) return 'existing';
+  if (Object.prototype.hasOwnProperty.call(source.merge_new, name)) return 'new';
+  return 'default';
 }
 
 function when(value: number): string {
@@ -362,8 +385,21 @@ export function PlaylistPage() {
 
   const patch = (value: Partial<Source>) => {
     setDrawer((current) =>
-      current ? { ...current, draft: { ...current.draft, ...value }, preview: null } : current,
+      current
+        ? { ...current, draft: { ...current.draft, ...value }, preview: null, error: '' }
+        : current,
     );
+  };
+
+  const setTargetMode = (name: string, mode: 'default' | 'new' | 'existing') => {
+    if (!drawer) return;
+    const mergeInto = { ...drawer.draft.merge_into };
+    const mergeNew = { ...drawer.draft.merge_new };
+    delete mergeInto[name];
+    delete mergeNew[name];
+    if (mode === 'existing') mergeInto[name] = '';
+    if (mode === 'new') mergeNew[name] = '';
+    patch({ merge_into: mergeInto, merge_new: mergeNew });
   };
 
   const readGroups = async () => {
@@ -464,6 +500,22 @@ export function PlaylistPage() {
       setDrawer({ ...drawer, error: '名称与地址不能为空' });
       return;
     }
+    if (drawer.draft.mode === 'sync') {
+      const badExisting = Object.entries(drawer.draft.merge_into).some(
+        ([from, to]) => !from.trim() || !to.trim(),
+      );
+      if (badExisting) {
+        setDrawer({ ...drawer, error: '请为每个「并入已有组」选择目标分组' });
+        return;
+      }
+      const badNew = Object.entries(drawer.draft.merge_new).some(
+        ([from, to]) => !from.trim() || !to.trim(),
+      );
+      if (badNew) {
+        setDrawer({ ...drawer, error: '请填写每个「合并到新组」的组名' });
+        return;
+      }
+    }
     setDrawer({ ...drawer, busy: true, error: '' });
     void saveSource(drawer.draft, undefined, thenSync);
   };
@@ -513,14 +565,12 @@ export function PlaylistPage() {
     }
   };
 
-  const mergedGroupOptions = useMemo(
-    () => [
-      { value: '', label: '保持独立（默认）', desc: '这个分组不并入其它分组。' },
-      ...allGroups.map((group) => ({
+  const existingGroupOptions = useMemo(
+    () =>
+      allGroups.map((group) => ({
         value: group.id,
         label: `${group.name}（${group.id}）`,
       })),
-    ],
     [allGroups],
   );
 
@@ -876,7 +926,7 @@ export function PlaylistPage() {
           <hr className="divider" />
           <h3>分组</h3>
           <div className="form-grid">
-            <Field label="分组方式" tip="选择如何整理源里的分组。">
+            <Field label="分组方式" tip="选择如何整理源里的分组。表格里单独设置了目标的优先。">
               <Select
                 ariaLabel="分组方式"
                 value={drawer.draft.group_mode}
@@ -892,7 +942,7 @@ export function PlaylistPage() {
             {drawer.draft.group_mode === 'merge' && (
               <label>
                 合并到分组
-                <Tip text="源里的分组都放进这个分组。请填写分组名。" />
+                <Tip text="未单独设置目标的分组都放进这个分组。请填写分组名。" />
                 <input
                   value={drawer.draft.merge_group}
                   placeholder="目标分组名"
@@ -944,49 +994,108 @@ export function PlaylistPage() {
                   <tr>
                     <th>源里的分组</th>
                     <th className="right">频道</th>
-                    <th>并入本地分组</th>
+                    <th>目标分组</th>
                     <th className="right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {drawer.groups.map((group) => (
-                    <tr key={group.name}>
-                      <td>{group.name}</td>
-                      <td className="right">{group.count}</td>
-                      <td>
-                        {drawer.draft.mode === 'sync' && (
-                          <Select
-                            ariaLabel={`${group.name} 并入分组`}
-                            value={drawer.draft.merge_into[group.name] ?? ''}
-                            options={mergedGroupOptions}
-                            onChange={(next) => {
-                              const mergeInto = { ...drawer.draft.merge_into };
-                              if (next) mergeInto[group.name] = next;
-                              else delete mergeInto[group.name];
-                              patch({ merge_into: mergeInto });
-                            }}
-                            compact
-                          />
-                        )}
-                      </td>
-                      <td className="right">
-                        <button
-                          className="ghost"
-                          onClick={() =>
-                            patch({
-                              group_map: {
-                                ...drawer.draft.group_map,
-                                [group.name]:
-                                  drawer.draft.group_map[group.name] ?? group.name,
-                              },
-                            })
-                          }
-                        >
-                          加入改名表
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {drawer.groups.map((group) => {
+                    const targetMode = targetModeOf(drawer.draft, group.name);
+                    return (
+                      <tr key={group.name}>
+                        <td>{group.name}</td>
+                        <td className="right">{group.count}</td>
+                        <td>
+                          {drawer.draft.mode === 'sync' ? (
+                            <div className="target-picker">
+                              <Select
+                                ariaLabel={`${group.name} 目标方式`}
+                                value={targetMode}
+                                options={[
+                                  {
+                                    value: 'default',
+                                    label: '按分组方式',
+                                    desc: '使用上面的分组规则。',
+                                  },
+                                  {
+                                    value: 'new',
+                                    label: '合并到新组',
+                                    desc: '输入新组名；同名会合并。',
+                                  },
+                                  {
+                                    value: 'existing',
+                                    label: '并入已有组',
+                                    desc: '保持该分组的名称与设置。',
+                                  },
+                                ]}
+                                onChange={(next) =>
+                                  setTargetMode(
+                                    group.name,
+                                    next as 'default' | 'new' | 'existing',
+                                  )
+                                }
+                                compact
+                              />
+                              {targetMode === 'new' && (
+                                <input
+                                  aria-label={`${group.name} 新组名`}
+                                  value={drawer.draft.merge_new[group.name] ?? ''}
+                                  placeholder="新组名"
+                                  title="多个上游分组使用同一个新组名时会合并到同一个组。"
+                                  onChange={(event) => {
+                                    patch({
+                                      merge_new: {
+                                        ...drawer.draft.merge_new,
+                                        [group.name]: event.target.value,
+                                      },
+                                    });
+                                  }}
+                                />
+                              )}
+                              {targetMode === 'existing' && (
+                                <Select
+                                  ariaLabel={`${group.name} 并入分组`}
+                                  value={drawer.draft.merge_into[group.name] ?? ''}
+                                  placeholder="选择已有分组"
+                                  options={[
+                                    { value: '', label: '选择已有分组' },
+                                    ...existingGroupOptions,
+                                  ]}
+                                  onChange={(next) => {
+                                    patch({
+                                      merge_into: {
+                                        ...drawer.draft.merge_into,
+                                        [group.name]: next,
+                                      },
+                                    });
+                                  }}
+                                  compact
+                                />
+                              )}
+                            </div>
+                          ) : (
+                            <span className="muted">仅托管源</span>
+                          )}
+                        </td>
+                        <td className="right">
+                          <button
+                            className="ghost"
+                            onClick={() =>
+                              patch({
+                                group_map: {
+                                  ...drawer.draft.group_map,
+                                  [group.name]:
+                                    drawer.draft.group_map[group.name] ?? group.name,
+                                },
+                              })
+                            }
+                          >
+                            加入改名表
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

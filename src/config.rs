@@ -154,6 +154,11 @@ fn validate_playlist(playlist: &crate::config::model::PlaylistCfg) -> anyhow::Re
                 bail!("订阅源 {} 的 merge_into 不能有空键或空值", source.id);
             }
         }
+        for (from, to) in &source.merge_new {
+            if from.trim().is_empty() || to.trim().is_empty() {
+                bail!("订阅源 {} 的 merge_new 不能有空键或空值", source.id);
+            }
+        }
     }
     Ok(())
 }
@@ -267,6 +272,13 @@ mod tests {
     fn empty_merge_into_is_rejected() {
         let mut source = source("sync");
         source.merge_into.insert("组".into(), " ".into());
+        assert!(validate(&config_with_source(source)).is_err());
+    }
+
+    #[test]
+    fn empty_merge_new_is_rejected() {
+        let mut source = source("sync");
+        source.merge_new.insert("组".into(), " ".into());
         assert!(validate(&config_with_source(source)).is_err());
     }
 

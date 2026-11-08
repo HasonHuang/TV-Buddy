@@ -17,6 +17,10 @@ pub struct PreviewSource {
     pub group_mode: String,
     /// `merge` 模式的目标分组名；空值表示保留原名。
     pub merge_group: String,
+    /// 上游分组名 → 已有分组 id。显式目标，不参与「映射外丢弃」。
+    pub merge_into: BTreeMap<String, String>,
+    /// 上游分组名 → 新组名。显式目标，不参与「映射外丢弃」。
+    pub merge_new: BTreeMap<String, String>,
     /// 未出现在 `group_map` 的分组：`drop` 或 `keep`。空值按 `drop` 处理。
     pub unlisted_groups: String,
     /// 频道名白名单；支持 `group:` 与 `id:` 前缀。
@@ -44,6 +48,8 @@ pub struct GroupRules<'a> {
     pub group_map: &'a BTreeMap<String, String>,
     pub group_mode: &'a str,
     pub merge_group: &'a str,
+    pub merge_into: &'a BTreeMap<String, String>,
+    pub merge_new: &'a BTreeMap<String, String>,
     pub unlisted_groups: &'a str,
 }
 
@@ -56,8 +62,26 @@ impl GroupRules<'_> {
             _ => "keep",
         };
         let merge = self.merge_group.trim();
+        // 显式目标不参与「映射外丢弃」。`merge_into` 优先，
+        // 它的目标组名要到同步阶段才解析，这里保留常规名称。
+        let merge_into = self
+            .merge_into
+            .get(original)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        let merge_new = self
+            .merge_new
+            .get(original)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        let explicit = merge_into.is_some() || merge_new.is_some();
+        if merge_into.is_none() {
+            if let Some(name) = merge_new {
+                return Some(name.to_string());
+            }
+        }
         let Some(mapped) = self.group_map.get(original).map(|value| value.trim()) else {
-            if self.unlisted_groups.trim() != "keep" {
+            if !explicit && self.unlisted_groups.trim() != "keep" {
                 return None;
             }
             return Some(if mode == "merge" && !merge.is_empty() {
@@ -165,6 +189,17 @@ pub fn group_counts(entries: &[Entry]) -> Vec<Count> {
         .collect()
 }
 
+/// 预检显示的组名，与选择阶段一致。`merge_new` 已在 `GroupRules` 中解析。
+fn preview_group(source: &PreviewSource, item: &Selected<'_>) -> String {
+    source
+        .merge_new
+        .get(&item.original)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(item.group.as_str())
+        .to_string()
+}
+
 /// 预检：分组选择/改名 → 全局排除 → 源白名单 → 源黑名单。
 pub fn preview(
     entries: &[Entry],
@@ -176,7 +211,7 @@ pub fn preview(
 
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for item in &selected.kept {
-        *counts.entry(item.group.clone()).or_insert(0) += 1;
+        *counts.entry(preview_group(source, item)).or_insert(0) += 1;
     }
     let out_groups = counts
         .into_iter()
@@ -189,7 +224,7 @@ pub fn preview(
         .take(sample_limit)
         .map(|item| Sample {
             name: item.entry.name.clone(),
-            group: item.group.clone(),
+            group: preview_group(source, item),
             tvg_id: item.entry.tvg_id.clone().unwrap_or_default(),
         })
         .collect();
@@ -224,6 +259,8 @@ pub fn select_entries<'a>(
         group_map: &source.group_map,
         group_mode: &source.group_mode,
         merge_group: &source.merge_group,
+        merge_into: &source.merge_into,
+        merge_new: &source.merge_new,
         unlisted_groups: &source.unlisted_groups,
     };
 
@@ -387,6 +424,50 @@ mod tests {
         );
         assert_eq!(result.dropped_groups, vec!["别的组"]);
         assert_eq!(result.trace.after_group, 3);
+    }
+
+    #[test]
+    fn merge_new_changes_preview_group_name() {
+        let source = PreviewSource {
+            merge_new: BTreeMap::from([("远端组".to_string(), "新组".to_string())]),
+            ..PreviewSource::default()
+        };
+        let result = preview(&sample_entries(), &source, &[], 5);
+        assert_eq!(result.kept, 3);
+        assert_eq!(
+            result.out_groups,
+            vec![Count {
+                name: "新组".into(),
+                count: 3
+            }]
+        );
+        assert_eq!(
+            result
+                .sample
+                .iter()
+                .filter(|sample| sample.group == "新组")
+                .count(),
+            3
+        );
+        assert_eq!(result.dropped_groups, vec!["别的组"]);
+    }
+
+    #[test]
+    fn merge_into_bypasses_unlisted_drop() {
+        let source = PreviewSource {
+            merge_into: BTreeMap::from([("远端组".to_string(), "g".to_string())]),
+            unlisted_groups: "drop".into(),
+            ..PreviewSource::default()
+        };
+        let result = preview(&sample_entries(), &source, &[], 5);
+        assert_eq!(result.kept, 3);
+        assert_eq!(
+            result.out_groups,
+            vec![Count {
+                name: "远端组".into(),
+                count: 3
+            }]
+        );
     }
 
     #[test]

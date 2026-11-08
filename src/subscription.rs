@@ -40,6 +40,8 @@ pub struct PlannedGroup {
     pub name: String,
     /// `merge_into` 指定的已有分组 id；空值表示按源独立建组。
     pub merge_id: String,
+    /// `merge_new` 指定的新组名（不含前缀）；空值表示没有单独指定。
+    pub new_name: String,
     pub count: usize,
 }
 
@@ -109,18 +111,29 @@ pub fn preview_source(source: &PlaylistSource) -> PreviewSource {
         group_map: source.group_map.clone(),
         group_mode: source.group_mode.clone(),
         merge_group: source.merge_group.clone(),
+        merge_into: source.merge_into.clone(),
+        merge_new: source.merge_new.clone(),
         unlisted_groups: source.unlisted_groups.clone(),
         include: source.include.clone(),
         exclude: source.exclude.clone(),
     }
 }
 
-/// 分组身份：`merge_into` 的 id 优先，其次 merge 模式的目标名，最后原分组名。
+/// 分组身份：`merge_into` 的 id 优先，其次 `merge_new` 的新组名，
+/// 再其次 merge 模式的目标名，最后原分组名。
 ///
 /// 合并组的多个上游分组必须指向同一身份，否则会建成多个同名分组。
-fn group_target(source: &PlaylistSource, original: &str, merge_id: &str) -> String {
+fn group_target(
+    source: &PlaylistSource,
+    original: &str,
+    merge_id: &str,
+    merge_new: &str,
+) -> String {
     if !merge_id.is_empty() {
         return format!("gid:{merge_id}");
+    }
+    if !merge_new.is_empty() {
+        return format!("new:{merge_new}");
     }
     let merge = source.merge_group.trim();
     if source.group_mode.trim() == "merge" && !merge.is_empty() {
@@ -218,8 +231,25 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .unwrap_or_default();
-        let target = group_target(source, &item.original, &merge_id);
-        let name = format!("{prefix}{}", item.group);
+        // 已有组优先。同一上游分组只认一个显式目标。
+        let merge_new = if merge_id.is_empty() {
+            source
+                .merge_new
+                .get(&item.original)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let target = group_target(source, &item.original, &merge_id, &merge_new);
+        // `merge_new` 的新组名覆盖改名表的结果。前缀只影响显示名。
+        let display_group = if merge_new.is_empty() {
+            item.group.clone()
+        } else {
+            merge_new.clone()
+        };
+        let name = format!("{prefix}{display_group}");
         match groups.iter_mut().find(|group| group.target == target) {
             Some(group) => group.count += 1,
             None => groups.push(PlannedGroup {
@@ -227,6 +257,7 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
                 target: target.clone(),
                 name,
                 merge_id,
+                new_name: merge_new,
                 count: 1,
             }),
         }
@@ -271,39 +302,51 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
             continue;
         }
         let name = planned.name.clone();
-        let existing = if !planned.merge_id.is_empty() {
-            groups.iter().position(|g| g.id == planned.merge_id)
+        // 显式并入已有组：先按 id 找。目标被删除后，按身份标记找回
+        // 上次为这个目标建立的同步组，避免每次同步都新建一组。
+        // 不用同名/原分组名回退，避免把频道放进错误的组。
+        let explicit = !planned.merge_id.is_empty();
+        let existing = if explicit {
+            let by_id = groups.iter().position(|g| g.id == planned.merge_id);
+            by_id.or_else(|| {
+                groups.iter().position(|group| {
+                    group.origin == "sync"
+                        && group.source_id == source.id
+                        && sync_marker(group, SYNC_TARGET_KEY) == planned.target
+                })
+            })
         } else {
-            None
-        };
-        // 先按身份标记找，避免旧同名分组抢先命中导致分组 ID 漂移。
-        let existing = existing.or_else(|| {
-            groups.iter().position(|group| {
+            // 先按身份标记找，避免旧同名分组抢先命中导致分组 ID 漂移。
+            let by_marker = groups.iter().position(|group| {
                 group.origin == "sync"
                     && group.source_id == source.id
                     && sync_marker(group, SYNC_TARGET_KEY) == planned.target
+            });
+            by_marker.or_else(|| {
+                groups.iter().position(|group| {
+                    group.origin == "sync"
+                        && group.source_id == source.id
+                        && (group.source_group == planned.original
+                            || (group.source_group.is_empty() && group.name == name))
+                })
             })
-        });
-        let existing = existing.or_else(|| {
-            groups.iter().position(|group| {
-                group.origin == "sync"
-                    && group.source_id == source.id
-                    && (group.source_group == planned.original
-                        || (group.source_group.is_empty() && group.name == name))
-            })
-        });
+        };
         let id = match existing {
             Some(idx) => {
-                // 配置改名只作用于未被管理员改过名的分组。
-                // 旧分组没有基线：记下当前计划名，但不覆盖现有名称。
-                let baseline = sync_marker(&groups[idx], SYNC_NAME_KEY).to_string();
-                if baseline.is_empty() {
-                    set_sync_marker(&mut groups[idx], SYNC_NAME_KEY, &name);
-                } else if groups[idx].name == baseline && groups[idx].name != name {
-                    groups[idx].name = name.clone();
-                    set_sync_marker(&mut groups[idx], SYNC_NAME_KEY, &name);
+                // 已有组是显式目标。保留名称与全部设置，只更新频道。
+                // 不写同步标记，避免多个源共用同一组时互相覆盖。
+                if !explicit {
+                    // 配置改名只作用于未被管理员改过名的分组。
+                    // 旧分组没有基线：记下当前计划名，但不覆盖现有名称。
+                    let baseline = sync_marker(&groups[idx], SYNC_NAME_KEY).to_string();
+                    if baseline.is_empty() {
+                        set_sync_marker(&mut groups[idx], SYNC_NAME_KEY, &name);
+                    } else if groups[idx].name == baseline && groups[idx].name != name {
+                        groups[idx].name = name.clone();
+                        set_sync_marker(&mut groups[idx], SYNC_NAME_KEY, &name);
+                    }
+                    set_sync_marker(&mut groups[idx], SYNC_TARGET_KEY, &planned.target);
                 }
-                set_sync_marker(&mut groups[idx], SYNC_TARGET_KEY, &planned.target);
                 groups[idx].id.clone()
             }
             None => {
@@ -423,20 +466,21 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         }
     }
 
-    // 阶段四：移动频道到目标分组。
+    // 阶段四：移动频道到目标分组。按原顺序收集，避免组内顺序反转。
     if !move_keys.is_empty() {
         let mut moved: Vec<Channel> = Vec::new();
         for group in &mut groups {
-            let mut idx = group.channels.len();
-            while idx > 0 {
-                idx -= 1;
-                let channel = &group.channels[idx];
+            let mut kept = Vec::with_capacity(group.channels.len());
+            for channel in group.channels.drain(..) {
                 if channel.source_id == source.id
                     && move_keys.contains(&canonical_key(&channel.source_key))
                 {
-                    moved.push(group.channels.remove(idx));
+                    moved.push(channel);
+                } else {
+                    kept.push(channel);
                 }
             }
+            group.channels = kept;
         }
         for mut channel in moved {
             let Some(&pidx) = plan_index.get(&canonical_key(&channel.source_key)) else {
@@ -577,15 +621,20 @@ pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
     out.add = plan.channels.len().saturating_sub(matched.len());
 
     for planned_group in &plan.groups {
-        let existing = if !planned_group.merge_id.is_empty() {
-            config
+        let explicit = !planned_group.merge_id.is_empty();
+        let existing = if explicit {
+            let by_id = config
                 .groups
                 .iter()
-                .position(|group| group.id == planned_group.merge_id)
+                .position(|group| group.id == planned_group.merge_id);
+            by_id.or_else(|| {
+                config.groups.iter().position(|group| {
+                    group.origin == "sync"
+                        && group.source_id == source.id
+                        && sync_marker(group, SYNC_TARGET_KEY) == planned_group.target
+                })
+            })
         } else {
-            None
-        };
-        let existing = existing.or_else(|| {
             config.groups.iter().position(|group| {
                 group.origin == "sync"
                     && group.source_id == source.id
@@ -593,10 +642,14 @@ pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
                         || group.source_group == planned_group.original
                         || (group.source_group.is_empty() && group.name == planned_group.name))
             })
-        });
+        };
         match existing {
             None => out.groups_add += 1,
             Some(idx) => {
+                // 与 apply 一致：显式已有组不改名。
+                if explicit {
+                    continue;
+                }
                 let group = &config.groups[idx];
                 let baseline = sync_marker(group, SYNC_NAME_KEY);
                 // 与 apply 一致：只改未被管理员改过名的分组。
@@ -614,7 +667,8 @@ pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
             continue;
         }
         let planned_group = plan.groups.iter().any(|planned| {
-            sync_marker(group, SYNC_TARGET_KEY) == planned.target
+            (!planned.merge_id.is_empty() && planned.merge_id == group.id)
+                || sync_marker(group, SYNC_TARGET_KEY) == planned.target
                 || planned.original == group.source_group
                 || (group.source_group.is_empty() && group.name == planned.name)
         });
@@ -1799,6 +1853,249 @@ mod tests {
         assert_eq!(config.groups[0].id, "manual");
         assert_eq!(config.groups[0].channels.len(), 1);
         assert!(config.groups[0].channels[0].source_id == "s1");
+    }
+
+    #[test]
+    fn merge_new_shares_one_group_and_keeps_upstream_order() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.merge_new.insert("新闻".into(), "合集".into());
+        source.merge_new.insert("体育".into(), "合集".into());
+        let entries = urls(&[
+            ("c1", "新闻", "http://up/c1.m3u8"),
+            ("c2", "体育", "http://up/c2.m3u8"),
+            ("c3", "新闻", "http://up/c3.m3u8"),
+        ]);
+        let stats = run(&mut config, &source, &entries);
+        assert_eq!(stats.groups_created, 1);
+        assert_eq!(config.groups.len(), 1);
+        assert_eq!(config.groups[0].name, "合集");
+        assert_eq!(sync_marker(&config.groups[0], SYNC_TARGET_KEY), "new:合集");
+        let ids: Vec<&str> = config.groups[0]
+            .channels
+            .iter()
+            .map(|channel| channel.id.as_str())
+            .collect();
+        assert_eq!(ids, ["c1", "c2", "c3"], "合并组保留上游条目顺序");
+
+        let stats = run(&mut config, &source, &entries);
+        assert_eq!(stats.groups_created, 0, "二次同步不重复建组");
+        assert_eq!(config.groups.len(), 1);
+    }
+
+    #[test]
+    fn merge_new_bypasses_unlisted_drop() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.group_mode = "map".into();
+        source.group_map.insert("已列出".into(), "已列出".into());
+        source.unlisted_groups = "drop".into();
+        source.merge_new.insert("新闻".into(), "合集".into());
+        let entries = urls(&[
+            ("c1", "新闻", "http://up/c1.m3u8"),
+            ("c2", "其他", "http://up/c2.m3u8"),
+        ]);
+        let stats = run(&mut config, &source, &entries);
+        assert_eq!(stats.added, 1, "显式目标不应被映射外丢弃");
+        assert_eq!(config.groups.len(), 1);
+        assert_eq!(config.groups[0].name, "合集");
+    }
+
+    #[test]
+    fn merge_new_and_existing_targets_coexist() {
+        let mut config = config_with_source();
+        config.groups.push(Group {
+            id: "manual".into(),
+            name: "手工组".into(),
+            origin: "manual".into(),
+            ..Group::default()
+        });
+        let mut source = source();
+        source.merge_into.insert("体育".into(), "manual".into());
+        source.merge_new.insert("新闻".into(), "新闻合集".into());
+        let entries = urls(&[
+            ("c1", "新闻", "http://up/c1.m3u8"),
+            ("c2", "体育", "http://up/c2.m3u8"),
+        ]);
+        let stats = run(&mut config, &source, &entries);
+        assert_eq!(stats.added, 2);
+        assert_eq!(config.groups.len(), 2);
+        let manual = config
+            .groups
+            .iter()
+            .find(|group| group.id == "manual")
+            .expect("手工组应保留");
+        assert_eq!(manual.name, "手工组");
+        assert_eq!(manual.channels.len(), 1);
+        assert!(
+            sync_marker(manual, SYNC_TARGET_KEY).is_empty(),
+            "显式已有组不写同步标记"
+        );
+        let merged = config
+            .groups
+            .iter()
+            .find(|group| sync_marker(group, SYNC_TARGET_KEY) == "new:新闻合集")
+            .expect("应建立新组");
+        assert_eq!(merged.name, "新闻合集");
+        assert_eq!(merged.channels.len(), 1);
+
+        let updated = urls(&[
+            ("c1", "新闻", "http://up/c1-new.m3u8"),
+            ("c2", "体育", "http://up/c2-new.m3u8"),
+        ]);
+        let stats = run(&mut config, &source, &updated);
+        assert_eq!(stats.updated, 2, "两种目标都继续更新频道");
+        assert_eq!(config.groups.len(), 2);
+    }
+
+    #[test]
+    fn merge_into_existing_group_keeps_name_on_prefix_change() {
+        let mut config = config_with_source();
+        config.groups.push(Group {
+            id: "manual".into(),
+            name: "新闻".into(),
+            origin: "manual".into(),
+            ..Group::default()
+        });
+        let mut source = source();
+        source.merge_into.insert("新闻".into(), "manual".into());
+        let entries = urls(&[("c1", "新闻", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+
+        let mut renamed = source.clone();
+        renamed.group_prefix = "源 · ".into();
+        run(&mut config, &renamed, &entries);
+        let group = config
+            .groups
+            .iter()
+            .find(|group| group.id == "manual")
+            .expect("手工组应保留");
+        assert_eq!(group.name, "新闻", "显式已有组不跟随源改名");
+        assert!(sync_marker(group, SYNC_NAME_KEY).is_empty());
+    }
+
+    #[test]
+    fn merge_into_existing_group_keeps_settings() {
+        let mut config = config_with_source();
+        config.groups.push(Group {
+            id: "manual".into(),
+            name: "目标组".into(),
+            origin: "manual".into(),
+            mode: "dash".into(),
+            format: "mpd".into(),
+            access: "hidden".into(),
+            ..Group::default()
+        });
+        let mut source = source();
+        source.playback_mode = "redirect".into();
+        source.format = "hls".into();
+        source.merge_into.insert("新闻".into(), "manual".into());
+        let entries = urls(&[("c1", "新闻", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+        let group = config
+            .groups
+            .iter()
+            .find(|group| group.id == "manual")
+            .expect("手工组应保留");
+        assert_eq!(group.mode, "dash");
+        assert_eq!(group.format, "mpd");
+        assert_eq!(group.access, "hidden");
+        assert_eq!(group.channels.len(), 1);
+    }
+
+    #[test]
+    fn merge_into_missing_target_reuses_stand_in_group() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.merge_into.insert("新闻".into(), "gone".into());
+        let entries = urls(&[("c1", "新闻", "http://up/c1.m3u8")]);
+        let stats = run(&mut config, &source, &entries);
+        assert_eq!(stats.groups_created, 1);
+        assert_eq!(config.groups.len(), 1);
+        assert_eq!(sync_marker(&config.groups[0], SYNC_TARGET_KEY), "gid:gone");
+        let stats = run(&mut config, &source, &entries);
+        assert_eq!(stats.groups_created, 0, "目标缺失时不得每次新建组");
+        assert_eq!(config.groups.len(), 1);
+    }
+
+    #[test]
+    fn moving_channels_preserves_source_order() {
+        let mut config = config_with_source();
+        let source = source();
+        let entries = urls(&[
+            ("c1", "新闻", "http://up/1.m3u8"),
+            ("c2", "新闻", "http://up/2.m3u8"),
+            ("c3", "新闻", "http://up/3.m3u8"),
+        ]);
+        run(&mut config, &source, &entries);
+        config.groups.push(Group {
+            id: "manual".into(),
+            name: "目标组".into(),
+            origin: "manual".into(),
+            ..Group::default()
+        });
+        let mut moved = source.clone();
+        moved.merge_into.insert("新闻".into(), "manual".into());
+        run(&mut config, &moved, &entries);
+
+        assert_eq!(config.groups.len(), 1, "旧同步组应清空并删除");
+        let ids: Vec<&str> = config.groups[0]
+            .channels
+            .iter()
+            .map(|channel| channel.id.as_str())
+            .collect();
+        assert_eq!(ids, ["c1", "c2", "c3"], "移动后保持上游顺序");
+    }
+
+    #[test]
+    fn merge_new_prefix_renames_without_moving_group() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.merge_new.insert("新闻".into(), "合集".into());
+        let entries = urls(&[("c1", "新闻", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+        let gid = config.groups[0].id.clone();
+        assert_eq!(config.groups[0].name, "合集");
+
+        let mut prefixed = source.clone();
+        prefixed.group_prefix = "A · ".into();
+        run(&mut config, &prefixed, &entries);
+        assert_eq!(config.groups.len(), 1);
+        assert_eq!(config.groups[0].id, gid, "前缀只改显示名");
+        assert_eq!(config.groups[0].name, "A · 合集");
+        assert_eq!(sync_marker(&config.groups[0], SYNC_TARGET_KEY), "new:合集");
+    }
+
+    #[test]
+    fn explicit_existing_target_keeps_other_source_marker() {
+        let mut config = Config::default();
+        let mut first = source();
+        first.merge_new.insert("新闻".into(), "合集".into());
+        let mut second = source();
+        second.id = "s2".into();
+        second.name = "上游2".into();
+        second.url = "http://up/source2.m3u".into();
+        config.playlist.sources.push(first.clone());
+        config.playlist.sources.push(second.clone());
+
+        let first_entries = urls(&[("c1", "新闻", "http://up/a.m3u8")]);
+        run(&mut config, &first, &first_entries);
+        let gid = config.groups[0].id.clone();
+        assert_eq!(sync_marker(&config.groups[0], SYNC_TARGET_KEY), "new:合集");
+
+        second.merge_into.insert("体育".into(), gid);
+        let second_entries = urls(&[("c2", "体育", "http://up/b.m3u8")]);
+        run(&mut config, &second, &second_entries);
+        assert_eq!(config.groups.len(), 1);
+        assert_eq!(
+            sync_marker(&config.groups[0], SYNC_TARGET_KEY),
+            "new:合集",
+            "第二个源不得覆盖第一个源的目标标记"
+        );
+
+        run(&mut config, &first, &first_entries);
+        assert_eq!(config.groups.len(), 1, "第一个源仍应找到原组");
+        assert_eq!(config.groups[0].channels.len(), 2);
     }
 
     #[test]

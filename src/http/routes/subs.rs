@@ -177,6 +177,8 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
                 .collect(),
             group_mode: configured.group_mode.clone(),
             merge_group: configured.merge_group.clone(),
+            merge_into: configured.merge_into.clone(),
+            merge_new: configured.merge_new.clone(),
             unlisted_groups: configured.unlisted_groups.clone(),
             include: configured.include.clone(),
             exclude: configured.exclude.clone(),
@@ -214,6 +216,30 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
             source.group_map.insert(from.clone(), to.to_string());
         }
     }
+    if let Some(map) = input.get("merge_into") {
+        let map = map
+            .as_object()
+            .ok_or_else(|| ApiError::bad_request("source.merge_into 必须是对象"))?;
+        source.merge_into.clear();
+        for (from, value) in map {
+            let to = value
+                .as_str()
+                .ok_or_else(|| ApiError::bad_request("source.merge_into 的值必须是字符串"))?;
+            source.merge_into.insert(from.clone(), to.to_string());
+        }
+    }
+    if let Some(map) = input.get("merge_new") {
+        let map = map
+            .as_object()
+            .ok_or_else(|| ApiError::bad_request("source.merge_new 必须是对象"))?;
+        source.merge_new.clear();
+        for (from, value) in map {
+            let to = value
+                .as_str()
+                .ok_or_else(|| ApiError::bad_request("source.merge_new 的值必须是字符串"))?;
+            source.merge_new.insert(from.clone(), to.to_string());
+        }
+    }
 
     // 与保存时一致：空值按 keep；空映射、非 map 模式的 drop 归一为 keep。
     source.normalize();
@@ -235,6 +261,8 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
     candidate.group_map = source.group_map.clone();
     candidate.group_mode = source.group_mode.clone();
     candidate.merge_group = source.merge_group.clone();
+    candidate.merge_into = source.merge_into.clone();
+    candidate.merge_new = source.merge_new.clone();
     candidate.unlisted_groups = source.unlisted_groups.clone();
     candidate.include = source.include.clone();
     candidate.exclude = source.exclude.clone();

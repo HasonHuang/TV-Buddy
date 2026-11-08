@@ -49,7 +49,7 @@
 | `[epg.translate]` | `enabled`、`url`/`mtran_url`、`token`/`mtran_token`、`source`、`target(s)`、`mtran_batch` | EPG 机翻 |
 | `[subtitle.translate]` | `enabled`、`url`、`token`、`source`、`target(s)`、`batch` | 字幕机翻 |
 | `[playlist]` | `merge_ttl_secs`、`merge_position`、`global_exclude`、`sync_*` | 聚合缓存参数、插入位置、全局排除与同步默认值。见 §1.2 |
-| `[[playlist.sources]]` | `id`、`name`、`url`、`enabled`、`ttl_secs`、`group_map`、`group_mode`、`merge_group`、`unlisted_groups`、`include`、`exclude`、`mode`、同步与抓取字段 | 源缓存、分组选择/改名、过滤、托管同步。见 §1.2；`ttl_secs=0` 按 3600 秒 |
+| `[[playlist.sources]]` | `id`、`name`、`url`、`enabled`、`ttl_secs`、`group_map`、`group_mode`、`merge_group`、`unlisted_groups`、`include`、`exclude`、`mode`、`merge_into`、`merge_new`、同步与抓取字段 | 源缓存、分组选择/改名、过滤、托管同步。见 §1.2；`ttl_secs=0` 按 3600 秒 |
 | `[[groups]]`/`[[groups.channels]]` | 见 `02-architecture.md` §4.1；新增 `origin`、`source_id`、`source_group`、`source_key`、`sync_follow` | 数据面。见 §1.3 |
 
 ### 1.2 订阅同步配置
@@ -87,8 +87,9 @@
 | `proxy` | 空 | 抓取代理 |
 | `max_channels` | 0 | 0 继承全局 |
 | `merge_into` | 空 | 上游分组名 → 已有分组 id |
+| `merge_new` | 空 | 上游分组名 → 新组名。同名合并为一组 |
 
-`unlisted_groups` 默认 `keep`。旧配置的空映射 `drop` 在加载时归一为 `keep`。见 `07` `D-007`。
+`merge_into` 优先于 `merge_new`。`unlisted_groups` 默认 `keep`。旧配置的空映射 `drop` 在加载时归一为 `keep`。见 `07` `D-007`。
 
 ### 1.3 分组与频道的来源字段
 
