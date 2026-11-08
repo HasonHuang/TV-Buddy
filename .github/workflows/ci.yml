@@ -275,94 +275,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  release-windows:
-    name: 发布包 Windows x64
-    needs: [frontend, rust]
-    runs-on: windows-latest
-    env:
-      TV_BUDDY_VERSION: ${{ github.ref_name }}
-      # 静态链接 CRT，目标机器不需要 VC++ 运行库。
-      RUSTFLAGS: "-C target-feature=+crt-static"
-      # C 依赖（SQLite、ring）也用静态 CRT，避免与 Rust 侧混用。
-      CFLAGS: "/MT"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: frontend/dist
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
-      - name: 构建
-        run: cargo build --release --target x86_64-pc-windows-msvc
-      - name: 冒烟运行
-        shell: pwsh
-        run: |
-          $bin = (Resolve-Path "target/x86_64-pc-windows-msvc/release/tv-buddy.exe").Path
-          & $bin version
-          $db = Join-Path $env:RUNNER_TEMP "tv-buddy-smoke.db"
-          # 固定回环地址与高位端口，避免与 runner 上其他服务冲突。
-          & $bin config set server.bind '"127.0.0.1:19877"' --db $db | Out-Null
-          $proc = Start-Process -FilePath $bin -ArgumentList @($db) -PassThru -WindowStyle Hidden
-          $ok = $false
-          try {
-            for ($i = 0; $i -lt 30; $i++) {
-              try {
-                $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:19877/health" -TimeoutSec 2
-                if ($r.StatusCode -eq 200) { $ok = $true; break }
-              } catch {}
-              Start-Sleep -Seconds 1
-            }
-          } finally {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-          }
-          if (-not $ok) {
-            Get-ChildItem $env:RUNNER_TEMP -Filter "*.log" -ErrorAction SilentlyContinue |
-              ForEach-Object { "=== $($_.Name) ==="; Get-Content $_.FullName -Tail 50 }
-            throw "健康检查失败"
-          }
-          "健康检查通过"
-      - name: 打包
-        shell: pwsh
-        run: |
-          $version = $env:GITHUB_REF_NAME -replace '^v',''
-          $name = "$env:PRODUCT_SLUG-$version-windows-x64"
-          New-Item -ItemType Directory -Force "out/$name" | Out-Null
-          Copy-Item "target/x86_64-pc-windows-msvc/release/tv-buddy.exe" "out/$name/tv-buddy.exe"
-          $readme = @(
-            "TV Buddy $version Windows x64",
-            "",
-            "运行：",
-            "  .\tv-buddy.exe .\tv-buddy.db",
-            "",
-            "面板：http://127.0.0.1:9900/panel",
-            "初始口令：.\cache\admin_initial_credentials.txt",
-            "",
-            "说明：",
-            "- 未签名。SmartScreen 可能提示，选择“更多信息”后仍要运行。",
-            "- 数据目录为当前目录。请把 tv-buddy.db 放在用户目录下。",
-            "- install.sh 只支持 Linux。Windows 直接运行 tv-buddy.exe。",
-            "- DASH 录制与素材转换需要 ffmpeg 在 PATH 中。",
-            "- EPG 脚本默认调用 python3；请安装 Python 并确保命令名为 python3。"
-          )
-          $readme | Set-Content -Path "out/$name/README.txt" -Encoding utf8
-          Compress-Archive -Path "out/$name" -DestinationPath "out/$name.zip" -Force
-          $hash = (Get-FileHash "out/$name.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $name.zip" | Set-Content "out/$name.zip.sha256"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tv-buddy-windows-x64
-          path: |
-            out/*.zip
-            out/*.zip.sha256
-          if-no-files-found: error
-          retention-days: 7
-
   publish:
     name: 发布 Release
-    needs: [release, release-macos, release-windows]
+    needs: [release, release-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write

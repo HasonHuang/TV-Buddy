@@ -90,9 +90,8 @@ TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、�
 | Linux | amd64（x86_64） | 静态 musl 二进制 | systemd / OpenRC |
 | Linux | arm64（aarch64） | 静态 musl 二进制 | systemd / OpenRC |
 | macOS | arm64（Apple Silicon） | 原生 Mach-O 二进制 | 手动运行 / launchd |
-| Windows | x64 | 原生 PE 二进制 | 手动运行 / 任务计划程序 |
 
-Linux 版本是静态链接的 musl 二进制。macOS 与 Windows 版本是系统原生二进制。
+Linux 版本是静态链接的 musl 二进制。macOS 版本是系统原生二进制。
 
 以下能力为可选，用到时才需要：
 
@@ -102,11 +101,9 @@ Linux 版本是静态链接的 musl 二进制。macOS 与 Windows 版本是系�
 | systemd 或 OpenRC | Linux 开机自启（安装脚本自动选择） |
 | Python 3 | EPG 脚本源（默认命令名 `python3`） |
 
-### macOS 与 Windows
+### macOS arm64
 
-这两个平台的发布包只含二进制和运行说明，不含 `install.sh`。`install.sh` 只支持 Linux。
-
-macOS arm64：
+发布包只含二进制和运行说明，不含 `install.sh`。`install.sh` 只支持 Linux。
 
 ```bash
 tar -xzf tv-buddy-<version>-macos-arm64.tar.gz
@@ -115,21 +112,12 @@ xattr -d com.apple.quarantine ./tv-buddy   # 未签名，首次运行需要
 ./tv-buddy ./tv-buddy.db
 ```
 
-Windows x64：
-
-```powershell
-Expand-Archive tv-buddy-<version>-windows-x64.zip
-cd tv-buddy-<version>-windows-x64
-.\tv-buddy.exe .\tv-buddy.db
-```
-
 限制：
 
-- 两个包都未签名。macOS 会被 Gatekeeper 拦截；Windows 会出现 SmartScreen 提示。
-- 不注册系统服务。需要开机自启时，macOS 用 launchd，Windows 用任务计划程序或 NSSM。
-- Windows 的数据库权限依赖所在目录的 ACL。请把 `tv-buddy.db` 放在用户目录，不要放在共享目录。
-- EPG 脚本默认调用 `python3`。Windows 上请安装 Python，并确保命令名是 `python3`，或修改脚本配置。
-- Docker 镜像仍是 Linux。macOS 的 Docker Desktop 运行 `linux/arm64` 镜像；Windows 的 Docker Desktop（WSL2）运行 `linux/amd64` 镜像。
+- 包未签名。macOS 会被 Gatekeeper 拦截。
+- 不注册系统服务。需要开机自启时用 launchd。
+- EPG 脚本默认调用 `python3`。请安装 Python，并确保命令名是 `python3`，或修改脚本配置。
+- Docker 镜像仍是 Linux。macOS 的 Docker Desktop 运行 `linux/arm64` 镜像；Windows 主机可用 Docker Desktop 运行 `linux/amd64` 镜像，但本项目不提供 Windows 原生二进制。
 
 ---
 
@@ -776,7 +764,7 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 
 ## 已知限制
 
-- **平台**：Linux amd64/arm64、macOS arm64、Windows x64。macOS 与 Windows 不提供系统服务集成。
+- **平台**：Linux amd64/arm64、macOS arm64。Windows 不在支持范围。macOS 不提供系统服务集成。
 - **Remux**：纯 Rust 切片。冷启动时在首批切片产出前返回 `503 remux warming up`，不是恒 503。
 - **DASH**：已把 MPD 转成 HLS。需要 `SegmentTimeline`，或 `SegmentTemplate@duration` 加总时长。CENC/ClearKey 不解密，按原字节代理。
 - **缓存**：无容量上限校验。`cache.backend=memory` 只回显，实际仍落盘。

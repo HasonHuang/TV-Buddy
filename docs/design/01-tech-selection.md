@@ -9,7 +9,7 @@
 | --- | --- | --- |
 | 目标 | 重实现 IPTV Proxy v0.8.2 的功能 | `spec/08` |
 | 兼容级别 | **完全兼容（drop-in）** | 用户决策 |
-| 平台 | linux-arm64（主）、linux-amd64、macos-arm64、windows-x64 | 用户决策 |
+| 平台 | linux-arm64（主）、linux-amd64、macos-arm64 | 用户决策 |
 | 首期范围 | P0（反代核心） | 用户决策 |
 | 外部依赖 | `ffmpeg`、`python3` 保持**可选依赖**语义 | 用户决策 / `S-DEP-01`、`S-DEP-02` |
 
