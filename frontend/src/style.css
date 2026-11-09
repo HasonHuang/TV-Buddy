@@ -2041,6 +2041,75 @@ dl > dd:last-of-type {
   margin: 16px 0 12px;
 }
 
+/* 设备弹窗的添加表单：独立浅色块，与下方设备列表分开。 */
+.device-add {
+  margin: 12px 0 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+.device-add .fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 460px) {
+  .device-add .fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.device-add > .field {
+  margin-bottom: 0;
+}
+
+.device-add input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.device-add input[aria-invalid='true']:focus {
+  box-shadow: 0 0 0 3px var(--danger-weak);
+}
+
+.device-add-actions {
+  margin-top: 10px;
+}
+
+/* 设备表：固定列宽，长名称与长地址不挤压操作按钮。 */
+.device-table {
+  table-layout: fixed;
+}
+
+.device-table th:nth-child(1),
+.device-table td:nth-child(1) {
+  width: 14%;
+}
+
+.device-table th:nth-child(2),
+.device-table td:nth-child(2) {
+  width: 48%;
+}
+
+.device-table th:nth-child(3),
+.device-table td:nth-child(3) {
+  width: 14%;
+}
+
+.device-table th:nth-child(4),
+.device-table td:nth-child(4) {
+  width: 24%;
+}
+
+/* 设备列表的名称列：长名称截断，不挤压订阅地址与操作列。 */
+.device-name {
+  display: block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 侧边抽屉：订阅源编辑。 */
 .drawer-overlay {
   padding: 0;

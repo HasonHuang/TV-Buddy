@@ -877,7 +877,7 @@ async fn sub_routes_404_on_bad_token() {
 }
 
 #[tokio::test]
-async fn device_token_can_be_customized_and_renamed() {
+async fn device_token_can_be_customized() {
     let fixture = fixture().await;
     let session = login(&fixture).await;
     let auth = format!("Bearer {session}");
@@ -921,7 +921,7 @@ async fn device_token_can_be_customized_and_renamed() {
         .expect("旧凭证订阅");
     assert_eq!(old.status(), StatusCode::OK);
 
-    let renamed = fixture
+    let rejected = fixture
         .client
         .put(format!(
             "{}/panel/api/users/{}/tokens/living-room",
@@ -933,28 +933,50 @@ async fn device_token_can_be_customized_and_renamed() {
         .send()
         .await
         .expect("改凭证");
-    assert_eq!(renamed.status(), StatusCode::OK);
-    let renamed_body: serde_json::Value =
-        serde_json::from_str(&renamed.text().await.expect("读正文")).expect("解析 JSON");
-    assert_eq!(renamed_body["token"]["token"], "bedroom1");
-    assert_eq!(renamed_body["token"]["expires_at_ms"], expires);
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+
+    let rejected_null = fixture
+        .client
+        .put(format!(
+            "{}/panel/api/users/{}/tokens/living-room",
+            fixture.base, admin.id
+        ))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(r#"{"token":null}"#)
+        .send()
+        .await
+        .expect("改凭证 null");
+    assert_eq!(rejected_null.status(), StatusCode::BAD_REQUEST);
 
     let old = fixture
         .client
         .get(format!("{}/sub/living-room/playlist.m3u", fixture.base))
         .send()
         .await
-        .expect("旧凭证订阅");
-    assert_eq!(old.status(), StatusCode::NOT_FOUND);
-    let new = fixture
+        .expect("原凭证订阅");
+    assert_eq!(old.status(), StatusCode::OK);
+
+    let relabeled = fixture
         .client
-        .get(format!("{}/sub/bedroom1/playlist.m3u", fixture.base))
+        .put(format!(
+            "{}/panel/api/users/{}/tokens/living-room",
+            fixture.base, admin.id
+        ))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(r#"{"label":"卧室"}"#)
         .send()
         .await
-        .expect("新凭证订阅");
-    assert_eq!(new.status(), StatusCode::OK);
+        .expect("改名称");
+    assert_eq!(relabeled.status(), StatusCode::OK);
+    let relabeled_body: serde_json::Value =
+        serde_json::from_str(&relabeled.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(relabeled_body["token"]["token"], "living-room");
+    assert_eq!(relabeled_body["token"]["label"], "卧室");
+    assert_eq!(relabeled_body["token"]["expires_at_ms"], expires);
 
-    let duplicate = create(r#"{"token":"bedroom1"}"#)
+    let duplicate = create(r#"{"token":"living-room"}"#)
         .send()
         .await
         .expect("重复凭证");
@@ -965,31 +987,6 @@ async fn device_token_can_be_customized_and_renamed() {
         .await
         .expect("非法凭证");
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
-
-    let web = fixture
-        .state
-        .users
-        .create_token(
-            &admin.id,
-            tv_buddy::users::Purpose::WebUiLinks,
-            Some("面板".into()),
-            None,
-            None,
-        )
-        .expect("建面板令牌");
-    let rejected = fixture
-        .client
-        .put(format!(
-            "{}/panel/api/users/{}/tokens/{}",
-            fixture.base, admin.id, web.token
-        ))
-        .header("authorization", &auth)
-        .header("content-type", "application/json")
-        .body(r#"{"token":"panel-link"}"#)
-        .send()
-        .await
-        .expect("改面板令牌");
-    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

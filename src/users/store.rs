@@ -32,7 +32,7 @@ pub struct UserStore {
     conn: SharedConn,
     users: RwLock<Vec<User>>,
     tokens: RwLock<Vec<AccessToken>>,
-    /// 串行化令牌写操作，避免凭证改名与 `last_seen` 落盘交叉。
+    /// 串行化令牌写操作，避免写操作与 `last_seen` 落盘交叉。
     token_lock: Mutex<()>,
     /// `last_seen_at_ms` 有未落盘的改动。
     dirty: AtomicBool,
@@ -306,42 +306,6 @@ impl UserStore {
         drop(conn);
         let mut list = self.tokens.write().unwrap_or_else(|e| e.into_inner());
         if let Some(slot) = list.iter_mut().find(|item| item.token == token) {
-            *slot = next.clone();
-        }
-        Ok(next)
-    }
-
-    /// 改令牌凭证。保留 label、有效期与 `last_seen_at_ms`。
-    ///
-    /// 旧凭证立即失效。新凭证不能与其他令牌重复，含已过期记录。
-    pub fn rename_token(&self, old: &str, new: &str) -> Result<AccessToken> {
-        let _guard = self.token_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let existing = self
-            .find_token_any(old)
-            .with_context(|| format!("令牌不存在: {old}"))?;
-        let value = normalize_device_token(new)?;
-        if value == existing.token {
-            return Ok(existing);
-        }
-        if self.token_exists(&value) {
-            anyhow::bail!("凭证已被使用");
-        }
-        let next = AccessToken {
-            token: value,
-            ..existing
-        };
-        let now = now_ms();
-        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(row_id) = row_id_of(&conn, TOKENS, "token", old)? else {
-            anyhow::bail!("令牌不存在: {old}");
-        };
-        conn.execute(
-            &format!("UPDATE {TOKENS} SET config_json = ?1, updated_at_ms = ?2 WHERE id = ?3"),
-            params![serde_json::to_string(&next)?, now, row_id],
-        )?;
-        drop(conn);
-        let mut list = self.tokens.write().unwrap_or_else(|e| e.into_inner());
-        if let Some(slot) = list.iter_mut().find(|item| item.token == old) {
             *slot = next.clone();
         }
         Ok(next)
@@ -704,56 +668,6 @@ mod tests {
         assert!(store
             .create_token(&user.id, Purpose::Device, None, None, Some("old-device"))
             .is_err());
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn rename_token_preserves_fields_and_updates_lookup() {
-        let (store, dir) = temp_store("rename-token");
-        let user = store.create_user(sample_user("erin")).expect("新建");
-        let token = store
-            .create_token(
-                &user.id,
-                Purpose::Device,
-                Some("TV".into()),
-                Some(1000),
-                Some("living-room"),
-            )
-            .expect("建令牌");
-        let renamed = store.rename_token("living-room", "bedroom1").expect("改名");
-        assert_eq!(renamed.token, "bedroom1");
-        assert_eq!(renamed.label.as_deref(), Some("TV"));
-        assert_eq!(renamed.expires_at_ms, token.expires_at_ms);
-        assert!(store.find_token("living-room").is_none());
-        assert!(store.find_token("bedroom1").is_some());
-        assert_eq!(
-            store
-                .rename_token("bedroom1", "bedroom1")
-                .expect("同名")
-                .token,
-            "bedroom1"
-        );
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn expired_token_can_be_renamed() {
-        let (store, dir) = temp_store("rename-expired");
-        let user = store.create_user(sample_user("frank")).expect("新建");
-        store
-            .create_token(
-                &user.id,
-                Purpose::Device,
-                None,
-                Some(-1000),
-                Some("old-device"),
-            )
-            .expect("建过期令牌");
-        let renamed = store
-            .rename_token("old-device", "new-device")
-            .expect("改名");
-        assert_eq!(renamed.token, "new-device");
-        assert!(store.find_token("new-device").is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 

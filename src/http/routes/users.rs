@@ -123,9 +123,9 @@ pub struct TokenUpdateReq {
     /// `Some(Some(secs))` = 新的有效期。
     #[serde(default, deserialize_with = "present_i64")]
     pub ttl_secs: Option<Option<i64>>,
-    /// 新凭证。缺省表示不改。
-    #[serde(default)]
-    pub token: Option<String>,
+    /// 凭证建成后不可修改。带上此字段（含 `null`）的请求会被拒绝。
+    #[serde(default, deserialize_with = "present_string")]
+    pub token: Option<Option<String>>,
 }
 
 /// 区分「字段缺省」与「字段为 null」。
@@ -134,6 +134,14 @@ where
     D: Deserializer<'de>,
 {
     Option::<i64>::deserialize(deserializer).map(Some)
+}
+
+/// 区分「字段缺省」与「字段为 null」。
+fn present_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 fn parse_role(raw: Option<String>, fallback: Role) -> Role {
@@ -378,33 +386,12 @@ pub async fn update_token(
         .find(|item| item.token == token)
         .ok_or_else(|| ApiError::not_found("令牌不存在"))?;
 
-    let new_token = match req.token.as_deref() {
-        Some(raw) => {
-            if raw.trim().is_empty() {
-                return Err(ApiError::bad_request("凭证不能为空"));
-            }
-            if target.purpose != Purpose::Device {
-                return Err(ApiError::bad_request("只能修改设备凭证"));
-            }
-            let value = normalize_device_token(raw)
-                .map_err(|error| ApiError::bad_request(format!("{error}")))?;
-            if value != token && state.users.token_exists(&value) {
-                return Err(ApiError::conflict("凭证已被使用"));
-            }
-            Some(value)
-        }
-        None => None,
-    };
+    // 凭证建成后不能修改。要换凭证就撤销旧设备，再添加新设备。
+    if req.token.is_some() {
+        return Err(ApiError::bad_request("设备凭证建成后不能修改"));
+    }
 
-    // 只改凭证时不动名称与有效期。
-    let mut saved = match new_token {
-        Some(value) => state
-            .users
-            .rename_token(&token, &value)
-            .map_err(|error| ApiError::bad_request(format!("{error}")))?,
-        None => target,
-    };
-
+    let mut saved = target;
     if req.label.is_some() || req.ttl_secs.is_some() {
         let ttl_ms = req
             .ttl_secs

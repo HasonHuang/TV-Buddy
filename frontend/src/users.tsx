@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
 import { Icon } from './icons';
-import { Badge, Confirm, Field, Modal, PageHead, Select, Switch, Tip, useToast } from './ui';
+import { Badge, Confirm, Field, Modal, PageHead, Select, Switch, useToast } from './ui';
 
 type Role = 'admin' | 'user';
 
@@ -106,6 +106,16 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** 自定义凭证的本地校验。空串表示随机生成。返回空串表示通过。 */
+function credentialProblem(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === '') return '';
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(trimmed)) {
+    return '自定义凭证须为 8–64 位字母、数字、下划线或连字符。';
+  }
+  return '';
+}
+
 /** 凭证有效期文本。 */
 function ttlText(token: AccessToken): string {
   if (token.expires_at_ms === null) return '永不过期';
@@ -128,7 +138,6 @@ export function UsersPage() {
   const [tokenLabel, setTokenLabel] = useState('');
   const [tokenTtl, setTokenTtl] = useState<number | null>(null);
   const [tokenCredential, setTokenCredential] = useState('');
-  const [editingToken, setEditingToken] = useState<AccessToken | null>(null);
   const [busy, setBusy] = useState(false);
   const [passwordFor, setPasswordFor] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
@@ -222,13 +231,17 @@ export function UsersPage() {
     setTokenLabel('');
     setTokenTtl(null);
     setTokenCredential('');
-    setEditingToken(null);
     await loadTokens(user.id);
   };
 
   const createToken = async () => {
     if (!tokenFor) return;
     const custom = tokenCredential.trim();
+    const problem = credentialProblem(custom);
+    if (problem !== '') {
+      err(problem);
+      return;
+    }
     try {
       await api('POST', `/users/${tokenFor.id}/tokens`, {
         label: tokenLabel.trim() === '' ? null : tokenLabel.trim(),
@@ -245,44 +258,10 @@ export function UsersPage() {
     }
   };
 
-  const startRename = (token: AccessToken) => {
-    setEditingToken(token);
-    setTokenCredential(token.token);
-  };
-
-  const cancelRename = () => {
-    setEditingToken(null);
-    setTokenCredential('');
-  };
-
-  const renameToken = async () => {
-    if (!tokenFor || !editingToken) return;
-    const value = tokenCredential.trim();
-    if (value === '') {
-      err('凭证不能为空');
-      return;
-    }
-    if (value === editingToken.token) {
-      cancelRename();
-      return;
-    }
-    try {
-      await api('PUT', `/users/${tokenFor.id}/tokens/${editingToken.token}`, {
-        token: value,
-      });
-      cancelRename();
-      await loadTokens(tokenFor.id);
-      ok('凭证已更新');
-    } catch (error) {
-      err(errorText(error));
-    }
-  };
-
   const revokeToken = async (token: AccessToken) => {
     if (!tokenFor) return;
     try {
       await api('DELETE', `/users/${tokenFor.id}/tokens/${token.token}`);
-      if (editingToken?.token === token.token) cancelRename();
       await loadTokens(tokenFor.id);
       ok('设备已撤销');
     } catch (error) {
@@ -338,6 +317,7 @@ export function UsersPage() {
   const visibleChannels = options.filter((group) =>
     form?.allowed_group_ids.includes(group.id),
   );
+  const credentialIssue = credentialProblem(tokenCredential);
 
   return (
     <>
@@ -606,70 +586,62 @@ export function UsersPage() {
             每个设备有一个独立播放凭证。播放地址形如{' '}
             <code className="mono">/sub/&lt;凭证&gt;/playlist.m3u</code>。
           </p>
-          <div className="row form-row">
-            {editingToken ? (
-              <>
-                <input
-                  aria-label="新凭证"
-                  title="8–64 位，只能使用字母、数字、下划线和连字符。"
-                  placeholder="新凭证"
-                  value={tokenCredential}
-                  onChange={(event) => setTokenCredential(event.target.value)}
-                  spellCheck={false}
-                  autoComplete="off"
-                />
-                <button
-                  title="保存新凭证。旧订阅地址立即失效。"
-                  onClick={() => void renameToken()}
-                >
-                  保存
-                </button>
-                <button className="ghost" onClick={cancelRename}>
-                  取消
-                </button>
-                <Tip text="修改后旧订阅地址立即失效。凭证只能包含字母、数字、下划线和连字符，长度 8–64 位。" />
-              </>
-            ) : (
-              <>
+          <div className="device-add">
+            <div className="fields">
+              <Field label="设备名称" hint="可选。只用于区分设备。">
                 <input
                   aria-label="设备名称"
-                  title="只用于区分设备，可以留空"
-                  placeholder="设备名称（可选）"
+                  placeholder="例如 客厅电视"
                   value={tokenLabel}
                   onChange={(event) => setTokenLabel(event.target.value)}
                 />
+              </Field>
+              <Field label="有效期" hint="到期后订阅地址自动失效。">
                 <Select
                   ariaLabel="有效期"
-                  title="到期后播放地址自动失效"
                   value={tokenTtl === null ? 'forever' : String(tokenTtl)}
                   options={TTL_CHOICES.map((item) => ({
                     value: item.secs === null ? 'forever' : String(item.secs),
                     label: item.label,
                   }))}
                   onChange={(next) => setTokenTtl(next === 'forever' ? null : Number(next))}
-                  compact
                 />
-                <input
-                  aria-label="自定义凭证"
-                  title="留空时随机生成。只能使用字母、数字、下划线和连字符。"
-                  placeholder="自定义凭证（留空随机）"
-                  value={tokenCredential}
-                  onChange={(event) => setTokenCredential(event.target.value)}
-                  spellCheck={false}
-                  autoComplete="off"
-                />
-                <button
-                  title="为这个用户生成一个新的设备凭证"
-                  onClick={() => void createToken()}
-                >
-                  添加设备
-                </button>
-                <Tip text="每个设备一个独立凭证。留空时随机生成 12 位。自定义凭证须为 8–64 位字母、数字、下划线或连字符。" />
-              </>
+              </Field>
+            </div>
+            <Field
+              label="自定义凭证"
+              hint={
+                credentialIssue === ''
+                  ? '可选。留空时随机生成 12 位。只能使用字母、数字、下划线和连字符，长度 8–64 位。'
+                  : undefined
+              }
+            >
+              <input
+                aria-label="自定义凭证"
+                placeholder="留空则自动生成"
+                value={tokenCredential}
+                onChange={(event) => setTokenCredential(event.target.value)}
+                spellCheck={false}
+                autoComplete="off"
+                aria-invalid={credentialIssue !== ''}
+              />
+            </Field>
+            {credentialIssue !== '' && (
+              <div className="hint danger-text">{credentialIssue}</div>
             )}
+            <div className="row between device-add-actions">
+              <span className="muted">每个设备一个独立凭证。建成后不可修改。</span>
+              <button
+                title="为这个用户生成一个新的设备凭证"
+                onClick={() => void createToken()}
+                disabled={credentialIssue !== ''}
+              >
+                添加设备
+              </button>
+            </div>
           </div>
 
-          <table className="table">
+          <table className="table device-table">
             <thead>
               <tr>
                 <th>名称</th>
@@ -682,23 +654,16 @@ export function UsersPage() {
               {tokens.map((token) => (
                 <tr key={token.token}>
                   <td>
-                    {token.label || <span className="muted">未命名</span>}
-                    {token.purpose === 'web_ui_links' && (
-                      <span className="muted"> · 面板</span>
-                    )}
+                    <span className="device-name" title={token.label ?? '未命名'}>
+                      {token.label || <span className="muted">未命名</span>}
+                      {token.purpose === 'web_ui_links' && (
+                        <span className="muted"> · 面板</span>
+                      )}
+                    </span>
                   </td>
                   <td className="mono ellipsis">{token.playlist_url}</td>
                   <td className="muted">{ttlText(token)}</td>
-                  <td className="right">
-                    {token.purpose === 'device' && (
-                      <button
-                        className="chip"
-                        title="修改这个设备的凭证。旧订阅地址立即失效。"
-                        onClick={() => startRename(token)}
-                      >
-                        改凭证
-                      </button>
-                    )}
+                  <td className="right nowrap">
                     <button
                       className="chip"
                       title="复制这个设备的完整订阅地址"
@@ -708,7 +673,7 @@ export function UsersPage() {
                     </button>
                     <button
                       className="chip danger-text"
-                      title="让这个设备的播放地址立即失效"
+                      title="让这个设备的播放地址立即失效。要换凭证，请撤销后重新添加。"
                       onClick={() => setConfirmRevoke(token)}
                     >
                       撤销

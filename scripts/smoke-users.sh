@@ -188,13 +188,12 @@ DTOK=$(jget 'd["token"]["token"]')
 check "自定义凭证生效" "smoke-device" "$DTOK"
 check "设备令牌用途" "device" "$(jget 'd["token"]["purpose"]')"
 check "设备令牌可订阅" "200" "$(code "$B/sub/$DTOK/playlist.m3u")"
-check "修改凭证 200" "200" \
+check "改凭证被拒 400" "400" \
   "$(code -X PUT "${A[@]}" -d '{"token":"smoke-device2"}' "$B/panel/api/users/$UID_/tokens/$DTOK")"
-check "旧凭证订阅 404" "404" "$(code "$B/sub/smoke-device/playlist.m3u")"
-check "新凭证可订阅" "200" "$(code "$B/sub/smoke-device2/playlist.m3u")"
+check "原凭证仍可订阅" "200" "$(code "$B/sub/smoke-device/playlist.m3u")"
 check "撤销设备令牌 200" "200" \
-  "$(code -X DELETE "${A[@]}" "$B/panel/api/users/$UID_/tokens/smoke-device2")"
-check "撤销后订阅 404" "404" "$(code "$B/sub/smoke-device2/playlist.m3u")"
+  "$(code -X DELETE "${A[@]}" "$B/panel/api/users/$UID_/tokens/$DTOK")"
+check "撤销后订阅 404" "404" "$(code "$B/sub/smoke-device/playlist.m3u")"
 
 # --- 改密踢会话 ---
 check "重置口令 200" "200" \
