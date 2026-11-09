@@ -219,15 +219,21 @@ function cleanTargets(map: Record<string, string>): Record<string, string> {
   );
 }
 
-/** 保存前清掉空地址代理，避免每轮抓取都告警。 */
+/** 保存前清掉空地址代理与无效的逐行目标，避免残留配置再切回托管时生效。 */
 function cleanSource(source: Source): Source {
   const proxy = source.proxy?.addr.trim() ? source.proxy : null;
+  const sync = source.mode === 'sync';
   return {
     ...source,
     proxy,
-    merge_into: cleanTargets(source.merge_into),
-    merge_new: cleanTargets(source.merge_new),
+    merge_into: sync ? cleanTargets(source.merge_into) : {},
+    merge_new: sync ? cleanTargets(source.merge_new) : {},
   };
+}
+
+/** 只读自有键。分组名可能撞上 `constructor` 等原型属性。 */
+function ownValue(map: Record<string, string>, key: string): string {
+  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] ?? '' : '';
 }
 
 /** 每一行的目标方式。已选已有组时优先，与后端一致。 */
@@ -235,6 +241,64 @@ function targetModeOf(source: Source, name: string): 'default' | 'new' | 'existi
   if (Object.prototype.hasOwnProperty.call(source.merge_into, name)) return 'existing';
   if (Object.prototype.hasOwnProperty.call(source.merge_new, name)) return 'new';
   return 'default';
+}
+
+/** 后端未知的分组方式按 `keep`。 */
+function groupModeOf(source: Source): 'keep' | 'map' | 'merge' {
+  const mode = source.group_mode.trim();
+  return mode === 'map' || mode === 'merge' ? mode : 'keep';
+}
+
+/** 有键的项。后端 `map.is_empty()` 只看键，值可以为空。 */
+function mapHasKeys(map: Record<string, string>): boolean {
+  return Object.keys(map).some((key) => key.trim() !== '');
+}
+
+/** 有非空值的项。逐行目标保存前会清掉空值。 */
+function mapHasValues(map: Record<string, string>): boolean {
+  return Object.keys(cleanTargets(map)).length > 0;
+}
+
+/** 与 `PlaylistSource::normalize` 一致：无意义的「丢弃」按「保留」处理。 */
+function unlistedModeOf(source: Source): 'keep' | 'drop' {
+  if (source.unlisted_groups.trim() !== 'drop') return 'keep';
+  const explicit =
+    source.mode === 'sync' &&
+    (mapHasValues(source.merge_into) || mapHasValues(source.merge_new));
+  if (mapHasKeys(source.group_map)) return 'drop';
+  if (groupModeOf(source) === 'map') return 'drop';
+  return explicit ? 'drop' : 'keep';
+}
+
+/**
+ * 一个源分组的最终分组名。`null` 表示丢弃。
+ *
+ * 规则与 `src/subs.rs` 的 `GroupRules::target` 一致：
+ * 逐行目标 → 分组方式 → 改名表 → 映射外分组。
+ * 聚合源不使用逐行目标。
+ */
+function finalGroupOf(
+  source: Source,
+  original: string,
+  resolveExisting: (id: string) => string,
+  unlistedDrop: boolean,
+): string | null {
+  const sync = source.mode === 'sync';
+  const existing = sync ? ownValue(source.merge_into, original).trim() : '';
+  const fresh = sync ? ownValue(source.merge_new, original).trim() : '';
+  if (existing) return resolveExisting(existing);
+  if (fresh) return fresh;
+  const mode = groupModeOf(source);
+  const merge = source.merge_group.trim();
+  const listed = Object.prototype.hasOwnProperty.call(source.group_map, original);
+  const mapped = listed ? ownValue(source.group_map, original).trim() : '';
+  if (!listed) {
+    if (unlistedDrop) return null;
+    return mode === 'merge' && merge ? merge : original;
+  }
+  if (mode === 'merge' && merge) return merge;
+  if (mode === 'map' && mapped) return mapped;
+  return original;
 }
 
 function when(value: number): string {
@@ -601,19 +665,24 @@ export function PlaylistPage() {
   // 后端 GroupRules 的可见结果：map 模式 + 空映射 + 丢弃 → 零频道。
   // 显式目标不受「映射外丢弃」影响，所以存在目标时不再提示零频道。
   const draft = drawer?.draft;
-  const draftMapEmpty = draft ? Object.keys(draft.group_map).length === 0 : true;
+  const draftMapEmpty = draft ? !mapHasKeys(draft.group_map) : true;
   const hasExplicitTargets =
     draft?.mode === 'sync' &&
-    (Object.keys(draft.merge_into).length > 0 || Object.keys(draft.merge_new).length > 0);
+    (mapHasValues(draft.merge_into) || mapHasValues(draft.merge_new));
   const showUnlistedGroups =
     draft !== undefined &&
-    (draft.group_mode === 'map' || !draftMapEmpty || hasExplicitTargets);
+    (groupModeOf(draft) === 'map' || !draftMapEmpty || hasExplicitTargets);
+  const unlistedDrop = draft !== undefined && unlistedModeOf(draft) === 'drop';
   const dropsAllGroups =
     draft !== undefined &&
-    draft.group_mode === 'map' &&
-    draft.unlisted_groups === 'drop' &&
+    groupModeOf(draft) === 'map' &&
+    unlistedDrop &&
     draftMapEmpty &&
     !hasExplicitTargets;
+  const existingName = useCallback(
+    (id: string) => allGroups.find((group) => group.id === id)?.name ?? '（目标分组已删除）',
+    [allGroups],
+  );
 
   return (
     <>
@@ -950,7 +1019,10 @@ export function PlaylistPage() {
           <hr className="divider" />
           <h3>分组</h3>
           <div className="form-grid">
-            <Field label="分组方式" tip="选择如何整理源里的分组。表格里单独设置了目标的优先。">
+            <Field
+              label="分组方式"
+              tip="未单独设置目标的分组使用这条规则。读取分组后，表格里每行的目标优先。"
+            >
               <Select
                 ariaLabel="分组方式"
                 value={drawer.draft.group_mode}
@@ -975,7 +1047,10 @@ export function PlaylistPage() {
               </label>
             )}
             {showUnlistedGroups && (
-              <Field label="映射外的分组" tip="没有写进改名表的分组怎么处理。">
+              <Field
+                label="映射外的分组"
+                tip="没有写进改名表的分组怎么处理。改名表同时是分组选择集，所以「保留原名」模式下也会生效。"
+              >
                 <Select
                   ariaLabel="映射外的分组"
                   value={drawer.draft.unlisted_groups}
@@ -1018,19 +1093,40 @@ export function PlaylistPage() {
                   <tr>
                     <th>源里的分组</th>
                     <th className="right">频道</th>
-                    <th>目标分组</th>
+                    <th>最终分组</th>
                     <th className="right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {drawer.groups.map((group) => {
                     const targetMode = targetModeOf(drawer.draft, group.name);
+                    const finalName = finalGroupOf(
+                      drawer.draft,
+                      group.name,
+                      existingName,
+                      unlistedDrop,
+                    );
+                    // 前缀只影响新建的同步分组；并入已有组时保留原组名。
+                    const prefix =
+                      drawer.draft.mode === 'sync' && targetMode !== 'existing'
+                        ? drawer.draft.group_prefix.replace(/[\u0000-\u001f\u007f]/g, '')
+                        : '';
                     return (
                       <tr key={group.name}>
                         <td>{group.name}</td>
                         <td className="right">{group.count}</td>
                         <td>
-                          {drawer.draft.mode === 'sync' ? (
+                          <div className="final-group">
+                            {finalName === null ? (
+                              <Badge tone="warn">丢弃</Badge>
+                            ) : (
+                              <span className={targetMode === 'default' ? 'muted' : undefined}>
+                                {prefix}
+                                {finalName}
+                              </span>
+                            )}
+                          </div>
+                          {drawer.draft.mode === 'sync' && (
                             <div className="target-picker">
                               <Select
                                 ariaLabel={`${group.name} 目标方式`}
@@ -1063,7 +1159,7 @@ export function PlaylistPage() {
                               {targetMode === 'new' && (
                                 <input
                                   aria-label={`${group.name} 新组名`}
-                                  value={drawer.draft.merge_new[group.name] ?? ''}
+                                  value={ownValue(drawer.draft.merge_new, group.name)}
                                   placeholder="新组名"
                                   title="多个上游分组使用同一个新组名时会合并到同一个组。"
                                   onChange={(event) => {
@@ -1079,7 +1175,7 @@ export function PlaylistPage() {
                               {targetMode === 'existing' && (
                                 <Select
                                   ariaLabel={`${group.name} 并入分组`}
-                                  value={drawer.draft.merge_into[group.name] ?? ''}
+                                  value={ownValue(drawer.draft.merge_into, group.name)}
                                   placeholder="选择已有分组"
                                   options={[
                                     { value: '', label: '选择已有分组' },
@@ -1097,22 +1193,31 @@ export function PlaylistPage() {
                                 />
                               )}
                             </div>
-                          ) : (
-                            <span className="muted">仅托管源</span>
                           )}
                         </td>
                         <td className="right">
                           <button
                             className="ghost"
-                            onClick={() =>
+                            title="加入改名表，并切换为「按映射改名」"
+                            onClick={() => {
+                              // 逐行目标会覆盖改名表。加入改名表时清掉，
+                              // 让这一行按映射结果生效。
+                              const mergeInto = { ...drawer.draft.merge_into };
+                              const mergeNew = { ...drawer.draft.merge_new };
+                              delete mergeInto[group.name];
+                              delete mergeNew[group.name];
                               patch({
+                                group_mode: 'map',
+                                merge_into: mergeInto,
+                                merge_new: mergeNew,
                                 group_map: {
                                   ...drawer.draft.group_map,
                                   [group.name]:
-                                    drawer.draft.group_map[group.name] ?? group.name,
+                                    ownValue(drawer.draft.group_map, group.name) ||
+                                    group.name,
                                 },
-                              })
-                            }
+                              });
+                            }}
                           >
                             加入改名表
                           </button>
@@ -1126,11 +1231,17 @@ export function PlaylistPage() {
           )}
           <label>
             分组改名表
-            <Tip text="每行一条「源里的分组=新分组名」。分组方式为「按映射改名」时生效。" />
+            <Tip text="每行一条「源里的分组=新分组名」。写入的分组同时成为选择集，映射外的分组按上面的设置处理。" />
             <textarea
               value={mapText(drawer.draft.group_map)}
+              disabled={groupModeOf(drawer.draft) !== 'map'}
               onChange={(event) => patch({ group_map: parseMap(event.target.value) })}
             />
+            {groupModeOf(drawer.draft) !== 'map' && (
+              <span className="hint">
+                当前分组方式不使用改名表。点表格里的「加入改名表」会自动切换为「按映射改名」。
+              </span>
+            )}
           </label>
           <div className="form-grid two">
             <label>
@@ -1346,6 +1457,21 @@ export function PlaylistPage() {
               <p className="muted">
                 源里共 {drawer.preview.trace.total} 个频道，保留 {drawer.preview.kept} 个。
               </p>
+              {drawer.preview.trace.out_groups.length > 0 && (
+                <p className="muted">
+                  预检分组
+                  <Tip text="按上游分组名统计。不含分组前缀与「并入已有组」的目标名；逐行结果看上方表格。" />
+                  ：
+                  {drawer.preview.trace.out_groups
+                    .map((item) => `${item.name} ${item.count}`)
+                    .join('、')}
+                </p>
+              )}
+              {drawer.preview.trace.dropped_groups.length > 0 && (
+                <p className="muted">
+                  丢弃分组：{drawer.preview.trace.dropped_groups.join('、')}
+                </p>
+              )}
               {drawer.preview.sync && (
                 <div className="row">
                   <Badge tone="ok">新增 {drawer.preview.sync.add}</Badge>

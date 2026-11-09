@@ -1321,12 +1321,13 @@ impl PlaylistSource {
             self.unlisted_groups = "keep".to_string();
         }
         // 旧默认值 drop + 空映射只会得到零频道。保留原名与合并模式改为 keep。
-        // 有显式目标时 drop 有意义：只导入指定的分组。
+        // 显式目标只用于托管同步；聚合源忽略它们，不能靠它们保留 drop。
+        let explicit = self.mode == "sync"
+            && (!self.merge_into.is_empty() || !self.merge_new.is_empty());
         if self.unlisted_groups == "drop"
             && self.group_map.is_empty()
             && self.group_mode.trim() != "map"
-            && self.merge_into.is_empty()
-            && self.merge_new.is_empty()
+            && !explicit
         {
             self.unlisted_groups = "keep".to_string();
         }
@@ -1891,12 +1892,20 @@ mod tests {
         mapped.normalize();
         assert_eq!(mapped.unlisted_groups, "drop");
 
-        // 有显式目标时，drop 表示只导入这些目标。
+        // 托管源有显式目标时，drop 表示只导入这些目标。
         let mut explicit = PlaylistSource::default();
+        explicit.mode = "sync".into();
         explicit.unlisted_groups = "drop".into();
         explicit.merge_new.insert("新闻".into(), "合集".into());
         explicit.normalize();
         assert_eq!(explicit.unlisted_groups, "drop");
+
+        // 聚合源忽略显式目标，残留目标不能保留 drop。
+        let mut legacy = PlaylistSource::default();
+        legacy.unlisted_groups = "drop".into();
+        legacy.merge_new.insert("新闻".into(), "合集".into());
+        legacy.normalize();
+        assert_eq!(legacy.unlisted_groups, "keep");
     }
 
     #[test]

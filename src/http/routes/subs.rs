@@ -241,9 +241,6 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
         }
     }
 
-    // 与保存时一致：空值按 keep；空映射、非 map 模式的 drop 归一为 keep。
-    source.normalize();
-
     // 托管源使用草稿源抓取，应用请求头、代理与超时。聚合源沿用轻量抓取。
     let mut candidate = configured.cloned().unwrap_or_default();
     if let Some(object) = input.as_object() {
@@ -266,15 +263,18 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
     candidate.unlisted_groups = source.unlisted_groups.clone();
     candidate.include = source.include.clone();
     candidate.exclude = source.exclude.clone();
-    candidate.normalize();
 
-    // 聚合输出不读取显式目标。预检与聚合清单保持一致。
+    // 聚合输出不读取显式目标。先清空，再归一，
+    // 避免残留目标让 unlisted_groups=drop 保留下来。预检与聚合清单一致。
     if candidate.mode != "sync" {
         source.merge_into.clear();
         source.merge_new.clear();
         candidate.merge_into.clear();
         candidate.merge_new.clear();
     }
+    // 与保存时一致：空值按 keep；空映射、非 map 模式的 drop 归一为 keep。
+    source.normalize();
+    candidate.normalize();
 
     // 与「读取分组」同一套抓取参数：请求头、代理、按模式选超时。
     let text = fetch_for(&state, &candidate, &config.playlist).await?;

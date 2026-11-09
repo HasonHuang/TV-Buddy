@@ -1863,6 +1863,13 @@ a.compact {
   text-align: right;
 }
 
+/* 订阅源分组的最终结果。 */
+.final-group {
+  min-height: 22px;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
 /* 订阅源分组的目标选择：方式、新组名或已有组。 */
 .target-picker {
   display: flex;
