@@ -1322,8 +1322,8 @@ impl PlaylistSource {
         }
         // 旧默认值 drop + 空映射只会得到零频道。保留原名与合并模式改为 keep。
         // 显式目标只用于托管同步；聚合源忽略它们，不能靠它们保留 drop。
-        let explicit = self.mode == "sync"
-            && (!self.merge_into.is_empty() || !self.merge_new.is_empty());
+        let explicit =
+            self.mode == "sync" && (!self.merge_into.is_empty() || !self.merge_new.is_empty());
         if self.unlisted_groups == "drop"
             && self.group_map.is_empty()
             && self.group_mode.trim() != "map"
