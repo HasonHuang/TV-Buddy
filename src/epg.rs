@@ -493,6 +493,9 @@ impl Drop for RunningGuard<'_> {
     }
 }
 
+/// 等待采集结束的上限（秒）。防止源改动后的重生成无限挂起。
+const WAIT_IDLE_SECS: u64 = 1_800;
+
 /// 节目单输出目录。
 pub fn output_dir(cache_dir: &Path) -> PathBuf {
     cache_dir.join("epg")
@@ -541,6 +544,11 @@ pub fn clear_generated(state: &AppState) -> Result<()> {
         .last_error
         .lock()
         .unwrap_or_else(|error| error.into_inner()) = Some("没有可用的 EPG 源".into());
+    *state
+        .epg
+        .last_success
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = None;
     Ok(())
 }
 
@@ -593,30 +601,71 @@ pub async fn refresh_managed(state: &Arc<AppState>) -> Result<Summary> {
     if ids.is_empty() {
         bail!("没有使用全局节奏的 EPG 源");
     }
-    run_with_ids(state, SourceMode::Fetch, Some(&ids)).await
+    run_with_ids(state, SourceMode::Fetch, Some(&ids), false).await
 }
 
 async fn run(state: &Arc<AppState>, mode: SourceMode) -> Result<Summary> {
-    run_with_ids(state, mode, None).await
+    run_with_ids(state, mode, None, false).await
+}
+
+/// 等待正在进行的采集结束后再重新生成。
+///
+/// 源改动可能发生在采集途中。直接放弃会留下旧输出。
+pub async fn regenerate_wait(state: &Arc<AppState>) -> Result<Summary> {
+    run_with_ids(state, SourceMode::CacheOnly, None, true).await
 }
 
 async fn run_with_ids(
     state: &Arc<AppState>,
     mode: SourceMode,
     fetch_ids: Option<&HashSet<String>>,
+    wait: bool,
 ) -> Result<Summary> {
+    // 采集与清理由同一个标志互斥。`wait` 用于源改动后的自动重生成。
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(WAIT_IDLE_SECS);
+    while state.epg.running.swap(true, Ordering::SeqCst) {
+        if !wait {
+            bail!("EPG 采集进行中");
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("等待 EPG 采集空闲超时");
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    let _guard = RunningGuard(&state.epg.running);
+    // 拿到标志后再读配置。等待期间配置可能变化。
     let config = state.snapshot();
     if !config.epg.enabled {
         bail!("EPG 未启用");
     }
-    if state.epg.running.swap(true, Ordering::SeqCst) {
-        bail!("EPG 采集进行中");
-    }
-    let _guard = RunningGuard(&state.epg.running);
 
     let result = collect(state, &config, mode, fetch_ids).await;
     record_result(state, &result);
     result
+}
+
+/// 等待采集结束后清理输出。
+///
+/// 等待期间出现启用的源时返回 `false`，调用方应改为重新生成。
+pub async fn clear_generated_when_idle(state: &Arc<AppState>) -> Result<bool> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(WAIT_IDLE_SECS);
+    while state.epg.running.swap(true, Ordering::SeqCst) {
+        if tokio::time::Instant::now() >= deadline {
+            bail!("等待 EPG 采集空闲超时");
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    let _guard = RunningGuard(&state.epg.running);
+    if state
+        .epg_store
+        .sources()
+        .iter()
+        .any(|source| source.enabled)
+    {
+        return Ok(false);
+    }
+    clear_generated(state)?;
+    Ok(true)
 }
 
 /// 只刷新一个源，再用全部 raw 缓存重新生成。
@@ -683,17 +732,6 @@ async fn collect(
 ) -> Result<Summary> {
     let targets = channel_targets(config);
     let mappings = mappings(state);
-    // 手工绑定优先。自动匹配不得覆盖手工绑定的源。
-    let manual_source: HashMap<usize, String> = mappings
-        .iter()
-        .filter_map(|(key, mapping)| {
-            let (gid, cid) = key.split_once('/')?;
-            let index = targets
-                .iter()
-                .position(|target| target.gid == gid && target.cid == cid)?;
-            Some((index, mapping.source_id.clone()))
-        })
-        .collect();
     let mut rows: Vec<MatchRow> = targets
         .iter()
         .map(|target| MatchRow {
@@ -712,7 +750,7 @@ async fn collect(
         .collect();
     let now = now_secs() as i64;
     let past = past_limit(config, now);
-    let future = now + config.epg.future_days.max(0) * 86_400;
+    let future = future_limit(config, now);
 
     let mut channels: Vec<Channel> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -722,7 +760,9 @@ async fn collect(
     let mut documents: HashMap<String, DocumentData> = HashMap::new();
     let mut viewer_meta: HashMap<String, ViewerMeta> = HashMap::new();
 
-    for source in enabled_sources(state) {
+    // 先抓取全部源。手工绑定能否生效取决于源文档，所以不能边抓边定。
+    let source_list = enabled_sources(state);
+    for source in &source_list {
         let source_mode = if mode == SourceMode::Fetch
             && fetch_ids.is_some_and(|ids| !ids.contains(&source.id))
         {
@@ -730,36 +770,29 @@ async fn collect(
         } else {
             mode
         };
-        let document = match source_document(state, config, &source, source_mode).await {
-            Ok(document) => document,
-            Err(error) => {
-                errors.push(format!("{}：{error:#}", source.name));
-                continue;
+        match source_document(state, config, source, source_mode).await {
+            Ok(document) => {
+                sources += 1;
+                documents.insert(source.id.clone(), document);
             }
+            Err(error) => errors.push(format!("{}：{error:#}", source.name)),
+        }
+    }
+    // 只有源可用且目标频道存在时，手工绑定才阻止自动匹配。
+    let manual_source = resolvable_manual_sources(&targets, &mappings, &documents);
+
+    for source in &source_list {
+        let Some(document) = documents.get(&source.id) else {
+            continue;
         };
-        sources += 1;
-        documents.insert(source.id.clone(), document.clone());
-        let (candidates, owners, source_programmes) = match_source(
-            &targets, &document, &mappings, &source.id, config, past, future,
+        let (candidates, _owners, source_programmes) = match_source(
+            &targets, document, &mappings, &source.id, config, past, future,
         );
-        for candidate in &candidates {
+        // 归属只算实际会被写入的候选。被跳过的候选不能占着上游频道。
+        let (accepted, owners) =
+            effective_candidates(&candidates, &targets, &manual_source, &source.id, &seen);
+        for candidate in accepted {
             let target = &targets[candidate.target];
-            let claimed = seen.contains(&target.out_id);
-            if !candidate.manual {
-                // 手工绑定到别的源时，自动匹配不能抢先占用输出频道。
-                if let Some(manual_source_id) = manual_source.get(&candidate.target) {
-                    if manual_source_id != &source.id {
-                        continue;
-                    }
-                }
-                // 输出频道已有更高优先级的源。后面的源不再追加节目。
-                if claimed {
-                    continue;
-                }
-            } else if claimed {
-                // 相同输出频道的多个本地频道只保留频道顺序中的第一个。
-                continue;
-            }
             let owns_channel = owners.get(&candidate.channel_id) == Some(&candidate.target);
             let display_name = document
                 .channels
@@ -781,9 +814,6 @@ async fn collect(
             } else {
                 0
             };
-            if claimed {
-                continue;
-            }
             seen.insert(target.out_id.clone());
             viewer_meta.insert(
                 target.out_id.clone(),
@@ -894,6 +924,17 @@ async fn collect(
         tracing::warn!(%line, "EPG 源告警");
     }
 
+    // 翻译期间源可能被删除或停用。写盘前再确认，避免写回旧节目单。
+    if !state
+        .epg_store
+        .sources()
+        .iter()
+        .any(|source| source.enabled)
+    {
+        clear_generated(state)?;
+        bail!("没有可用的 EPG 源");
+    }
+
     let directory = output_dir(Path::new(&config.cache.disk_path));
     fs::create_dir_all(&directory).with_context(|| format!("建目录 {}", directory.display()))?;
     let xml = render(&channels, &programmes);
@@ -934,7 +975,7 @@ async fn collect(
     }
     let matched_names: HashMap<String, String> = rows
         .iter()
-        .filter(|row| !row.upstream_display_name.is_empty())
+        .filter(|row| row.via == "manual" && !row.upstream_display_name.is_empty())
         .map(|row| {
             (
                 format!("{}/{}", row.gid, row.cid),
@@ -1080,17 +1121,19 @@ fn match_source(
     let mut candidates = Vec::new();
     for (index, target) in targets.iter().enumerate() {
         let key = format!("{}/{}", target.gid, target.cid);
-        let manual = mappings.get(&key).filter(|mapping| {
-            mapping.source_id == source_id && !mapping.source_channel_id.is_empty()
-        });
-        let (channel, via, is_manual) = if let Some(mapping) = manual {
-            let channel = by_id
-                .get(&mapping.source_channel_id.to_lowercase())
-                .copied();
-            match channel {
-                Some(channel) => (Some(channel), "manual", true),
-                None => (None, "none", false),
-            }
+        // 手工绑定优先。绑定失效时回退到自动匹配，避免频道完全没有节目。
+        let manual = mappings
+            .get(&key)
+            .filter(|mapping| {
+                mapping.source_id == source_id && !mapping.source_channel_id.trim().is_empty()
+            })
+            .and_then(|mapping| {
+                by_id
+                    .get(&mapping.source_channel_id.to_lowercase())
+                    .copied()
+            });
+        let (channel, via, is_manual) = if let Some(channel) = manual {
+            (Some(channel), "manual", true)
         } else {
             let by_tvg = target
                 .tvg_id
@@ -1138,6 +1181,74 @@ fn match_source(
         }
     }
     (candidates, owners, source_programmes)
+}
+
+/// 手工绑定是否可用。
+///
+/// 源停用、采集失败或上游频道不存在时，绑定不生效。自动匹配可以接管。
+fn resolvable_manual_sources(
+    targets: &[Target],
+    mappings: &HashMap<String, Mapping>,
+    documents: &HashMap<String, DocumentData>,
+) -> HashMap<usize, String> {
+    let mut manual = HashMap::new();
+    for (index, target) in targets.iter().enumerate() {
+        let key = format!("{}/{}", target.gid, target.cid);
+        let Some(mapping) = mappings.get(&key) else {
+            continue;
+        };
+        if mapping.source_id.trim().is_empty() || mapping.source_channel_id.trim().is_empty() {
+            continue;
+        }
+        let Some(document) = documents.get(&mapping.source_id) else {
+            continue;
+        };
+        if document.channels.iter().any(|channel| {
+            channel.id.to_lowercase() == mapping.source_channel_id.trim().to_lowercase()
+        }) {
+            manual.insert(index, mapping.source_id.clone());
+        }
+    }
+    manual
+}
+
+/// 过滤本源的候选，并按上游频道分配节目归属。
+///
+/// 跳过两类候选：
+/// - 目标频道的手工绑定指向另一个可用源；
+/// - 输出频道已被前面的源占用。
+///
+/// 归属只算通过过滤的候选。被跳过的候选不能占着上游频道却不输出节目。
+fn effective_candidates<'a>(
+    candidates: &'a [Candidate],
+    targets: &[Target],
+    manual_source: &HashMap<usize, String>,
+    source_id: &str,
+    seen: &HashSet<String>,
+) -> (Vec<&'a Candidate>, HashMap<String, usize>) {
+    let mut accepted = Vec::new();
+    let mut local_claimed: HashSet<String> = HashSet::new();
+    for candidate in candidates {
+        let target = &targets[candidate.target];
+        if !candidate.manual {
+            if let Some(manual_source_id) = manual_source.get(&candidate.target) {
+                if manual_source_id != source_id {
+                    continue;
+                }
+            }
+        }
+        if seen.contains(&target.out_id) || !local_claimed.insert(target.out_id.clone()) {
+            continue;
+        }
+        accepted.push(candidate);
+    }
+    let mut owners = HashMap::new();
+    for candidate in &accepted {
+        owners
+            .entry(candidate.channel_id.clone())
+            .or_insert(candidate.target);
+    }
+    (accepted, owners)
 }
 
 /// 源是否使用全局 cron 采集。
@@ -1768,7 +1879,7 @@ async fn translate_programmes(
     Ok(translated)
 }
 
-/// 启动后台采集：启用时立即跑一次，之后按 `cron`（只识别 `0 */N * * *`）或 4 小时。
+/// 启动后台采集：启用时立即跑一次，之后按 `cron` 或 4 小时。
 pub fn spawn(state: Arc<AppState>) {
     if !state.snapshot().epg.enabled {
         return;
@@ -1782,6 +1893,8 @@ pub fn spawn(state: Arc<AppState>) {
             ),
             Err(error) => tracing::warn!(%error, "EPG 采集失败"),
         }
+        // 全局节奏的最近一次尝试。启动时的全量采集也算一次。
+        let mut last_global_try = now_secs() as i64;
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;
             let config = state.snapshot();
@@ -1790,19 +1903,8 @@ pub fn spawn(state: Arc<AppState>) {
             }
             let now = now_secs() as i64;
             let offset = config.server.timezone_offset_hours as i64;
-            let last_success = *state
-                .epg
-                .last_success
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            let fallback_due = last_success
-                .map(|at| at as i64 + 4 * 3_600)
-                .unwrap_or(now + 4 * 3_600);
-            let global_due = cron_preview(&config.epg.cron, now, offset, 1)
-                .ok()
-                .and_then(|next| next.first().copied())
-                .unwrap_or(fallback_due);
-            if global_due <= now {
+            // 只用全局节奏自己的尝试时间。逐源采集成功不能推迟全局采集。
+            if global_schedule_due(&config.epg.cron, now, offset, last_global_try) {
                 let has_global = state
                     .epg_store
                     .sources()
@@ -1817,31 +1919,35 @@ pub fn spawn(state: Arc<AppState>) {
                         ),
                         Err(error) => tracing::warn!(%error, "EPG 采集失败"),
                     }
+                    last_global_try = now_secs() as i64;
                     continue;
                 }
             }
             let sources = state.epg_store.sources();
             for source in sources.iter().filter(|source| source.enabled) {
-                let last = state
+                let (last, last_finished) = state
                     .epg
                     .source_status
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
                     .get(&source.id)
-                    .and_then(|status| {
-                        status
-                            .last_fetch_started_at_ms
-                            .or(status.last_fetch_finished_at_ms)
+                    .map_or((None, None), |status| {
+                        (
+                            status
+                                .last_fetch_started_at_ms
+                                .or(status.last_fetch_finished_at_ms),
+                            status
+                                .last_fetch_finished_at_ms
+                                .or(status.last_fetch_started_at_ms),
+                        )
                     });
                 let due = if source.refresh_secs > 0 {
                     last.is_none_or(|at| {
                         at + source.refresh_secs.saturating_mul(1_000) as i64 <= now * 1_000
                     })
                 } else if !source.cron.trim().is_empty() {
-                    cron_preview(&source.cron, now, offset, 1)
-                        .ok()
-                        .and_then(|next| next.first().copied())
-                        .is_some_and(|due| due <= now)
+                    // cron 用结束时间，避免跨过边界的采集刚结束又触发一次。
+                    source_cron_due(&source.cron, now, offset, last_finished)
                 } else {
                     false
                 };
@@ -2317,6 +2423,43 @@ pub fn cron_preview(expr: &str, now: i64, offset_hours: i64, count: usize) -> Re
     Ok(next)
 }
 
+/// 最近一次不晚于 `now` 的触发时间（Unix 秒）。
+///
+/// 从当前分钟向前查找。一年内没有触发时间时返回错误。
+fn cron_prev(expr: &str, now: i64, offset_hours: i64) -> Result<i64> {
+    let spec = parse_cron(expr)?;
+    let mut candidate = now.div_euclid(60) * 60;
+    let limit = now.saturating_sub(366 * 86_400);
+    while candidate >= limit {
+        if cron_matches(&spec, candidate, offset_hours) {
+            return Ok(candidate);
+        }
+        candidate -= 60;
+    }
+    bail!("一年内没有触发时间")
+}
+
+/// 全局节奏是否到期。表达式无效时按 4 小时回退。
+fn global_schedule_due(expr: &str, now: i64, offset_hours: i64, last_run: i64) -> bool {
+    match cron_prev(expr, now, offset_hours) {
+        Ok(prev) => last_run < prev,
+        Err(_) => now.saturating_sub(last_run) >= 4 * 3_600,
+    }
+}
+
+/// 源级 cron 是否到期。
+///
+/// `last_run_ms` 是最近一次采集结束时间（缺失时用开始时间）。
+/// 没有记录时按到期处理。表达式非法时不采集。
+fn source_cron_due(expr: &str, now: i64, offset_hours: i64, last_run_ms: Option<i64>) -> bool {
+    let Ok(prev) = cron_prev(expr, now, offset_hours) else {
+        return false;
+    };
+    last_run_ms
+        .map(|at| at.div_euclid(1_000))
+        .is_none_or(|at| at < prev)
+}
+
 /// 当前 Unix 秒。
 pub fn now_secs() -> u64 {
     SystemTime::now()
@@ -2325,8 +2468,13 @@ pub fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// 节目窗口的未来边界。极端配置下饱和，避免溢出。
+fn future_limit(config: &Config, now: i64) -> i64 {
+    now.saturating_add(config.epg.future_days.max(0).saturating_mul(86_400))
+}
+
 fn past_limit(config: &Config, now: i64) -> i64 {
-    let by_days = now - config.epg.keep_days.max(0) * 86_400;
+    let by_days = now.saturating_sub(config.epg.keep_days.max(0).saturating_mul(86_400));
     if config.epg.keep_yesterday {
         // 保留昨天 0 点以后的内容。
         by_days.min(now - (now % 86_400) - 86_400)
@@ -2896,6 +3044,112 @@ mod tests {
         assert_eq!(programmes["cctv3"].len(), 1);
     }
 
+    fn target(gid: &str, cid: &str, name: &str, out_id: &str) -> Target {
+        Target {
+            gid: gid.into(),
+            cid: cid.into(),
+            name: name.into(),
+            group_name: gid.into(),
+            out_id: out_id.into(),
+            tvg_id: None,
+            normalized: normalize_name(name),
+        }
+    }
+
+    #[test]
+    fn manual_mapping_missing_channel_falls_back_to_auto() {
+        let config = Config::default();
+        let targets = vec![target("g", "e6", "CCTV1", "cctv1")];
+        let document = parse(
+            r#"<tv><channel id="auto"><display-name>CCTV1</display-name></channel>
+<programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="auto"><title>A</title></programme></tv>"#,
+        )
+        .expect("解析");
+        let mut mappings = HashMap::new();
+        mappings.insert(
+            "g/e6".into(),
+            Mapping {
+                source_id: "s1".into(),
+                source_channel_id: "missing".into(),
+                ..Mapping::default()
+            },
+        );
+        let (candidates, _, _) = match_source(
+            &targets,
+            &document,
+            &mappings,
+            "s1",
+            &config,
+            0,
+            4_000_000_000,
+        );
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].channel_id, "auto");
+        assert!(!candidates[0].manual, "失效的手工绑定回退自动匹配");
+        assert_eq!(candidates[0].via, "name");
+    }
+
+    #[test]
+    fn manual_binding_requires_enabled_source_and_channel() {
+        let targets = vec![
+            target("g", "e1", "A", "a"),
+            target("g", "e2", "B", "b"),
+            target("g", "e3", "C", "c"),
+        ];
+        let mut mappings = HashMap::new();
+        for (cid, source, raw) in [
+            ("e1", "s1", "raw1"),
+            ("e2", "s2", "raw2"),
+            ("e3", "s1", "missing"),
+        ] {
+            mappings.insert(
+                format!("g/{cid}"),
+                Mapping {
+                    source_id: source.into(),
+                    source_channel_id: raw.into(),
+                    ..Mapping::default()
+                },
+            );
+        }
+        let mut documents = HashMap::new();
+        documents.insert(
+            "s1".to_string(),
+            parse(r#"<tv><channel id="raw1"/></tv>"#).expect("解析"),
+        );
+        // s2 不在 documents 中：停用或采集失败。
+        let manual = resolvable_manual_sources(&targets, &mappings, &documents);
+        assert_eq!(manual.get(&0), Some(&"s1".to_string()));
+        assert!(!manual.contains_key(&1), "源不可用时绑定不阻塞自动匹配");
+        assert!(!manual.contains_key(&2), "上游频道不存在时绑定不生效");
+    }
+
+    #[test]
+    fn effective_candidates_assigns_owner_after_filtering() {
+        let targets = vec![target("g", "a", "A", "a"), target("g", "b", "B", "b")];
+        let candidates = vec![
+            Candidate {
+                target: 0,
+                channel_id: "X".into(),
+                via: "tvg-id".into(),
+                manual: false,
+            },
+            Candidate {
+                target: 1,
+                channel_id: "X".into(),
+                via: "name".into(),
+                manual: false,
+            },
+        ];
+        let mut manual_source = HashMap::new();
+        manual_source.insert(0, "other".to_string());
+        let seen = HashSet::new();
+        let (accepted, owners) =
+            effective_candidates(&candidates, &targets, &manual_source, "s1", &seen);
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0].target, 1);
+        assert_eq!(owners.get("X"), Some(&1), "被跳过的候选不占用上游频道");
+    }
+
     #[test]
     fn manual_mapping_channel_is_used() {
         let mut config = Config::default();
@@ -3028,5 +3282,53 @@ mod tests {
             .collect();
         assert_eq!(hours, vec![3, 5, 12]);
         assert!(cron_preview("bad", now, 0, 1).is_err());
+    }
+
+    #[test]
+    fn cron_prev_finds_the_last_trigger() {
+        let now = 1_700_000_000;
+        let prev = cron_prev("0 */4 * * *", now, 0).expect("表达式应有效");
+        let next = cron_preview("0 */4 * * *", now, 0, 1).expect("表达式应有效")[0];
+        assert!(prev <= now);
+        assert_eq!(next - prev, 4 * 3_600, "前后两个四点边界");
+        assert_eq!(
+            cron_prev("* * * * *", now, 0).unwrap(),
+            now.div_euclid(60) * 60
+        );
+        assert!(cron_prev("bad", now, 0).is_err());
+    }
+
+    #[test]
+    fn schedule_due_uses_last_trigger_not_next() {
+        let now = 1_700_000_000;
+        let prev = cron_prev("0 */4 * * *", now, 0).expect("表达式应有效");
+
+        assert!(global_schedule_due("0 */4 * * *", now, 0, prev - 1));
+        assert!(!global_schedule_due("0 */4 * * *", now, 0, prev));
+        // 非法表达式回退到 4 小时。
+        assert!(global_schedule_due("bad", now, 0, now - 4 * 3_600 - 1));
+        assert!(!global_schedule_due("bad", now, 0, now - 3_600));
+
+        assert!(source_cron_due(
+            "0 */4 * * *",
+            now,
+            0,
+            Some((prev - 1) * 1_000)
+        ));
+        assert!(!source_cron_due("0 */4 * * *", now, 0, Some(prev * 1_000)));
+        assert!(!source_cron_due("bad", now, 0, None), "非法表达式不采集");
+    }
+
+    #[test]
+    fn future_and_past_limits_saturate() {
+        let mut config = Config::default();
+        config.epg.future_days = i64::MAX;
+        config.epg.keep_days = i64::MAX;
+        let now = 1_700_000_000;
+        assert_eq!(future_limit(&config, now), i64::MAX);
+        assert!(
+            past_limit(&config, now) <= now.saturating_sub(365 * 86_400),
+            "极大 keep_days 不能回绕成近期"
+        );
     }
 }

@@ -275,10 +275,12 @@ pub async fn extra(
 }
 
 /// 后台按 raw 缓存重新生成，不阻塞面板请求。
+///
+/// 采集进行中时等待它结束。源改动不能因为一次锁冲突而丢失。
 fn spawn_regenerate(state: &Arc<AppState>) {
     let state = state.clone();
     tokio::spawn(async move {
-        if let Err(error) = epg::regenerate(&state).await {
+        if let Err(error) = epg::regenerate_wait(&state).await {
             tracing::warn!(%error, "EPG 重新生成失败");
         }
     });
@@ -286,16 +288,24 @@ fn spawn_regenerate(state: &Arc<AppState>) {
 
 /// 源改动后刷新输出。没有启用的源时清掉旧节目单。
 fn refresh_after_change(state: &Arc<AppState>) {
-    if state
+    let has_enabled = state
         .epg_store
         .sources()
         .iter()
-        .any(|source| source.enabled)
-    {
+        .any(|source| source.enabled);
+    if has_enabled {
         spawn_regenerate(state);
-    } else if let Err(error) = epg::clear_generated(state) {
-        tracing::warn!(%error, "清理 EPG 输出失败");
+        return;
     }
+    // 清理与采集互斥。等待采集结束后再删，避免采集把旧文件写回。
+    let state = state.clone();
+    tokio::spawn(async move {
+        match epg::clear_generated_when_idle(&state).await {
+            Ok(true) => {}
+            Ok(false) => spawn_regenerate(&state),
+            Err(error) => tracing::warn!(%error, "清理 EPG 输出失败"),
+        }
+    });
 }
 
 /// `POST /panel/api/epg/regenerate`——按 raw 缓存重新匹配并生成。

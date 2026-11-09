@@ -1313,6 +1313,35 @@ async fn epg_disabled_returns_404() {
 }
 
 #[tokio::test]
+async fn clearing_epg_output_resets_last_success() {
+    let fixture = fixture_with(true).await;
+    epg::refresh(&fixture.state).await.expect("采集应成功");
+    assert!(fixture.state.epg.last_success.lock().expect("锁").is_some());
+
+    epg::clear_generated(&fixture.state).expect("清理");
+    assert!(
+        fixture.state.epg.last_success.lock().expect("锁").is_none(),
+        "清空后不能保留旧的最近成功时间"
+    );
+
+    let session = login(&fixture).await;
+    let body: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/epg/status", fixture.base))
+            .header("authorization", format!("Bearer {session}"))
+            .send()
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert!(body["last_success"].is_null());
+}
+
+#[tokio::test]
 async fn epg_enabled_serves_xmltv_and_filters() {
     let fixture = fixture_with(true).await;
 

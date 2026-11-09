@@ -27,7 +27,12 @@ const ACTION_WINDOW_SECS: i64 = 180;
 
 /// 实际可扫描窗口。受生成的节目单范围限制。
 fn lookahead_secs(config: &crate::config::Config) -> i64 {
-    (config.epg.future_days.max(0) * 86_400).min(MAX_LOOKAHEAD_SECS)
+    config
+        .epg
+        .future_days
+        .max(0)
+        .saturating_mul(86_400)
+        .min(MAX_LOOKAHEAD_SECS)
 }
 
 /// 起规则引擎（每 30 秒扫描）。
@@ -450,6 +455,8 @@ mod tests {
         assert_eq!(lookahead_secs(&config), 48 * 3_600);
         config.epg.future_days = 0;
         assert_eq!(lookahead_secs(&config), 0);
+        config.epg.future_days = i64::MAX;
+        assert_eq!(lookahead_secs(&config), MAX_LOOKAHEAD_SECS);
     }
 
     #[test]

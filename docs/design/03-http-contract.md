@@ -395,19 +395,19 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 | --- | --- |
 | 源类型 | `kind = "xml"`：按 `url` 拉 XMLTV。`kind = "script"`：执行 `<cache>/epg/scripts/<script>`（`python_bin`，默认 `python3`；cwd 为脚本目录，stdout 即 XMLTV；为空时读 `output_files`）。`allow_scripts = false` 时拒绝脚本源 |
 | 源缓存 | 每次抓取/执行后写 `<cache>/epg/raw/<source_id>.xml`；`regenerate` 与单源定时任务只读该缓存 |
-| 定时 | `[epg].cron` 与源级 `cron` 均按标准 5 字段解析；源级空表示仅随全局采集。非法全局表达式回退 4 小时 |
+| 定时 | `[epg].cron` 与源级 `cron` 均按标准 5 字段解析；源级空表示仅随全局采集。到期按最近一次触发时间判定：全局用上次尝试时间，源用上次结束时间。非法全局表达式回退 4 小时；非法源级表达式不采集 |
 | 超时 | 源级 `timeout_secs > 0` 优先，否则用 `[epg].script_timeout_secs`；均限制在 5–3600 秒 |
 | 时间偏移 | `source.tz_shift_mins` 在解析后平移 `start`/`stop`，单位分钟，正数向后 |
 | 时间窗 | 保留 `stop >= 现在 - keep_days` 且 `start <= 现在 + future_days`；`keep_yesterday = true` 时下界不晚于昨天 0 点 |
 | 输出标识 | `out_id = (tvg_id \|\| channel.id).to_ascii_lowercase()`；XMLTV 的 `channel/@id`、节目 `channel`、公开 API 与面板报告均使用小写 `out_id` |
 | 额外频道 | `extra.json` 持久化；`out_id` 为空时用源频道 ID；与输出 ID 冲突时跳过 |
-| 频道匹配 | 手工映射优先；否则 `tvg_id`（大小写不敏感）→ 名称（删全部空白含 U+3000、转小写、完全相等，不做子串）；`match_by_name=false` 时只保留 `tvg_id` |
-| 冲突 | 同一源频道被多个本地频道命中 → 配置顺序最后一个获得节目；重复 `out_id` 标为 `duplicate` |
+| 频道匹配 | 手工映射优先；源停用、采集失败或上游频道不存在时回退自动匹配。自动匹配顺序：`tvg_id`（大小写不敏感）→ 名称（删全部空白含 U+3000、转小写、完全相等，不做子串）；`match_by_name=false` 时只保留 `tvg_id` |
+| 冲突 | 同一源频道被多个本地频道命中 → 配置顺序第一个获得节目；重复 `out_id` 标为 `duplicate` |
 | 输出 | `<cache>/epg/epg.xml` 与 `epg.xml.gz`；根节点 `generator-info-name="tv-buddy"`；保留 `programme` 的 `start`/`stop`/`channel` |
 | 语言 | 文本节点缺 `xml:lang` 时补 `lang="zh"`；显式语言保留 |
 | 原样保留 | `icon`、`credits` 等未建模子节点按原片段输出 |
-| 手工映射 | 存 `<cache>/epg/mappings.json`；`GET /panel/api/epg/mappings` 读取；刷新后补源频道显示名 |
-| 调度 | 启动即采集一次；之后每分钟检查 `[epg].cron` 与源级 `cron`。全局到期刷新全部源，单源到期只刷新该源再用 raw 缓存重生成 |
+| 手工映射 | 存 `epg_bindings` 表（`origin = manual`）。首次启动从旧 `<cache>/epg/mappings.json` 导入；自动绑定不算已迁移，旧映射优先 |
+| 调度 | 启动即采集一次；之后每分钟检查 `[epg].cron` 与源级 `cron`。全局到期只抓 `refresh_secs = 0` 且无源 `cron` 的源；单源到期只刷新该源再用 raw 缓存重生成。源改动遇到采集进行中时等待结束再重生成 |
 
 > `/epg/api/*` 形状按目标 v0.8.2 抓包对齐（F-023）。公开频道读取 `<cache>/epg/viewer.json` 快照；节目与搜索按请求解析 `epg.xml`。
 > 关闭 EPG → `404 {"error":"EPG 功能已关闭"}`；关闭公开查看器 → `404 {"error":"公开节目单查看器已关闭"}`。三个公开端点共享宽松 CORS。

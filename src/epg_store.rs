@@ -614,8 +614,11 @@ impl Store {
                 failed += 1;
                 continue;
             };
-            if self.binding(gid, cid).is_some() {
-                continue;
+            if let Some(existing) = self.binding(gid, cid) {
+                // 已有手工绑定说明迁移过。自动绑定不是用户配置，旧映射优先。
+                if existing.manual() {
+                    continue;
+                }
             }
             let binding = Binding {
                 gid: gid.to_string(),
@@ -892,6 +895,47 @@ mod tests {
             store.binding("g", "c").expect("绑定").raw_channel_id,
             "manual"
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn legacy_mapping_replaces_auto_binding() {
+        let (store, dir) = store("legacy-mapping-auto");
+        let source = store
+            .save_source(xml_source("源", "https://example.com/epg.xml"))
+            .expect("保存源");
+        store
+            .replace_auto_bindings(vec![Binding {
+                gid: "g".into(),
+                cid: "c".into(),
+                source_id: source.id.clone(),
+                raw_channel_id: "auto".into(),
+                ..Binding::default()
+            }])
+            .expect("自动绑定");
+        let epg_dir = dir.join("epg");
+        std::fs::create_dir_all(&epg_dir).expect("建目录");
+        let legacy = serde_json::json!({
+            "g/c": {
+                "source_id": source.id,
+                "source_channel_id": "manual",
+                "source_name": "源",
+                "source_display_name": "手工频道"
+            }
+        });
+        std::fs::write(
+            epg_dir.join("mappings.json"),
+            serde_json::to_string(&legacy).expect("序列化"),
+        )
+        .expect("写旧映射");
+
+        let count = store.import_legacy_mappings(&dir).expect("导入");
+        assert_eq!(count, 1);
+        let binding = store.binding("g", "c").expect("绑定");
+        assert_eq!(binding.origin, "manual", "旧映射应提升为手工绑定");
+        assert_eq!(binding.raw_channel_id, "manual");
+        assert!(!epg_dir.join("mappings.json").exists());
+        assert!(epg_dir.join("mappings.json.migrated").exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
