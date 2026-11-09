@@ -901,6 +901,33 @@ export function PlaylistPage() {
             />
           </label>
           <label>
+            同步并发数
+            <Tip text="同时抓取多少个托管源。范围 1–16；并发越高，抓取越快，也越占用上游带宽。" />
+            <NumberBox
+              min={1}
+              max={16}
+              value={global.sync_concurrency}
+              onChange={(next) =>
+                setGlobal({ ...global, sync_concurrency: Number(next) || 1 })
+              }
+            />
+          </label>
+          <label>
+            同步抓取超时
+            <Tip text="单个托管源一次抓取的最长等待时间（秒）。范围 1–600。" />
+            <NumberBox
+              min={1}
+              max={600}
+              value={global.sync_fetch_timeout_secs}
+              onChange={(next) =>
+                setGlobal({
+                  ...global,
+                  sync_fetch_timeout_secs: Number(next) || 25,
+                })
+              }
+            />
+          </label>
+          <label>
             缩水提醒比例
             <Tip text="一次同步删除的频道超过这个比例时标黄。例如 0.2 表示 20%。" />
             <NumberBox

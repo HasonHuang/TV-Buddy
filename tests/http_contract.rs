@@ -513,6 +513,9 @@ async fn fixture_with_options(
                 "url": format!("{upstream}/epg.xml")
             }]
         });
+    } else {
+        // 默认值已改为开启；关闭 EPG 的夹具必须显式写回。
+        config["epg"] = json!({ "enabled": false });
     }
     merge_json(&mut config, &extra_section);
     if let Some(base) = config.get_mut("auth") {

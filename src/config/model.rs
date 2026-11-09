@@ -1105,9 +1105,13 @@ impl Default for Channel {
 }
 
 /// `[epg]`——节目单（S-EP-05、F-008）。
+///
+/// 默认开启，与参考实现的 EPG 页面默认可见一致。关闭后不建采集任务，
+/// 面板仍显示「节目指南」入口，源、绑定与规则照常管理。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EpgCfg {
+    /// 总开关。控制采集任务与浏览接口；不控制侧栏入口。
     pub enabled: bool,
     pub cron: String,
     pub public_viewer_enabled: bool,
@@ -1129,7 +1133,7 @@ pub struct EpgCfg {
 impl Default for EpgCfg {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             cron: "0 */4 * * *".into(),
             public_viewer_enabled: true,
             keep_days: 3,

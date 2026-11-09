@@ -294,6 +294,15 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
           value={authNumber(auth, 'token_ttl_hours')}
           onChange={(next) => setKey('token_ttl_hours', Number(next) || 0)}
         />
+        <Field label="凭证失效跳转" tip="播放凭证失效时跳转的地址。留空返回错误。">
+          <div className="field-control">
+            <input
+              aria-label="凭证失效跳转"
+              value={typeof auth.token_failure_url === 'string' ? auth.token_failure_url : ''}
+              onChange={(event) => setKey('token_failure_url', event.target.value)}
+            />
+          </div>
+        </Field>
         <Field
           label="导入随机 ID"
           tip="开启后导入 M3U 时忽略 tvg-id，为每个新频道生成随机 ID。只影响之后导入的频道"

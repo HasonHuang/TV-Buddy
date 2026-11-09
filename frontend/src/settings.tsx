@@ -82,6 +82,8 @@ function Num({
   tip,
   unit,
   step,
+  min = 0,
+  max,
 }: {
   label: string;
   path: string;
@@ -89,6 +91,8 @@ function Num({
   tip?: string;
   unit?: string;
   step?: number;
+  min?: number;
+  max?: number;
 }) {
   const { draft, update } = useDraft();
   return (
@@ -99,13 +103,70 @@ function Num({
       </label>
       <div className="field-control">
         <NumberBox
-          min={0}
+          min={min}
+          max={max}
           step={step ?? 1}
           ariaLabel={label}
           value={String(asNumber(draft, path))}
           onChange={(next) => {
             const value = Number(next);
             update(path, Number.isFinite(value) ? value : 0);
+          }}
+        />
+        {unit ? <span className="field-unit">{unit}</span> : null}
+      </div>
+      {hint ? <div className="hint">{hint}</div> : null}
+    </div>
+  );
+}
+
+/** 数字列表输入：逗号或空格分隔。失焦时解析并写回。 */
+function NumList({
+  label,
+  path,
+  hint,
+  tip,
+  unit,
+}: {
+  label: string;
+  path: string;
+  hint?: string;
+  tip?: string;
+  unit?: string;
+}) {
+  const { draft, update } = useDraft();
+  const stored = asList(draft, path).join(', ');
+  const [text, setText] = useState(stored);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setText(stored);
+  }, [stored, editing]);
+
+  return (
+    <div className="field">
+      <label>
+        {label}
+        {tip ? <Tip text={tip} /> : null}
+      </label>
+      <div className="field-control">
+        <input
+          aria-label={label}
+          value={text}
+          placeholder="200, 1000, 2000"
+          onFocus={() => setEditing(true)}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={() => {
+            setEditing(false);
+            update(
+              path,
+              text
+                .split(/[\s,，]+/)
+                .map((item) => item.trim())
+                .filter((item) => item !== '')
+                .map((item) => Math.trunc(Number(item)))
+                .filter((item) => Number.isFinite(item) && item >= 0),
+            );
           }}
         />
         {unit ? <span className="field-unit">{unit}</span> : null}
@@ -792,6 +853,13 @@ export function SettingsPage({
                       path="server.error_url"
                       tip="读取源或播放出错时跳转的地址。"
                     />
+                    <BoolPick
+                      label="低配模式"
+                      path="server.low_resource_mode"
+                      tip="低配部署标记。当前只在概览的系统信息里回显，不改变缓存与并发参数。"
+                      onLabel="开启"
+                      offLabel="关闭"
+                    />
                   </div>
                   <Lines
                     label="M3U 头部"
@@ -801,6 +869,37 @@ export function SettingsPage({
                     rows={3}
                     placeholder="#EXT-X-APTV-PREVIEW: FALSE"
                   />
+                  <Lines
+                    label="可信代理"
+                    path="server.trust_proxy"
+                    tip="兼容保留。当前版本尚未读取该名单，转发头仍按现有逻辑解析。"
+                    hint="兼容保留；当前未生效"
+                    rows={3}
+                    placeholder={'127.0.0.1\n10.0.0.0/8'}
+                  />
+                </Card>
+                <Card
+                  title="面板"
+                  note="登录入口与会话有效期"
+                  tip="关闭后新登录会被拒绝；已登录的会话仍可在面板内改回。"
+                >
+                  <div className="fields">
+                    <BoolPick
+                      label="启用面板"
+                      path="panel.enabled"
+                      tip="关闭后无法新登录面板；已登录的会话在过期前仍可使用。"
+                      hint="已登录会话仍可在面板内改回"
+                      onLabel="开启"
+                      offLabel="关闭"
+                    />
+                    <Num
+                      label="会话有效期"
+                      path="panel.session_ttl"
+                      unit="秒"
+                      tip="面板登录会话的有效期。保存后需重启进程才生效。"
+                      hint="改后需重启进程"
+                    />
+                  </div>
                 </Card>
                 <Card
                   title="功能开关"
@@ -838,16 +937,96 @@ export function SettingsPage({
                       path="features.users"
                       tip="显示「用户与设备」分区与账号、设备凭证接口。"
                     />
+                    <BoolPick
+                      label="节目指南"
+                      path="epg.enabled"
+                      tip="控制 EPG 采集与浏览接口。关闭后侧栏仍显示「节目指南」，源、绑定与规则照常管理。"
+                      hint="从关到开需重启服务才建立采集任务"
+                    />
                   </div>
                   <p className="muted">
-                    节目指南由「节目指南」页的总开关控制，频道热度由「监控与字幕」分组里的
-                    访问统计控制。概览、缓存状态、分组管理、系统设置、安全管控与运行日志
-                    始终显示。
+                    节目指南开关只停采集与浏览接口，入口始终显示。频道热度由「监控与字幕」
+                    分组里的访问统计控制。概览、缓存状态、分组管理、系统设置、安全管控与
+                    运行日志始终显示。
                   </p>
                   <p className="muted">
                     普通用户登录后只看到「我的订阅」：自己的订阅地址、EPG 地址与授权频道。
                     其余分区与接口仅管理员可用。
                   </p>
+                </Card>
+                <Card
+                  title="节目指南"
+                  note="采集参数与保留窗口"
+                  tip="节目指南总开关在「功能开关」里；这里调采集与保留策略。保存后下一轮采集生效。"
+                  wide
+                >
+                  <div className="fields">
+                    <BoolPick
+                      label="保留昨天"
+                      path="epg.keep_yesterday"
+                      tip="保留昨天的节目单，方便回看昨天已播出的节目。"
+                      onLabel="保留"
+                      offLabel="不保留"
+                    />
+                    <BoolPick
+                      label="按名称匹配"
+                      path="epg.match_by_name"
+                      tip="频道名与节目源频道名相同时自动绑定；关闭后只按显式绑定的频道 ID 匹配。"
+                      onLabel="开启"
+                      offLabel="关闭"
+                    />
+                    <BoolPick
+                      label="允许脚本源"
+                      path="epg.allow_scripts"
+                      tip="允许执行缓存目录下的 Python 采集脚本。关闭后只接受 XML 地址源。"
+                      onLabel="允许"
+                      offLabel="禁止"
+                    />
+                    <BoolPick
+                      label="公开节目单"
+                      path="epg.public_viewer_enabled"
+                      tip="兼容保留字段。公开浏览页已删除，当前版本没有运行时作用。"
+                      onLabel="开启"
+                      offLabel="关闭"
+                    />
+                    <Num
+                      label="保留天数"
+                      path="epg.keep_days"
+                      unit="天"
+                      tip="保留过去多少天的节目。"
+                    />
+                    <Num
+                      label="未来天数"
+                      path="epg.future_days"
+                      unit="天"
+                      tip="保留未来多少天的节目。"
+                    />
+                    <Num
+                      label="脚本超时"
+                      path="epg.script_timeout_secs"
+                      unit="秒"
+                      tip="单次脚本采集的最长运行时间。"
+                    />
+                    <Num
+                      label="录制前缓冲"
+                      path="epg.record_pad_before_secs"
+                      unit="秒"
+                      tip="按节目单创建定时录制时，在节目开始前提前多少秒开始。"
+                    />
+                    <Num
+                      label="录制后缓冲"
+                      path="epg.record_pad_after_secs"
+                      unit="秒"
+                      tip="按节目单创建定时录制时，在节目结束后继续录多少秒。"
+                    />
+                    <Text
+                      label="Python 命令"
+                      path="epg.python_bin"
+                      placeholder="python3"
+                      tip="执行脚本源时使用的命令名或绝对路径。留空使用 python3。"
+                      hint="留空使用 python3"
+                    />
+                  </div>
                 </Card>
                 <Card
                   title="面板认证"
@@ -912,6 +1091,25 @@ export function SettingsPage({
                       unit="MB"
                       tip="内存缓存最多用多少空间。0 表示不限。"
                     />
+                    <Num
+                      label="清单条目上限"
+                      path="cache.m3u8_max_entries"
+                      tip="兼容保留。当前版本不按该值限制清单条目。"
+                      hint="兼容保留；当前未生效"
+                    />
+                    <Num
+                      label="切片条目上限"
+                      path="cache.segment_max_entries"
+                      tip="兼容保留。当前版本不按该值限制切片条目。"
+                      hint="兼容保留；当前未生效"
+                    />
+                    <Num
+                      label="切片缓存容量"
+                      path="cache.segment_cache_max_mb"
+                      unit="MB"
+                      tip="兼容保留。当前版本不使用该容量。"
+                      hint="兼容保留；当前未生效"
+                    />
                   </div>
                 </Card>
                 <Card
@@ -936,6 +1134,74 @@ export function SettingsPage({
                       label="保留条数"
                       path="cache.segments.retain_count"
                       tip="每个清单保留的切片引用数。"
+                    />
+                  </div>
+                </Card>
+                <Card
+                  title="缓存有效期"
+                  note="订阅、清单与切片的 TTL"
+                  tip="过期后重新向上游读取。填 0 时按 1 秒处理；标注「兼容保留」的字段当前未生效。"
+                >
+                  <div className="fields">
+                    <Num
+                      label="订阅地址有效期"
+                      path="cache.ttl.sub_url_secs"
+                      unit="秒"
+                      tip="订阅地址缓存的有效期。填 0 时按 1 秒处理。"
+                    />
+                    <Num
+                      label="切片有效期"
+                      path="cache.ttl.segment_secs"
+                      unit="秒"
+                      tip="切片 Cache-Control 的有效期。填 0 时按 1 秒处理。"
+                    />
+                    <Num
+                      label="刷新比例"
+                      path="cache.ttl.refresh_ratio"
+                      step={0.05}
+                      tip="兼容保留。当前版本未读取该值。"
+                      hint="兼容保留；当前未生效"
+                    />
+                    <Num
+                      label="MPD 兜底有效期"
+                      path="cache.ttl.fallback_mpd_secs"
+                      unit="秒"
+                      tip="兼容保留。当前版本未读取该值。"
+                      hint="兼容保留；当前未生效"
+                    />
+                  </div>
+                </Card>
+                <Card
+                  title="Remux"
+                  note="转封装切片时长与重连"
+                  tip="只影响 remux 分组。切片越短起播越快，上游请求也越多。"
+                >
+                  <div className="fields">
+                    <Num
+                      label="目标切片时长"
+                      path="cache.remux.target_duration_secs"
+                      unit="秒"
+                      step={0.5}
+                      tip="重新封装后每个切片的时长。"
+                    />
+                    <Num
+                      label="窗口切片数"
+                      path="cache.remux.window_segments"
+                      unit="个"
+                      tip="清单中保留的切片数。"
+                    />
+                    <Num
+                      label="发布延迟"
+                      path="cache.remux.publish_delay_segments"
+                      unit="个"
+                      tip="生成后延迟多少个切片再发布，用来吸收上游抖动。"
+                    />
+                    <NumList
+                      label="重连退避"
+                      path="cache.remux.reconnect_backoff_ms"
+                      unit="ms"
+                      tip="上游断开后的重连等待时间，按顺序使用最后一个值循环。"
+                      hint="逗号分隔；例如 200, 1000, 2000"
                     />
                   </div>
                 </Card>
@@ -1208,6 +1474,23 @@ export function SettingsPage({
                     </button>
                   }
                 >
+                  <div className="fields">
+                    <Text
+                      label="兼容模式"
+                      path="subtitle.compat_mode"
+                      placeholder="auto"
+                      tip="播放侧兼容模式。目标键保留，当前版本未使用该值。"
+                      hint="兼容保留；当前未使用"
+                    />
+                  </div>
+                  <Lines
+                    label="字幕 UA 关键字"
+                    path="subtitle.srt_ua_keywords"
+                    tip="兼容保留。当前版本未读取该名单。"
+                    hint="兼容保留；当前未生效"
+                    rows={3}
+                    placeholder="ijkplayer"
+                  />
                   <Toggle
                     label="开启（下方参数生效，注入到 VTT）"
                     path="subtitle.style.enabled"
@@ -1247,6 +1530,12 @@ export function SettingsPage({
                     path="subtitle.translate.enabled"
                     tip="把字幕翻译成目标语言；源必须提供字幕轨道。"
                   />
+                  <Pick
+                    label="源语言"
+                    path="subtitle.translate.source"
+                    tip="字幕原文的语言。自动表示由翻译服务判断。"
+                    options={[{ value: 'auto', label: '自动' }, ...SUBTITLE_LANGS]}
+                  />
                   <Chips
                     label="目标语言"
                     path="subtitle.translate.targets"
@@ -1278,6 +1567,15 @@ export function SettingsPage({
                       path="subtitle.translate.timeout_ms"
                       unit="ms"
                       tip="单条字幕翻译的超时时间（毫秒）。"
+                    />
+                    <Num
+                      label="每批条数"
+                      path="subtitle.translate.batch"
+                      unit="条"
+                      min={1}
+                      max={500}
+                      tip="一次请求提交多少条字幕。"
+                      hint="范围 1–500"
                     />
                   </div>
                   <div className="fields">

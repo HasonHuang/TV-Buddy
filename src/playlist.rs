@@ -313,7 +313,8 @@ mod tests {
 
     #[test]
     fn epg_header_is_absent_when_disabled() {
-        let config = config_with(vec![group("g1", "public", "proxy")]);
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.epg.enabled = false;
         let body = render_user(&config, &admin(), "http://host", "tok", None);
         let first = body.lines().next().unwrap();
         assert_eq!(first, "#EXTM3U");

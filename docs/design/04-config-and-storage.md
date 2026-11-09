@@ -30,21 +30,21 @@
 
 | 段 | 关键键 | P0 用途 |
 | --- | --- | --- |
-| `[server]` | `bind`、`not_found_url`、`error_url`、`home_url`、`m3u_header_lines`、`timezone_offset_hours`、`log_level`、`trust_proxy` | 监听、跳转、订阅头行、日志级别 |
+| `[server]` | `bind`、`not_found_url`、`error_url`、`home_url`、`m3u_header_lines`、`timezone_offset_hours`、`log_level`、`trust_proxy` | 监听、跳转、订阅头行、日志级别。`trust_proxy` 兼容保留，当前未读取 |
 | `[panel]` | `enabled`、`session_ttl` | 面板登录。账号与口令在 `users` 表（见 `09-users-and-devices.md`） |
-| `[cache]` | `backend`（`disk`/`memory`）、`disk_path`、`m3u8/segment_max_entries`、`disk_max_mb`、`memory_max_mb`、`disguise.*` | 缓存与伪装 |
+| `[cache]` | `backend`（`disk`/`memory`）、`disk_path`、`m3u8/segment_max_entries`、`disk_max_mb`、`memory_max_mb`、`disguise.*` | 缓存与伪装。`m3u8_max_entries`、`segment_max_entries`、`segment_cache_max_mb` 兼容保留，不消费（§11.5） |
 | `[cache.prefetch]` | `enabled`、`concurrency`、`timeout`、`prefetch_limit`、`skip_tail`、`mpd_readahead` | 媒体清单刷新后按并发与超时预取切片；`skip_tail` 跳过尾部。分组/频道可用 `[groups.prefetch]` 覆盖（见 §11） |
 | `[cache.segments]` | `global_max`、`per_channel_max`、`retain_count` | 内存切片索引上限；`per_channel_max > 0` 时同时约束磁盘索引条数（`seg_url/*.json`） |
 | `[cache.gc]` | `enabled`、`max_disk_mb`、`max_age_secs`、`interval_secs`、`scan_limit`、`disk_budget_ratio`、`reserve_mb`、`min_mb` | 磁盘回收：切片正文只写不删，靠它兜住可用空间。见 §11 |
-| `[cache.ttl]` | `sub_url_secs`、`segment_secs`、`refresh_ratio`、`fallback_mpd_secs` | 订阅地址与切片缓存时长 |
+| `[cache.ttl]` | `sub_url_secs`、`segment_secs`、`refresh_ratio`、`fallback_mpd_secs` | 订阅地址与切片缓存时长。前两项生效；后两项兼容保留，当前未读取 |
 | `[cache.dash]` | `mpd_refresh_*`、`*_timeout_secs`、`fetch_concurrency`、`ondemand_idle_secs`、`retry_*`、`watchdog_*` 等 | MPD/切片超时、重试退避、会话空闲回收、`playlist_min_secs` 媒体窗口、`start_time_offset_secs`、`publish_delay_secs`、看门狗 tick/stall/stagger/上限/冷却已接入；`fast_start_secs` 目标无可观测语义，仅保留配置 |
 | `[cache.remux]` | `target_duration_secs`、`window_segments`、`publish_delay_segments`、`reconnect_backoff_ms` | Remux 切片时长、窗口与重连退避 |
 | `[auth]` | `token_enabled`、`token_ttl_hours`、`token_failure_url`、`whitelist`、`max_sessions_per_ip`、`session_ttl_secs`、`ip_guard_enabled` | 播放 Token 与播放会话 |
-| `[subtitle]` | `compat_mode`、`srt_ua_keywords`、`style.{enabled,color,font_size,bold,position}`、`translate.{enabled,url,token,target,targets,translation_first,bilingual,set_default,timeout_ms,batch}` | 字幕样式与机翻。`translate.*` 已实现；`style.*` **样式注入未实现**（兼容保留，见 `PROGRESS.md` §2.3）。缺省 `translation_first = true`（对齐目标） |
+| `[subtitle]` | `compat_mode`、`srt_ua_keywords`、`style.{enabled,color,font_size,bold,position}`、`translate.{enabled,url,token,source,target,targets,translation_first,bilingual,set_default,timeout_ms,batch}` | 字幕样式与机翻。`translate.*` 已实现；`style.*` **样式注入未实现**，`compat_mode` 与 `srt_ua_keywords` 兼容保留，均未读取（`PROGRESS.md` §2.3、D19）。缺省 `translation_first = true`（对齐目标） |
 | `[cdn]` | `enabled`、`auto_tune`、`segment_max_age_secs`、`shared_cache_hits`、`dont_cache_empty`、`empty_status`、`public_base` | 外部 CDN 侧兜底与被动实测开关；`enabled=false`（默认）时响应头与状态码逐字节不变。见 §11 |
 | `[health]`/`[stats]` | `enabled`、`interval_secs`、`online_window_secs` | 健康与指标 |
 | `[assets]` | `map`（原始 URL → 本地 HLS 入口） | 占位/错误视频转换 |
-| `[epg]` | `enabled`、`cron`、`public_viewer_enabled`、`keep_days`、`future_days`、`keep_yesterday`、`match_by_name`、`allow_scripts`、`python_bin`、`script_timeout_secs`、`record_pad_before_secs`、`record_pad_after_secs` | 节目单采集与浏览 |
+| `[epg]` | `enabled`、`cron`、`public_viewer_enabled`、`keep_days`、`future_days`、`keep_yesterday`、`match_by_name`、`allow_scripts`、`python_bin`、`script_timeout_secs`、`record_pad_before_secs`、`record_pad_after_secs` | 节目单采集与浏览。`enabled` 默认开启，只控制采集与浏览接口，不控制侧栏入口；`public_viewer_enabled` 兼容保留 |
 | `[[epg.sources]]` | 仅旧配置。启动时导入 `epg_sources` 表，然后清空 | 节目单源迁移 |
 | `epg_sources` | `id`、`name`、`kind`、`enabled`、`urls[]{url,priority,user_agent,headers}`、`refresh_secs`、`priority`、`script`、`output_files`、`timeout_secs`、`tz_shift_mins`、`cron` | 面板管理。保存即生效 |
 | `epg_bindings` | `gid`、`cid`、`source_id`、`raw_channel_id`、`origin`、`upstream_display_name` | 频道绑定。`origin` 为 `auto` 或 `manual` |
@@ -141,7 +141,7 @@
 | `[epg]` | `enabled` 从关到开需重启（启动时不建任务）；其余字段下一轮读取。源、绑定与规则存表，保存即生效 | F-008 |
 | `[epg.translate]`/`[subtitle.translate]` | 立即（下次翻译生效） | 设计决策 |
 | `[playlist]`/`[[playlist.sources]]` | 立即；源正文按源级 TTL 复用 | F-020 |
-| `[panel]` | 立即（新会话按新口令） | 设计决策 |
+| `[panel]` | `enabled` 立即（拒绝新登录）；`session_ttl` 需重启 | 设计决策 |
 
 EPG cron 的到期判断用**最近触发时间**，不用“下次触发时间”。
 
