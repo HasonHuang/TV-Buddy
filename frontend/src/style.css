@@ -720,51 +720,76 @@ a {
   min-width: 0;
 }
 
-/* 安全管控：字段多、说明长，改成两列横向行，标签与控件成对。 */
+/* 安全管控：字段多、说明长。按系统设置的表单样式排：
+ * 标签列固定，数字框与单位排在同一行，说明在控件下方。
+ * 列数跟随卡片自身宽度变化，不随视口猜。
+ */
+.security-card {
+  container-type: inline-size;
+}
+
 .security-card .fields {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 24px;
+  grid-template-columns: 1fr;
+  gap: 2px 18px;
+}
+
+@container (min-width: 660px) {
+  .security-card .fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 1180px) {
+  .security-card .fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .security-card .field {
   display: grid;
-  grid-template-columns: 140px minmax(0, 1fr);
+  grid-template-columns: 120px minmax(0, 1fr);
   align-items: center;
   gap: 3px 8px;
-  margin-bottom: 10px;
+  margin-bottom: 9px;
+  min-width: 0;
 }
 
-.security-card .field > label,
-.security-card .field > span {
+.security-card .field > label {
   grid-column: 1;
   min-width: 0;
   margin: 0;
   line-height: 1.35;
-  /* 标签靠右贴住控件，短标签不再隔出一大段空白。 */
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   text-align: right;
 }
 
 .security-card .field > input,
+.security-card .field > textarea,
 .security-card .field > .select,
 .security-card .field > .input-group,
-.security-card .field > .num-line,
 .security-card .field > .num-box,
-.security-card .field > .date-field,
 .security-card .field > .field-control {
   grid-column: 2;
   min-width: 0;
 }
 
-/* 数字框与单位同一行；单位不单独占一行。 */
-.security-card .field > .num-line {
+.security-card .field-control {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
-.security-card .field > .num-line .num-box {
+.security-card .field-control > input,
+.security-card .field-control > .input-group {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 数字框固定窄宽；单位在框右侧，扫读时数位与单位成列。 */
+.security-card .field-control > .num-box {
   flex: 0 1 var(--control-w);
   width: auto;
   min-width: 104px;
@@ -775,43 +800,27 @@ a {
   margin-top: 0;
 }
 
-@media (max-width: 900px) {
-  .security-card .fields {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* 手机宽度：标签放到控件上方，输入框吃满整行。 */
-@media (max-width: 640px) {
+/* 手机宽度：标签放到控件上方，控件吃满整行。 */
+@container (max-width: 640px) {
   .security-card .field {
     grid-template-columns: 1fr;
     gap: 4px;
   }
 
   .security-card .field > label,
-  .security-card .field > span,
   .security-card .field > input,
+  .security-card .field > textarea,
   .security-card .field > .select,
   .security-card .field > .input-group,
-  .security-card .field > .num-line,
   .security-card .field > .num-box,
-  .security-card .field > .date-field,
   .security-card .field > .field-control,
   .security-card .field > .hint {
     grid-column: 1;
   }
 
-  .security-card .field > label,
-  .security-card .field > span {
+  .security-card .field > label {
     justify-content: flex-start;
     text-align: left;
-  }
-
-  .security-card .field > .num-line .num-box {
-    flex: 1 1 auto;
-    width: auto;
-    min-width: 0;
-    max-width: none;
   }
 }
 

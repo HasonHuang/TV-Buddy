@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiText, getToken, putConfig } from './api';
 import { EpgBindingsTab, EpgRulesTab, EpgSourcesTab } from './epg';
 import { Icon } from './icons';
-import { Confirm, Field, NumberBox, PageHead, Select, Tip } from './ui';
+import { Badge, Confirm, Field, NumberBox, PageHead, Select, Tip } from './ui';
 
 type IpEntry = {
   ip: string;
@@ -37,45 +37,85 @@ type IpStats = {
 type AuthCfg = Record<string, unknown>;
 type FullConfig = { auth?: AuthCfg } & Record<string, unknown>;
 
-/** 数字字段：路径 + 标签 + 单位。 */
-type NumField = { key: string; label: string; hint?: string; unit?: string };
+/** 数字字段：路径 + 标签 + 单位 + 说明。 */
+type NumField = { key: string; label: string; hint?: string; unit?: string; tip?: string };
 
 const AUTH_LIMIT: NumField[] = [
   {
     key: 'max_sessions_per_ip',
     label: '每 IP 并发会话',
-    hint: '每 IP 同时可看的频道数，超出时踢掉最久未用的那路；0 = 不限。仅在「IP 管控」开启时生效',
+    unit: '路',
+    hint: '每 IP 同时可看的频道数。超出时踢掉最久未用的那路；0 = 不限',
   },
   {
     key: 'session_ttl_secs',
     label: '会话超时',
-    hint: '秒；该 IP 超过此时长没有播放请求即释放会话。仅在「IP 管控」开启时生效',
+    unit: '秒',
+    hint: '该 IP 超过此时长没有播放请求，即释放会话',
   },
-  { key: 'l1_window_secs', label: '一级（持续）窗口', hint: '秒' },
-  { key: 'l1_limit', label: '一级窗口次数', hint: '0 = 关闭该级' },
-  { key: 'l2_window_secs', label: '二级（突发）窗口', hint: '秒' },
-  { key: 'l2_limit', label: '二级窗口次数', hint: '0 = 关闭该级' },
-  { key: 'cooldown_secs', label: '超限冷却', hint: '秒；期间返回 429 + Retry-After' },
-  { key: 'violation_window_secs', label: '违规统计窗口', hint: '秒' },
-  { key: 'violation_decay_secs', label: '违规衰减', hint: '秒；每满一个周期失效一条' },
-  { key: 'ban_threshold', label: '升级封禁的违规次数' },
-  { key: 'ban_duration_secs', label: '违规升级的封禁时长', hint: '秒，默认 30 天' },
+  { key: 'l1_window_secs', label: '一级窗口', unit: '秒', hint: '持续上限的统计窗口' },
+  { key: 'l1_limit', label: '一级次数', unit: '次', hint: '0 = 关闭该级' },
+  { key: 'l2_window_secs', label: '二级窗口', unit: '秒', hint: '突发上限的统计窗口' },
+  { key: 'l2_limit', label: '二级次数', unit: '次', hint: '0 = 关闭该级' },
+  {
+    key: 'cooldown_secs',
+    label: '超限冷却',
+    unit: '秒',
+    hint: '冷却期间返回 429 + Retry-After',
+  },
+  { key: 'violation_window_secs', label: '违规统计窗口', unit: '秒', hint: '只统计窗口内的违规' },
+  {
+    key: 'violation_decay_secs',
+    label: '违规衰减',
+    unit: '秒',
+    hint: '每满一个周期失效一条违规',
+  },
+  {
+    key: 'ban_threshold',
+    label: '违规封禁阈值',
+    unit: '次',
+    hint: '有效违规达到该次数即本机封禁',
+  },
+  { key: 'ban_duration_secs', label: '封禁时长', unit: '秒', hint: '默认 30 天（2592000 秒）' },
 ];
 
 const AUTH_LOCK: NumField[] = [
-  { key: 'auth_fail_window_secs', label: '失败统计窗口', hint: '秒' },
-  { key: 'auth_fail_free_per_window', label: '窗口内免费次数' },
-  { key: 'auth_fail_ban_threshold', label: '免费后再失败几次锁定' },
+  { key: 'auth_fail_window_secs', label: '失败统计窗口', unit: '秒', hint: '只统计窗口内的失败' },
+  {
+    key: 'auth_fail_free_per_window',
+    label: '失败容忍次数',
+    unit: '次',
+    hint: '窗口内前几次失败不触发锁定；0 = 不容忍',
+  },
+  {
+    key: 'auth_fail_ban_threshold',
+    label: '追加失败次数',
+    unit: '次',
+    hint: '超过容忍次数后，再失败几次即锁定',
+  },
+  {
+    key: 'auth_fail_lock_secs',
+    label: '首次锁定时长',
+    unit: '秒',
+    hint: '默认 5 分钟（300 秒）',
+  },
   {
     key: 'auth_fail_ban_duration_secs',
     label: '第 2 次锁定时长',
-    hint: '秒；第 1 次仍用「锁定秒数」，默认 300',
+    unit: '秒',
+    hint: '仅在「IP 管控」开启时按阶梯升级',
   },
-  { key: 'auth_fail_ban_repeat_duration_secs', label: '第 3 次及以后锁定时长', hint: '秒' },
+  {
+    key: 'auth_fail_ban_repeat_duration_secs',
+    label: '第 3 次及以后锁定',
+    unit: '秒',
+    hint: '默认 30 天（2592000 秒）',
+  },
   {
     key: 'auth_fail_ban_escalate_window_secs',
     label: '锁定升级统计窗口',
-    hint: '秒；超出窗口后重新按第 1 次计',
+    unit: '秒',
+    hint: '超过窗口未再锁定，按第 1 次计',
   },
 ];
 
@@ -101,24 +141,21 @@ function NumberField({
   onChange: (next: string) => void;
 }) {
   return (
-    <label className="field">
-      <span>
-        {field.label}
-      </span>
-      <div className="num-line">
+    <Field label={field.label} hint={field.hint} tip={field.tip}>
+      <div className="field-control">
         <NumberBox
           min={0}
+          ariaLabel={field.label}
           value={value}
           onChange={onChange}
         />
         {field.unit ? <span className="field-unit">{field.unit}</span> : null}
       </div>
-      {field.hint && <div className="hint">{field.hint}</div>}
-    </label>
+    </Field>
   );
 }
 
-/** `[auth]` 四组编辑卡片：白名单、IP 管控与限流、会话与 Token、防爆破。 */
+/** `[auth]` 编辑卡：白名单、会话与凭证、切片签名、限流与会话、登录防爆破。 */
 function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
   const [config, setConfig] = useState<FullConfig | null>(null);
   const [saving, setSaving] = useState(false);
@@ -194,7 +231,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
         <div>
           <h2>访问控制</h2>
           <p className="muted">
-            这些设置影响播放链接、限流和封禁。改完点保存。
+            这些设置影响播放链接、限流和封禁。改完点「保存访问控制」。
           </p>
         </div>
         <button
@@ -209,48 +246,71 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
       <h3>白名单</h3>
       <p className="muted">
         每行一个地址，支持精确 IP、IPv4 CIDR 与 <code className="mono">*</code>。
-        只在「IP 管控」开启时生效：名单内的地址不受封禁与并发会话上限限制。
+        名单内的地址不受封禁与并发会话上限限制；只在「IP 管控」开启时生效。
       </p>
-      <textarea
-        rows={4}
-        aria-label="白名单地址"
-        title="名单内的地址豁免封禁与并发会话上限；只在 IP 管控开启时生效"
-        placeholder="203.0.113.7&#10;10.0.0.0/8&#10;*"
-        value={whitelist}
-        onChange={(event) => setWhitelist(event.target.value)}
-      />
+      <Field label="白名单地址">
+        <textarea
+          rows={4}
+          aria-label="白名单地址"
+          title="名单内的地址豁免封禁与并发会话上限；只在 IP 管控开启时生效"
+          placeholder="203.0.113.7&#10;10.0.0.0/8&#10;*"
+          value={whitelist}
+          onChange={(event) => setWhitelist(event.target.value)}
+        />
+      </Field>
 
-      <h3>会话与凭证</h3>
+      <h3>访问与链接</h3>
       <div className="fields">
         <Field label="IP 管控" tip="开启后启用按 IP 的限流、封禁与并发会话上限">
-          <Select
-            ariaLabel="IP 管控"
-            value={auth.ip_guard_enabled === true ? 'on' : 'off'}
-            options={[
-              { value: 'off', label: '关闭' },
-              { value: 'on', label: '开启' },
-            ]}
-            onChange={(next) => setKey('ip_guard_enabled', next === 'on')}
-            compact
-          />
+          <div className="field-control">
+            <Select
+              ariaLabel="IP 管控"
+              value={auth.ip_guard_enabled === true ? 'on' : 'off'}
+              options={[
+                { value: 'off', label: '关闭' },
+                { value: 'on', label: '开启' },
+              ]}
+              onChange={(next) => setKey('ip_guard_enabled', next === 'on')}
+              compact
+            />
+          </div>
         </Field>
         <Field label="播放凭证" tip="开启后每个设备凭证只能播放自己的授权频道">
-          <Select
-            ariaLabel="播放凭证"
-            value={auth.token_enabled === true ? 'on' : 'off'}
-            options={[
-              { value: 'off', label: '关闭' },
-              { value: 'on', label: '开启' },
-            ]}
-            onChange={(next) => setKey('token_enabled', next === 'on')}
-            compact
-          />
+          <div className="field-control">
+            <Select
+              ariaLabel="播放凭证"
+              value={auth.token_enabled === true ? 'on' : 'off'}
+              options={[
+                { value: 'off', label: '关闭' },
+                { value: 'on', label: '开启' },
+              ]}
+              onChange={(next) => setKey('token_enabled', next === 'on')}
+              compact
+            />
+          </div>
         </Field>
         <NumberField
           field={{ key: 'token_ttl_hours', label: '凭证有效期', unit: '小时' }}
           value={authNumber(auth, 'token_ttl_hours')}
           onChange={(next) => setKey('token_ttl_hours', Number(next) || 0)}
         />
+        <Field
+          label="导入随机 ID"
+          tip="开启后导入 M3U 时忽略 tvg-id，为每个新频道生成随机 ID。只影响之后导入的频道"
+        >
+          <div className="field-control">
+            <Select
+              ariaLabel="导入随机 ID"
+              value={auth.random_id_enabled === true ? 'on' : 'off'}
+              options={[
+                { value: 'off', label: '关闭' },
+                { value: 'on', label: '开启' },
+              ]}
+              onChange={(next) => setKey('random_id_enabled', next === 'on')}
+              compact
+            />
+          </div>
+        </Field>
       </div>
       {auth.token_enabled === false ? (
         <div className="msg warn">
@@ -277,53 +337,59 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
       <h3>切片签名</h3>
       <p className="muted">
         开启后清单里的切片地址带时间窗签名。同一窗口内所有用户拿到相同地址，
-        CDN 只缓存一份。关闭「播放 Token」时本项不生效。
+        CDN 只缓存一份。关闭「播放凭证」时本项不生效。
         修改密钥会让当前窗口内的旧链接立即失效。
       </p>
       <div className="fields">
         <Field label="切片签名" tip="开启后切片地址带时间签名。关闭播放凭证时本项不生效">
-          <Select
-            ariaLabel="切片签名"
-            value={auth.slice_sign_enabled === false ? 'off' : 'on'}
-            options={[
-              { value: 'on', label: '开启' },
-              { value: 'off', label: '关闭' },
-            ]}
-            onChange={(next) => setKey('slice_sign_enabled', next === 'on')}
-            compact
-          />
+          <div className="field-control">
+            <Select
+              ariaLabel="切片签名"
+              value={auth.slice_sign_enabled === false ? 'off' : 'on'}
+              options={[
+                { value: 'on', label: '开启' },
+                { value: 'off', label: '关闭' },
+              ]}
+              onChange={(next) => setKey('slice_sign_enabled', next === 'on')}
+              compact
+            />
+          </div>
         </Field>
         <NumberField
           field={{ key: 'slice_sign_window_secs', label: '签名时间窗', unit: '秒', hint: '范围 30–3600' }}
           value={authNumber(auth, 'slice_sign_window_secs')}
           onChange={(next) => setKey('slice_sign_window_secs', Number(next) || 0)}
         />
-        <label className="field">
-          <span>签名密钥</span>
-          <div className="input-group">
-            <input
-              className="mono"
-              title="改动后当前窗口内的旧签名链接会立即失效"
-              value={typeof auth.slice_sign_secret === 'string' ? auth.slice_sign_secret : ''}
-              placeholder="留空自动生成 32 字节"
-              onChange={(event) => setKey('slice_sign_secret', event.target.value.trim())}
-            />
-            <button
-              type="button"
-              title="生成一个新的十六进制密钥"
-              onClick={() => setKey('slice_sign_secret', randomSecret())}
-            >
-              生成随机
-            </button>
+        <Field
+          label="签名密钥"
+          tip="改动后当前窗口内的旧签名链接会立即失效"
+          hint="十六进制，32–128 位。改动后需要保存。"
+        >
+          <div className="field-control">
+            <div className="input-group">
+              <input
+                className="mono"
+                aria-label="签名密钥"
+                value={typeof auth.slice_sign_secret === 'string' ? auth.slice_sign_secret : ''}
+                placeholder="留空自动生成 32 字节"
+                onChange={(event) => setKey('slice_sign_secret', event.target.value.trim())}
+              />
+              <button
+                type="button"
+                title="生成一个新的十六进制密钥"
+                onClick={() => setKey('slice_sign_secret', randomSecret())}
+              >
+                生成随机
+              </button>
+            </div>
           </div>
-          <div className="hint">十六进制，32–128 位。改动后需要保存。</div>
-        </label>
+        </Field>
       </div>
 
       <h3>限流与会话</h3>
       <p className="muted">
-        限流只计播放入口请求（换台 / 新建播放），不计切片。二级是突发上限，
-        一级是持续上限，任一超限即进入冷却并记一次违规。全部只在「IP 管控」开启时生效。
+        限流只统计播放入口请求（换台、新建播放），不计切片。二级是突发上限，
+        一级是持续上限；任一超限即进入冷却，并记一次违规。全部只在「IP 管控」开启时生效。
       </p>
       <div className="fields">
         {AUTH_LIMIT.map((field) => (
@@ -334,30 +400,32 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
             onChange={(next) => setKey(field.key, Number(next) || 0)}
           />
         ))}
-      </div>
-      <div className="fields">
-        <label className="field">
-          <span>限流跳转地址</span>
-          <input
-            title="触发限流时跳转的地址"
-            value={typeof auth.limit_url === 'string' ? auth.limit_url : ''}
-            onChange={(event) => setKey('limit_url', event.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>封禁跳转地址</span>
-          <input
-            title="地址被封禁时跳转的地址"
-            value={typeof auth.ban_url === 'string' ? auth.ban_url : ''}
-            onChange={(event) => setKey('ban_url', event.target.value)}
-          />
-        </label>
+        <Field label="限流跳转地址" tip="触发限流时跳转的地址">
+          <div className="field-control">
+            <input
+              aria-label="限流跳转地址"
+              value={typeof auth.limit_url === 'string' ? auth.limit_url : ''}
+              onChange={(event) => setKey('limit_url', event.target.value)}
+            />
+          </div>
+        </Field>
+        <Field label="封禁跳转地址" tip="地址被封禁时跳转的地址">
+          <div className="field-control">
+            <input
+              aria-label="封禁跳转地址"
+              value={typeof auth.ban_url === 'string' ? auth.ban_url : ''}
+              onChange={(event) => setKey('ban_url', event.target.value)}
+            />
+          </div>
+        </Field>
       </div>
 
       <h3>登录防爆破</h3>
       <p className="muted">
-        窗口内累计失败达到「免费次数 + 阈值」后，该 IP 的 <code className="mono">/panel/api/login</code> 返回 <code className="mono">429</code>；
-        已登录的面板会话不受影响。首次锁定时长约 5 分钟。
+        同一 IP 的登录失败数在统计窗口内达到「失败容忍次数 + 追加失败次数」后，
+        登录接口 <code className="mono">/panel/api/login</code> 返回{' '}
+        <code className="mono">429</code>；已登录的面板会话不受影响。
+        首次锁定使用「首次锁定时长」；「IP 管控」开启时，后续锁定按阶梯加长。
       </p>
       <div className="fields">
         {AUTH_LOCK.map((field) => (
@@ -387,6 +455,8 @@ export function SecurityPage() {
   const [seconds, setSeconds] = useState('3600');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  /** 访问控制保存后让只读检查卡重新读取。 */
+  const [linkRefresh, setLinkRefresh] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -458,34 +528,32 @@ export function SecurityPage() {
 
   return (
     <>
-      <PageHead icon="security" title="安全管控" sub="访问控制、IP 封禁与限流">
+      <PageHead icon="security" title="安全管控" sub="访问控制、播放链接检查与 IP 封禁">
         <button
           className="ghost"
-          title="重新读取访问控制与 IP 统计"
+          title="重新读取 IP 统计"
           onClick={() => void load()}
         >
           <Icon name="refresh" size={14} />
           刷新
         </button>
       </PageHead>
-      <div className="card">
-        <h2>播放凭证</h2>
-        <p className="muted">
-          凭证按用户与设备下发，在「用户与设备」分区管理。
-          每个设备一条订阅地址，播放链接只使用该设备的凭证。
-        </p>
-        {message && <div className="msg ok">{message}</div>}
-        {error && <div className="msg err">{error}</div>}
-      </div>
 
-      <AuthConfigCard onSaved={() => void load()} />
-      <LinkInfoCard />
+      <AuthConfigCard
+        onSaved={() => {
+          void load();
+          setLinkRefresh((next) => next + 1);
+        }}
+      />
+      <LinkInfoCard refreshKey={linkRefresh} />
 
       <div className="card">
         <h2>IP 统计与封禁</h2>
         <p className="muted">
           共 {stats?.count ?? 0} 个地址，其中封禁 {stats?.banned ?? 0} 个。封禁只作用于非面板路径。
         </p>
+        {message && <div className="msg ok">{message}</div>}
+        {error && <div className="msg err">{error}</div>}
         <div className="row">
           <input
             aria-label="要封禁的地址"
@@ -2201,49 +2269,89 @@ function EpgViewerCard() {
   );
 }
 
-/** 播放链接审计：`GET /panel/api/link-info`。 */function LinkInfoCard() {
-  const [info, setInfo] = useState<{
-    aliases: Record<string, unknown>;
-    random_id_enabled: boolean;
-    token: string;
-    token_enabled: boolean;
-    use_alias: boolean;
-  } | null>(null);
+type LinkInfo = {
+  aliases: Record<string, unknown>;
+  random_id_enabled: boolean;
+  token: string;
+  token_enabled: boolean;
+  use_alias: boolean;
+};
+
+/** 播放链接检查：`GET /panel/api/link-info`。
+ *
+ * 只读：开关分布在「访问控制」与配置文件里，本卡只汇总当前结果。
+ * 全局播放令牌已废弃，凭证按用户与设备下发（`docs/design/09-users-and-devices.md` §9.2）。
+ */
+function LinkInfoCard({ refreshKey }: { refreshKey: number }) {
+  const [info, setInfo] = useState<LinkInfo | null>(null);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        setInfo(
-          await api<{
-            aliases: Record<string, unknown>;
-            random_id_enabled: boolean;
-            token: string;
-            token_enabled: boolean;
-            use_alias: boolean;
-          }>('GET', '/link-info'),
-        );
-      } catch (err) {
-        setError(errorText(err));
-      }
-    })();
+  const load = useCallback(async () => {
+    try {
+      setInfo(await api<LinkInfo>('GET', '/link-info'));
+      setError('');
+    } catch (err) {
+      setError(errorText(err));
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load, refreshKey]);
 
   const aliases = Object.keys(info?.aliases ?? {});
 
   return (
     <div className="card">
-      <h2>播放链接检查</h2>
-      <dl>
-        <dt>凭证校验</dt>
-        <dd>{info?.token_enabled ? '已开启' : '已关闭'}</dd>
-        <dt>当前凭证</dt>
-        <dd className="mono ellipsis">{info?.token || '—'}</dd>
-        <dt>随机 ID</dt>
-        <dd>{info?.random_id_enabled ? '已开启' : '已关闭'}</dd>
-        <dt>别名</dt>
-        <dd className="mono">{aliases.length > 0 ? aliases.join(', ') : '—'}</dd>
-      </dl>
+      <div className="row between">
+        <div>
+          <h2>
+            播放链接检查 <Badge tone="muted">只读</Badge>
+          </h2>
+          <p className="muted">
+            汇总播放链接用到的开关，用来核对。本卡不改配置：播放凭证与导入随机 ID
+            在「访问控制」修改；用户与设备凭证在「用户与设备」分区管理。
+          </p>
+        </div>
+        <button className="ghost" title="重新读取播放链接开关" onClick={() => void load()}>
+          <Icon name="refresh" size={14} />
+          刷新
+        </button>
+      </div>
+      {info ? (
+        <dl>
+          <dt>播放凭证校验</dt>
+          <dd>
+            <Badge tone={info.token_enabled ? 'ok' : 'warn'}>
+              {info.token_enabled ? '已开启' : '已关闭'}
+            </Badge>
+            <span className="muted"> 开启后，播放地址只使用「用户与设备」下发的凭证。</span>
+          </dd>
+          <dt>全局播放令牌</dt>
+          <dd className="muted">已废弃。播放凭证按用户与设备下发。</dd>
+          <dt>导入随机 ID</dt>
+          <dd>
+            <Badge tone={info.random_id_enabled ? 'ok' : 'muted'}>
+              {info.random_id_enabled ? '已开启' : '已关闭'}
+            </Badge>
+            <span className="muted"> 开启后导入 M3U 时忽略 tvg-id，给新频道生成随机 ID。</span>
+          </dd>
+          <dt>链接别名</dt>
+          <dd>
+            {aliases.length > 0 ? (
+              <span className="mono">{aliases.join(', ')}</span>
+            ) : (
+              <span className="muted">未设置</span>
+            )}
+            <span className="muted"> 别名只在配置文件的 [auth] aliases 中设置。</span>
+          </dd>
+        </dl>
+      ) : error ? null : (
+        <p className="muted">读取中…</p>
+      )}
+      {info && !info.token_enabled && (
+        <div className="msg warn">播放凭证校验已关闭：拿到播放地址的人都能播放。</div>
+      )}
       {error && <div className="msg err">{error}</div>}
     </div>
   );
