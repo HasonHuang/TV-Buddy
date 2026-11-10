@@ -1357,7 +1357,7 @@ export function PlaylistPage() {
                   </label>
                 )}
               </div>
-              <div className="form-grid">
+              <div className="form-grid two wide-controls">
                 <Field
                   label="新分组工作模式"
                   tip="只影响之后新建的同步分组。已有分组在「分组管理」里修改「工作模式」。"
@@ -1370,7 +1370,7 @@ export function PlaylistPage() {
                       ...syncModeOptions(),
                     ]}
                     onChange={(next) => patch({ playback_mode: next })}
-                    width={200}
+                    compact
                   />
                 </Field>
                 <Field

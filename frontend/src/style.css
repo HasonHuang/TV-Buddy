@@ -667,6 +667,11 @@ a {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* 整行短控件加宽。工作模式要显示英文标识，148 px 会截断。 */
+.form-grid.wide-controls {
+  --control-w: 200px;
+}
+
 .form-grid.four {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }

@@ -1,27 +1,42 @@
 /** 分组工作模式。分组管理与订阅源共用同一套说明，避免两处漂移。 */
-export const MODES: { value: string; code: string; label: string; desc: string }[] = [
+export type Mode = {
+  value: string;
+  code: string;
+  label: string;
+  desc: string;
+  /** 只用于聚合源。托管源会落盘为本地分组，后端拒绝这个模式（`src/config.rs`）。 */
+  aggregateOnly?: boolean;
+};
+
+export type ModeOption = { value: string; label: string; desc: string };
+
+export const MODES: Mode[] = [
   { value: 'proxy', code: 'PROXY', label: '服务器转发', desc: '视频经过本机。兼容性最好。' },
   { value: 'remux', code: 'REMUX', label: '服务器转封装', desc: '本机重新打包视频流。占用 CPU。' },
   { value: 'dash', code: 'DASH', label: 'DASH 转发', desc: '处理 DASH 清单。源必须提供 MPD。' },
   { value: 'redirect', code: '302', label: '跳转源地址', desc: '播放器直接连源。会显示源地址。' },
   { value: 'rewrite', code: 'REWRITE', label: '改写地址', desc: '本机改写清单地址，播放器再连源。' },
-  { value: 'passthrough', code: 'PASSTHROUGH', label: '原样直通', desc: '直接使用源地址。不经过本机。' },
+  {
+    value: 'passthrough',
+    code: 'PASSTHROUGH',
+    label: '原样直通',
+    desc: '直接使用源地址。不经过本机。',
+    aggregateOnly: true,
+  },
 ];
 
-/** 模式下拉选项。`exclude` 用于过滤后端不接受的值。 */
-export function modeOptions(
-  exclude: string[] = [],
-): { value: string; label: string; desc: string }[] {
-  return MODES.filter((mode) => !exclude.includes(mode.value)).map((mode) => ({
-    value: mode.value,
-    label: modeText(mode.value),
-    desc: mode.desc,
-  }));
+function optionOf(mode: Mode): ModeOption {
+  return { value: mode.value, label: modeText(mode.value), desc: mode.desc };
 }
 
-/** 同步源可选的工作模式。后端拒绝同步源使用 `passthrough`（`src/config.rs`）。 */
-export function syncModeOptions(): { value: string; label: string; desc: string }[] {
-  return modeOptions(['passthrough']);
+/** 分组工作模式的全部选项。 */
+export function modeOptions(): ModeOption[] {
+  return MODES.map(optionOf);
+}
+
+/** 同步源可选的工作模式。标记 `aggregateOnly` 的模式不出现。 */
+export function syncModeOptions(): ModeOption[] {
+  return MODES.filter((mode) => !mode.aggregateOnly).map(optionOf);
 }
 
 /** 中文名加短标识，如「服务器转发（PROXY）」。名称已含标识时不重复添加。 */
