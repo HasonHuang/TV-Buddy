@@ -69,7 +69,7 @@ pub struct User {
     pub role: Role,
     /// `argon2id` 文本格式。见 [`super::password`]。
     pub password_hash: String,
-    /// 可见分组。空表示全部。
+    /// 可见分组。空列表表示全部分组，包括以后新增的分组。
     #[serde(default)]
     pub allowed_group_ids: Vec<String>,
     /// 是否启用频道级过滤。
@@ -88,9 +88,13 @@ pub struct User {
 }
 
 impl User {
-    /// 管理员是否可见某个分组。
+    /// 是否可见某个分组。
+    ///
+    /// 管理员、或 `allowed_group_ids` 为空的普通用户可见全部分组。
     pub fn can_see_group(&self, gid: &str) -> bool {
-        self.role.is_admin() || self.allowed_group_ids.iter().any(|id| id == gid)
+        self.role.is_admin()
+            || self.allowed_group_ids.is_empty()
+            || self.allowed_group_ids.iter().any(|id| id == gid)
     }
 
     /// 是否可见某个频道。分组可见是前置条件。
@@ -175,6 +179,15 @@ mod tests {
         assert!(!plain.can_see_group("g2"));
         assert!(plain.can_see_channel("g1", "c1"));
         assert!(!plain.can_see_channel("g2", "c2"));
+    }
+
+    #[test]
+    fn empty_allowed_groups_means_all() {
+        let mut plain = user(Role::User);
+        plain.allowed_group_ids.clear();
+        assert!(plain.can_see_group("g1"));
+        assert!(plain.can_see_group("new-group"));
+        assert!(plain.can_see_channel("new-group", "c1"));
     }
 
     #[test]

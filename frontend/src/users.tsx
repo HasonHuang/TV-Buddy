@@ -51,6 +51,7 @@ type UserForm = {
   username: string;
   password: string;
   role: Role;
+  all_groups: boolean;
   allowed_group_ids: string[];
   channel_filter_enabled: boolean;
   allowed_channel_ids: string[];
@@ -75,6 +76,7 @@ function emptyForm(): UserForm {
     username: '',
     password: '',
     role: 'user',
+    all_groups: false,
     allowed_group_ids: [],
     channel_filter_enabled: false,
     allowed_channel_ids: [],
@@ -87,6 +89,8 @@ function formOf(user: User): UserForm {
     username: user.username,
     password: '',
     role: user.role,
+    // 空列表表示全部分组。
+    all_groups: user.allowed_group_ids.length === 0,
     allowed_group_ids: [...user.allowed_group_ids],
     channel_filter_enabled: user.channel_filter_enabled,
     allowed_channel_ids: [...user.allowed_channel_ids],
@@ -173,20 +177,27 @@ export function UsersPage() {
   const saveUser = async () => {
     if (!editing) return;
     const { form, id } = editing;
+    if (form.role === 'user' && !form.all_groups && form.allowed_group_ids.length === 0) {
+      err('普通用户至少需要一个可见分组，或开启「可见全部分组」。');
+      return;
+    }
     setBusy(true);
     try {
+      // 空列表表示全部分组。管理员不受分组限制，统一发空列表。
+      const payload = {
+        username: form.username,
+        role: form.role,
+        allowed_group_ids:
+          form.role === 'admin' || form.all_groups ? [] : form.allowed_group_ids,
+        channel_filter_enabled: form.channel_filter_enabled,
+        allowed_channel_ids: form.allowed_channel_ids,
+        web_ui_access: form.web_ui_access,
+      };
       if (id === null) {
-        await api('POST', '/users', form);
+        await api('POST', '/users', { ...payload, password: form.password });
         ok('用户已创建');
       } else {
-        await api('PUT', `/users/${id}`, {
-          username: form.username,
-          role: form.role,
-          allowed_group_ids: form.allowed_group_ids,
-          channel_filter_enabled: form.channel_filter_enabled,
-          allowed_channel_ids: form.allowed_channel_ids,
-          web_ui_access: form.web_ui_access,
-        });
+        await api('PUT', `/users/${id}`, payload);
         ok('用户已保存');
       }
       setEditing(null);
@@ -314,9 +325,9 @@ export function UsersPage() {
 
   const form = editing?.form;
   const isNew = editing?.id === null;
-  const visibleChannels = options.filter((group) =>
-    form?.allowed_group_ids.includes(group.id),
-  );
+  const visibleChannels = form?.all_groups
+    ? options
+    : options.filter((group) => form?.allowed_group_ids.includes(group.id));
   const credentialIssue = credentialProblem(tokenCredential);
 
   return (
@@ -356,9 +367,13 @@ export function UsersPage() {
                   )}
                 </td>
                 <td>
-                  {user.role === 'admin' || user.allowed_group_ids.length === 0
-                    ? '全部'
-                    : user.allowed_group_ids.map(groupName).join('、')}
+                  {user.role === 'admin' ? (
+                    '全部'
+                  ) : user.allowed_group_ids.length === 0 ? (
+                    <span title="包含以后新增的分组">全部</span>
+                  ) : (
+                    user.allowed_group_ids.map(groupName).join('、')
+                  )}
                   {user.channel_filter_enabled && (
                     <Badge tone="info">
                       {user.allowed_channel_ids.length} 个频道
@@ -430,7 +445,7 @@ export function UsersPage() {
         >
           <p className="muted">
             {isNew
-              ? '用户名与密码均为必填；普通用户至少需要一个可见分组。'
+              ? '用户名与密码均为必填；普通用户至少需要一个可见分组，或开启「可见全部分组」。'
               : '修改用户名、角色或可见分组。密码请通过「重置密码」按钮修改。'}
           </p>
           <div className="fields">
@@ -482,11 +497,29 @@ export function UsersPage() {
 
           {form.role === 'user' && (
             <>
-              <Field
-                label="可见分组"
-                tip="普通用户只能看到选中的分组。管理员不受分组限制。"
-                hint="普通用户至少选一个。管理员不受限制。"
-              >
+              <div className="row between">
+                <div>
+                  <div className="section-title">可见分组</div>
+                  <p className="muted">
+                    普通用户只能看到选中的分组。管理员不受分组限制。
+                  </p>
+                </div>
+                <Switch
+                  label="可见全部分组"
+                  checked={form.all_groups}
+                  onChange={(next) =>
+                    setEditing({
+                      ...editing,
+                      form: { ...form, all_groups: next },
+                    })
+                  }
+                />
+              </div>
+              {form.all_groups ? (
+                <p className="muted">
+                  可见全部分组，包括以后新增的分组。管理员不受分组限制。
+                </p>
+              ) : (
                 <div className="checkbox-list">
                   {options.map((group) => (
                     <label key={group.id} className="check">
@@ -506,7 +539,7 @@ export function UsersPage() {
                   ))}
                   {options.length === 0 && <p className="muted">还没有分组。</p>}
                 </div>
-              </Field>
+              )}
 
               <div className="row between">
                 <div>

@@ -285,6 +285,17 @@ mod tests {
     }
 
     #[test]
+    fn user_with_empty_allowed_groups_sees_all_groups() {
+        let config = config_with(vec![
+            group("g1", "public", "proxy"),
+            group("g2", "public", "proxy"),
+        ]);
+        let body = render_user(&config, &plain(&[]), "http://host", "tok", None);
+        assert!(body.contains("/g1/"));
+        assert!(body.contains("/g2/"));
+    }
+
+    #[test]
     fn public_group_entry_has_token() {
         let config = config_with(vec![group("g3", "public", "proxy")]);
         let body = render_user(&config, &admin(), "http://host", "tok", None);

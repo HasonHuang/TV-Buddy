@@ -708,8 +708,9 @@ EPG 配置另存 `tv-buddy.db.bak.epg.json`。
 | `/sub/<令牌>/playlist.m3u` | 该用户可见频道 + 聚合源条目 |
 | `/sub/<令牌>/epg.xml[.gz]` | 只含该用户可见频道的节目单 |
 
-**可见范围**：`allowed_group_ids` 决定分组，`channel_filter_enabled` 为真时
-`allowed_channel_ids` 再收窄。`access = "archived"` 的分组一律排除。
+**可见范围**：`allowed_group_ids` 决定分组，空列表表示全部分组（含以后新增）。
+`channel_filter_enabled` 为真时 `allowed_channel_ids` 再收窄。
+`access = "archived"` 的分组一律排除。
 
 **面板分权**：`guard::admin_gate` 拦非管理员的 `/panel/api/*`。
 放行名单：`login`、`logout`、`me`、`my/*`。角色每次请求从库重读。

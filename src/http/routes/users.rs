@@ -69,7 +69,7 @@ pub struct CreateReq {
     pub password: String,
     #[serde(default)]
     pub role: Option<String>,
-    #[serde(default)]
+    /// 可见分组。空列表表示全部分组，所以必须显式传字段，避免漏传时误授权。
     pub allowed_group_ids: Vec<String>,
     #[serde(default)]
     pub channel_filter_enabled: bool,
@@ -88,7 +88,7 @@ pub struct UpdateReq {
     pub username: String,
     #[serde(default)]
     pub role: Option<String>,
-    #[serde(default)]
+    /// 可见分组。空列表表示全部分组，所以必须显式传字段，避免漏传时误授权。
     pub allowed_group_ids: Vec<String>,
     #[serde(default)]
     pub channel_filter_enabled: bool,
@@ -176,9 +176,6 @@ pub async fn create(
         return Err(ApiError::bad_request("密码不能为空"));
     }
     let role = parse_role(req.role, Role::User);
-    if role == Role::User && req.allowed_group_ids.is_empty() {
-        return Err(ApiError::bad_request("普通用户至少需要一个可见分组"));
-    }
     let hash = crate::users::password::hash(&req.password)
         .map_err(|error| ApiError::internal(format!("口令散列失败: {error}")))?;
     let now = now_ms();
@@ -214,9 +211,6 @@ pub async fn update(
         return Err(ApiError::not_found("用户不存在"));
     };
     let role = parse_role(req.role, existing.role);
-    if role == Role::User && req.allowed_group_ids.is_empty() {
-        return Err(ApiError::bad_request("普通用户至少需要一个可见分组"));
-    }
     let next = User {
         username: req.username.trim().to_string(),
         role,

@@ -385,7 +385,11 @@ export function PlaylistPage() {
         })),
       ]);
       const restricted = (users.users ?? []).filter((user) => user.role !== 'admin');
-      if (restricted.length === 0) {
+      // 空授权列表表示可见全部分组，不需要再提示未授权。
+      const seesAllGroups = restricted.some(
+        (user) => (user.allowed_group_ids ?? []).length === 0,
+      );
+      if (restricted.length === 0 || seesAllGroups) {
         setUnauthorizedSync(0);
       } else {
         const granted = new Set(restricted.flatMap((user) => user.allowed_group_ids ?? []));
