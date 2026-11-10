@@ -11,6 +11,7 @@ import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, copyText, putConfig } from './api';
 import { Icon } from './icons';
+import { MODES, modeText } from './modes';
 import {
   Badge,
   Confirm,
@@ -67,15 +68,6 @@ export type HealthEntry = {
   latency_ms: number | null;
   ok: boolean;
 };
-
-const MODES: { value: string; code: string; label: string; desc: string }[] = [
-  { value: 'proxy', code: 'PROXY', label: '服务器转发', desc: '视频经过本机。兼容性最好。' },
-  { value: 'remux', code: 'REMUX', label: '服务器转封装', desc: '本机重新打包视频流。占用 CPU。' },
-  { value: 'dash', code: 'DASH', label: 'DASH 转发', desc: '处理 DASH 清单。源必须提供 MPD。' },
-  { value: 'redirect', code: '302', label: '跳转源地址', desc: '播放器直接连源。会显示源地址。' },
-  { value: 'rewrite', code: 'REWRITE', label: '改写地址', desc: '本机改写清单地址，播放器再连源。' },
-  { value: 'passthrough', code: 'PASSTHROUGH', label: '原样直通', desc: '直接使用源地址。不经过本机。' },
-];
 
 const ACCESS: { value: string; label: string; desc: string }[] = [
   { value: 'public', label: '公开', desc: '正常出现在订阅里。' },
@@ -151,13 +143,6 @@ function dragGhost(event: DragEvent<HTMLElement>, name: string, note: string) {
 /** 模式徽标的短标识，如 `PROXY`、`302`。 */
 function modeCode(mode: string): string {
   return MODES.find((item) => item.value === mode)?.code ?? mode.toUpperCase();
-}
-
-/** 中文名加短标识，如「服务器转发（PROXY）」。 */
-function modeText(mode: string): string {
-  const item = MODES.find((entry) => entry.value === mode);
-  if (!item) return mode;
-  return item.label.includes(item.code) ? item.label : `${item.label}（${item.code}）`;
 }
 
 /** 徽标的悬停说明。 */

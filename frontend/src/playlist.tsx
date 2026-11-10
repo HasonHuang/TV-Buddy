@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError } from './api';
+import { MODES, modeText } from './modes';
 import {
   Badge,
   DateInput,
@@ -1030,14 +1031,22 @@ export function PlaylistPage() {
           <h3>模式</h3>
           <Field
             label="处理方式"
-            tip="选择这个源的内容怎么进入你的订阅。"
+            tip="聚合只转发。托管把频道保存到本地。"
           >
             <Select
               ariaLabel="处理方式"
               value={drawer.draft.mode}
               options={[
-                { value: 'aggregate', label: '聚合', desc: '播放时读取源，不在本地保存频道。' },
-                { value: 'sync', label: '托管', desc: '频道保存到本地，可以分组和授权。' },
+                {
+                  value: 'aggregate',
+                  label: '聚合',
+                  desc: '直接转发源里的频道，不在本地保存。不能改名、排序、授权或配节目单。',
+                },
+                {
+                  value: 'sync',
+                  label: '托管',
+                  desc: '把源里的频道保存到本地。可以改名、排序、授权或配节目单。',
+                },
               ]}
               onChange={(next) => patch({ mode: next })}
             />
@@ -1350,15 +1359,15 @@ export function PlaylistPage() {
                     ariaLabel="新分组工作模式"
                     value={drawer.draft.playback_mode}
                     options={[
-                      { value: 'auto', label: '自动选择', desc: '按源的类型自动选。' },
-                      { value: 'proxy', label: '服务器转发', desc: '视频经过本机，兼容性最好。' },
-                      { value: 'remux', label: '服务器转封装', desc: '本机重新打包视频流。占用 CPU。' },
-                      { value: 'dash', label: 'DASH 就绪', desc: '用于 DASH 清单。先确认源可用。' },
-                      { value: 'redirect', label: '跳转源地址', desc: '播放器直接连源。会显示源地址。' },
-                      { value: 'rewrite', label: '改写地址', desc: '本机改写清单地址，播放器再连源。' },
+                      { value: 'auto', label: '自动选择', desc: '按源的类型自动选。结果落在 PROXY 或 DASH。' },
+                      ...MODES.filter((mode) => mode.value !== 'passthrough').map((mode) => ({
+                        value: mode.value,
+                        label: modeText(mode.value),
+                        desc: mode.desc,
+                      })),
                     ]}
                     onChange={(next) => patch({ playback_mode: next })}
-                    compact
+                    width={200}
                   />
                 </Field>
                 <Field
