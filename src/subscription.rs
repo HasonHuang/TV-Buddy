@@ -2045,7 +2045,7 @@ mod tests {
             origin: "manual".into(),
             mode: "dash".into(),
             format: "mpd".into(),
-            access: "hidden".into(),
+            access: "archived".into(),
             ..Group::default()
         });
         let mut source = source();
@@ -2061,7 +2061,7 @@ mod tests {
             .expect("手工组应保留");
         assert_eq!(group.mode, "dash");
         assert_eq!(group.format, "mpd");
-        assert_eq!(group.access, "hidden");
+        assert_eq!(group.access, "archived");
         assert_eq!(group.channels.len(), 1);
     }
 

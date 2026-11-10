@@ -285,8 +285,8 @@ mod tests {
     }
 
     #[test]
-    fn open_group_entry_has_token() {
-        let config = config_with(vec![group("g3", "open", "proxy")]);
+    fn public_group_entry_has_token() {
+        let config = config_with(vec![group("g3", "public", "proxy")]);
         let body = render_user(&config, &admin(), "http://host", "tok", None);
         assert!(body.contains("http://host/l/tok/g3/c1.m3u8\n"));
     }

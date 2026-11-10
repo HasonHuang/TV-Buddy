@@ -79,7 +79,6 @@ const MODES: { value: string; code: string; label: string; desc: string }[] = [
 
 const ACCESS: { value: string; label: string; desc: string }[] = [
   { value: 'public', label: '公开', desc: '正常出现在订阅里。' },
-  { value: 'hidden', label: '隐藏', desc: '当前与公开相同，只保留旧配置。' },
   { value: 'archived', label: '归档', desc: '停播：不出现在订阅里，也不能播放。' },
 ];
 
@@ -1526,7 +1525,7 @@ export function GroupsPage() {
           </div>
           <Field
             label="访问范围"
-            tip="归档的分组停播：不出现在订阅里，也不能播放。公开和隐藏现在作用相同。"
+            tip="归档的分组停播：不出现在订阅里，也不能播放。"
           >
             <Select
               ariaLabel="访问范围"

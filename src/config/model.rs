@@ -55,11 +55,11 @@ impl Config {
 
     /// 规范化旧取值。
     ///
-    /// `open` 不再免令牌。加载与保存时改为 `public`。
-    /// 数据层保留四档，兼容导入与备份。
+    /// `open` 不再免令牌。`hidden` 与 `public` 行为相同。
+    /// 加载与保存时都改为 `public`。
     pub fn normalize(&mut self) {
         for group in &mut self.groups {
-            if group.access == "open" {
+            if group.access == "open" || group.access == "hidden" {
                 group.access = "public".to_string();
             }
             if group.origin.trim().is_empty() {
@@ -969,9 +969,9 @@ pub struct Group {
     pub name: String,
     /// `proxy` / `remux` / `dash` / `redirect` / `rewrite` / `passthrough`。
     pub mode: String,
-    /// `public` / `hidden` / `archived`。
+    /// `public` / `archived`。
     ///
-    /// 旧值 `open` 在加载与保存时归一为 `public`。
+    /// 旧值 `open` 与 `hidden` 在加载与保存时归一为 `public`。
     pub access: String,
     /// `hls` / `mpd`。
     pub format: String,
@@ -1431,7 +1431,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_maps_open_to_public() {
+    fn normalize_maps_legacy_access_to_public() {
         let mut config = Config::default();
         config.groups.push(Group {
             id: "open".into(),
@@ -1443,9 +1443,15 @@ mod tests {
             access: "hidden".into(),
             ..Group::default()
         });
+        config.groups.push(Group {
+            id: "archived".into(),
+            access: "archived".into(),
+            ..Group::default()
+        });
         config.normalize();
         assert_eq!(config.groups[0].access, "public");
-        assert_eq!(config.groups[1].access, "hidden", "其它档位不变");
+        assert_eq!(config.groups[1].access, "public", "hidden 已移除");
+        assert_eq!(config.groups[2].access, "archived", "归档不变");
     }
 
     #[test]

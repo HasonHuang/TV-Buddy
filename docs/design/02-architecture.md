@@ -117,8 +117,8 @@
 请求 /{gid}/{cid}.m3u8
   → [1] 路由匹配
   → [2] 边缘校验（edge_mode != off）
-  → [3] 查分组/频道；判定 access（public/hidden/archived/open）
-  → [4] 播放 Token 校验（token_enabled 且 access != open）
+  → [3] 查分组/频道；判定 access（public/archived）
+  → [4] 播放 Token 校验（token_enabled）
   → [5] 模式分发
         proxy      → 上游取清单 → 改写切片地址（伪装）→ 缓存 → 响应
         redirect   → 上游取地址 → 302；缓存地址 TTL 300s

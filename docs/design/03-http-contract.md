@@ -189,7 +189,6 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 <server.m3u_header_lines 逐行原文>
 #EXTINF:-1 tvg-id="<tvg_id||id>" tvg-name="<tvg_name||name>" tvg-logo="<logo>" group-title="<分组显示名>",<频道名>
 http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
-http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 <聚合源条目，原样保留上游地址>                              ← merge_position 决定位置
 ```
 
@@ -198,24 +197,23 @@ http://<host>/<gid>/<cid>.<ext>           ← open 组，不带令牌
 | `tvg-id` | 缺省用频道 id | S-MODEL-04 |
 | `tvg-name` | 缺省用频道名 | S-MODEL-04 |
 | `group-title` | 分组**显示名** | F-013 §3 |
-| 令牌段 | 非 `open` 组用 `/l/<token>/…` 路径段；`open` 组不带 | S-URL-04、F-009 |
+| 令牌段 | 一律用 `/l/<token>/…` 路径段 | S-URL-04、F-009 |
 | `x-tvg-url` | 指向该用户自己的 `/sub/<token>/epg.xml.gz` | F-1 §3.3 |
 | `m3u_header_lines` | 追加在 `#EXTM3U` 后；热重载生效 | S-URL-07 |
 | 范围 | 只含 `allowed_group_ids` 与 `allowed_channel_ids` 允许的频道 | F-1 §5 |
 
 ### 5.3 `access` 矩阵
 
-`access` 在用户订阅里只影响两件事：归档组停播，开放组免令牌。
-其余可见性由用户授权决定，不再看 `public` / `hidden`。
+`access` 在用户订阅里只影响一件事：归档组停播。
+可见性由用户授权决定。
 
 | access | 用户订阅 | 直播入口 | 每用户 EPG |
 | --- | --- | --- | --- |
 | `public` | 授权即含 | 按 Token 开关 | ✅ |
-| `hidden` | 授权即含 | 按 Token 开关 | ✅ |
 | `archived` | ❌ 一律排除 | ❌ `302` 占位 | ❌ 排除 |
-| `open` | 授权即含，条目无令牌 | ✅ 免 Token | ✅ |
 
-> `public` 与 `hidden` 的区别只剩「是否出现在旧版全局订阅里」。全局订阅已停用，两者行为一致。
+> 旧值 `open` 与 `hidden` 在加载与保存时归一为 `public`。
+> 全局订阅已停用，`hidden` 不再有单独行为。
 
 ### 5.4 订阅聚合
 
