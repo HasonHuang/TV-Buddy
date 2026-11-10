@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError } from './api';
-import { MODES, modeText } from './modes';
+import { syncModeOptions } from './modes';
 import {
   Badge,
   DateInput,
@@ -1040,15 +1040,22 @@ export function PlaylistPage() {
                 {
                   value: 'aggregate',
                   label: '聚合',
-                  desc: '直接转发源里的频道，不在本地保存。不能改名、排序、授权或配节目单。',
+                  desc: '直接转发源里的频道，不在本地保存。不能改频道名、排序、授权或设置节目单。',
                 },
                 {
                   value: 'sync',
                   label: '托管',
-                  desc: '把源里的频道保存到本地。可以改名、排序、授权或配节目单。',
+                  desc: '把源里的频道保存到本地。可以改频道名、排序、授权或设置节目单。',
                 },
               ]}
-              onChange={(next) => patch({ mode: next })}
+              onChange={(next) =>
+                patch(
+                  // 托管源禁止 passthrough，切换时归一为自动选择。
+                  next === 'sync' && drawer.draft.playback_mode === 'passthrough'
+                    ? { mode: next, playback_mode: 'auto' }
+                    : { mode: next },
+                )
+              }
             />
           </Field>
           {drawer.draft.mode === 'sync' && (
@@ -1360,11 +1367,7 @@ export function PlaylistPage() {
                     value={drawer.draft.playback_mode}
                     options={[
                       { value: 'auto', label: '自动选择', desc: '按源的类型自动选。结果落在 PROXY 或 DASH。' },
-                      ...MODES.filter((mode) => mode.value !== 'passthrough').map((mode) => ({
-                        value: mode.value,
-                        label: modeText(mode.value),
-                        desc: mode.desc,
-                      })),
+                      ...syncModeOptions(),
                     ]}
                     onChange={(next) => patch({ playback_mode: next })}
                     width={200}

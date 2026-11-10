@@ -11,7 +11,7 @@ import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, copyText, putConfig } from './api';
 import { Icon } from './icons';
-import { MODES, modeText } from './modes';
+import { modeCode, modeOptions, modeTip } from './modes';
 import {
   Badge,
   Confirm,
@@ -138,17 +138,6 @@ function dragGhost(event: DragEvent<HTMLElement>, name: string, note: string) {
   const rect = ghost.getBoundingClientRect();
   event.dataTransfer.setDragImage(ghost, rect.width / 2, rect.height / 2);
   window.setTimeout(() => ghost.remove(), 0);
-}
-
-/** 模式徽标的短标识，如 `PROXY`、`302`。 */
-function modeCode(mode: string): string {
-  return MODES.find((item) => item.value === mode)?.code ?? mode.toUpperCase();
-}
-
-/** 徽标的悬停说明。 */
-function modeTip(mode: string): string {
-  const item = MODES.find((entry) => entry.value === mode);
-  return item ? `${modeText(mode)}：${item.desc}` : mode;
 }
 
 /** 播放地址后缀由分组格式决定（S-URL-03）。 */
@@ -1528,11 +1517,7 @@ export function GroupsPage() {
               <Select
                 ariaLabel="工作模式"
                 value={groupForm.form.mode}
-                options={MODES.map((mode) => ({
-                  value: mode.value,
-                  label: modeText(mode.value),
-                  desc: mode.desc,
-                }))}
+                options={modeOptions()}
                 onChange={(next) =>
                   setGroupForm({
                     ...groupForm,
