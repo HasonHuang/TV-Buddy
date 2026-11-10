@@ -7,7 +7,7 @@
  * 未知字段里（`Channel.extra`），后端已经消费它们，所以这里直接读写同名键。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, copyText, putConfig } from './api';
 import { Icon } from './icons';
@@ -107,12 +107,45 @@ function hitsChannelControl(node: EventTarget | null): boolean {
   return node instanceof Element && node.closest(CHANNEL_ROW_CONTROLS) !== null;
 }
 
-/** 直接切换拖动落点样式，避免拖动经过每一行都触发 React 重渲染。 */
-function highlightDrop(ref: { current: HTMLElement | null }, el: HTMLElement | null) {
-  if (ref.current === el) return;
-  ref.current?.classList.remove('dragover');
-  ref.current = el;
-  el?.classList.add('dragover');
+/** 拖动落点：目标元素与插入方位。`after` 为真表示插到目标后面。 */
+type DropMark = { el: HTMLElement; after: boolean };
+
+/** 直接切换落点样式，避免拖动经过每一行都触发 React 重渲染。 */
+function markDrop(ref: { current: DropMark | null }, el: HTMLElement | null, after = false) {
+  const prev = ref.current;
+  if (prev?.el === el && prev.after === after) return;
+  if (prev) prev.el.classList.remove('drop-before', 'drop-after');
+  ref.current = el ? { el, after } : null;
+  if (el) el.classList.add(after ? 'drop-after' : 'drop-before');
+}
+
+/** 光标在元素竖向中线之后时返回 true，用于决定插到目标前还是后。 */
+function afterMidpoint(event: DragEvent<HTMLElement>): boolean {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return event.clientY > rect.top + rect.height / 2;
+}
+
+/**
+ * 拖动影像：一条紧凑的标题条，光标落在影像中间。
+ *
+ * 默认影像只有把手，且锚在光标左上角，看不出在拖哪一项。
+ * 影像由浏览器截取，追加后下一轮事件循环即可移除。
+ */
+function dragGhost(event: DragEvent<HTMLElement>, name: string, note: string) {
+  const ghost = document.createElement('div');
+  ghost.className = 'drag-ghost';
+  const title = document.createElement('span');
+  title.className = 'drag-ghost-name';
+  title.textContent = name;
+  ghost.append(title);
+  const tag = document.createElement('span');
+  tag.className = 'drag-ghost-note';
+  tag.textContent = note;
+  ghost.append(tag);
+  document.body.append(ghost);
+  const rect = ghost.getBoundingClientRect();
+  event.dataTransfer.setDragImage(ghost, rect.width / 2, rect.height / 2);
+  window.setTimeout(() => ghost.remove(), 0);
 }
 
 /** 模式徽标的短标识，如 `PROXY`、`302`。 */
@@ -461,9 +494,9 @@ export function GroupsPage() {
   const [draggingChannel, setDraggingChannel] = useState<{ gid: string; cid: string } | null>(
     null,
   );
-  /** 拖动落点的 DOM 引用。直接用 class 画高亮，不走 state。 */
-  const groupDropRef = useRef<HTMLElement | null>(null);
-  const channelDropRef = useRef<HTMLElement | null>(null);
+  /** 拖动落点的 DOM 引用。直接用 class 画插入线，不走 state。 */
+  const groupDropRef = useRef<DropMark | null>(null);
+  const channelDropRef = useRef<DropMark | null>(null);
   /** 标题栏按下时的元素。按下与松开不在同一元素时，click 落在共同祖先上。 */
   const headPress = useRef<EventTarget | null>(null);
   /** 解析脚本列表；打开频道弹窗时按需加载。 */
@@ -676,14 +709,15 @@ export function GroupsPage() {
       return true;
     });
 
-  /** 拖动排序：把分组 `gid` 移到目标分组 `targetGid` 的位置。 */
-  const moveGroupTo = (gid: string, targetGid: string) =>
+  /** 拖动排序：把分组 `gid` 插到目标分组 `targetGid` 的前面或后面。 */
+  const moveGroupTo = (gid: string, targetGid: string, after: boolean) =>
     reorder((list) => {
       const from = list.findIndex((item) => item.id === gid);
       const to = list.findIndex((item) => item.id === targetGid);
       if (from < 0 || to < 0 || from === to) return false;
       const [moved] = list.splice(from, 1);
-      list.splice(to, 0, moved);
+      const at = to > from ? to - 1 : to;
+      list.splice(at + (after ? 1 : 0), 0, moved);
       return true;
     });
 
@@ -701,8 +735,8 @@ export function GroupsPage() {
       return true;
     });
 
-  /** 把频道移到目标频道的位置；`targetCid` 为空表示移到第一位。 */
-  const moveChannelTo = (gid: string, cid: string, targetCid: string | null) =>
+  /** 把频道插到目标频道的前面或后面；`targetCid` 为空表示移到第一位。 */
+  const moveChannelTo = (gid: string, cid: string, targetCid: string | null, after = false) =>
     reorder((list) => {
       const channels = list.find((item) => item.id === gid)?.channels;
       if (!channels) return false;
@@ -717,7 +751,8 @@ export function GroupsPage() {
       const to = channels.findIndex((item) => item.id === targetCid);
       if (to < 0 || from === to) return false;
       const [moved] = channels.splice(from, 1);
-      channels.splice(to, 0, moved);
+      const at = to > from ? to - 1 : to;
+      channels.splice(at + (after ? 1 : 0), 0, moved);
       return true;
     });
 
@@ -1088,32 +1123,32 @@ export function GroupsPage() {
         const isCollapsed = collapsed.includes(group.id);
         return (
           <div
-            className="card flush group-card"
+            className={`card flush group-card${dragging === group.id ? ' dragging' : ''}`}
             key={group.id}
             onDragOver={(event) => {
               if (dragging === '') return;
               event.preventDefault();
               if (dragging === group.id) {
-                highlightDrop(groupDropRef, null);
+                markDrop(groupDropRef, null);
                 return;
               }
-              highlightDrop(groupDropRef, event.currentTarget);
+              markDrop(groupDropRef, event.currentTarget, afterMidpoint(event));
             }}
             onDragLeave={(event) => {
               if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
                 return;
               }
-              if (groupDropRef.current === event.currentTarget) {
-                highlightDrop(groupDropRef, null);
+              if (groupDropRef.current?.el === event.currentTarget) {
+                markDrop(groupDropRef, null);
               }
             }}
             onDrop={(event) => {
               event.preventDefault();
               if (dragging !== '' && dragging !== group.id) {
-                void moveGroupTo(dragging, group.id);
+                void moveGroupTo(dragging, group.id, afterMidpoint(event));
               }
               setDragging('');
-              highlightDrop(groupDropRef, null);
+              markDrop(groupDropRef, null);
             }}
           >
             <div
@@ -1141,10 +1176,11 @@ export function GroupsPage() {
                   event.dataTransfer.effectAllowed = 'move';
                   // Firefox 需要写入数据才会开始拖动。
                   event.dataTransfer.setData('text/plain', group.id);
+                  dragGhost(event, group.name || group.id, `[${group.id}]`);
                 }}
                 onDragEnd={() => {
                   setDragging('');
-                  highlightDrop(groupDropRef, null);
+                  markDrop(groupDropRef, null);
                 }}
               >
                 <Icon name="grip" size={14} />
@@ -1263,6 +1299,10 @@ export function GroupsPage() {
                 <div
                   className={`ch-row${multi ? ' selectable' : ''}${
                     isChannelSelected(group.id, channel.id) ? ' selected' : ''
+                  }${
+                    draggingChannel?.gid === group.id && draggingChannel.cid === channel.id
+                      ? ' dragging'
+                      : ''
                   }`}
                   key={channel.id}
                   onClickCapture={(event) => {
@@ -1272,16 +1312,19 @@ export function GroupsPage() {
                   }}
                   onDragOver={(event) => {
                     if (draggingChannel?.gid !== group.id) return;
-                    if (draggingChannel.cid === channel.id) return;
+                    if (draggingChannel.cid === channel.id) {
+                      markDrop(channelDropRef, null);
+                      return;
+                    }
                     event.preventDefault();
-                    highlightDrop(channelDropRef, event.currentTarget);
+                    markDrop(channelDropRef, event.currentTarget, afterMidpoint(event));
                   }}
                   onDragLeave={(event) => {
                     if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
                       return;
                     }
-                    if (channelDropRef.current === event.currentTarget) {
-                      highlightDrop(channelDropRef, null);
+                    if (channelDropRef.current?.el === event.currentTarget) {
+                      markDrop(channelDropRef, null);
                     }
                   }}
                   onDrop={(event) => {
@@ -1289,10 +1332,15 @@ export function GroupsPage() {
                     if (!draggingChannel) return;
                     event.preventDefault();
                     if (draggingChannel.gid === group.id) {
-                      void moveChannelTo(group.id, draggingChannel.cid, channel.id);
+                      void moveChannelTo(
+                        group.id,
+                        draggingChannel.cid,
+                        channel.id,
+                        afterMidpoint(event),
+                      );
                     }
                     setDraggingChannel(null);
-                    highlightDrop(channelDropRef, null);
+                    markDrop(channelDropRef, null);
                   }}
                 >
                   <span
@@ -1301,14 +1349,15 @@ export function GroupsPage() {
                     title="拖动排序"
                     onDragStart={(event) => {
                       setDraggingChannel({ gid: group.id, cid: channel.id });
-                      highlightDrop(channelDropRef, null);
+                      markDrop(channelDropRef, null);
                       event.dataTransfer.effectAllowed = 'move';
                       // Firefox 需要写入数据才会开始拖动。
                       event.dataTransfer.setData('text/plain', channel.id);
+                      dragGhost(event, channel.name || channel.id, `[${channel.id}]`);
                     }}
                     onDragEnd={() => {
                       setDraggingChannel(null);
-                      highlightDrop(channelDropRef, null);
+                      markDrop(channelDropRef, null);
                     }}
                   >
                     <Icon name="grip" size={13} />
