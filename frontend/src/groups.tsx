@@ -801,9 +801,14 @@ export function GroupsPage() {
     await download('/groups/export', 'groups.json', '分组已导出');
   };
 
-  /** 导出单个分组：`GET /groups/{gid}/export`。 */
-  const exportGroup = async (gid: string) => {
-    await download(`/groups/${gid}/export`, `${gid}.json`, `分组 ${gid} 已导出`);
+  /** 复制该分组的 M3U 订阅链接。链接里带当前账号的播放凭证。 */
+  const copyGroupPlaylist = async (group: Group) => {
+    if (playToken === '') {
+      err('播放凭证未就绪，请刷新页面后再试');
+      return;
+    }
+    const link = `${location.origin}/sub/${encodeURIComponent(playToken)}/${encodeURIComponent(group.id)}/playlist.m3u`;
+    await copy(link, `分组「${group.name || group.id}」的 M3U 链接`);
   };
 
   const download = async (path: string, filename: string, done: string) => {
@@ -1306,10 +1311,20 @@ export function GroupsPage() {
                 </button>
                 <button
                   className="chip icon-only"
-                  title="导出该分组的 JSON"
-                  onClick={() => void exportGroup(group.id)}
+                  title={
+                    group.access === 'archived'
+                      ? '归档分组已停播，不提供订阅链接'
+                      : '复制该分组的 M3U 链接'
+                  }
+                  aria-label={
+                    group.access === 'archived'
+                      ? '归档分组已停播，不提供订阅链接'
+                      : '复制该分组的 M3U 链接'
+                  }
+                  disabled={group.access === 'archived'}
+                  onClick={() => void copyGroupPlaylist(group)}
                 >
-                  <Icon name="download" size={13} />
+                  <Icon name="copy" size={13} />
                 </button>
                 {group.source_id && (
                   <button

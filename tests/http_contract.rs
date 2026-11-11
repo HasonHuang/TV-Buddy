@@ -782,6 +782,48 @@ async fn sub_playlist_filters_by_user_scope() {
     assert!(admin_body.len() > body.len());
 }
 
+#[tokio::test]
+async fn group_playlist_is_scoped() {
+    let fixture = fixture().await;
+
+    // 分组订阅只含该分组，响应头与文件名跟随分组。
+    let response = fetch(&fixture, &fixture.sub(&fixture.token, "pg/playlist.m3u")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        header(&response, "content-type"),
+        "application/vnd.apple.mpegurl; charset=utf-8"
+    );
+    assert_eq!(
+        header(&response, "content-disposition"),
+        "inline; filename=\"pg.m3u\""
+    );
+    let body = response.text().await.expect("读正文");
+    assert!(body.contains(&format!("/l/{}/pg/c1.m3u8", fixture.token)));
+    assert!(!body.contains("/pm/"));
+    assert!(!body.contains("/ar/"));
+
+    // 未授权的分组不暴露存在性。
+    let response = fetch(
+        &fixture,
+        &fixture.sub(&fixture.user_token, "pm/playlist.m3u"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // 归档组停播；未知分组与坏令牌同返回 404。
+    for path in [
+        fixture.sub(&fixture.token, "ar/playlist.m3u"),
+        fixture.sub(&fixture.token, "nope/playlist.m3u"),
+        fixture.sub("nope", "pg/playlist.m3u"),
+    ] {
+        assert_eq!(
+            fetch(&fixture, &path).await.status(),
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
+}
+
 /// 切片签名：路径令牌入口、签名切片、篡改与无签名拒绝。
 #[tokio::test]
 async fn slice_signature_path_token_and_rejections() {

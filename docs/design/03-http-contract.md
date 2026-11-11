@@ -170,14 +170,19 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 
 ## 5. 订阅契约
 
-订阅只有一个入口：`/sub/:token/playlist.m3u`。令牌即身份，范围由用户决定。
-全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 返回 `404` 文本，指路用户订阅。
+订阅有两个入口：
+
+- `/sub/:token/playlist.m3u`：用户订阅，含该用户可见的全部分组。
+- `/sub/:token/:gid/playlist.m3u`：单个分组的订阅，只含指定分组的频道。
+
+令牌即身份，范围由用户决定。全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 返回 `404` 文本，指路用户订阅。
 
 ### 5.1 响应头
 
 | 路径 | 头 |
 | --- | --- |
 | `/sub/:token/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="playlist.m3u"` |
+| `/sub/:token/:gid/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="<gid>.m3u"` |
 | `/sub/:token/epg.xml` | `content-type: application/xml; charset=utf-8` |
 | `/sub/:token/epg.xml.gz` | `content-type: application/gzip` |
 | `/playlist.m3u`、`/{gid}/playlist.m3u` | `404` + `text/plain` 提示 |
@@ -201,16 +206,20 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | `x-tvg-url` | 指向该用户自己的 `/sub/<token>/epg.xml.gz` | F-1 §3.3 |
 | `m3u_header_lines` | 追加在 `#EXTM3U` 后；热重载生效 | S-URL-07 |
 | 范围 | 只含 `allowed_group_ids` 与 `allowed_channel_ids` 允许的频道 | F-1 §5 |
+| 分组订阅范围 | 只含指定分组；分组不存在、已归档或对用户不可见时返回 `404` | — |
+| 分组订阅聚合源 | 不含聚合源条目；聚合源不属于任何本地分组 | — |
+
+> 分组订阅的正文形状与用户订阅相同。
 
 ### 5.3 `access` 矩阵
 
 `access` 在用户订阅里只影响一件事：归档组停播。
 可见性由用户授权决定。
 
-| access | 用户订阅 | 直播入口 | 每用户 EPG |
-| --- | --- | --- | --- |
-| `public` | 授权即含 | 按 Token 开关 | ✅ |
-| `archived` | ❌ 一律排除 | ❌ `302` 占位 | ❌ 排除 |
+| access | 用户订阅 | 分组订阅 | 直播入口 | 每用户 EPG |
+| --- | --- | --- | --- | --- |
+| `public` | 授权即含 | 授权即含 | 按 Token 开关 | ✅ |
+| `archived` | ❌ 一律排除 | ❌ `404` | ❌ `302` 占位 | ❌ 排除 |
 
 > 旧值 `open` 与 `hidden` 在加载与保存时归一为 `public`。
 > 全局订阅已停用，`hidden` 不再有单独行为。

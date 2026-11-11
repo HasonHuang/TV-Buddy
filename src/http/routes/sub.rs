@@ -72,6 +72,53 @@ pub async fn playlist(
         .into_response()
 }
 
+/// `GET /sub/:token/:gid/playlist.m3u`——单个分组的订阅。
+///
+/// 分组不存在、已归档或对该用户不可见时返回 `404`，与无效令牌不区分。
+pub async fn group_playlist(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((token, gid)): Path<(String, String)>,
+) -> Response {
+    let Some(user) = resolve(&state, &token) else {
+        return missing();
+    };
+
+    let config = state.snapshot();
+    let base = base_url(&headers);
+    let Some(body) =
+        playlist::render_user_group(&config, &user, &base, &token, Some(&state.health), &gid)
+    else {
+        return missing();
+    };
+    // 文件名只保留安全字符，避免把路径段原样写进响应头。
+    let filename: String = gid
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    (
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/vnd.apple.mpegurl; charset=utf-8".to_string(),
+            ),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{filename}.m3u\""),
+            ),
+            (header::CACHE_CONTROL, "private, no-store".to_string()),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 /// 抓取并合并聚合源（F-013 §5）。
 ///
 /// 单个源失败只记日志；本地订阅照常返回。

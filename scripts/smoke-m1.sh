@@ -181,7 +181,7 @@ check "删组 200" "200" "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new1")
 check "再删组 404" "404" "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new1")"
 
 # --- 用户订阅 ---
-# 订阅只有一个入口：`/sub/<令牌>/playlist.m3u`。令牌从 `/panel/api/me` 取。
+# 订阅入口在 `/sub/<令牌>/` 下：用户订阅与分组订阅。令牌从 `/panel/api/me` 取。
 PTOK=$(curl -s "${A[@]}" "$B/panel/api/me" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 SUB="$B/sub/$PTOK/playlist.m3u"
@@ -202,6 +202,21 @@ check "含直通组" "1" "$(grep -c 'http://example.invalid/live.m3u8' "$WORK/bo
 check "开放组已归一并带 Token" "1" "$(grep -c "http://127.0.0.1:$PORT/l/$PTOK/op/c3.m3u8" "$WORK/body")"
 check "排归档组" "0" "$(grep -c '/arc/' "$WORK/body")"
 check "条目数" "4" "$(grep -c '^#EXTINF' "$WORK/body")"
+
+# --- 分组订阅 ---
+GSUB="$B/sub/$PTOK/pub/playlist.m3u"
+check "分组订阅 200" "200" "$(curl -s -o "$WORK/gbody" -w '%{http_code}' "$GSUB")"
+check "分组订阅类型" "application/vnd.apple.mpegurl; charset=utf-8" \
+  "$(curl -s -o /dev/null -w '%{content_type}' "$GSUB")"
+check "分组订阅文件名" 'inline; filename="pub.m3u"' \
+  "$(curl -s -D - -o /dev/null "$GSUB" | tr -d '\r' | sed -n 's/^[Cc]ontent-[Dd]isposition: //p')"
+check "分组订阅含本组频道" "1" \
+  "$(grep -c "http://127.0.0.1:$PORT/l/$PTOK/pub/c1.m3u8" "$WORK/gbody")"
+check "分组订阅不含他组" "0" "$(grep -c '/hid/' "$WORK/gbody" || true)"
+check "归档分组订阅 404" "404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/$PTOK/arc/playlist.m3u")"
+check "未知分组订阅 404" "404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/$PTOK/nope/playlist.m3u")"
 
 # --- 播放 Token ---
 curl -s "${A[@]}" "$B/panel/api/config" > "$WORK/cfg.json"

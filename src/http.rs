@@ -35,6 +35,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/:gid/playlist.m3u", get(routes::sub::gone))
         // 用户订阅入口。令牌见 `tv-buddy.db` 的 access_tokens 表。
         .route("/sub/:token/playlist.m3u", get(routes::sub::playlist))
+        // 单个分组的订阅。分组范围仍受令牌所属用户的可见性限制。
+        .route(
+            "/sub/:token/:gid/playlist.m3u",
+            get(routes::sub::group_playlist),
+        )
         .route("/sub/:token/epg.xml", get(routes::sub::epg))
         .route("/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
         // 面板接口：未知路径固定 404 JSON，先于播放通配路由匹配。

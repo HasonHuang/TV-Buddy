@@ -313,11 +313,12 @@ TV_BUDDY_INITIAL_PASSWORD='你的口令' sudo -E sh install.sh
 
 ```text
 http://<host>:9900/sub/<令牌>/playlist.m3u   # 该用户的订阅
+http://<host>:9900/sub/<令牌>/<分组>/playlist.m3u  # 该用户单个分组的订阅
 http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 ```
 
 每个用户在「用户与设备」里单独授权分组与频道，或选择可见全部分组。令牌在同一个弹窗里管理。
-全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用，返回 `404`。
+全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用，返回 `404`。分组订阅用 `/sub/<令牌>/<分组>/playlist.m3u`。
 
 ---
 
@@ -675,6 +676,7 @@ ls scripts/smoke-*.sh
 | --- | --- | --- |
 | `GET` | `/health` | 健康检查，返回 `ok` |
 | `GET` | `/sub/<令牌>/playlist.m3u` | 用户订阅，只含该用户可见频道 |
+| `GET` | `/sub/<令牌>/<分组>/playlist.m3u` | 该用户单个分组的订阅；不可见或归档分组返回 `404` |
 | `GET` | `/sub/<令牌>/epg.xml[.gz]` | 用户节目单 |
 | `GET` | `/{gid}/{cid}.m3u8`（或 `.mpd`） | 入口清单 |
 | `GET` | `/{gid}/{cid}/video/index.txt` | 媒体清单 |
