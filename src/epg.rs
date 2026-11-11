@@ -5,11 +5,14 @@
 //!
 //! 输出只保留能匹配到本服务频道的频道与节目。生成文件放在
 //! `<cache>/epg/epg.xml` 与 `epg.xml.gz`，由公开路由直接下发。
+//!
+//! 采集用流式解析，只保留匹配频道与时间窗内的节目。上游可能有几十万条
+//! 节目；全量建 DOM 会占用约 1 GiB 内存，足以拖垮小内存主机。
 
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -19,12 +22,23 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
+use quick_xml::{
+    events::{BytesRef, BytesStart, BytesText, Event},
+    Reader, XmlVersion,
+};
 use roxmltree::Document;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::{config::Config, state::AppState};
+
+/// 单次下载上限（网络字节，含压缩正文）。
+const MAX_FETCH_BYTES: usize = 64 * 1024 * 1024;
+/// 解压后的 XML 上限。超限视为异常源，避免 gzip 炸弹占满内存。
+const MAX_XML_BYTES: usize = 128 * 1024 * 1024;
+/// XML 源下载超时（秒）。源配置的 `timeout_secs` 优先。
+const FETCH_TIMEOUT_SECS: u64 = 120;
 
 /// EPG 运行状态（指标与最近一次结果）。
 #[derive(Default)]
@@ -154,6 +168,14 @@ pub struct Mapping {
     pub source_channel_id: String,
     pub source_name: String,
     pub source_display_name: String,
+}
+
+/// 预先取出的额外频道输出。
+struct ExtraOutput {
+    out_id: String,
+    name: String,
+    raw_children: Vec<String>,
+    programmes: Vec<Programme>,
 }
 
 /// 一条匹配报告。
@@ -686,7 +708,20 @@ pub async fn refresh_source(state: &Arc<AppState>, source_id: &str) -> Result<Su
     }
     let _guard = RunningGuard(&state.epg.running);
 
-    let result = match source_document(state, &config, &source, SourceMode::Fetch).await {
+    let targets = channel_targets(&config);
+    let mappings = mappings(state);
+    let extra_list = extras(state);
+    let now = now_secs() as i64;
+    let filter = SourceFilter::new(
+        &targets,
+        &mappings,
+        &extra_list,
+        &source.id,
+        &config,
+        past_limit(&config, now),
+        future_limit(&config, now),
+    );
+    let result = match source_document(state, &config, &source, SourceMode::Fetch, &filter).await {
         Ok(_) => collect(state, &config, SourceMode::CacheOnly, None).await,
         Err(error) => Err(error),
     };
@@ -760,6 +795,7 @@ async fn collect(
     let mut documents: HashMap<String, DocumentData> = HashMap::new();
     let mut viewer_meta: HashMap<String, ViewerMeta> = HashMap::new();
 
+    let extra_list = extras(state);
     // 先抓取全部源。手工绑定能否生效取决于源文档，所以不能边抓边定。
     let source_list = enabled_sources(state);
     for source in &source_list {
@@ -770,7 +806,17 @@ async fn collect(
         } else {
             mode
         };
-        match source_document(state, config, source, source_mode).await {
+        // 只解析可能命中的频道与时间窗内的节目。上游可能有几十万条节目。
+        let filter = SourceFilter::new(
+            &targets,
+            &mappings,
+            &extra_list,
+            &source.id,
+            config,
+            past,
+            future,
+        );
+        match source_document(state, config, source, source_mode, &filter).await {
             Ok(document) => {
                 sources += 1;
                 documents.insert(source.id.clone(), document);
@@ -781,23 +827,73 @@ async fn collect(
     // 只有源可用且目标频道存在时，手工绑定才阻止自动匹配。
     let manual_source = resolvable_manual_sources(&targets, &mappings, &documents);
 
-    for source in &source_list {
-        let Some(document) = documents.get(&source.id) else {
+    // 额外频道数量少，先克隆它们的节目。目标频道随后直接移动节目，
+    // 避免整份源文档再复制一遍。
+    let mut extra_outputs: Vec<ExtraOutput> = Vec::new();
+    for extra in &extra_list {
+        let Some(document) = documents.get(&extra.source_id) else {
             continue;
         };
-        let (candidates, _owners, source_programmes) = match_source(
-            &targets, document, &mappings, &source.id, config, past, future,
-        );
+        let Some(channel) = document
+            .channels
+            .iter()
+            .find(|channel| channel.id == extra.source_channel_id)
+        else {
+            continue;
+        };
+        let out_id = extra.output_id();
+        if out_id.is_empty() {
+            continue;
+        }
+        let name = if extra.out_name.trim().is_empty() {
+            channel
+                .names
+                .first()
+                .map(|(_, name)| name.clone())
+                .unwrap_or_else(|| out_id.clone())
+        } else {
+            extra.out_name.trim().to_string()
+        };
+        let extra_programmes = document
+            .programmes
+            .iter()
+            .filter(|programme| programme.channel == extra.source_channel_id)
+            .cloned()
+            .map(|mut programme| {
+                programme.channel = out_id.clone();
+                programme
+            })
+            .collect();
+        extra_outputs.push(ExtraOutput {
+            out_id,
+            name,
+            raw_children: channel.raw_children.clone(),
+            programmes: extra_programmes,
+        });
+    }
+
+    for source in &source_list {
+        let Some(document) = documents.remove(&source.id) else {
+            continue;
+        };
+        let result = match_source(&targets, document, &mappings, &source.id, config);
+        let upstream_channels = result.channels;
+        let mut source_programmes = result.source_programmes;
         // 归属只算实际会被写入的候选。被跳过的候选不能占着上游频道。
-        let (accepted, owners) =
-            effective_candidates(&candidates, &targets, &manual_source, &source.id, &seen);
+        let (accepted, owners) = effective_candidates(
+            &result.candidates,
+            &targets,
+            &manual_source,
+            &source.id,
+            &seen,
+        );
         for candidate in accepted {
             let target = &targets[candidate.target];
             let owns_channel = owners.get(&candidate.channel_id) == Some(&candidate.target);
-            let display_name = document
-                .channels
+            let upstream = upstream_channels
                 .iter()
-                .find(|channel| channel.id == candidate.channel_id)
+                .find(|channel| channel.id == candidate.channel_id);
+            let display_name = upstream
                 .and_then(|channel| channel.names.first())
                 .map(|(_, name)| name.clone())
                 .unwrap_or_default();
@@ -826,67 +922,32 @@ async fn collect(
             channels.push(Channel {
                 id: target.out_id.clone(),
                 names: vec![(None, target.name.clone())],
-                raw_children: document
-                    .channels
-                    .iter()
-                    .find(|channel| channel.id == candidate.channel_id)
+                raw_children: upstream
                     .map(|channel| channel.raw_children.clone())
                     .unwrap_or_default(),
             });
             if owns_channel {
-                for programme in source_programmes
-                    .get(&candidate.channel_id)
-                    .into_iter()
-                    .flatten()
-                {
-                    let mut programme = programme.clone();
-                    programme.channel = target.out_id.clone();
-                    programmes.push(programme);
+                if let Some(items) = source_programmes.remove(&candidate.channel_id) {
+                    programmes.extend(items.into_iter().map(|mut programme| {
+                        programme.channel = target.out_id.clone();
+                        programme
+                    }));
                 }
             }
         }
     }
 
     // 额外频道：只按配置写入输出，不参与本地频道匹配。
-    for extra in extras(state) {
-        let Some(document) = documents.get(&extra.source_id) else {
-            continue;
-        };
-        let Some(channel) = document
-            .channels
-            .iter()
-            .find(|channel| channel.id == extra.source_channel_id)
-        else {
-            continue;
-        };
-        let out_id = extra.output_id();
-        if out_id.is_empty() || !seen.insert(out_id.clone()) {
+    for output in extra_outputs {
+        if !seen.insert(output.out_id.clone()) {
             continue;
         }
-        let name = if extra.out_name.trim().is_empty() {
-            channel
-                .names
-                .first()
-                .map(|(_, name)| name.clone())
-                .unwrap_or_else(|| out_id.clone())
-        } else {
-            extra.out_name.trim().to_string()
-        };
         channels.push(Channel {
-            id: out_id.clone(),
-            names: vec![(None, name)],
-            raw_children: channel.raw_children.clone(),
+            id: output.out_id,
+            names: vec![(None, output.name)],
+            raw_children: output.raw_children,
         });
-        for programme in document
-            .programmes
-            .iter()
-            .filter(|programme| programme.channel == extra.source_channel_id)
-            .filter(|programme| in_window(programme, past, future))
-        {
-            let mut programme = programme.clone();
-            programme.channel = out_id.clone();
-            programmes.push(programme);
-        }
+        programmes.extend(output.programmes);
     }
 
     // 源可能在采集途中被删除或停用。此时清掉旧输出，避免继续下发过期节目单。
@@ -1092,28 +1153,33 @@ fn duplicate_out_ids(targets: &[Target], out_id: &str) -> bool {
         > 1
 }
 
-type MatchResult = (
-    Vec<Candidate>,
-    HashMap<String, usize>,
-    HashMap<String, Vec<Programme>>,
-);
+struct MatchResult {
+    channels: Vec<Channel>,
+    candidates: Vec<Candidate>,
+    /// 只在测试与诊断中使用；写盘归属由 `effective_candidates` 决定。
+    #[allow(dead_code)]
+    owners: HashMap<String, usize>,
+    source_programmes: HashMap<String, Vec<Programme>>,
+}
 
+/// 匹配一个源。文档已经按 [`SourceFilter`] 裁剪，这里只做频道匹配与节目分组。
 fn match_source(
     targets: &[Target],
-    document: &DocumentData,
+    document: DocumentData,
     mappings: &HashMap<String, Mapping>,
     source_id: &str,
     config: &Config,
-    past: i64,
-    future: i64,
 ) -> MatchResult {
-    let by_id: HashMap<String, &Channel> = document
-        .channels
+    let DocumentData {
+        channels,
+        programmes,
+    } = document;
+    let by_id: HashMap<String, &Channel> = channels
         .iter()
         .map(|channel| (channel.id.to_lowercase(), channel))
         .collect();
     let mut by_name: HashMap<String, &Channel> = HashMap::new();
-    for channel in &document.channels {
+    for channel in &channels {
         for (_, name) in &channel.names {
             by_name.entry(normalize_name(name)).or_insert(channel);
         }
@@ -1172,15 +1238,18 @@ fn match_source(
             .or_insert(candidate.target);
     }
     let mut source_programmes: HashMap<String, Vec<Programme>> = HashMap::new();
-    for programme in &document.programmes {
-        if in_window(programme, past, future) {
-            source_programmes
-                .entry(programme.channel.clone())
-                .or_default()
-                .push(programme.clone());
-        }
+    for programme in programmes {
+        source_programmes
+            .entry(programme.channel.clone())
+            .or_default()
+            .push(programme);
     }
-    (candidates, owners, source_programmes)
+    MatchResult {
+        channels,
+        candidates,
+        owners,
+        source_programmes,
+    }
 }
 
 /// 手工绑定是否可用。
@@ -1276,9 +1345,12 @@ async fn source_document(
     config: &Config,
     source: &crate::epg_store::Source,
     mode: SourceMode,
+    filter: &SourceFilter,
 ) -> Result<DocumentData> {
+    let directory = Path::new(&config.cache.disk_path);
     if mode == SourceMode::CacheOnly {
-        let mut document = load_raw_document(config, source).context("缺少缓存，请先采集")?;
+        let mut document =
+            load_raw_document(config, source, filter).context("缺少缓存，请先采集")?;
         shift_document(&mut document, source.tz_shift_mins);
         return Ok(document);
     }
@@ -1301,8 +1373,25 @@ async fn source_document(
                 return Err(error);
             }
         };
-        let mut document = match parse(&body) {
-            Ok(document) => document,
+        let cache = raw_file(directory, &source.id);
+        let cache_dir = config.cache.disk_path.clone();
+        let source_id = source.id.clone();
+        let task_filter = filter.clone();
+        let parsed = tokio::task::spawn_blocking(move || {
+            let result = parse_source(&body, &task_filter);
+            if result.as_ref().is_ok_and(|(_, stats)| stats.channels > 0) {
+                if let Some(path) = raw_file(Path::new(&cache_dir), &source_id) {
+                    if let Err(error) = write_raw_body(&path, body.as_bytes()) {
+                        tracing::warn!(path = %path.display(), %error, "写 EPG raw 缓存失败");
+                    }
+                }
+            }
+            result
+        })
+        .await
+        .context("解析任务失败")?;
+        let (mut document, stats) = match parsed {
+            Ok(parsed) => parsed,
             Err(error) => {
                 let status = SourceStatus {
                     last_fetch_started_at_ms: Some(status_started),
@@ -1315,16 +1404,25 @@ async fn source_document(
                 return Err(error.context("解析失败"));
             }
         };
+        if stats.channels == 0 {
+            let status = SourceStatus {
+                last_fetch_started_at_ms: Some(status_started),
+                last_fetch_finished_at_ms: Some(crate::users::model::now_ms()),
+                last_fetch_ok: false,
+                last_error: Some("源没有频道".into()),
+                ..SourceStatus::default()
+            };
+            store_source_status(state, &source.id, status);
+            bail!("源没有频道");
+        }
         // 先平移时区，再算覆盖区间。面板显示的时间与节目时间一致。
         shift_document(&mut document, source.tz_shift_mins);
-        let status = build_source_status(&document, status_started, true, None, Vec::new());
+        let mut status = build_source_status(&stats, status_started, true, None, Vec::new());
+        status.last_fetch_finished_at_ms = Some(crate::users::model::now_ms());
+        // 脚本缓存按源 id 命名；清掉旧的 URL 缓存，避免磁盘堆积。
+        let cache_files: HashSet<PathBuf> = cache.into_iter().collect();
+        prune_raw_files(directory, &source.id, Some(&cache_files));
         store_source_status(state, &source.id, status);
-        if let Some(path) = raw_file(Path::new(&config.cache.disk_path), &source.id) {
-            if let Some(parent) = path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            let _ = fs::write(path, body.as_bytes());
-        }
         return Ok(document);
     }
     if source.kind != "xml" {
@@ -1333,7 +1431,6 @@ async fn source_document(
     if source.urls.is_empty() {
         bail!("缺少 URL");
     }
-    let directory = Path::new(&config.cache.disk_path);
     let previous = state
         .epg
         .source_status
@@ -1346,14 +1443,25 @@ async fn source_document(
     urls.sort_by_key(|url| url.priority);
     let started = crate::users::model::now_ms();
     let mut merged = DocumentData::default();
+    let mut stats = SourceStats::default();
+    let mut succeeded = false;
     let mut statuses: Vec<UrlStatus> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     let mut cache_headers = HashMap::new();
+    let mut cache_files: HashSet<PathBuf> = HashSet::new();
+    let timeout_secs = if source.timeout_secs > 0 {
+        source.timeout_secs
+    } else {
+        FETCH_TIMEOUT_SECS
+    };
     for url in &urls {
         if url.url.trim().is_empty() {
             continue;
         }
         let file = raw_url_file(directory, &source.id, &url.url);
+        if let Some(path) = &file {
+            cache_files.insert(path.clone());
+        }
         let previous_url = previous
             .urls
             .iter()
@@ -1366,51 +1474,92 @@ async fn source_document(
             last_fetch_started_at_ms: Some(crate::users::model::now_ms()),
             ..UrlStatus::default()
         };
-        let fetched = fetch_url(state, url, &previous_url).await;
+        let fetched = fetch_url(state, url, &previous_url, timeout_secs).await;
         match fetched {
             Ok(Fetched::Body {
-                body,
+                bytes,
                 etag,
                 last_modified,
-            }) => match parse(&body) {
-                Ok(document) => {
-                    if let Some(path) = &file {
-                        if let Some(parent) = path.parent() {
-                            let _ = fs::create_dir_all(parent);
+            }) => {
+                let path = file.clone();
+                let task_filter = filter.clone();
+                let parsed = tokio::task::spawn_blocking(move || {
+                    let parsed = decode_body(&bytes)
+                        .and_then(|body| parse_source(&body, &task_filter));
+                    // 解析成功且有频道才替换缓存。坏响应不能毁掉上一份可用数据。
+                    if parsed.as_ref().is_ok_and(|(_, stats)| stats.channels > 0) {
+                        if let Some(path) = path {
+                            if let Err(error) = write_raw_body(&path, &bytes) {
+                                tracing::warn!(path = %path.display(), %error, "写 EPG raw 缓存失败");
+                            }
                         }
-                        let _ = fs::write(path, body.as_bytes());
                     }
-                    status.last_fetch_ok = true;
-                    status.channels = document.channels.len();
-                    status.programmes = document.programmes.len();
-                    status.etag = etag.clone();
-                    status.last_modified = last_modified.clone();
-                    cache_headers.insert(url.url.trim().to_string(), (etag, last_modified));
-                    merge_document(&mut merged, document);
+                    parsed
+                })
+                .await
+                .context("解析任务失败")?;
+                match parsed {
+                    Ok((_document, parsed_stats)) if parsed_stats.channels == 0 => {
+                        status.last_error = Some("源没有频道".into());
+                        errors.push(format!("{}：源没有频道", url.url.trim()));
+                    }
+                    Ok((document, parsed_stats)) => {
+                        succeeded = true;
+                        status.last_fetch_ok = true;
+                        status.channels = parsed_stats.channels;
+                        status.programmes = parsed_stats.programmes;
+                        status.etag = etag.clone();
+                        status.last_modified = last_modified.clone();
+                        cache_headers.insert(url.url.trim().to_string(), (etag, last_modified));
+                        stats.merge(&parsed_stats);
+                        merge_document(&mut merged, document);
+                    }
+                    Err(error) => {
+                        status.last_error = Some(format!("解析失败 {error:#}"));
+                        errors.push(format!("{}：{}", url.url.trim(), error));
+                    }
                 }
-                Err(error) => {
-                    status.last_error = Some(format!("解析失败 {error:#}"));
-                    errors.push(format!("{}：{}", url.url.trim(), error));
-                }
-            },
+            }
             Ok(Fetched::NotModified) => {
-                if let Some(document) = file.as_deref().and_then(read_raw_document) {
-                    status.last_fetch_ok = true;
-                    status.channels = document.channels.len();
-                    status.programmes = document.programmes.len();
-                    status.etag = previous_url.etag.clone();
-                    status.last_modified = previous_url.last_modified.clone();
-                    cache_headers.insert(
-                        url.url.trim().to_string(),
-                        (
-                            previous_url.etag.clone(),
-                            previous_url.last_modified.clone(),
-                        ),
-                    );
-                    merge_document(&mut merged, document);
-                } else {
-                    status.last_error = Some("上游 304，但没有缓存".into());
-                    errors.push(format!("{}：上游 304，但没有缓存", url.url.trim()));
+                let path = file.clone();
+                let task_filter = filter.clone();
+                let parsed = match path {
+                    Some(path) => {
+                        tokio::task::spawn_blocking(move || read_raw_source(&path, &task_filter))
+                            .await
+                            .context("解析任务失败")?
+                    }
+                    None => Err(anyhow::anyhow!("缺少缓存路径")),
+                };
+                match parsed {
+                    Ok((_document, parsed_stats)) if parsed_stats.channels == 0 => {
+                        status.last_error = Some("上游 304，但缓存没有频道".into());
+                        errors.push(format!("{}：上游 304，但缓存没有频道", url.url.trim()));
+                    }
+                    Ok((document, parsed_stats)) => {
+                        succeeded = true;
+                        status.last_fetch_ok = true;
+                        status.channels = parsed_stats.channels;
+                        status.programmes = parsed_stats.programmes;
+                        status.etag = previous_url.etag.clone();
+                        status.last_modified = previous_url.last_modified.clone();
+                        cache_headers.insert(
+                            url.url.trim().to_string(),
+                            (
+                                previous_url.etag.clone(),
+                                previous_url.last_modified.clone(),
+                            ),
+                        );
+                        stats.merge(&parsed_stats);
+                        merge_document(&mut merged, document);
+                    }
+                    Err(error) => {
+                        status.last_error = Some(format!("上游 304，但缓存不可用：{error:#}"));
+                        errors.push(format!(
+                            "{}：上游 304，但缓存不可用：{error:#}",
+                            url.url.trim()
+                        ));
+                    }
                 }
             }
             Err(error) => {
@@ -1422,7 +1571,8 @@ async fn source_document(
         statuses.push(status);
     }
     let finished = crate::users::model::now_ms();
-    if merged.channels.is_empty() {
+    prune_raw_files(directory, &source.id, Some(&cache_files));
+    if !succeeded {
         let status = SourceStatus {
             last_fetch_started_at_ms: Some(started),
             last_fetch_finished_at_ms: Some(finished),
@@ -1433,11 +1583,14 @@ async fn source_document(
             ..SourceStatus::default()
         };
         store_source_status(state, &source.id, status);
+        if errors.is_empty() {
+            bail!("没有可用的 URL");
+        }
         bail!("{}", errors.join("；"));
     }
     // 先平移时区，再算覆盖区间。面板显示的时间与节目时间一致。
     shift_document(&mut merged, source.tz_shift_mins);
-    let mut status = build_source_status(&merged, started, true, None, statuses);
+    let mut status = build_source_status(&stats, started, true, None, statuses);
     status.last_fetch_finished_at_ms = Some(finished);
     status.last_error = (!errors.is_empty()).then(|| errors.join("；"));
     status.cache_headers = cache_headers;
@@ -1447,7 +1600,8 @@ async fn source_document(
 
 enum Fetched {
     Body {
-        body: String,
+        /// 原始下载字节。可能是 gzip，也可能是明文 XML。
+        bytes: Vec<u8>,
         etag: Option<String>,
         last_modified: Option<String>,
     },
@@ -1458,8 +1612,12 @@ async fn fetch_url(
     state: &AppState,
     url: &crate::epg_store::SourceUrl,
     previous: &UrlStatus,
+    timeout_secs: u64,
 ) -> Result<Fetched> {
-    let mut request = state.http.get(url.url.trim());
+    let mut request = state
+        .http
+        .get(url.url.trim())
+        .timeout(Duration::from_secs(timeout_secs.clamp(5, 3_600)));
     if !url.user_agent.trim().is_empty() {
         request = request.header(reqwest::header::USER_AGENT, url.user_agent.trim());
     }
@@ -1485,6 +1643,11 @@ async fn fetch_url(
         return Ok(Fetched::NotModified);
     }
     let response = response.error_for_status().context("上游状态异常")?;
+    if let Some(length) = response.content_length() {
+        if length > MAX_FETCH_BYTES as u64 {
+            bail!("正文超过 {} MiB", MAX_FETCH_BYTES / 1024 / 1024);
+        }
+    }
     let etag = response
         .headers()
         .get(reqwest::header::ETAG)
@@ -1495,55 +1658,64 @@ async fn fetch_url(
         .get(reqwest::header::LAST_MODIFIED)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let bytes = response.bytes().await.context("读取正文失败")?;
-    let body = decode_body(&bytes);
+    // 流式累计，先拦上限再扩容，避免无 Content-Length 的响应占满内存。
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut response = response;
+    while let Some(chunk) = response.chunk().await.context("读取正文失败")? {
+        if bytes.len() + chunk.len() > MAX_FETCH_BYTES {
+            bail!("正文超过 {} MiB", MAX_FETCH_BYTES / 1024 / 1024);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     Ok(Fetched::Body {
-        body,
+        bytes,
         etag,
         last_modified,
     })
 }
 
 /// 解压 gzip 正文；不是 gzip 时按 UTF-8 读取。
-fn decode_body(bytes: &[u8]) -> String {
+///
+/// 解压上限为 [`MAX_XML_BYTES`]，防止 gzip 炸弹占满内存。
+fn decode_body(bytes: &[u8]) -> Result<String> {
     if bytes.starts_with(&[0x1f, 0x8b]) {
-        let mut decoder = flate2::read::GzDecoder::new(bytes);
-        let mut text = String::new();
-        if std::io::Read::read_to_string(&mut decoder, &mut text).is_ok() {
-            return text;
+        let mut out = Vec::new();
+        flate2::read::GzDecoder::new(bytes)
+            .take(MAX_XML_BYTES as u64 + 1)
+            .read_to_end(&mut out)
+            .context("解压失败")?;
+        if out.len() > MAX_XML_BYTES {
+            bail!("解压后正文超过 {} MiB", MAX_XML_BYTES / 1024 / 1024);
         }
+        // 合法 UTF-8 时复用解压缓冲区，避免再复制一份几十 MB 的正文。
+        Ok(match String::from_utf8(out) {
+            Ok(text) => text,
+            Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+        })
+    } else {
+        if bytes.len() > MAX_XML_BYTES {
+            bail!("正文超过 {} MiB", MAX_XML_BYTES / 1024 / 1024);
+        }
+        Ok(String::from_utf8_lossy(bytes).into_owned())
     }
-    String::from_utf8_lossy(bytes).to_string()
 }
 
 fn build_source_status(
-    document: &DocumentData,
+    stats: &SourceStats,
     started: i64,
     ok: bool,
     error: Option<String>,
     urls: Vec<UrlStatus>,
 ) -> SourceStatus {
-    let mut coverage_start: Option<i64> = None;
-    let mut coverage_end: Option<i64> = None;
-    for programme in &document.programmes {
-        if let Some(start) = parse_time(&programme.start) {
-            let start = start.saturating_mul(1_000);
-            coverage_start = Some(coverage_start.map_or(start, |value| value.min(start)));
-        }
-        if let Some(stop) = parse_time(&programme.stop) {
-            let stop = stop.saturating_mul(1_000);
-            coverage_end = Some(coverage_end.map_or(stop, |value| value.max(stop)));
-        }
-    }
     SourceStatus {
         last_fetch_started_at_ms: Some(started),
         last_fetch_finished_at_ms: Some(crate::users::model::now_ms()),
         last_fetch_ok: ok,
         last_error: error,
-        channels: document.channels.len(),
-        programmes: document.programmes.len(),
-        coverage_start_ms: coverage_start,
-        coverage_end_ms: coverage_end,
+        channels: stats.channels,
+        programmes: stats.programmes,
+        coverage_start_ms: stats.coverage_start_ms,
+        coverage_end_ms: stats.coverage_end_ms,
         urls,
         cache_headers: HashMap::new(),
     }
@@ -1581,8 +1753,12 @@ fn merge_document(merged: &mut DocumentData, next: DocumentData) {
     );
 }
 
-/// 读 raw 缓存并合并。缺文件时返回 `None`。
-fn load_raw_document(config: &Config, source: &crate::epg_store::Source) -> Option<DocumentData> {
+/// 读 raw 缓存并按过滤条件合并。缺文件时返回 `None`。
+fn load_raw_document(
+    config: &Config,
+    source: &crate::epg_store::Source,
+    filter: &SourceFilter,
+) -> Option<DocumentData> {
     let directory = Path::new(&config.cache.disk_path);
     if source.kind == "xml" && !source.urls.is_empty() {
         let mut urls = source.urls.clone();
@@ -1592,7 +1768,7 @@ fn load_raw_document(config: &Config, source: &crate::epg_store::Source) -> Opti
         for url in &urls {
             let Some(document) = raw_url_file(directory, &source.id, &url.url)
                 .as_deref()
-                .and_then(read_raw_document)
+                .and_then(|path| read_raw_document(path, filter))
             else {
                 continue;
             };
@@ -1605,13 +1781,188 @@ fn load_raw_document(config: &Config, source: &crate::epg_store::Source) -> Opti
     }
     raw_file(directory, &source.id)
         .as_deref()
-        .and_then(read_raw_document)
+        .and_then(|path| read_raw_document(path, filter))
 }
 
-fn read_raw_document(path: &Path) -> Option<DocumentData> {
+/// 读 raw 缓存并完整统计。缓存可能是 gzip 或明文。
+fn read_raw_source(path: &Path, filter: &SourceFilter) -> Result<(DocumentData, SourceStats)> {
+    let bytes = fs::read(path).with_context(|| format!("读 {}", path.display()))?;
+    let body = decode_body(&bytes)?;
+    parse_source(&body, filter)
+}
+
+fn read_raw_document(path: &Path, filter: &SourceFilter) -> Option<DocumentData> {
+    read_raw_source(path, filter)
+        .ok()
+        .map(|(document, _)| document)
+}
+
+/// 只读 raw 缓存中的频道。面板匹配工具用，不解析节目正文。
+fn load_raw_channels(config: &Config, source: &crate::epg_store::Source) -> Option<Vec<Channel>> {
+    let directory = Path::new(&config.cache.disk_path);
+    if source.kind == "xml" && !source.urls.is_empty() {
+        let mut urls = source.urls.clone();
+        urls.sort_by_key(|url| url.priority);
+        let mut merged = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut found = false;
+        for url in &urls {
+            let Some(channels) = raw_url_file(directory, &source.id, &url.url)
+                .as_deref()
+                .and_then(read_raw_channels)
+            else {
+                continue;
+            };
+            found = true;
+            for channel in channels {
+                if seen.insert(channel.id.to_lowercase()) {
+                    merged.push(channel);
+                }
+            }
+        }
+        if found {
+            return Some(merged);
+        }
+    }
+    raw_file(directory, &source.id)
+        .as_deref()
+        .and_then(read_raw_channels)
+}
+
+fn read_raw_channels(path: &Path) -> Option<Vec<Channel>> {
     let bytes = fs::read(path).ok()?;
-    let body = decode_body(&bytes);
-    parse(&body).ok()
+    let body = decode_body(&bytes).ok()?;
+    scan_channels(&body, None)
+        .ok()
+        .map(|(channels, _, _)| channels)
+}
+
+/// 只读 raw 缓存中的第一条有时间字段的节目。时区预览用。
+fn load_raw_first_programme(
+    config: &Config,
+    source: &crate::epg_store::Source,
+) -> Option<Programme> {
+    let directory = Path::new(&config.cache.disk_path);
+    if source.kind == "xml" && !source.urls.is_empty() {
+        let mut urls = source.urls.clone();
+        urls.sort_by_key(|url| url.priority);
+        for url in &urls {
+            if let Some(programme) = raw_url_file(directory, &source.id, &url.url)
+                .as_deref()
+                .and_then(read_raw_first_programme)
+            {
+                return Some(programme);
+            }
+        }
+        return None;
+    }
+    raw_file(directory, &source.id)
+        .as_deref()
+        .and_then(read_raw_first_programme)
+}
+
+fn read_raw_first_programme(path: &Path) -> Option<Programme> {
+    let bytes = fs::read(path).ok()?;
+    let body = decode_body(&bytes).ok()?;
+    let mut reader = Reader::from_str(&body);
+    let mut seen_root = false;
+    loop {
+        match reader.read_event().ok()? {
+            Event::Start(start) => {
+                if !seen_root {
+                    seen_root = true;
+                    if local_name(start.name().0) != "tv" {
+                        return None;
+                    }
+                    continue;
+                }
+                if local_name(start.name().0) == "programme" {
+                    if let Some(programme) = read_programme(&mut reader, &start, None).ok()? {
+                        if parse_time(&programme.start).is_some() {
+                            return Some(programme);
+                        }
+                    }
+                } else {
+                    reader.read_to_end(start.name()).ok()?;
+                }
+            }
+            Event::Empty(start) => {
+                if !seen_root {
+                    seen_root = true;
+                    if local_name(start.name().0) != "tv" {
+                        return None;
+                    }
+                    continue;
+                }
+                if local_name(start.name().0) == "programme" {
+                    let start_text = attr_value(&start, "start")?;
+                    if parse_time(&start_text).is_some() {
+                        let channel = attr_value(&start, "channel").unwrap_or_default();
+                        return Some(Programme {
+                            start: start_text.trim().to_string(),
+                            stop: attr_value(&start, "stop").unwrap_or_default(),
+                            channel: channel.trim().to_string(),
+                            ..Programme::default()
+                        });
+                    }
+                }
+            }
+            Event::End(_) | Event::Eof => return None,
+            _ => {}
+        }
+    }
+}
+
+/// 写 raw 缓存。明文正文改写为 gzip，控制磁盘占用。
+fn write_raw_body(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("建目录 {}", parent.display()))?;
+    }
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        fs::write(path, bytes).with_context(|| format!("写 {}", path.display()))
+    } else {
+        write_gzip(path, bytes).with_context(|| format!("写 {}", path.display()))
+    }
+}
+
+/// 删除一个源的全部 raw 缓存。删除源时调用。
+pub fn clear_raw_cache(state: &AppState, source_id: &str) {
+    let config = state.snapshot();
+    prune_raw_files(Path::new(&config.cache.disk_path), source_id, None);
+}
+
+/// 删除同一源已不再使用的 raw 缓存。
+///
+/// `keep` 为 `None` 时删除该源全部缓存；为空集时不做任何删除。
+fn prune_raw_files(directory: &Path, source_id: &str, keep: Option<&HashSet<PathBuf>>) {
+    let Some(name) = crate::logo::sanitize(source_id) else {
+        return;
+    };
+    if keep.is_some_and(HashSet::is_empty) {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(raw_dir(directory)) else {
+        return;
+    };
+    let own_file = format!("{name}.xml");
+    let prefix = format!("{name}-");
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if keep.is_some_and(|keep| keep.contains(&path)) {
+            continue;
+        }
+        let file = entry.file_name();
+        let file = file.to_string_lossy();
+        let ours = file == own_file
+            || file.strip_prefix(&prefix).is_some_and(|rest| {
+                rest.len() == 12
+                    && rest.ends_with(".xml")
+                    && rest[..8].bytes().all(|byte| byte.is_ascii_hexdigit())
+            });
+        if ours {
+            let _ = fs::remove_file(&path);
+        }
+    }
 }
 
 async fn run_script(config: &Config, source: &crate::epg_store::Source) -> Result<String> {
@@ -2120,9 +2471,14 @@ fn shift_document(document: &mut DocumentData, minutes: i64) {
     }
 }
 
-fn raw_document(state: &AppState, source: &crate::epg_store::Source) -> Option<DocumentData> {
+fn raw_channels(state: &AppState, source: &crate::epg_store::Source) -> Option<Vec<Channel>> {
     let config = state.snapshot();
-    load_raw_document(&config, source)
+    load_raw_channels(&config, source)
+}
+
+fn raw_first_programme(state: &AppState, source: &crate::epg_store::Source) -> Option<Programme> {
+    let config = state.snapshot();
+    load_raw_first_programme(&config, source)
 }
 
 fn title_text(programme: &Programme) -> String {
@@ -2204,10 +2560,10 @@ pub fn source_channels(
         .collect();
     let mut items = Vec::new();
     for source in sources {
-        let Some(document) = raw_document(state, &source) else {
+        let Some(channels) = raw_channels(state, &source) else {
             continue;
         };
-        for channel in &document.channels {
+        for channel in &channels {
             let names: Vec<String> = channel.names.iter().map(|(_, name)| name.clone()).collect();
             if !query.is_empty()
                 && !channel.id.to_lowercase().contains(&query)
@@ -2251,10 +2607,10 @@ pub fn suggest(state: &AppState, gid: &str, cid: &str, limit: usize) -> Result<V
         .into_iter()
         .filter(|source| source.enabled)
     {
-        let Some(document) = raw_document(state, &source) else {
+        let Some(channels) = raw_channels(state, &source) else {
             continue;
         };
-        for candidate in &document.channels {
+        for candidate in &channels {
             for (_, display_name) in &candidate.names {
                 let score = crate::logo::similarity(&channel.name, display_name);
                 if score > 0.0 {
@@ -2286,16 +2642,15 @@ pub fn tz_preview(state: &AppState, source_id: &str, shift_secs: i64) -> Value {
     let Some(source) = state.epg_store.source(source_id) else {
         return json!({ "ok": false, "error": "EPG 源不存在" });
     };
-    let Some(document) = raw_document(state, &source) else {
+    let Some(programme) = raw_first_programme(state, &source) else {
         return json!({ "ok": false, "error": "该源暂无采集数据" });
     };
-    let item = document.programmes.iter().find_map(|programme| {
-        let start = parse_time(&programme.start)?;
-        Some(json!({
+    let item = parse_time(&programme.start).map(|start| {
+        json!({
             "raw": programme.start,
             "current": format_local(start, offset),
             "shifted": format_local(start + shift_secs, offset),
-        }))
+        })
     });
     match item {
         Some(item) => json!({ "ok": true, "items": [item] }),
@@ -2541,63 +2896,576 @@ pub struct Programme {
     pub raw_children: Vec<String>,
 }
 
+/// 源文档统计。统计整份文档，不受频道过滤影响。
+#[derive(Debug, Default, Clone)]
+struct SourceStats {
+    channels: usize,
+    programmes: usize,
+    coverage_start_ms: Option<i64>,
+    coverage_end_ms: Option<i64>,
+    /// 频道 id → 节目数。多 URL 合并时按先到频道去重。
+    channel_ids: HashSet<String>,
+    programme_counts: HashMap<String, usize>,
+}
+
+impl SourceStats {
+    fn record_channel(&mut self, id: &str) {
+        self.channel_ids.insert(id.to_string());
+        self.channels = self.channel_ids.len();
+    }
+
+    /// 累计一条有效节目（`channel` 非空）。
+    fn record_programme(&mut self, channel: &str, start: &str, stop: &str) {
+        self.programmes += 1;
+        let channel = channel.trim();
+        match self.programme_counts.get_mut(channel) {
+            Some(count) => *count += 1,
+            None => {
+                self.programme_counts.insert(channel.to_string(), 1);
+            }
+        }
+        if let Some(start) = parse_time(start) {
+            let start = start.saturating_mul(1_000);
+            self.coverage_start_ms = Some(
+                self.coverage_start_ms
+                    .map_or(start, |value| value.min(start)),
+            );
+        }
+        if let Some(stop) = parse_time(stop) {
+            let stop = stop.saturating_mul(1_000);
+            self.coverage_end_ms = Some(self.coverage_end_ms.map_or(stop, |value| value.max(stop)));
+        }
+    }
+
+    /// 合并同一源内多个 URL 的统计。
+    ///
+    /// 与 [`merge_document`] 一致：同一频道只算先到 URL 的节目。
+    fn merge(&mut self, other: &Self) {
+        for id in &other.channel_ids {
+            if self.channel_ids.insert(id.clone()) {
+                self.programmes += other.programme_counts.get(id).copied().unwrap_or(0);
+            }
+        }
+        self.channels = self.channel_ids.len();
+        self.coverage_start_ms = match (self.coverage_start_ms, other.coverage_start_ms) {
+            (Some(left), Some(right)) => Some(left.min(right)),
+            (left, right) => left.or(right),
+        };
+        self.coverage_end_ms = match (self.coverage_end_ms, other.coverage_end_ms) {
+            (Some(left), Some(right)) => Some(left.max(right)),
+            (left, right) => left.or(right),
+        };
+    }
+}
+
+/// 采集过滤：只解析可能命中的频道与时间窗内的节目。
+///
+/// 上游 XMLTV 可能有几十万条节目。全量建 DOM 会占用约 1 GiB 内存，
+/// 所以流式解析时按这个集合裁剪。
+#[derive(Debug, Clone, Default)]
+struct SourceFilter {
+    /// 上游频道 id（小写）。
+    keep_ids: HashSet<String>,
+    /// 归一化后的显示名。`match_by_name` 关闭时为空。
+    keep_names: HashSet<String>,
+    past: i64,
+    future: i64,
+}
+
+impl SourceFilter {
+    fn new(
+        targets: &[Target],
+        mappings: &HashMap<String, Mapping>,
+        extras: &[Extra],
+        source_id: &str,
+        config: &Config,
+        past: i64,
+        future: i64,
+    ) -> Self {
+        let mut keep_ids = HashSet::new();
+        let mut keep_names = HashSet::new();
+        for target in targets {
+            if let Some(tvg_id) = &target.tvg_id {
+                keep_ids.insert(tvg_id.to_lowercase());
+            }
+            let name = target.name.trim();
+            if !name.is_empty() {
+                keep_ids.insert(name.to_lowercase());
+            }
+            if config.epg.match_by_name && !target.normalized.is_empty() {
+                keep_names.insert(target.normalized.clone());
+            }
+        }
+        for mapping in mappings.values() {
+            if mapping.source_id == source_id && !mapping.source_channel_id.trim().is_empty() {
+                keep_ids.insert(mapping.source_channel_id.trim().to_lowercase());
+            }
+        }
+        for extra in extras {
+            if extra.source_id == source_id && !extra.source_channel_id.trim().is_empty() {
+                keep_ids.insert(extra.source_channel_id.trim().to_lowercase());
+            }
+        }
+        Self {
+            keep_ids,
+            keep_names,
+            past,
+            future,
+        }
+    }
+
+    fn keeps_channel(&self, channel: &Channel) -> bool {
+        self.keep_ids.contains(&channel.id.to_lowercase())
+            || channel
+                .names
+                .iter()
+                .any(|(_, name)| self.keep_names.contains(&normalize_name(name)))
+    }
+}
+
+/// 节目过滤：命中频道的上游 id 集合 + 时间窗。
+///
+/// 频道可能按显示名命中，所以 id 集合要等频道扫描结束后才能确定。
+struct ProgrammeFilter {
+    ids: HashSet<String>,
+    past: i64,
+    future: i64,
+}
+
+impl ProgrammeFilter {
+    fn keeps(&self, channel: &str, start: &str, stop: &str) -> bool {
+        if !self.ids.contains(&channel.trim().to_lowercase()) {
+            return false;
+        }
+        let start = parse_time(start);
+        let stop = parse_time(stop).or(start);
+        match (start, stop) {
+            (Some(start), Some(stop)) => stop >= self.past && start <= self.future,
+            _ => true,
+        }
+    }
+}
+
 /// 解析 XMLTV 正文。
 pub fn parse(body: &str) -> Result<DocumentData> {
-    let document = Document::parse(body).context("XML 不合法")?;
-    let root = document.root_element();
-    if root.tag_name().name() != "tv" {
-        bail!("根节点不是 tv");
-    }
-    let mut data = DocumentData::default();
-    for node in root.children().filter(|node| node.is_element()) {
-        match node.tag_name().name() {
-            "channel" => {
-                let id = node.attribute("id").unwrap_or("").trim().to_string();
-                if id.is_empty() {
+    let (channels, _, _) = scan_channels(body, None)?;
+    let programmes = scan_programmes(body, None)?;
+    Ok(DocumentData {
+        channels,
+        programmes,
+    })
+}
+
+/// 采集解析：只保留 [`SourceFilter`] 选中的频道与节目，并返回整份文档的统计。
+fn parse_source(body: &str, filter: &SourceFilter) -> Result<(DocumentData, SourceStats)> {
+    let (channels, stats, ids) = scan_channels(body, Some(filter))?;
+    let programmes = scan_programmes(
+        body,
+        Some(&ProgrammeFilter {
+            ids,
+            past: filter.past,
+            future: filter.future,
+        }),
+    )?;
+    Ok((
+        DocumentData {
+            channels,
+            programmes,
+        },
+        stats,
+    ))
+}
+
+/// 解析频道节点并统计节目总数。`filter` 为空时保留全部频道。
+fn scan_channels(
+    body: &str,
+    filter: Option<&SourceFilter>,
+) -> Result<(Vec<Channel>, SourceStats, HashSet<String>)> {
+    let mut reader = Reader::from_str(body);
+    let mut channels = Vec::new();
+    let mut matches: HashSet<String> = HashSet::new();
+    let mut stats = SourceStats::default();
+    let mut seen_root = false;
+    loop {
+        let event = reader.read_event().context("XML 不合法")?;
+        match event {
+            Event::Start(start) => {
+                if !seen_root {
+                    seen_root = true;
+                    if local_name(start.name().0) != "tv" {
+                        bail!("根节点不是 tv");
+                    }
                     continue;
                 }
-                let mut channel = Channel {
-                    id,
-                    ..Channel::default()
-                };
-                for child in node.children().filter(|child| child.is_element()) {
-                    if child.tag_name().name() == "display-name" {
-                        channel.names.push((lang_of(child), text_of(child)));
-                    } else if child.tag_name().name() == "icon" {
-                        channel.raw_children.push(raw_of(body, child));
+                match local_name(start.name().0) {
+                    "channel" => {
+                        let id = attr_value(&start, "id").unwrap_or_default();
+                        if id.is_empty() {
+                            skip_element(&mut reader, start.name())?;
+                            continue;
+                        }
+                        let mut channel = Channel {
+                            id,
+                            ..Channel::default()
+                        };
+                        read_channel_children(&mut reader, &mut channel)?;
+                        stats.record_channel(&channel.id);
+                        if filter.is_none_or(|filter| filter.keeps_channel(&channel)) {
+                            matches.insert(channel.id.to_lowercase());
+                            channels.push(channel);
+                        }
                     }
+                    "programme" => {
+                        let channel = attr_value(&start, "channel").unwrap_or_default();
+                        if !channel.trim().is_empty() {
+                            stats.record_programme(
+                                &channel,
+                                &attr_value(&start, "start").unwrap_or_default(),
+                                &attr_value(&start, "stop").unwrap_or_default(),
+                            );
+                        }
+                        skip_element(&mut reader, start.name())?;
+                    }
+                    _ => skip_element(&mut reader, start.name())?,
                 }
-                data.channels.push(channel);
             }
-            "programme" => {
-                let start = node.attribute("start").unwrap_or("").trim().to_string();
-                let stop = node.attribute("stop").unwrap_or("").trim().to_string();
-                let channel = node.attribute("channel").unwrap_or("").trim().to_string();
-                if channel.is_empty() {
+            Event::Empty(start) => {
+                if !seen_root {
+                    seen_root = true;
+                    if local_name(start.name().0) != "tv" {
+                        bail!("根节点不是 tv");
+                    }
                     continue;
                 }
-                let mut programme = Programme {
-                    start,
-                    stop,
-                    channel,
-                    ..Programme::default()
-                };
-                for child in node.children().filter(|child| child.is_element()) {
-                    let name = child.tag_name().name();
-                    if is_text_element(name) {
-                        programme
-                            .texts
-                            .push((name.to_string(), lang_of(child), text_of(child)));
-                    } else {
-                        programme.raw_children.push(raw_of(body, child));
+                match local_name(start.name().0) {
+                    "channel" => {
+                        let id = attr_value(&start, "id").unwrap_or_default();
+                        if id.is_empty() {
+                            continue;
+                        }
+                        let channel = Channel {
+                            id,
+                            ..Channel::default()
+                        };
+                        stats.record_channel(&channel.id);
+                        if filter.is_none_or(|filter| filter.keeps_channel(&channel)) {
+                            matches.insert(channel.id.to_lowercase());
+                            channels.push(channel);
+                        }
                     }
+                    "programme" => {
+                        let channel = attr_value(&start, "channel").unwrap_or_default();
+                        if !channel.trim().is_empty() {
+                            stats.record_programme(
+                                &channel,
+                                &attr_value(&start, "start").unwrap_or_default(),
+                                &attr_value(&start, "stop").unwrap_or_default(),
+                            );
+                        }
+                    }
+                    _ => {}
                 }
-                data.programmes.push(programme);
             }
+            Event::End(_) => break,
+            Event::Eof => break,
             _ => {}
         }
     }
-    Ok(data)
+    if !seen_root {
+        bail!("根节点不是 tv");
+    }
+    Ok((channels, stats, matches))
+}
+
+/// 解析节目节点。`filter` 为空时保留全部节目。
+fn scan_programmes(body: &str, filter: Option<&ProgrammeFilter>) -> Result<Vec<Programme>> {
+    let mut reader = Reader::from_str(body);
+    let mut programmes = Vec::new();
+    let mut seen_root = false;
+    loop {
+        let event = reader.read_event().context("XML 不合法")?;
+        match event {
+            Event::Start(start) => {
+                if !seen_root {
+                    seen_root = true;
+                    if local_name(start.name().0) != "tv" {
+                        bail!("根节点不是 tv");
+                    }
+                    continue;
+                }
+                if local_name(start.name().0) == "programme" {
+                    if let Some(programme) = read_programme(&mut reader, &start, filter)? {
+                        programmes.push(programme);
+                    }
+                } else {
+                    skip_element(&mut reader, start.name())?;
+                }
+            }
+            Event::Empty(start) => {
+                if !seen_root {
+                    seen_root = true;
+                    if local_name(start.name().0) != "tv" {
+                        bail!("根节点不是 tv");
+                    }
+                    continue;
+                }
+                if local_name(start.name().0) == "programme" {
+                    let channel = attr_value(&start, "channel").unwrap_or_default();
+                    let start_text = attr_value(&start, "start").unwrap_or_default();
+                    let stop_text = attr_value(&start, "stop").unwrap_or_default();
+                    if !channel.trim().is_empty()
+                        && filter
+                            .is_none_or(|filter| filter.keeps(&channel, &start_text, &stop_text))
+                    {
+                        programmes.push(Programme {
+                            start: start_text.trim().to_string(),
+                            stop: stop_text.trim().to_string(),
+                            channel: channel.trim().to_string(),
+                            ..Programme::default()
+                        });
+                    }
+                }
+            }
+            Event::End(_) => break,
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    if !seen_root {
+        bail!("根节点不是 tv");
+    }
+    Ok(programmes)
+}
+
+fn read_channel_children(reader: &mut Reader<&[u8]>, channel: &mut Channel) -> Result<()> {
+    loop {
+        match reader.read_event().context("XML 不合法")? {
+            Event::Start(start) => match local_name(start.name().0) {
+                "display-name" => {
+                    let lang = element_lang(&start);
+                    let text = read_element_text(reader)?;
+                    channel.names.push((lang, text));
+                }
+                "icon" => channel.raw_children.push(read_raw_element(reader, &start)?),
+                _ => skip_element(reader, start.name())?,
+            },
+            Event::Empty(start) => match local_name(start.name().0) {
+                "display-name" => channel.names.push((element_lang(&start), String::new())),
+                "icon" => channel.raw_children.push(write_empty(&start)),
+                _ => {}
+            },
+            Event::End(_) => return Ok(()),
+            Event::Eof => bail!("XML 意外结束"),
+            _ => {}
+        }
+    }
+}
+
+fn read_programme(
+    reader: &mut Reader<&[u8]>,
+    start: &BytesStart,
+    filter: Option<&ProgrammeFilter>,
+) -> Result<Option<Programme>> {
+    let start_text = attr_value(start, "start").unwrap_or_default();
+    let stop_text = attr_value(start, "stop").unwrap_or_default();
+    let channel = attr_value(start, "channel").unwrap_or_default();
+    if channel.trim().is_empty()
+        || filter.is_some_and(|filter| !filter.keeps(&channel, &start_text, &stop_text))
+    {
+        skip_element(reader, start.name())?;
+        return Ok(None);
+    }
+    let mut programme = Programme {
+        start: start_text.trim().to_string(),
+        stop: stop_text.trim().to_string(),
+        channel: channel.trim().to_string(),
+        ..Programme::default()
+    };
+    loop {
+        match reader.read_event().context("XML 不合法")? {
+            Event::Start(child) => {
+                let name = local_name(child.name().0);
+                if is_text_element(name) {
+                    let lang = element_lang(&child);
+                    let text = read_element_text(reader)?;
+                    programme.texts.push((name.to_string(), lang, text));
+                } else {
+                    programme
+                        .raw_children
+                        .push(read_raw_element(reader, &child)?);
+                }
+            }
+            Event::Empty(child) => {
+                let name = local_name(child.name().0);
+                if is_text_element(name) {
+                    programme
+                        .texts
+                        .push((name.to_string(), element_lang(&child), String::new()));
+                } else {
+                    programme.raw_children.push(write_empty(&child));
+                }
+            }
+            Event::End(_) => return Ok(Some(programme)),
+            Event::Eof => bail!("XML 意外结束"),
+            _ => {}
+        }
+    }
+}
+
+/// 读取元素内的文本。实体引用由独立事件给出，需要逐个还原。
+fn read_element_text(reader: &mut Reader<&[u8]>) -> Result<String> {
+    let mut text = String::new();
+    let mut depth = 0usize;
+    loop {
+        match reader.read_event().context("XML 不合法")? {
+            Event::Text(event) => text.push_str(&decode_text(&event)?),
+            Event::GeneralRef(reference) => text.push_str(&resolve_reference(&reference)?),
+            Event::CData(event) => text.push_str(event.as_ref()),
+            Event::Start(_) => depth += 1,
+            Event::End(_) if depth == 0 => return Ok(text.trim().to_string()),
+            Event::End(_) => depth -= 1,
+            Event::Eof => bail!("XML 意外结束"),
+            _ => {}
+        }
+    }
+}
+
+/// 原样保留一个非文本子节点。空白与引号形式会规范化，语义不变。
+fn read_raw_element(reader: &mut Reader<&[u8]>, start: &BytesStart) -> Result<String> {
+    let mut out = write_start(start);
+    let mut depth = 1usize;
+    loop {
+        match reader.read_event().context("XML 不合法")? {
+            Event::Start(child) => {
+                out.push_str(&write_start(&child));
+                depth += 1;
+            }
+            Event::Empty(child) => out.push_str(&write_empty(&child)),
+            Event::End(child) => {
+                out.push_str("</");
+                out.push_str(child.name().0);
+                out.push('>');
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(out);
+                }
+            }
+            Event::Text(event) => out.push_str(&escape(&decode_text(&event)?)),
+            Event::GeneralRef(reference) => {
+                out.push_str(&escape(&resolve_reference(&reference)?));
+            }
+            Event::CData(event) => {
+                out.push_str("<![CDATA[");
+                out.push_str(event.as_ref());
+                out.push_str("]]>");
+            }
+            Event::Comment(event) => {
+                out.push_str("<!--");
+                out.push_str(event.as_ref());
+                out.push_str("-->");
+            }
+            Event::PI(event) => {
+                out.push_str("<?");
+                out.push_str(event.as_ref());
+                out.push_str("?>");
+            }
+            Event::Eof => bail!("XML 意外结束"),
+            Event::Decl(_) | Event::DocType(_) => {}
+        }
+    }
+}
+
+fn write_start(start: &BytesStart) -> String {
+    let mut out = String::from("<");
+    out.push_str(start.name().0);
+    for attribute in start.attributes().with_checks(false).flatten() {
+        out.push(' ');
+        out.push_str(attribute.key.0);
+        match attribute.normalized_value(XmlVersion::Implicit1_0) {
+            Ok(value) => {
+                out.push_str("=\"");
+                out.push_str(&escape(&value));
+                out.push('"');
+            }
+            Err(_) => out.push_str("=\"\""),
+        }
+    }
+    out.push('>');
+    out
+}
+
+fn write_empty(start: &BytesStart) -> String {
+    let mut out = write_start(start);
+    out.truncate(out.len() - 1);
+    out.push_str("/>");
+    out
+}
+
+fn decode_text(text: &BytesText) -> Result<String> {
+    match quick_xml::escape::unescape(&text.xml10_content()) {
+        Ok(value) => Ok(value.into_owned()),
+        Err(error) => bail!("文本实体不合法：{error}"),
+    }
+}
+
+fn resolve_reference(reference: &BytesRef) -> Result<String> {
+    if let Some(character) = reference.resolve_char_ref().context("字符引用不合法")? {
+        return Ok(character.to_string());
+    }
+    match reference.as_ref() {
+        "amp" => Ok("&".into()),
+        "lt" => Ok("<".into()),
+        "gt" => Ok(">".into()),
+        "quot" => Ok("\"".into()),
+        "apos" => Ok("'".into()),
+        other => bail!("未知实体 &{other};"),
+    }
+}
+
+fn local_name(name: &str) -> &str {
+    match name.rfind(':') {
+        Some(index) => &name[index + 1..],
+        None => name,
+    }
+}
+
+fn attr_value(start: &BytesStart, name: &str) -> Option<String> {
+    for attribute in start.attributes().with_checks(false) {
+        let Ok(attribute) = attribute else {
+            continue;
+        };
+        if local_name(attribute.key.0) == name {
+            return attribute
+                .normalized_value(XmlVersion::Implicit1_0)
+                .ok()
+                .map(|value| value.trim().to_string());
+        }
+    }
+    None
+}
+
+fn element_lang(start: &BytesStart) -> Option<String> {
+    let mut plain = None;
+    for attribute in start.attributes().with_checks(false).flatten() {
+        let key = attribute.key.0;
+        let value = attribute
+            .normalized_value(XmlVersion::Implicit1_0)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if key == "xml:lang" {
+            return value;
+        }
+        if key == "lang" && plain.is_none() {
+            plain = value;
+        }
+    }
+    plain
+}
+
+fn skip_element(reader: &mut Reader<&[u8]>, name: quick_xml::name::QName<'_>) -> Result<()> {
+    reader.read_to_end(name).context("XML 不合法")?;
+    Ok(())
 }
 
 fn is_text_element(name: &str) -> bool {
@@ -2616,22 +3484,7 @@ fn is_text_element(name: &str) -> bool {
     )
 }
 
-fn lang_of(node: roxmltree::Node) -> Option<String> {
-    node.attribute(("http://www.w3.org/XML/1998/namespace", "lang"))
-        .or_else(|| node.attribute("lang"))
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn text_of(node: roxmltree::Node) -> String {
-    node.text().unwrap_or("").trim().to_string()
-}
-
-fn raw_of(source: &str, node: roxmltree::Node) -> String {
-    let range = node.range();
-    source[range.start..range.end].to_string()
-}
-
+#[cfg(test)]
 fn in_window(programme: &Programme, past: i64, future: i64) -> bool {
     let start = parse_time(&programme.start);
     let stop = parse_time(&programme.stop).or(start);
@@ -2788,6 +3641,71 @@ mod tests {
         assert_eq!(data.programmes[0].texts[0].0, "title");
         assert!(data.programmes[0].texts[1].1.is_none());
         assert!(data.programmes[0].raw_children[0].contains("icon"));
+    }
+
+    #[test]
+    fn parse_source_keeps_only_matched_channel_and_window() {
+        let past = parse_time("20261020000000").unwrap();
+        let future = parse_time("20261021000000").unwrap();
+        let body = r#"<tv>
+  <channel id="cctv1"><display-name lang="zh">CCTV-1</display-name><icon src="http://logo/1.png"/></channel>
+  <channel id="other"><display-name>Other</display-name></channel>
+  <programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="cctv1">
+    <title lang="zh">A &amp; B</title>
+    <credits><director>Someone</director></credits>
+  </programme>
+  <programme start="20200101080000 +0000" stop="20200101090000 +0000" channel="cctv1"><title>Old</title></programme>
+  <programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="other"><title>Other</title></programme>
+</tv>"#;
+        let filter = SourceFilter {
+            keep_ids: HashSet::new(),
+            keep_names: [normalize_name("CCTV-1")].into_iter().collect(),
+            past,
+            future,
+        };
+        let (document, stats) = parse_source(body, &filter).expect("应解析成功");
+        assert_eq!(document.channels.len(), 1, "按显示名命中频道");
+        assert_eq!(document.programmes.len(), 1, "只保留窗口内匹配频道");
+        assert_eq!(document.programmes[0].channel, "cctv1");
+        assert_eq!(document.programmes[0].texts[0].2, "A & B");
+        assert!(document.programmes[0].raw_children[0].contains("credits"));
+        assert_eq!(stats.channels, 2, "统计覆盖整份文档");
+        assert_eq!(stats.programmes, 3);
+        assert_eq!(
+            stats.coverage_start_ms,
+            parse_time("20200101080000").map(|value| value * 1_000)
+        );
+    }
+
+    #[test]
+    fn decode_body_handles_gzip_and_plain() {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(SAMPLE.as_bytes()).expect("压缩");
+        let gz = encoder.finish().expect("收尾");
+        assert_eq!(decode_body(&gz).expect("解压"), SAMPLE);
+        assert_eq!(decode_body(SAMPLE.as_bytes()).expect("明文"), SAMPLE);
+    }
+
+    #[test]
+    fn prune_raw_files_keeps_current_and_other_sources() {
+        let directory =
+            std::env::temp_dir().join(format!("tv-buddy-epg-raw-{}", uuid::Uuid::new_v4()));
+        let raw = raw_dir(&directory);
+        fs::create_dir_all(&raw).expect("建目录");
+        let current = raw.join("abc-123-0123abcd.xml");
+        let stale = raw.join("abc-123-89abcdef.xml");
+        let script = raw.join("abc-123.xml");
+        let other = raw.join("abc-1234-0123abcd.xml");
+        for path in [&current, &stale, &script, &other] {
+            fs::write(path, b"x").expect("写");
+        }
+        let keep: HashSet<PathBuf> = [current.clone()].into_iter().collect();
+        prune_raw_files(&directory, "abc-123", Some(&keep));
+        assert!(current.exists(), "保留当前 URL 缓存");
+        assert!(!stale.exists(), "删除旧 URL 缓存");
+        assert!(!script.exists(), "删除旧的脚本缓存");
+        assert!(other.exists(), "其他源不受影响");
+        let _ = fs::remove_dir_all(&directory);
     }
 
     #[test]
@@ -3026,22 +3944,17 @@ mod tests {
 <programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="cctv3"><title>C</title></programme></tv>"#,
         )
         .expect("解析");
-        let (candidates, owners, programmes) = match_source(
-            &targets,
-            &document,
-            &HashMap::new(),
-            "s1",
-            &config,
-            0,
-            4_000_000_000,
+        let result = match_source(&targets, document, &HashMap::new(), "s1", &config);
+        assert_eq!(result.candidates.len(), 4);
+        assert_eq!(result.candidates[0].via, "tvg-id");
+        assert_eq!(result.candidates[1].via, "name");
+        assert_eq!(result.candidates[3].via, "name", "tvg_id 未命中时回退名称");
+        assert_eq!(
+            result.owners["cctv1"], 0,
+            "配置顺序最靠前的同名频道获得节目"
         );
-        assert_eq!(candidates.len(), 4);
-        assert_eq!(candidates[0].via, "tvg-id");
-        assert_eq!(candidates[1].via, "name");
-        assert_eq!(candidates[3].via, "name", "tvg_id 未命中时回退名称");
-        assert_eq!(owners["cctv1"], 0, "配置顺序最靠前的同名频道获得节目");
-        assert_eq!(programmes["cctv1"].len(), 2);
-        assert_eq!(programmes["cctv3"].len(), 1);
+        assert_eq!(result.source_programmes["cctv1"].len(), 2);
+        assert_eq!(result.source_programmes["cctv3"].len(), 1);
     }
 
     fn target(gid: &str, cid: &str, name: &str, out_id: &str) -> Target {
@@ -3074,19 +3987,11 @@ mod tests {
                 ..Mapping::default()
             },
         );
-        let (candidates, _, _) = match_source(
-            &targets,
-            &document,
-            &mappings,
-            "s1",
-            &config,
-            0,
-            4_000_000_000,
-        );
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].channel_id, "auto");
-        assert!(!candidates[0].manual, "失效的手工绑定回退自动匹配");
-        assert_eq!(candidates[0].via, "name");
+        let result = match_source(&targets, document, &mappings, "s1", &config);
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].channel_id, "auto");
+        assert!(!result.candidates[0].manual, "失效的手工绑定回退自动匹配");
+        assert_eq!(result.candidates[0].via, "name");
     }
 
     #[test]
@@ -3175,18 +4080,10 @@ mod tests {
                 ..Mapping::default()
             },
         );
-        let (candidates, _, _) = match_source(
-            &targets,
-            &document,
-            &mappings,
-            "s1",
-            &config,
-            0,
-            4_000_000_000,
-        );
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].via, "manual");
-        assert_eq!(candidates[0].channel_id, "only");
+        let result = match_source(&targets, document, &mappings, "s1", &config);
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].via, "manual");
+        assert_eq!(result.candidates[0].channel_id, "only");
     }
 
     #[test]
@@ -3238,18 +4135,10 @@ mod tests {
 <programme start="20261020080000 +0000" stop="20261020090000 +0000" channel="CCTV1"><title>A</title></programme></tv>"#,
         )
         .expect("解析");
-        let (candidates, _, _) = match_source(
-            &targets,
-            &document,
-            &HashMap::new(),
-            "s1",
-            &config,
-            0,
-            4_000_000_000,
-        );
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].via, "id");
-        assert_eq!(candidates[0].channel_id, "CCTV1");
+        let result = match_source(&targets, document, &HashMap::new(), "s1", &config);
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].via, "id");
+        assert_eq!(result.candidates[0].channel_id, "CCTV1");
     }
 
     #[test]

@@ -767,6 +767,7 @@ pub async fn source_delete(
 ) -> Result<Json<Value>, ApiError> {
     match state.epg_store.delete_source(&id) {
         Ok(true) => {
+            epg::clear_raw_cache(&state, &id);
             refresh_after_change(&state);
             Ok(Json(json!({ "ok": true })))
         }
