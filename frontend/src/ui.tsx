@@ -416,6 +416,8 @@ export function Select({
   compact,
   width,
   title,
+  searchable,
+  searchPlaceholder = '搜索选项',
 }: {
   value: string;
   options: { value: string; label: string; desc?: string }[];
@@ -432,20 +434,35 @@ export function Select({
   width?: number | string;
   /** 悬停提示。内容长时用。 */
   title?: string;
+  /** 菜单顶部带搜索框，按选项名称与说明过滤。分组很多时用。 */
+  searchable?: boolean;
+  /** 搜索框占位文字。 */
+  searchPlaceholder?: string;
 }) {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLUListElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
   const typed = useRef({ text: '', at: 0 });
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  /** 可搜索菜单里的输入内容。只在菜单打开期间有意义。 */
+  const [query, setQuery] = useState('');
   /** 菜单用 fixed 定位挂到 body，避免被表格/抽屉的滚动容器裁切。 */
   const [menuPos, setMenuPos] = useState<CSSProperties | null>(null);
 
   const selected = options.findIndex((option) => option.value === value);
   const described = options.some((option) => Boolean(option.desc));
+  const needle = query.trim().toLowerCase();
+  const filtered =
+    searchable && needle !== ''
+      ? options.filter((option) =>
+          `${option.label} ${option.desc ?? ''}`.toLowerCase().includes(needle),
+        )
+      : options;
 
   const close = (focusButton = false) => {
     setOpen(false);
@@ -453,18 +470,21 @@ export function Select({
     if (focusButton) btnRef.current?.focus({ preventScroll: true });
   };
 
-  /** 聚焦选项并只滚动菜单自身，不触达页面滚动位置。 */
+  /** 聚焦选项并只滚动菜单自身，不触达页面滚动位置。
+   *
+   * 可搜索菜单把焦点留在搜索框，只用滚动露出当前项。
+   */
   const revealOption = (index: number) => {
-    const menu = menuRef.current;
+    const list = listRef.current;
     const option = optionRefs.current[index];
-    if (!menu || !option) return;
-    option.focus({ preventScroll: true });
-    const menuRect = menu.getBoundingClientRect();
+    if (!list || !option) return;
+    if (!searchable) option.focus({ preventScroll: true });
+    const listRect = list.getBoundingClientRect();
     const optionRect = option.getBoundingClientRect();
-    if (optionRect.top < menuRect.top) {
-      menu.scrollTop -= menuRect.top - optionRect.top;
-    } else if (optionRect.bottom > menuRect.bottom) {
-      menu.scrollTop += optionRect.bottom - menuRect.bottom;
+    if (optionRect.top < listRect.top) {
+      list.scrollTop -= listRect.top - optionRect.top;
+    } else if (optionRect.bottom > listRect.bottom) {
+      list.scrollTop += optionRect.bottom - listRect.bottom;
     }
   };
 
@@ -505,12 +525,16 @@ export function Select({
       maxHeight,
     });
     setActive(selected >= 0 ? selected : 0);
+    setQuery('');
     setOpen(true);
   };
 
-  // 打开后把焦点移到当前选项。用 `open` 作依赖即可：列表刚挂载，ref 已就位。
+  // 打开后把焦点移到当前选项或搜索框。用 `open` 作依赖即可：列表刚挂载，ref 已就位。
   useEffect(() => {
     if (!open) return;
+    if (searchable) {
+      searchRef.current?.focus({ preventScroll: true });
+    }
     revealOption(active);
   }, [open]);
 
@@ -572,7 +596,7 @@ export function Select({
   }, [open]);
 
   const move = (next: number) => {
-    const count = options.length;
+    const count = filtered.length;
     if (!count) return;
     const index = ((next % count) + count) % count;
     setActive(index);
@@ -580,13 +604,49 @@ export function Select({
   };
 
   const choose = (index: number) => {
-    const option = options[index];
+    const option = filtered[index];
     if (!option) return;
     onChange(option.value);
     close(true);
   };
 
-  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
+  /** 输入过滤词：回到第一条，并从列表顶部看起。 */
+  const searchOptions = (next: string) => {
+    setQuery(next);
+    setActive(0);
+    if (listRef.current) listRef.current.scrollTop = 0;
+  };
+
+  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (searchable) {
+      switch (event.key) {
+        case 'ArrowDown':
+          event.preventDefault();
+          move(active + 1);
+          return;
+        case 'ArrowUp':
+          event.preventDefault();
+          move(active - 1);
+          return;
+        case 'Enter':
+          event.preventDefault();
+          choose(active);
+          return;
+        case 'Escape':
+          event.preventDefault();
+          event.stopPropagation();
+          close(true);
+          return;
+        case 'Tab':
+          // 菜单挂在 body 末尾；先把焦点还给按钮，默认 Tab 才会落到下一个字段。
+          close(true);
+          return;
+        default:
+          // 其余按键留给搜索框，不抢方向键以外的输入。
+          return;
+      }
+    }
+
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
@@ -675,39 +735,73 @@ export function Select({
       {open &&
         menuPos &&
         createPortal(
-          <ul
+          <div
             ref={menuRef}
             id={`${id}-menu`}
-            className="select-menu"
+            className={`select-menu${searchable ? ' searchable' : ''}`}
             style={menuPos}
-            role="listbox"
-            aria-label={ariaLabel}
             onKeyDown={onMenuKeyDown}
           >
-            {options.map((option, index) => (
-              <li
-                key={option.value}
-                ref={(node) => {
-                  optionRefs.current[index] = node;
-                }}
-                role="option"
-                aria-selected={option.value === value}
-                tabIndex={-1}
-                className={`select-option${option.desc ? ' has-desc' : ''}${option.value === value ? ' selected' : ''}`}
-                onFocus={() => setActive(index)}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => choose(index)}
-              >
-                <span className="select-check" aria-hidden="true">
-                  {option.value === value ? <Icon name="check" size={14} /> : null}
-                </span>
-                <span className="select-text">
-                  <span className="select-label">{option.label}</span>
-                  {option.desc ? <span className="select-desc">{option.desc}</span> : null}
-                </span>
-              </li>
-            ))}
-          </ul>,
+            {searchable && (
+              <input
+                ref={searchRef}
+                className="select-search"
+                role="combobox"
+                aria-label={searchPlaceholder}
+                aria-controls={`${id}-list`}
+                aria-expanded={true}
+                aria-activedescendant={
+                  filtered[active] ? `${id}-opt-${active}` : undefined
+                }
+                placeholder={searchPlaceholder}
+                value={query}
+                autoComplete="off"
+                onChange={(event) => searchOptions(event.target.value)}
+              />
+            )}
+            <ul
+              ref={listRef}
+              id={`${id}-list`}
+              className="select-list"
+              role="listbox"
+              aria-label={ariaLabel}
+            >
+              {filtered.map((option, index) => (
+                <li
+                  key={option.value}
+                  id={`${id}-opt-${index}`}
+                  ref={(node) => {
+                    optionRefs.current[index] = node;
+                  }}
+                  role="option"
+                  aria-selected={option.value === value}
+                  tabIndex={-1}
+                  className={`select-option${option.desc ? ' has-desc' : ''}${
+                    option.value === value ? ' selected' : ''
+                  }${searchable && index === active ? ' active' : ''}`}
+                  onFocus={() => setActive(index)}
+                  onMouseEnter={() => {
+                    if (searchable) setActive(index);
+                  }}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => choose(index)}
+                >
+                  <span className="select-check" aria-hidden="true">
+                    {option.value === value ? <Icon name="check" size={14} /> : null}
+                  </span>
+                  <span className="select-text">
+                    <span className="select-label">{option.label}</span>
+                    {option.desc ? <span className="select-desc">{option.desc}</span> : null}
+                  </span>
+                </li>
+              ))}
+              {filtered.length === 0 && (
+                <li className="select-empty" role="presentation">
+                  没有匹配的选项
+                </li>
+              )}
+            </ul>
+          </div>,
           document.body,
         )}
     </div>

@@ -426,7 +426,12 @@ function textToHeaders(value: string): string[] {
 export function GroupsPage() {
   const { node, ok, err } = useToast();
   const [groups, setGroups] = useState<Group[]>([]);
-  const [filter, setFilter] = useState('');
+  /** 频道关键字：匹配频道 ID、名称与源地址。 */
+  const [keyword, setKeyword] = useState('');
+  /** 分组筛选：分组 id；空串表示全部分组。 */
+  const [groupFilter, setGroupFilter] = useState('');
+  /** 访问范围筛选：`public`、`archived`；空串表示全部。 */
+  const [accessFilter, setAccessFilter] = useState('');
   const [groupForm, setGroupForm] = useState<{
     form: GroupForm;
     prefetch: PrefetchForm;
@@ -473,12 +478,27 @@ export function GroupsPage() {
   const channelDropRef = useRef<DropMark | null>(null);
   /** 标题栏按下时的元素。按下与松开不在同一元素时，click 落在共同祖先上。 */
   const headPress = useRef<EventTarget | null>(null);
+  /** 上一轮是否在搜索。搜索刚开始时展开全部分组，露出匹配的频道。 */
+  const searching = useRef(false);
   /** 解析脚本列表；打开频道弹窗时按需加载。 */
   const [scripts, setScripts] = useState<string[]>([]);
   /** 当前账号的播放凭证。复制播放地址时附上，否则在开启凭证校验时是死链。 */
   const [playToken, setPlayToken] = useState('');
   /** 来源 id → 源名称。分组与频道徽章用。 */
   const [sourceNames, setSourceNames] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const active = keyword.trim() !== '';
+    if (active && !searching.current) setCollapsed([]);
+    searching.current = active;
+  }, [keyword]);
+
+  // 分组被删除后，清掉失效的分组筛选。
+  useEffect(() => {
+    if (groupFilter !== '' && !groups.some((group) => group.id === groupFilter)) {
+      setGroupFilter('');
+    }
+  }, [groups, groupFilter]);
 
   useEffect(() => {
     void api<{ token?: string }>('GET', '/me')
@@ -969,15 +989,43 @@ export function GroupsPage() {
     });
   };
 
-  const keyword = filter.trim().toLowerCase();
-  const visible = keyword
-    ? groups.filter((group) => {
-        if (`${group.id} ${group.name}`.toLowerCase().includes(keyword)) return true;
-        return (group.channels ?? []).some((channel) =>
-          `${channel.id} ${channel.name}`.toLowerCase().includes(keyword),
-        );
-      })
-    : groups;
+  const needle = keyword.trim().toLowerCase();
+  /** 任一项筛选生效。空状态文案与「清除筛选」按钮共用。 */
+  const filtering = needle !== '' || groupFilter !== '' || accessFilter !== '';
+  /** 频道命中搜索：ID、名称、源地址任一包含关键字。 */
+  const matchesChannel = (channel: Channel) => {
+    if (needle === '') return true;
+    return `${channel.id} ${channel.name} ${channel.url}`.toLowerCase().includes(needle);
+  };
+  const groupOptions = [
+    { value: '', label: '全部分组' },
+    ...groups.map((group) => ({
+      value: group.id,
+      label: group.name || group.id,
+      desc: group.name !== '' && group.name !== group.id ? `[${group.id}]` : undefined,
+    })),
+  ];
+  const accessOptions = [
+    { value: '', label: '全部访问范围' },
+    ...ACCESS.map((item) => ({ value: item.value, label: item.label })),
+  ];
+  /** 先按分组与访问范围过滤分组，再按关键字过滤组内频道。
+   *
+   * 关键字生效时，组内只保留命中的频道；没有命中频道的分组不显示。
+   */
+  const visible = groups
+    .filter((group) => groupFilter === '' || group.id === groupFilter)
+    .filter((group) => accessFilter === '' || group.access === accessFilter)
+    .map((group) => ({
+      group,
+      channels: (group.channels ?? []).filter(matchesChannel),
+    }))
+    .filter((item) => needle === '' || item.channels.length > 0);
+  const clearFilters = () => {
+    setKeyword('');
+    setGroupFilter('');
+    setAccessFilter('');
+  };
   const selectedLooseChannels = selectedChannels.filter((item) => !selected.includes(item.gid));
   const selectionText = [
     selected.length > 0 ? `${selected.length} 个分组` : '',
@@ -989,14 +1037,6 @@ export function GroupsPage() {
   return (
     <>
       <PageHead icon="groups" title="分组管理" sub="管理直播分组与频道">
-        <input
-          className="search"
-          aria-label="搜索分组或频道"
-          title="按分组名称、分组 ID 或频道名称筛选"
-          placeholder="搜索分组或频道"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        />
         <button
           className="ghost"
           title="从 M3U 文本导入分组与频道"
@@ -1056,6 +1096,46 @@ export function GroupsPage() {
         </button>
       </PageHead>
 
+      <div className="filter-bar">
+        <input
+          className="search"
+          aria-label="搜索频道"
+          title="按频道 ID、频道名称或源地址筛选"
+          placeholder="搜索频道 ID、名称或源地址"
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+        />
+        <Select
+          ariaLabel="按分组筛选"
+          title="按分组筛选；可输入名称搜索"
+          value={groupFilter}
+          options={groupOptions}
+          onChange={setGroupFilter}
+          searchable
+          searchPlaceholder="搜索分组名称"
+          width={220}
+        />
+        <Select
+          ariaLabel="按访问范围筛选"
+          title="按访问范围筛选"
+          value={accessFilter}
+          options={accessOptions}
+          onChange={setAccessFilter}
+          width={160}
+        />
+        {filtering && (
+          <button className="ghost" title="清除全部筛选条件" onClick={clearFilters}>
+            <Icon name="close" size={14} />
+            清除筛选
+          </button>
+        )}
+        {filtering && (
+          <span className="muted filter-count">
+            显示 {visible.length} / {groups.length} 个分组
+          </span>
+        )}
+      </div>
+
       {multi && (selected.length > 0 || selectedChannels.length > 0) && (
         <div className="card">
           <div className="row between">
@@ -1086,11 +1166,11 @@ export function GroupsPage() {
         <div className="card muted">
           {groups.length === 0
             ? '还没有分组。点「新建分组」创建，或用 M3U 导入现有清单。'
-            : '没有匹配的分组。'}
+            : '没有匹配的分组或频道。'}
         </div>
       )}
 
-      {visible.map((group) => {
+      {visible.map(({ group, channels: shown }) => {
         const channels = group.channels ?? [];
         // 排序按 `groups` 的绝对下标；搜索过滤时也不会错位。
         const groupIndex = groups.indexOf(group);
@@ -1189,7 +1269,18 @@ export function GroupsPage() {
                 <HoverTip text={modeTip(group.mode)}>
                   <span className={`badge mode ${group.mode}`}>{modeCode(group.mode)}</span>
                 </HoverTip>
-                <span className="count">{channels.length} 频道</span>
+                <span
+                  className="count"
+                  title={
+                    needle !== ''
+                      ? `匹配 ${shown.length} 个频道，共 ${channels.length} 个`
+                      : undefined
+                  }
+                >
+                  {needle !== ''
+                    ? `${shown.length} / ${channels.length} 频道`
+                    : `${channels.length} 频道`}
+                </span>
                 <button
                   className="icon-btn move"
                   disabled={groupIndex <= 0}
@@ -1257,7 +1348,9 @@ export function GroupsPage() {
             </div>
 
             {!isCollapsed &&
-              channels.map((channel, channelIndex) => {
+              shown.map((channel) => {
+              // 排序按钮按完整列表的下标判断边界，搜索过滤不影响排序。
+              const channelIndex = channels.indexOf(channel);
               const state = health[`${group.id}/${channel.id}`];
               const offlineOnFail =
                 channel.offline_on_fail ?? (group.offline_on_fail === true);

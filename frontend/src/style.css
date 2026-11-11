@@ -556,6 +556,30 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
+/* 列表页的筛选条：关键字、分组、状态排成一行，窄屏自动换行。 */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.filter-bar > input.search {
+  flex: 0 1 260px;
+  width: 260px;
+  min-width: 180px;
+}
+
+.filter-bar > .select {
+  flex: 0 0 auto;
+}
+
+.filter-bar .filter-count {
+  margin-left: auto;
+  font-size: 12.5px;
+}
+
 /* 卡片内的小节标题。 */
 .section-title {
   display: flex;
@@ -1243,14 +1267,40 @@ textarea {
 .select-menu {
   position: fixed;
   z-index: 45;
+  display: flex;
+  flex-direction: column;
   margin: 0;
   padding: 4px;
-  overflow-y: auto;
-  list-style: none;
   background: var(--panel);
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   box-shadow: var(--shadow-menu);
+}
+
+/* 选项列表单独滚动；搜索框固定在顶部，不随列表滚走。 */
+.select-list {
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+/* 可搜索菜单顶部的过滤框。 */
+.select-search {
+  flex: none;
+  width: 100%;
+  height: 30px;
+  margin-bottom: 4px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.select-empty {
+  padding: 10px 8px;
+  color: var(--text3);
+  font-size: 12.5px;
+  text-align: center;
 }
 
 .select-option {
@@ -1340,6 +1390,17 @@ textarea {
 
 .select-option.selected:hover {
   background: color-mix(in srgb, var(--accent-weak) 82%, var(--panel-3));
+}
+
+/* 可搜索模式下焦点在搜索框，用轮廓标出键盘光标所在选项。 */
+.select-option.active {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--panel-3);
+}
+
+.select-option.selected.active {
+  background: var(--accent-weak);
 }
 
 .select-option .icon {
