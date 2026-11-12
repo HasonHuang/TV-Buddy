@@ -1,0 +1,36 @@
+# TV Buddy 的 Compose 部署文件。使用已发布镜像，不在本地构建。
+# 生产环境请固定版本 tag。镜像不含 ffmpeg 与 python3。
+#
+# 启动：docker compose up -d
+# 日志：docker compose logs -f
+# 初始口令：docker compose exec tv-buddy cat /data/cache/admin_initial_credentials.txt
+
+name: tv-buddy
+
+services:
+  tv-buddy:
+    image: hason666/tv-buddy:latest
+    container_name: tv-buddy
+    restart: unless-stopped
+    # 回收子进程（ffmpeg、python3 等）。
+    init: true
+    ports:
+      - "${TV_BUDDY_PORT:-9900}:9900"
+    environment:
+      # 仅首次启动生效。留空则生成随机口令。
+      TV_BUDDY_INITIAL_PASSWORD: ${TV_BUDDY_INITIAL_PASSWORD:-}
+      # RUST_LOG: tv_buddy=debug
+    volumes:
+      # 数据库、日志、缓存与初始口令都在 /data。
+      # 换绑定挂载时，先执行 chown -R 10001:10001 <目录>。
+      - tv-buddy-data:/data
+    logging:
+      # 限制 Docker 日志占用，避免占满磁盘。
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  tv-buddy-data:
+    name: tv-buddy-data
