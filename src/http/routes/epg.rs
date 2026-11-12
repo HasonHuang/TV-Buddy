@@ -337,7 +337,14 @@ pub async fn cron_preview(
     let config = state.snapshot();
     let offset = config.server.timezone_offset_hours as i64;
     match epg::cron_preview(expr, epg::now_secs() as i64, offset, 3) {
-        Ok(next) => Json(json!({ "ok": true, "next": next })),
+        Ok(next) => {
+            // 面板直接显示，按服务器时区格式化。cron 也按同一时区解释。
+            let next: Vec<String> = next
+                .into_iter()
+                .map(|epoch| epg::format_datetime(epoch, offset))
+                .collect();
+            Json(json!({ "ok": true, "next": next }))
+        }
         Err(error) => Json(json!({ "ok": false, "error": format!("{error:#}") })),
     }
 }

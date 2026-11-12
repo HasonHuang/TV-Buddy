@@ -1548,7 +1548,14 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     assert_eq!(body["ok"], true);
-    assert_eq!(body["next"].as_array().expect("next").len(), 3);
+    let next = body["next"].as_array().expect("next");
+    assert_eq!(next.len(), 3);
+    for item in next {
+        let text = item.as_str().expect("预览应为格式化时间");
+        assert_eq!(text.len(), 19, "{text}");
+        assert_eq!(&text[4..5], "-");
+        assert_eq!(&text[10..11], " ");
+    }
 
     let response = fixture
         .client

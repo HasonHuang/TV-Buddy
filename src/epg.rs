@@ -2442,6 +2442,13 @@ fn format_local(epoch: i64, offset_hours: i64) -> String {
     )
 }
 
+/// Unix 秒 → `[server].timezone_offset_hours` 下的 `YYYY-MM-DD HH:MM:SS`。
+///
+/// cron 预览用。与 [`format_local`] 的区别是日期与时间之间用空格。
+pub fn format_datetime(epoch: i64, offset_hours: i64) -> String {
+    format_local(epoch, offset_hours).replace('T', " ")
+}
+
 /// XMLTV 时间 → `YYYYMMDDHHMMSS +0000`。
 fn format_time(epoch: i64) -> String {
     let days = epoch.div_euclid(86_400);
@@ -4158,6 +4165,12 @@ mod tests {
         source.cron.clear();
         source.enabled = false;
         assert!(!uses_global_schedule(&source), "停用源不采集");
+    }
+
+    #[test]
+    fn format_datetime_uses_space_and_offset() {
+        assert_eq!(format_datetime(1_700_000_000, 0), "2023-11-14 22:13:20");
+        assert_eq!(format_datetime(1_700_000_000, 8), "2023-11-15 06:13:20");
     }
 
     #[test]
