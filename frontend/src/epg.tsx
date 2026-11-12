@@ -1,6 +1,6 @@
 /** EPG 配置页：源、频道绑定、关键字规则。 */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from './api';
 import { Badge, Confirm, Empty, Field, Modal, Select, Switch, Tip, useToast } from './ui';
@@ -697,6 +697,9 @@ export function EpgSourcesTab() {
 
 /* ---------------- 绑定 ---------------- */
 
+/** 源频道列表每页条数。后端允许的最大值也是 200。 */
+const SOURCE_CHANNEL_PAGE_SIZE = 200;
+
 function BindingModal({
   row,
   sources,
@@ -714,22 +717,30 @@ function BindingModal({
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? '');
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<SourceChannel[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [copyFrom, setCopyFrom] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (mode !== 'source' || !sourceId) return;
     let alive = true;
     setLoading(true);
     const timer = window.setTimeout(() => {
-      api<{ items: SourceChannel[] }>(
+      api<{ items: SourceChannel[]; total: number }>(
         'GET',
-        `/epg/source-channels/${encodeURIComponent(sourceId)}?q=${encodeURIComponent(query)}&limit=200`,
+        `/epg/source-channels/${encodeURIComponent(sourceId)}?q=${encodeURIComponent(query)}&limit=${SOURCE_CHANNEL_PAGE_SIZE}&offset=${offset}`,
       )
         .then((data) => {
-          if (alive) setItems(data.items ?? []);
+          if (!alive) return;
+          const nextItems = data.items ?? [];
+          setItems(nextItems);
+          setTotal(data.total ?? 0);
+          // 源被重新采集后条数变少：当前页越界时回到第一页。
+          if (nextItems.length === 0 && offset > 0) setOffset(0);
         })
         .catch((err) => {
           if (alive) setError(errorText(err));
@@ -742,7 +753,12 @@ function BindingModal({
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [mode, sourceId, query]);
+  }, [mode, sourceId, query, offset]);
+
+  // 换页或换关键字后，列表滚回顶部。
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: 0 });
+  }, [sourceId, query, offset]);
 
   const bind = async (rawChannelId: string) => {
     setBusy(true);
@@ -798,6 +814,9 @@ function BindingModal({
     }
   };
 
+  const pages = Math.max(1, Math.ceil(total / SOURCE_CHANNEL_PAGE_SIZE));
+  const page = Math.floor(offset / SOURCE_CHANNEL_PAGE_SIZE);
+
   return (
     <Modal
       title={`为「${row.name}」选择 EPG`}
@@ -838,7 +857,10 @@ function BindingModal({
               <Select
                 value={sourceId}
                 options={sources.map((source) => ({ value: source.id, label: source.name }))}
-                onChange={setSourceId}
+                onChange={(value) => {
+                  setSourceId(value);
+                  setOffset(0);
+                }}
                 placeholder="选择源"
               />
             </Field>
@@ -848,11 +870,14 @@ function BindingModal({
               aria-label="搜索源频道"
               placeholder="搜索源频道名称或 ID"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setOffset(0);
+              }}
             />
-            <span className="muted">{loading ? '加载中…' : `${items.length} 个频道`}</span>
+            <span className="muted">{loading ? '加载中…' : `本页 ${items.length} 个频道`}</span>
           </div>
-          <div className="binding-list">
+          <div className="binding-list" ref={listRef}>
             {items.map((item) => (
               <button
                 className="binding-item"
@@ -867,6 +892,33 @@ function BindingModal({
             ))}
             {!loading && items.length === 0 && <Empty text="没有匹配的源频道" icon="search" />}
           </div>
+          {total > 0 && (
+            <div className="pager">
+              <span className="muted">
+                共 {total} 个频道 · 第 {page + 1} / {pages} 页
+              </span>
+              <div className="row">
+                <button
+                  className="ghost"
+                  title="查看上一页源频道"
+                  disabled={loading || offset === 0}
+                  onClick={() =>
+                    setOffset((current) => Math.max(0, current - SOURCE_CHANNEL_PAGE_SIZE))
+                  }
+                >
+                  上一页
+                </button>
+                <button
+                  className="ghost"
+                  title="查看下一页源频道"
+                  disabled={loading || offset + items.length >= total}
+                  onClick={() => setOffset((current) => current + SOURCE_CHANNEL_PAGE_SIZE)}
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <div className="fields">
