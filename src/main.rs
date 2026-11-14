@@ -75,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
     tv_buddy::timeshift::warm(&state);
     state.dash_timeshift.warm(&state);
     tv_buddy::health::spawn(state.clone());
+    tv_buddy::metrics_store::spawn(state.clone());
     tv_buddy::subscription::spawn(state.clone());
     // 启动时清掉过期令牌，避免表越积越大。
     match state.users.purge_expired() {

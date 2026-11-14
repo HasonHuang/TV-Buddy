@@ -131,6 +131,16 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
     let cfg = state.snapshot();
     let channels: usize = cfg.groups.iter().map(|group| group.channels.len()).sum();
     let disk = state.metrics.disk(&state.cache_dir);
+    let (disk_total_mb, disk_free_mb) = crate::metrics::disk_space_mb(&state.cache_dir);
+    let (net_rx_bytes, net_tx_bytes) = crate::metrics::net_bytes();
+    // 分组模式分布：概览页的频道分布卡直接用，避免前端再拉整份分组。
+    let mut group_modes: serde_json::Map<String, Value> = serde_json::Map::new();
+    for group in &cfg.groups {
+        let count = group_modes
+            .entry(group.mode.clone())
+            .or_insert_with(|| json!(0));
+        *count = json!(count.as_u64().unwrap_or(0) + 1);
+    }
     let entry_exts: serde_json::Map<String, Value> = cfg
         .groups
         .iter()
@@ -154,8 +164,16 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
         "version": state.version(),
         "mem_rss_mb": crate::metrics::rss_mb(),
         "cpu_seconds": crate::metrics::cpu_seconds(),
+        "host_cpu_percent": state.metrics.host_cpu_percent(),
+        "mem_total_mb": crate::metrics::mem_total_mb(),
+        "load_avg": crate::metrics::load_avg(),
         "disk_cache_mb": disk.cache_mb,
         "recording_mb": disk.recording_mb,
+        "disk_total_mb": disk_total_mb,
+        "disk_free_mb": disk_free_mb,
+        "host_net_rx_bytes": net_rx_bytes,
+        "host_net_tx_bytes": net_tx_bytes,
+        "group_modes": group_modes,
         "low_resource_mode": cfg.server.low_resource_mode,
         // 目标没有对应配置键，固定 10。
         "poll_interval_secs": 10,

@@ -50,15 +50,16 @@ function epgKey(channel: Channel): string {
   return typeof raw === 'string' ? raw.toLowerCase() : channel.id.toLowerCase();
 }
 
-const STATUS_TONE: Record<string, string> = {
+/** 任务状态与色调。概览页复用同一套映射。 */
+export const STATUS_TONE: Record<string, string> = {
   pending: 'info',
   recording: 'warn',
   finished: 'ok',
-  failed: 'err',
+  failed: 'danger',
   stopped: 'muted',
 };
 
-const STATUS_LABELS: Record<string, string> = {
+export const STATUS_LABELS: Record<string, string> = {
   pending: '等待中',
   recording: '录制中',
   finished: '已完成',

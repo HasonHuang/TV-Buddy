@@ -105,7 +105,7 @@ pub fn plan(
 /// 用 `f_bavail` 而非 `f_bfree`：前者是扣除保留块后**非特权用户真正可写**的块数，
 /// 才是回收该看的量。乘数用 `f_frsize`（POSIX 规定块计数以 fundamental
 /// fragment size 计），为 0 时退回 `f_bsize`。
-fn fs_space(dir: &Path) -> Option<(u64, u64)> {
+pub(crate) fn fs_space(dir: &Path) -> Option<(u64, u64)> {
     let vfs = rustix::fs::statvfs(dir).ok()?;
     let unit = if vfs.f_frsize != 0 {
         vfs.f_frsize

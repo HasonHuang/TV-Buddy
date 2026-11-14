@@ -62,6 +62,17 @@
   --warn-weak: #fff6e2;
   --info: #2f5bff;
   --info-weak: #edf1ff;
+  --violet: #7c5cf5;
+  --violet-weak: #f2eeff;
+
+  /* 概览：趋势曲线与指标卡底色。 */
+  --chart-a: #2f5bff;
+  --chart-b: #0ea97a;
+  --chart-c: #8b5cf6;
+  --kpi-blue: rgba(47, 91, 255, 0.08);
+  --kpi-green: rgba(14, 169, 122, 0.09);
+  --kpi-violet: rgba(139, 92, 246, 0.09);
+  --kpi-amber: rgba(183, 121, 0, 0.09);
 
   /* 圆角与阴影：卡片 12 px，控件 8 px。 */
   --radius: 16px;
@@ -138,6 +149,16 @@
   --warn-weak: #2b220e;
   --info: #7fa0ff;
   --info-weak: #17223c;
+  --violet: #b49bff;
+  --violet-weak: #201c36;
+
+  --chart-a: #7fa0ff;
+  --chart-b: #4bd6ac;
+  --chart-c: #b49bff;
+  --kpi-blue: rgba(127, 160, 255, 0.1);
+  --kpi-green: rgba(75, 214, 172, 0.09);
+  --kpi-violet: rgba(180, 155, 255, 0.09);
+  --kpi-amber: rgba(255, 195, 77, 0.09);
 
   --ring: rgba(127, 160, 255, 0.3);
 
@@ -2510,7 +2531,7 @@ pre.log .lv-trace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 
 /* 空实例引导：一句话 + 一个动作，不占整屏。 */
@@ -2565,40 +2586,6 @@ pre.log .lv-trace {
 
 .pager .row {
   gap: 6px;
-}
-
-/* 实时指标：一张卡里的五列数字，不再套一层小卡片。 */
-.metric-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 18px;
-}
-
-.metric-strip .stat {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.metric-strip .stat:hover {
-  border-color: transparent;
-}
-
-.metric-strip .v {
-  font-size: 20px;
-}
-
-/* 快速操作：两列按钮，保持单手可达与整齐的行高。 */
-.quick-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.quick-grid button {
-  justify-content: flex-start;
-  width: 100%;
 }
 
 /* 系统信息：右栏的键值列表。 */
@@ -2663,6 +2650,652 @@ pre.log .lv-trace {
 
 .feature-block .sep {
   color: var(--text3);
+}
+
+/* --- 概览页 --- */
+
+/* 概览页头跟随滚动，避免长页面失去刷新入口。 */
+.page-head.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: -26px -32px 16px;
+  padding: 14px 32px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 顶部指标卡：四列，窄屏自动换行。 */
+.ov-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ov-kpi {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow-xs);
+}
+
+/* 色调只做一层很浅的底，数值与文字仍取正文色。 */
+.ov-kpi::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--kpi-tone);
+  pointer-events: none;
+}
+
+.ov-kpi > * {
+  position: relative;
+}
+
+.ov-kpi.blue {
+  --kpi-tone: var(--kpi-blue);
+  --kpi-ink: var(--accent);
+  --kpi-ink-weak: var(--accent-weak);
+}
+
+.ov-kpi.green {
+  --kpi-tone: var(--kpi-green);
+  --kpi-ink: var(--ok);
+  --kpi-ink-weak: var(--ok-weak);
+}
+
+.ov-kpi.violet {
+  --kpi-tone: var(--kpi-violet);
+  --kpi-ink: var(--violet);
+  --kpi-ink-weak: var(--violet-weak);
+}
+
+.ov-kpi.amber {
+  --kpi-tone: var(--kpi-amber);
+  --kpi-ink: var(--warn);
+  --kpi-ink-weak: var(--warn-weak);
+}
+
+.ov-kpi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ov-kpi-label {
+  font-size: 12.5px;
+  color: var(--text2);
+}
+
+.ov-kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--kpi-ink) 15%, var(--panel));
+  color: var(--kpi-ink);
+}
+
+.ov-kpi-value {
+  margin-top: 6px;
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-kpi-value small {
+  margin-left: 3px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text2);
+}
+
+.ov-kpi-sub {
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text2);
+}
+
+/* 卡头：图标 + 标题 + 说明，右侧操作。 */
+.ov-card-head {
+  margin-bottom: 12px;
+}
+
+.ov-card-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 2px;
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+}
+
+.ov-card-head h3 .icon {
+  color: var(--text3);
+}
+
+.ov-play,
+.ov-tasks {
+  margin-bottom: 12px;
+}
+
+/* 播放概览里的四个小指标。 */
+.ov-mini-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.ov-mini {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+  padding: 10px 12px;
+}
+
+.ov-mini-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text2);
+  font-size: 11.5px;
+}
+
+.ov-mini-value {
+  margin-top: 3px;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-mini-value small {
+  margin-left: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text2);
+}
+
+/* 在线频道列表：名称、人数、请求数三列。 */
+.ov-channel-list {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.ov-channel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 72px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+
+.ov-channel:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.ov-channel-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-channel > .muted {
+  text-align: right;
+}
+
+/* 空状态：虚线框，高度与一行列表接近。 */
+.ov-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 58px;
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  color: var(--text3);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* 文案里的行内动作，不继承按钮的底色与高度。 */
+button.ov-link {
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  line-height: inherit;
+}
+
+button.ov-link:hover:not(:disabled) {
+  background: none;
+  color: var(--accent-dark);
+  text-decoration: underline;
+}
+
+/* 待触发任务：名称、时间、状态。 */
+.ov-task-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.ov-task {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+
+.ov-task:last-child {
+  border-bottom: 0;
+}
+
+.ov-task-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-task .badge {
+  justify-self: end;
+}
+
+/* 资源卡：CPU、内存、存储。 */
+.ov-res-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ov-res {
+  margin-bottom: 0;
+}
+
+.ov-res .ov-card-head {
+  margin-bottom: 8px;
+}
+
+.ov-res-pct {
+  color: var(--text2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-res-value {
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-bar {
+  height: 7px;
+  margin: 10px 0 8px;
+  border-radius: 99px;
+  background: var(--panel-3);
+  overflow: hidden;
+}
+
+.ov-bar.empty span {
+  display: none;
+}
+
+.ov-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.ov-bar.green span {
+  background: var(--ok);
+}
+
+.ov-bar.amber span {
+  background: var(--warn);
+}
+
+.ov-bar.violet span {
+  background: var(--violet);
+}
+
+.ov-res-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text2);
+  font-size: 11.5px;
+}
+
+/* 趋势图：两张并排。 */
+.ov-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* 趋势窗口切换条：右对齐，窄屏换行。 */
+.ov-chart-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ov-range {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+button.ov-range-btn {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+button.ov-range-btn:hover:not(:disabled):not(.active) {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+button.ov-range-btn.active {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+.ov-chart {
+  margin-bottom: 0;
+}
+
+.ov-chart .ov-card-head {
+  margin-bottom: 8px;
+}
+
+.ov-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ov-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text2);
+  font-size: 11.5px;
+}
+
+.ov-legend-item i {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+}
+
+.ov-legend-item b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 图表坐标系：左列纵轴刻度，右列曲线，下行为时间刻度。 */
+.ov-chart-frame {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  grid-template-rows: 112px 18px;
+  column-gap: 6px;
+  row-gap: 2px;
+}
+
+.ov-y-axis {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 3px 0 4px;
+  color: var(--text3);
+  font-size: 10.5px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ov-x-axis {
+  grid-area: 2 / 2;
+  display: flex;
+  justify-content: space-between;
+  color: var(--text3);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-spark-wrap {
+  grid-area: 1 / 2;
+  position: relative;
+  height: 112px;
+  /* 横向拖动用于查看数值，纵向仍可滚动页面。 */
+  touch-action: pan-y;
+}
+
+.ov-spark {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ov-spark-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+/* 悬停：竖线、数据点与数值提示。 */
+.ov-spark-cursor {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.ov-spark-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--panel);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.ov-tip {
+  position: absolute;
+  top: 2px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow-xs);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ov-tip-time {
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text2);
+}
+
+.ov-tip-row i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.ov-tip-row b {
+  margin-left: auto;
+  padding-left: 10px;
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 底部两栏：会话、系统信息与频道分布。 */
+.ov-dash {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+  min-height: 0;
+}
+
+/* 左栏只有一张卡：用 flex 填满行高，与右栏底部对齐。 */
+.dash-main .ov-dash {
+  flex: 1 1 auto;
+}
+
+/* 空态固定高度并垂直居中，不随卡片拉长。 */
+.ov-dash .ov-empty {
+  flex: 0 0 auto;
+  min-height: 132px;
+  margin: auto 0;
+}
+
+/* 在线频道列表直接接在卡头下，不再加分隔线。 */
+.ov-dash .ov-channel-list {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.ov-info,
+.ov-dist {
+  margin-bottom: 0;
+}
+
+.ov-dist-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.ov-dist-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+
+.ov-dist-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.ov-dist-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text2);
+}
+
+.ov-dist-row b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text3);
+}
+
+.ov-dot.proxy {
+  background: var(--accent);
+}
+
+.ov-dot.dash {
+  background: var(--violet);
+}
+
+.ov-dot.redirect {
+  background: var(--warn);
+}
+
+.ov-dot.remux,
+.ov-dot.rewrite {
+  background: var(--ok);
+}
+
+.ov-arrow {
+  transform: rotate(90deg);
+}
+
+@media (max-width: 720px) {
+  .ov-channel {
+    grid-template-columns: minmax(0, 1fr) 56px 56px;
+    gap: 6px;
+  }
+
+  .ov-task {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ov-task .muted {
+    display: none;
+  }
+
+  .page-head.sticky {
+    margin: -16px -14px 14px;
+    padding: 12px 14px;
+  }
 }
 
 /* --- 登录页 --- */

@@ -45,6 +45,12 @@ export type IconName =
   | 'play'
   | 'image'
   | 'file'
+  | 'cpu'
+  | 'memory'
+  | 'disk'
+  | 'network'
+  | 'activity'
+  | 'server'
   | 'users';
 
 /** 日历轮廓；EPG 与日期输入共用同一图形，避免维护两份相近路径。 */
@@ -215,6 +221,46 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M4 1.9h4.9l3.1 3.1v9.1H4z" />
       <path d="M8.9 1.9v3.1h3.1" />
+    </>
+  ),
+  /* 处理器：外框 + 内核 + 四周引脚。 */
+  cpu: (
+    <>
+      <rect x="4.1" y="4.1" width="7.8" height="7.8" rx="1.5" />
+      <rect x="6.4" y="6.4" width="3.2" height="3.2" rx="0.7" />
+      <path d="M6 1.9v2.2M10 1.9v2.2M6 11.9v2.2M10 11.9v2.2M1.9 6h2.2M1.9 10h2.2M11.9 6h2.2M11.9 10h2.2" />
+    </>
+  ),
+  /* 内存条：外壳 + 金手指。 */
+  memory: (
+    <>
+      <rect x="1.8" y="4.4" width="12.4" height="7.2" rx="1.4" />
+      <path d="M4.3 6.4v3.2M6.8 6.4v3.2M9.2 6.4v3.2M11.7 6.4v3.2" />
+      <path d="M4 13.6v-1M6.5 13.6v-1M9.5 13.6v-1M12 13.6v-1" />
+    </>
+  ),
+  /* 存储：盘体 + 指示灯。 */
+  disk: (
+    <>
+      <rect x="1.9" y="3.2" width="12.2" height="9.6" rx="1.6" />
+      <circle cx="11.4" cy="6.6" r="0.8" />
+      <path d="M4.2 11.2h4.6" />
+    </>
+  ),
+  /* 网络：两段上下行箭头。 */
+  network: (
+    <>
+      <path d="M4.2 2.6v9.2M2.2 4.6l2-2 2 2M11.8 13.4V4.2M9.8 11.4l2 2 2-2" />
+    </>
+  ),
+  /* 趋势：折线。 */
+  activity: <path d="M1.8 10.6 5 7.4l2.6 2.2 3-3.4 2.6 2.6" />,
+  /* 服务器：机架两层。 */
+  server: (
+    <>
+      <rect x="1.9" y="2.4" width="12.2" height="4.6" rx="1.3" />
+      <rect x="1.9" y="9" width="12.2" height="4.6" rx="1.3" />
+      <path d="M4.5 4.7h.01M4.5 11.3h.01M7.4 4.7h3.8M7.4 11.3h3.8" />
     </>
   ),
 };

@@ -23,6 +23,10 @@ pub struct Stats {
     per_channel: Mutex<HashMap<String, u64>>,
 }
 
+/// 统计键上限。路径来自请求，必须有界，避免无效地址占满内存。
+const MAX_GROUP_KEYS: usize = 1024;
+const MAX_CHANNEL_KEYS: usize = 16384;
+
 /// 指标快照。
 #[derive(Debug, Clone)]
 pub struct Snapshot {
@@ -36,22 +40,40 @@ pub struct Snapshot {
 
 impl Stats {
     /// 记一次请求；`gid` 为空表示不属于任何分组。
+    ///
+    /// 达到键上限后，新键不再登记。已有键继续累加。
     pub fn record_request(&self, gid: &str) {
         self.requests.fetch_add(1, Ordering::Relaxed);
         if gid.is_empty() {
             return;
         }
         let mut groups = self.per_group.lock().unwrap_or_else(|e| e.into_inner());
-        *groups.entry(gid.to_string()).or_insert(0) += 1;
+        let at_capacity = groups.len() >= MAX_GROUP_KEYS;
+        match groups.get_mut(gid) {
+            Some(count) => *count += 1,
+            None if !at_capacity => {
+                groups.insert(gid.to_string(), 1);
+            }
+            None => {}
+        }
     }
 
     /// 记一次频道请求。`key` 形如 `gid/cid`。
+    ///
+    /// 达到键上限后，新键不再登记。已有键继续累加。
     pub fn record_channel(&self, key: &str) {
         if key.is_empty() {
             return;
         }
         let mut channels = self.per_channel.lock().unwrap_or_else(|e| e.into_inner());
-        *channels.entry(key.to_string()).or_insert(0) += 1;
+        let at_capacity = channels.len() >= MAX_CHANNEL_KEYS;
+        match channels.get_mut(key) {
+            Some(count) => *count += 1,
+            None if !at_capacity => {
+                channels.insert(key.to_string(), 1);
+            }
+            None => {}
+        }
     }
 
     /// 某频道的累计请求数。未记录过的频道返回 0。
@@ -62,6 +84,14 @@ impl Stats {
             .get(key)
             .copied()
             .unwrap_or(0)
+    }
+
+    /// 频道键是否已登记。用于跳过高频请求里的频道列表扫描。
+    pub fn channel_tracked(&self, key: &str) -> bool {
+        self.per_channel
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(key)
     }
 
     pub fn record_playlist(&self) {
@@ -123,5 +153,30 @@ mod tests {
         assert_eq!(snapshot.playlists, 1);
         assert_eq!(snapshot.upstream_failures, 1);
         assert_eq!(snapshot.groups, vec![("g1".into(), 2), ("g2".into(), 1)]);
+    }
+
+    #[test]
+    fn caps_new_stat_keys() {
+        let stats = Stats::default();
+        for index in 0..=MAX_GROUP_KEYS {
+            stats.record_request(&format!("g{index}"));
+        }
+        {
+            let groups = stats.per_group.lock().unwrap();
+            assert_eq!(groups.len(), MAX_GROUP_KEYS);
+        }
+
+        for index in 0..=MAX_CHANNEL_KEYS {
+            stats.record_channel(&format!("g/c{index}"));
+        }
+        {
+            let channels = stats.per_channel.lock().unwrap();
+            assert_eq!(channels.len(), MAX_CHANNEL_KEYS);
+        }
+
+        // 已达上限时，已有键仍继续累加。
+        stats.record_channel("g/c0");
+        let channels = stats.per_channel.lock().unwrap();
+        assert_eq!(channels.get("g/c0"), Some(&2));
     }
 }

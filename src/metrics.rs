@@ -36,12 +36,22 @@ struct CachedDisk {
     sample: DiskSample,
 }
 
+/// 主机 CPU 的两次 `/proc/stat` 采样。
+struct CpuSample {
+    idle: u64,
+    total: u64,
+    at: Instant,
+    /// 上一次算出的百分比。间隔过短时复用，避免除以 0。
+    percent: f64,
+}
+
 #[derive(Default)]
 pub struct Metrics {
     out_bytes: AtomicU64,
     /// 在线记录：(时间, 观众键, 频道键)。频道键形如 `gid/cid`。
     viewers: Mutex<VecDeque<(i64, String, String)>>,
     disk: Mutex<Option<CachedDisk>>,
+    cpu: Mutex<Option<CpuSample>>,
 }
 
 impl Metrics {
@@ -135,6 +145,45 @@ impl Metrics {
         });
         sample
     }
+
+    /// 主机 CPU 使用率（0–100）。取值口径与 `top` 相同：非空闲时间占比。
+    ///
+    /// 第一次调用只建立采样基线，返回 0。间隔不足 500 ms 时复用上次结果，
+    /// 避免面板连续刷新时出现 0/100 的抖动。
+    pub fn host_cpu_percent(&self) -> f64 {
+        let Some((idle, total)) = read_proc_stat() else {
+            return 0.0;
+        };
+        let now = Instant::now();
+        let mut guard = self.cpu.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(previous) = guard.as_ref() {
+            if now.duration_since(previous.at) < Duration::from_millis(500) {
+                return previous.percent;
+            }
+            let total_delta = total.saturating_sub(previous.total);
+            let idle_delta = idle.saturating_sub(previous.idle);
+            let percent = if total_delta == 0 {
+                0.0
+            } else {
+                ((total_delta.saturating_sub(idle_delta)) as f64 / total_delta as f64 * 100.0)
+                    .clamp(0.0, 100.0)
+            };
+            *guard = Some(CpuSample {
+                idle,
+                total,
+                at: now,
+                percent,
+            });
+            return percent;
+        }
+        *guard = Some(CpuSample {
+            idle,
+            total,
+            at: now,
+            percent: 0.0,
+        });
+        0.0
+    }
 }
 
 /// 目录总字节数。读不到按 0。
@@ -154,6 +203,73 @@ fn dir_bytes(path: &Path) -> u64 {
         }
     }
     total
+}
+
+/// 主机内存总量（MB）。读不到 `/proc/meminfo` 时返回 0。
+pub fn mem_total_mb() -> u64 {
+    let Ok(text) = fs::read_to_string("/proc/meminfo") else {
+        return 0;
+    };
+    text.lines()
+        .find_map(|line| line.strip_prefix("MemTotal:"))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|kb| kb / 1024)
+        .unwrap_or(0)
+}
+
+/// 主机 1/5/15 分钟平均负载。读不到时返回全 0。
+pub fn load_avg() -> [f64; 3] {
+    let Ok(text) = fs::read_to_string("/proc/loadavg") else {
+        return [0.0; 3];
+    };
+    let mut fields = text.split_whitespace();
+    let mut values = [0.0; 3];
+    for value in values.iter_mut() {
+        *value = fields
+            .next()
+            .and_then(|field| field.parse().ok())
+            .unwrap_or(0.0);
+    }
+    values
+}
+
+/// 主机网卡累计收发字节。回环接口不计入。
+///
+/// 读不到 `/proc/net/dev` 时返回 `(0, 0)`。面板按两次采样的差值算速率。
+pub fn net_bytes() -> (u64, u64) {
+    let Ok(text) = fs::read_to_string("/proc/net/dev") else {
+        return (0, 0);
+    };
+    let mut rx = 0u64;
+    let mut tx = 0u64;
+    // 前两行是标题。每行格式：接口名: 收包字段… 发包字段…
+    for line in text.lines().skip(2) {
+        let Some((name, rest)) = line.split_once(':') else {
+            continue;
+        };
+        if name.trim() == "lo" {
+            continue;
+        }
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        // 收方向第 1 个字段是字节，发方向第 9 个字段是字节。
+        rx += fields
+            .first()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        tx += fields
+            .get(8)
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+    }
+    (rx, tx)
+}
+
+/// 目录所在文件系统的总容量与可用容量（MB）。
+///
+/// 读不到挂载信息时返回 `(0, 0)`。与缓存回收共用同一套 `statvfs` 计算。
+pub fn disk_space_mb(path: &Path) -> (u64, u64) {
+    crate::cache_gc::fs_space(path).unwrap_or((0, 0))
 }
 
 /// 进程常驻内存（MB）。
@@ -205,6 +321,29 @@ pub fn whole_file_budget(mb: u64) -> u64 {
     } else {
         mb.saturating_mul(1024 * 1024)
     }
+}
+
+/// 读 `/proc/stat` 的首行，返回 `(空闲滴答, 总滴答)`。
+///
+/// 用户态、内核态、中断与软中断都算忙；`idle` 与 `iowait` 算空闲。
+/// `guest` 已计入 `user`，不再重复累加。非 Linux 平台返回 `None`。
+fn read_proc_stat() -> Option<(u64, u64)> {
+    let text = fs::read_to_string("/proc/stat").ok()?;
+    let line = text.lines().next()?;
+    let mut fields = line.split_whitespace();
+    if fields.next()? != "cpu" {
+        return None;
+    }
+    let values: Vec<u64> = fields
+        .take(8)
+        .filter_map(|value| value.parse().ok())
+        .collect();
+    if values.len() < 5 {
+        return None;
+    }
+    let total: u64 = values.iter().sum();
+    let idle = values[3].saturating_add(values[4]);
+    Some((idle, total))
 }
 
 #[cfg(target_os = "linux")]

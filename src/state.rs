@@ -78,6 +78,8 @@ pub struct AppState {
     pub epg: crate::epg::EpgState,
     /// EPG 源、绑定与关键字规则（SQLite）。
     pub epg_store: crate::epg_store::Store,
+    /// 指标历史（SQLite）。
+    pub history: crate::metrics_store::Store,
     /// IP 统计与封禁。
     pub ip_guard: crate::auth::IpGuard,
     /// 每 IP 播放会话上限与空闲超时。
@@ -124,6 +126,7 @@ impl AppState {
             tracing::warn!("auth.token_enabled=false：播放地址不校验令牌。建议在面板安全页开启。");
         }
         let users = crate::users::UserStore::attach(conn.clone())?;
+        let history = crate::metrics_store::Store::new(conn.clone())?;
         let epg_store = crate::epg_store::Store::attach(conn)?;
         let epg = crate::epg::EpgState::load(&cache_dir);
         // 旧配置里的 `[[epg.sources]]` 逐条导入。成功的从配置移除，失败的保留。
@@ -180,6 +183,7 @@ impl AppState {
             modes: AddressCache::new(),
             epg,
             epg_store,
+            history,
             cache_dir,
             stats: Stats::default(),
             metrics: Arc::new(crate::metrics::Metrics::new()),

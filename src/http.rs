@@ -166,6 +166,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/cache/flush", post(routes::admin::cache_flush))
         .route("/panel/api/cdn/estimate", post(routes::cdn::estimate))
         .route("/panel/api/stats", get(routes::admin::stats))
+        .route(
+            "/panel/api/metrics/history",
+            get(routes::admin::metrics_history),
+        )
         .route("/panel/api/logs", get(routes::admin::logs))
         .route("/panel/api/link-info", get(routes::security::link_info))
         .route(

@@ -155,6 +155,27 @@ pub async fn stats(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) 
     }))
 }
 
+/// `GET /panel/api/metrics/history?range=5m`——趋势图历史。
+///
+/// 窗口：`5m`、`10m`、`1h`、`24h`、`7d`。未知或缺失按 `5m` 处理。
+/// 聚合在阻塞线程池执行，避免 7 天范围的查询占住 tokio worker。
+pub async fn metrics_history(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    let range = query
+        .get("range")
+        .and_then(|value| crate::metrics_store::Range::parse(value))
+        .unwrap_or(crate::metrics_store::Range::M5);
+    let store = state.history.clone();
+    let points = tokio::task::spawn_blocking(move || store.history(range))
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok(Json(json!({ "range": range.key(), "points": points })))
+}
+
 /// `GET /panel/api/logs?limit=n`。
 pub async fn logs(
     PanelAuth(_): PanelAuth,
@@ -174,15 +195,36 @@ pub async fn logs(
 }
 
 /// 统计中间件：记总请求数，并按首个路径段记分组。
+///
+/// 只登记配置中存在的分组。未知路径只增加总数，不写分组表。
+/// 这样扫描器无法用随机地址撑大内存。
 pub async fn count_request(
     State(state): State<Arc<AppState>>,
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    let gid = group_of(request.uri().path()).unwrap_or_default();
-    state.stats.record_request(&gid);
-    if let Some(key) = channel_of(request.uri().path()) {
-        state.stats.record_channel(&key);
+    let path = request.uri().path();
+    let gid = group_of(path).unwrap_or_default();
+    if gid.is_empty() {
+        state.stats.record_request("");
+    } else {
+        // 快照只在有首段路径时读取。未知分组只增加总数。
+        let config = state.snapshot();
+        match config.group(&gid) {
+            Some(group) => {
+                state.stats.record_request(&gid);
+                if let Some(key) = channel_of(path) {
+                    // 已登记的频道键直接累加；新键要求频道在配置里，
+                    // 避免任意 cid 占满统计表，挤掉真实频道。
+                    let tracked = state.stats.channel_tracked(&key);
+                    let cid = key.split_once('/').map(|(_, cid)| cid).unwrap_or_default();
+                    if tracked || group.channels.iter().any(|channel| channel.id == cid) {
+                        state.stats.record_channel(&key);
+                    }
+                }
+            }
+            None => state.stats.record_request(""),
+        }
     }
     let response = next.run(request).await;
     count_out(state, response)

@@ -1,20 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getRole, getToken, setRole, setToken, UNAUTHORIZED_EVENT } from './api';
 import { BrandMark, Icon, type IconName } from './icons';
-import { Confirm, PageHead, ThemeToggle, useToast } from './ui';
+import { Confirm, ThemeToggle } from './ui';
 import { GroupsPage } from './groups';
 import { EpgPanelPage, LogsPage, SecurityPage } from './ops';
 import { CachePage, StatsPage } from './cache';
 import { AssetsPage } from './assets';
 import { SettingsPage } from './settings';
-import { SystemPage } from './system';
 import { LogosPage } from './logo';
 import { UsersPage } from './users';
 import { PlaylistPage } from './playlist';
 import { LivestreamPage, SchedulePage } from './schedule';
 import { MySubsPage } from './my';
+import { Overview, uptime } from './overview';
 import './style.css';
 
 /** 侧栏分区；顺序按目标面板。 */
@@ -64,7 +64,25 @@ const FEATURE_LABELS: [string, string][] = NAV.flatMap((item) =>
   item.feature ? [[item.feature, item.label] as [string, string]] : [],
 );
 
-type Status = Record<string, unknown>;
+const SECTION_IDS = new Set<string>(NAV.map((item) => item.id));
+
+/** 从地址栏哈希取分区。`#/groups` → `groups`，未知值返回 `null`。
+ *
+ * 面板挂在 `/panel`，没有前端路由库，也不会拦截服务端路径。用哈希做路由：
+ * 切换分区只改片段，刷新不会把请求打到不存在的服务端路径。
+ */
+function sectionFromHash(hash = window.location.hash): SectionId | null {
+  const id = hash.replace(/^#\/?/, '');
+  return SECTION_IDS.has(id) ? (id as SectionId) : null;
+}
+
+/** 把分区写进地址栏。`replace` 用于首次落地与纠正非法分区，不新增历史记录。 */
+function writeSection(next: SectionId, replace = false): void {
+  const target = `#/${next}`;
+  if (window.location.hash === target) return;
+  if (replace) window.history.replaceState(null, '', target);
+  else window.history.pushState(null, '', target);
+}
 
 function Login({ onDone }: { onDone: () => void }) {
   const [username, setUsername] = useState('');
@@ -145,248 +163,13 @@ function Login({ onDone }: { onDone: () => void }) {
   );
 }
 
-/** 字节数转可读文本。 */
-function bytes(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let size = value;
-  let index = 0;
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024;
-    index += 1;
-  }
-  return `${size >= 100 || index === 0 ? Math.round(size) : size.toFixed(2)} ${units[index]}`;
-}
-
-/** 秒数转「N 小时 M 分钟」。 */
-function uptime(secs: number): string {
-  const total = Math.max(0, Math.floor(secs));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
-  return `${minutes} 分钟`;
-}
-
-/** 单个指标卡。`icon` 显示在标签左侧，`unit` 用小一号字接在数值后。 */
-function Stat({
-  label,
-  value,
-  unit,
-  tone,
-  icon,
-}: {
-  label: string;
-  value: string;
-  unit?: string;
-  tone?: string;
-  icon?: IconName;
-}) {
-  return (
-    <div className="stat">
-      <div className="k">
-        {icon && <Icon name={icon} size={13} />}
-        {label}
-      </div>
-      <div className={`v${tone ? ` ${tone}` : ''}`}>
-        {value}
-        {unit ? <small>{unit}</small> : null}
-      </div>
-    </div>
-  );
-}
-
-function Overview({ features }: { features: Record<string, boolean> | null }) {
-  const [status, setStatus] = useState<Status | null>(null);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState('');
-  const { node, ok, err } = useToast();
-
-  const load = useCallback(async () => {
-    try {
-      setStatus(await api<Status>('GET', '/status'));
-      setError('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  /** 快速操作：端点都是现成的，成功后刷新状态。 */
-  const action = async (name: string, path: string, done: string) => {
-    setBusy(name);
-    try {
-      await api('POST', path);
-      ok(done);
-      await load();
-    } catch (cause) {
-      err(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy('');
-    }
-  };
-
-  const num = (key: string): number => {
-    const value = status?.[key];
-    return typeof value === 'number' ? value : 0;
-  };
-  const text = (key: string): string => {
-    const value = status?.[key];
-    return value === undefined || value === null ? '—' : String(value);
-  };
-
-  const backend = text('cache_backend') === 'memory' ? '内存' : '硬盘';
-  // 版本号在接口里不带前缀，界面统一显示 `v`。
-  const version = status?.version ? `v${status.version}` : '—';
-  // 与侧栏同一口径：缺少键也算启用，只有显式 false 才隐藏。
-  const enabledFeatures = features
-    ? FEATURE_LABELS.filter(([key]) => features[key] !== false)
-    : [];
-
-  return (
-    <>
-      <PageHead icon="overview" title="系统概览" sub="实时运行状态">
-        <span className="badge ok">● 运行 {uptime(num('uptime_secs'))}</span>
-      </PageHead>
-
-      <div className="stats kpi">
-        <Stat label="分组数" value={text('group_count')} icon="groups" />
-        <Stat label="频道数" value={text('channel_count')} icon="livestream" />
-        <Stat label="在线观众" value={text('online_viewers')} unit="人" icon="stats" />
-        <Stat label="缓存磁盘占用" value={text('disk_cache_mb')} unit="MB" icon="file" />
-      </div>
-
-      {status !== null && num('group_count') === 0 ? (
-        <section className="card setup-card">
-          <div>
-            <h2>从第一个分组开始</h2>
-            <p className="muted">创建分组并添加频道，或用 M3U 导入。保存后订阅地址会立即更新。</p>
-          </div>
-          <button
-            className="ghost"
-            onClick={() => window.dispatchEvent(new CustomEvent('tv-buddy:goto-groups'))}
-          >
-            <Icon name="groups" size={14} />
-            打开分组管理
-          </button>
-        </section>
-      ) : null}
-
-      <div className="dash-grid">
-        <div className="dash-main">
-          <section className="card">
-            <div className="section-title">实时指标</div>
-            <div className="metric-strip">
-              <Stat label="下行流量" value={bytes(num('traffic_in_bytes'))} icon="download" />
-              <Stat label="上行流量" value={bytes(num('traffic_out_bytes'))} icon="upload" />
-              <Stat label="进程内存" value={text('mem_rss_mb')} unit="MB" icon="cache" />
-              <Stat label="CPU 占用" value={text('cpu_seconds')} unit="秒" icon="stats" />
-              <Stat
-                label="整盘内存峰值"
-                value={bytes(num('whole_file_peak'))}
-                unit={`/ ${bytes(num('whole_file_budget'))}`}
-                icon="file"
-              />
-            </div>
-          </section>
-
-          <section className="card">
-            <div className="section-title">快速操作</div>
-            <div className="quick-grid">
-              <button
-                className="ghost"
-                title="删除已保存的清单与切片，释放磁盘"
-                disabled={busy !== ''}
-                onClick={() => void action('flush', '/cache/flush', '本地缓存已清空')}
-              >
-                <Icon name="trash" size={14} />
-                {busy === 'flush' ? '清理中…' : '清空缓存'}
-              </button>
-              <button
-                className="ghost"
-                title="从数据库重新读取配置并立即生效"
-                disabled={busy !== ''}
-                onClick={() => void action('reload', '/reload', '配置已重新读取')}
-              >
-                <Icon name="refresh" size={14} />
-                {busy === 'reload' ? '读取中…' : '重新读取配置'}
-              </button>
-              <button
-                className="ghost"
-                title="重新读取运行状态与实时指标"
-                disabled={busy !== ''}
-                onClick={() => void load()}
-              >
-                <Icon name="refresh" size={14} />
-                刷新状态
-              </button>
-              <button
-                className="ghost"
-                title="跳到我的订阅页，查看并复制订阅地址"
-                onClick={() => window.dispatchEvent(new CustomEvent('tv-buddy:goto-my'))}
-              >
-                <Icon name="download" size={14} />
-                我的订阅地址
-              </button>
-            </div>
-          </section>
-        </div>
-
-        <div className="dash-rail">
-          <section className="card">
-            <div className="section-title">系统信息</div>
-            <div className="kv-list">
-              <div className="kv">
-                <span>版本</span>
-                <b>{version}</b>
-              </div>
-              <div className="kv">
-                <span>运行时长</span>
-                <b>{uptime(num('uptime_secs'))}</b>
-              </div>
-              <div className="kv">
-                <span>缓存位置</span>
-                <b className="mono">{backend}</b>
-              </div>
-              <div className="kv">
-                <span>监听地址</span>
-                <b className="mono">{text('bind')}</b>
-              </div>
-            </div>
-            <div className="feature-block">
-              <div className="feature-title">已启用功能</div>
-              <div className="feature-list">
-                {enabledFeatures.length === 0 ? (
-                  <span className="muted">{features ? '全部关闭' : '—'}</span>
-                ) : (
-                  enabledFeatures.map(([key, label]) => (
-                    <span key={key} className="badge muted">
-                      {label}
-                    </span>
-                  ))
-                )}
-              </div>
-            </div>
-          </section>
-        </div>
-      </div>
-
-      <div className="overview-system">
-        <SystemPage embedded />
-      </div>
-
-      {error && <div className="msg err">{error}</div>}
-      {node}
-    </>
-  );
-}
-
 function Shell({ onLogout }: { onLogout: () => void }) {
-  const [section, setSection] = useState<SectionId>('dashboard');
-  /** 设置页有没有未保存修改；离开前先确认。 */
-  const [settingsDirty, setSettingsDirty] = useState(false);
+  // 首屏分区取自地址栏，刷新与直接打开深链都能回原页。
+  const [section, setSection] = useState<SectionId>(() => sectionFromHash() ?? 'dashboard');
+  /** 当前分区。事件监听与浏览器前进/后退读它，避免闭包里拿到旧值。 */
+  const sectionRef = useRef(section);
+  /** 设置页有没有未保存修改；离开前先确认。只做拦截，不需要触发重渲染。 */
+  const settingsDirtyRef = useRef(false);
   const [pendingNav, setPendingNav] = useState<SectionId | null>(null);
   /** 侧栏分区搜索。只过滤导航，不触达接口。 */
   const [navQuery, setNavQuery] = useState('');
@@ -444,23 +227,69 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       .catch(() => setMeta(null));
   }, [isAdmin]);
 
+  /** 切分区并同步地址栏。 */
+  const show = (next: SectionId) => {
+    sectionRef.current = next;
+    setSection(next);
+    writeSection(next);
+  };
+
   /** 切分区。设置页有未保存修改时先弹确认。 */
   const go = (next: SectionId) => {
-    if (section === 'settings' && settingsDirty) {
+    // 点当前分区不触发确认，也不清未保存标记。
+    if (next === sectionRef.current) return;
+    if (sectionRef.current === 'settings' && settingsDirtyRef.current) {
       setPendingNav(next);
       return;
     }
-    setSection(next);
+    show(next);
   };
+
+  /** 设置页报告未保存状态。地址栏监听与切页拦截都读这个 ref。 */
+  const markSettingsDirty = (dirty: boolean) => {
+    settingsDirtyRef.current = dirty;
+  };
+
+  // 浏览器前进/后退：地址已经变了，让面板跟上。设置页有未保存修改时先确认；
+  // 取消（或非法分区）后把地址改回当前分区，避免面板与地址栏不一致。
+  useEffect(() => {
+    const onHistoryChange = () => {
+      const next = sectionFromHash();
+      if (!next) {
+        writeSection(sectionRef.current, true);
+        return;
+      }
+      if (next === sectionRef.current) return;
+      if (sectionRef.current === 'settings' && settingsDirtyRef.current) {
+        writeSection(sectionRef.current, true);
+        setPendingNav(next);
+        return;
+      }
+      sectionRef.current = next;
+      setSection(next);
+    };
+    window.addEventListener('popstate', onHistoryChange);
+    window.addEventListener('hashchange', onHistoryChange);
+    return () => {
+      window.removeEventListener('popstate', onHistoryChange);
+      window.removeEventListener('hashchange', onHistoryChange);
+    };
+  }, []);
 
   useEffect(() => {
     const gotoMy = () => go('my');
     const gotoGroups = () => go('groups');
+    const gotoStats = () => go('stats');
+    const gotoSchedule = () => go('schedule');
     window.addEventListener('tv-buddy:goto-my', gotoMy);
     window.addEventListener('tv-buddy:goto-groups', gotoGroups);
+    window.addEventListener('tv-buddy:goto-stats', gotoStats);
+    window.addEventListener('tv-buddy:goto-schedule', gotoSchedule);
     return () => {
       window.removeEventListener('tv-buddy:goto-my', gotoMy);
       window.removeEventListener('tv-buddy:goto-groups', gotoGroups);
+      window.removeEventListener('tv-buddy:goto-stats', gotoStats);
+      window.removeEventListener('tv-buddy:goto-schedule', gotoSchedule);
     };
   });
 
@@ -481,6 +310,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   });
   const fallback: SectionId = isAdmin ? 'dashboard' : 'my';
   const active = visibleNav.some((item) => item.id === section) ? section : fallback;
+
+  // 地址栏始终指向实际分区：首屏补上哈希，非法或无权访问的深链回落到可用分区。
+  useEffect(() => {
+    sectionRef.current = active;
+    if (active !== section) setSection(active);
+    writeSection(active, true);
+  }, [active, section]);
+
   const query = navQuery.trim().toLowerCase();
   const shownNav = query
     ? visibleNav.filter((item) => item.label.toLowerCase().includes(query))
@@ -566,10 +403,12 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       </aside>
       <main className="content">
         {active === 'my' && <MySubsPage />}
-        {active === 'dashboard' && <Overview features={features} />}
+        {active === 'dashboard' && (
+          <Overview features={features} featureLabels={FEATURE_LABELS} />
+        )}
         {active === 'cache' && <CachePage />}
         {active === 'groups' && <GroupsPage />}
-        {active === 'settings' && <SettingsPage onDirtyChange={setSettingsDirty} />}
+        {active === 'settings' && <SettingsPage onDirtyChange={markSettingsDirty} />}
         {active === 'security' && <SecurityPage />}
         {active === 'users' && <UsersPage />}
         {active === 'stats' && <StatsPage />}
@@ -599,8 +438,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           onConfirm={() => {
             const next = pendingNav;
             setPendingNav(null);
-            setSettingsDirty(false);
-            setSection(next);
+            markSettingsDirty(false);
+            show(next);
           }}
         />
       ) : null}
