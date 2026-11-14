@@ -65,6 +65,7 @@ async fn status_body(state: Arc<AppState>) -> Json<Value> {
                 "shrink_permille": status.shrink_permille,
                 "duration_ms": status.duration_ms,
                 "syncing": status.syncing,
+                "queued": status.queued,
                 "next_sync": next_sync,
                 "ttl": crate::subs::effective_ttl_secs(source.ttl_secs),
             })
@@ -379,6 +380,9 @@ pub async fn panel_preview(
 /// `POST /panel/api/subs/sync`——异步触发同步。返回 202。
 ///
 /// `{ "id": "可选", "force": false }`。省略 `id` 时同步全部启用的托管源。
+///
+/// 同步任务串行执行。已有任务在运行时，手动请求排队等待，不返回 409。
+/// 同一源已在队列中时不重复排队。
 pub async fn panel_sync(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -418,27 +422,49 @@ pub async fn panel_sync(
     if ids.is_empty() {
         return Err(ApiError::bad_request("没有可同步的托管源"));
     }
-    throttle(&state, &ids)?;
 
-    let guard = state
-        .sync_lock
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| ApiError::conflict_code("sync_running", "已有同步任务在运行"))?;
-    let queued = ids.len();
+    // 去重后排队。已在队列或运行中的源不重复加入。
+    let queued: Vec<String> = {
+        let mut pending = state
+            .sync_pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        ids.into_iter()
+            .filter(|id| pending.insert(id.clone()))
+            .collect()
+    };
+    if queued.is_empty() {
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(json!({ "ok": true, "queued": 0, "message": "已在同步队列中" })),
+        ));
+    }
+    for id in &queued {
+        state
+            .sources
+            .update_status(id, |status| status.queued = true);
+    }
+
+    let count = queued.len();
     let st = state.clone();
     tokio::spawn(async move {
-        let _guard = guard;
-        for id in ids {
-            if let Err(error) = subscription::sync_locked(&st, &id, force).await {
+        // 已有同步任务时在这里等待。请求已返回 202，队列状态由 `queued` 展示。
+        let _guard = st.sync_lock.lock().await;
+        for id in &queued {
+            if let Err(error) = subscription::sync_locked(&st, id, force).await {
                 tracing::warn!(source = %id, %error, "手动同步失败");
             }
+            st.sync_pending
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .remove(id);
+            st.sources.update_status(id, |status| status.queued = false);
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
     });
     Ok((
         StatusCode::ACCEPTED,
-        Json(json!({ "ok": true, "queued": queued })),
+        Json(json!({ "ok": true, "queued": count })),
     ))
 }
 
@@ -472,34 +498,6 @@ pub async fn panel_content(
         "channels": count,
         "to_manual": to_manual,
     })))
-}
-
-/// 单源 10 秒节流。
-fn throttle(state: &AppState, ids: &[String]) -> Result<(), ApiError> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|value| value.as_secs())
-        .unwrap_or(0);
-    let mut triggers = state
-        .sync_triggers
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    triggers.retain(|_, at| now.saturating_sub(*at) < 3600);
-    for id in ids {
-        if let Some(at) = triggers.get(id) {
-            let elapsed = now.saturating_sub(*at);
-            if elapsed < subscription::MANUAL_MIN_INTERVAL_SECS {
-                return Err(ApiError::too_many(json!({
-                    "error": "同步过于频繁，请稍后再试",
-                    "retry_after": subscription::MANUAL_MIN_INTERVAL_SECS - elapsed,
-                })));
-            }
-        }
-    }
-    for id in ids {
-        triggers.insert(id.clone(), now);
-    }
-    Ok(())
 }
 
 /// 抽样条数上限。

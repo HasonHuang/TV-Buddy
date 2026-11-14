@@ -1938,6 +1938,55 @@ a.compact {
   text-align: right;
 }
 
+/* 源列表：名称与操作不换行，内容过宽时由 table-wrap 横向滚动。 */
+.source-table .source-name {
+  min-width: 120px;
+  white-space: nowrap;
+}
+
+.source-table .source-actions {
+  white-space: nowrap;
+}
+
+/* 订阅源的启用/禁用按钮。按钮本身显示当前状态。 */
+.source-toggle {
+  min-width: 62px;
+  justify-content: center;
+}
+
+.source-toggle.on {
+  border-color: color-mix(in srgb, var(--ok) 32%, transparent);
+  background: var(--ok-weak);
+  color: var(--ok);
+}
+
+.source-toggle.on:hover:not(:disabled) {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok-weak) 60%, var(--ok) 12%);
+}
+
+.source-toggle.off {
+  background: var(--panel-2);
+  color: var(--text3);
+}
+
+/* 订阅源状态：徽章下一行显示结果摘要。 */
+.source-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  max-width: 220px;
+}
+
+.source-status-note {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
 /* 订阅源分组的最终结果。 */
 .final-group {
   min-height: 22px;

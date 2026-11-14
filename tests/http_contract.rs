@@ -3248,6 +3248,7 @@ async fn subs_status_lists_configured_sources() {
     assert!(sources[0]["last_ok"].as_u64().unwrap_or(0) > 0);
     assert!(sources[0]["last_try"].as_u64().unwrap_or(0) > 0);
     assert!(sources[0]["error"].is_null());
+    assert_eq!(sources[0]["queued"], false);
 
     fetch(&fixture, &fixture.sub(&fixture.token, "playlist.m3u")).await;
     let body: serde_json::Value = serde_json::from_str(

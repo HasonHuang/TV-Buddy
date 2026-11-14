@@ -134,6 +134,9 @@ pub struct SourceStatus {
     /// 正在同步。不落盘。
     #[serde(skip)]
     pub syncing: bool,
+    /// 已排入手动同步队列，等待同步锁。不落盘。
+    #[serde(skip)]
+    pub queued: bool,
 }
 
 /// `ttl_secs = 0` 时目标按 1 小时展示与缓存。

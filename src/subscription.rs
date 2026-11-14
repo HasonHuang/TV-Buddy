@@ -25,9 +25,6 @@ use crate::{
 /// M3U 正文上限。
 pub const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
-/// 手动触发的最短间隔（秒）。
-pub const MANUAL_MIN_INTERVAL_SECS: u64 = 10;
-
 /// 计划中的一个分组。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedGroup {

@@ -656,7 +656,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
-| GET | `/subs/status`、`/panel/api/subs/status` | — | `{"sources":[{"id","name","url","enabled","mode","error","channels","groups","last_ok","last_try","last_sync","added","updated","removed","skipped_removals","needs_review","zero_blocked","shrink_permille","duration_ms","syncing","next_sync","ttl"}],"sync":{"enabled","schedule","interval_secs","daily_at"}}` |
+| GET | `/subs/status`、`/panel/api/subs/status` | — | `{"sources":[{"id","name","url","enabled","mode","error","channels","groups","last_ok","last_try","last_sync","added","updated","removed","skipped_removals","needs_review","zero_blocked","shrink_permille","duration_ms","syncing","queued","next_sync","ttl"}],"sync":{"enabled","schedule","interval_secs","daily_at"}}` |
 | POST | `/subs/groups`、`/panel/api/subs/groups` | `{"url":"<m3u>"}` | `{"groups":[{"name","count"}],"total":<n>}` |
 | POST | `/subs/preview`、`/panel/api/subs/preview` | `{"source":{"id"?,"url"?,"mode"?,"group_map":{…},"group_mode"?,"merge_group"?,"merge_into":{…}?,"merge_new":{…}?,"unlisted_groups"?,"include"?,"exclude"?,"headers"?,"proxy"?}}` | `{"kept","sample":[{"name","group","tvg_id"}]×≤5,"sync"?,"trace":{"total","after_group","after_global_exclude","after_include","after_exclude","dropped_groups","out_groups":[{"name","count"}]}}` |
 
@@ -739,7 +739,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
-| POST | `/panel/api/subs/sync` | `{"id"?,"force"?}` | `202 {"ok":true,"queued":<n>}`；忙 `409 sync_running`；同源 10 秒内重复 `429` |
+| POST | `/panel/api/subs/sync` | `{"id"?,"force"?}` | `202 {"ok":true,"queued":<n>}`。同步串行执行，已有任务时排队等待，不返回 `409`；同一源已在队列中时 `queued=0` |
 | DELETE | `/panel/api/subs/:id/content` | `?to_manual=1`（默认）或 `0` | `{"ok":true,"channels":<n>,"to_manual":<bool>}` |
 | PUT | `/panel/api/playlist/settings` | 全局字段 | `{"ok":true}`。保留源列表 |
 | POST | `/panel/api/playlist/sources` | 一个源；空 `id` 生成 UUID | `{"ok":true,"source":{…}}` |

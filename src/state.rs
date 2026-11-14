@@ -94,8 +94,8 @@ pub struct AppState {
     proxy_clients: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
     /// 同一时间只跑一次订阅同步。
     pub sync_lock: Arc<tokio::sync::Mutex<()>>,
-    /// 单源手动同步节流：源 id → 上次触发时刻（Unix 秒）。
-    pub sync_triggers: Mutex<std::collections::HashMap<String, u64>>,
+    /// 已排队或正在执行的手动同步源 id。同一源不重复排队。
+    pub sync_pending: Mutex<std::collections::HashSet<String>>,
     /// 最近日志行。
     pub logs: Arc<RingBuffer>,
     /// 进程启动时刻。
@@ -193,7 +193,7 @@ impl AppState {
             estimate,
             proxy_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
             sync_lock: Arc::new(tokio::sync::Mutex::new(())),
-            sync_triggers: Mutex::new(std::collections::HashMap::new()),
+            sync_pending: Mutex::new(std::collections::HashSet::new()),
             logs,
             started: Instant::now(),
             write_lock: Mutex::new(()),

@@ -14,6 +14,7 @@ import {
   NumberBox,
   PageHead,
   Select,
+  Switch,
   Tip,
   useToast,
 } from './ui';
@@ -84,6 +85,7 @@ type Status = {
   shrink_permille: number;
   duration_ms: number;
   syncing: boolean;
+  queued: boolean;
   next_sync: number;
 };
 
@@ -159,7 +161,8 @@ function blankSource(): Source {
     group_map: {},
     include: [],
     exclude: [],
-    mode: 'aggregate',
+    // 新源默认托管：频道落盘后才能分组、授权、设节目单。
+    mode: 'sync',
     schedule: 'inherit',
     sync_interval_secs: 0,
     sync_daily_at: '',
@@ -315,21 +318,55 @@ function sourceModeBadge(source: Source) {
   );
 }
 
-type StatusView = { tone: string; label: string; hint: string };
+type StatusView = { tone: string; label: string; hint: string; note?: string };
 
-/** 状态徽章的文字、颜色与悬停说明。只算一次，避免两处规则漂移。 */
+/** 相对时间（秒）。状态每 5 秒轮询一次，显示会跟着刷新。 */
+function ago(value: number): string {
+  if (!value) return '—';
+  const seconds = Math.max(0, Math.round(Date.now() / 1000 - value));
+  if (seconds < 60) return `${seconds} 秒前`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)} 小时前`;
+  return `${Math.round(seconds / 86400)} 天前`;
+}
+
+/** 最近一次同步的增删摘要。 */
+function deltaText(status: Status): string {
+  const parts: string[] = [];
+  if (status.added) parts.push(`新增 ${status.added}`);
+  if (status.updated) parts.push(`更新 ${status.updated}`);
+  if (status.removed) parts.push(`移除 ${status.removed}`);
+  return parts.join('，') || '无变化';
+}
+
+/** 状态徽章的文字、颜色、悬停说明与行内摘要。只算一次，避免两处规则漂移。 */
 function statusView(status?: Status, warnRatio = 0.2): StatusView | null {
   if (!status) return null;
+  const sync = status.mode === 'sync';
   if (status.syncing) {
-    return { tone: 'info', label: '同步中', hint: '正在同步这个源。' };
+    return {
+      tone: 'info',
+      label: '同步中',
+      hint: '正在抓取上游并写入本地频道。',
+      note: '正在抓取上游',
+    };
+  }
+  if (status.queued) {
+    return {
+      tone: 'info',
+      label: '排队中',
+      hint: '已有同步任务在运行。这个源会等前一个任务结束后执行。',
+      note: '等待前一个任务完成',
+    };
   }
   if (status.error) {
     return {
       tone: 'danger',
-      label: '失败',
+      label: sync ? '同步失败' : '抓取失败',
       hint: status.needs_review
         ? `${status.error} 另外，源返回空清单，本地频道已保留。`
         : status.error,
+      note: status.error,
     };
   }
   if (status.needs_review) {
@@ -337,6 +374,7 @@ function statusView(status?: Status, warnRatio = 0.2): StatusView | null {
       tone: 'warn',
       label: '待确认',
       hint: '源返回空清单。本地频道已保留。如需接受空清单，请开启全局「允许空清单清空」。',
+      note: '空清单，本地频道已保留',
     };
   }
   const threshold = Math.max(0, Math.round(warnRatio * 1000));
@@ -345,6 +383,7 @@ function statusView(status?: Status, warnRatio = 0.2): StatusView | null {
       tone: 'warn',
       label: '频道变少',
       hint: `最近一次同步移除了 ${(status.shrink_permille / 10).toFixed(1)}% 的频道。`,
+      note: `移除 ${(status.shrink_permille / 10).toFixed(1)}% 的频道`,
     };
   }
   if (status.zero_blocked) {
@@ -352,9 +391,26 @@ function statusView(status?: Status, warnRatio = 0.2): StatusView | null {
       tone: 'warn',
       label: '空清单',
       hint: '源返回空清单。本地频道已保留。',
+      note: '本地频道已保留',
     };
   }
-  return { tone: 'ok', label: '正常', hint: '' };
+  // 旧状态文件可能只有 `last_ok`。两个成功时间都认。
+  const last = status.last_sync || status.last_ok;
+  if (last > 0) {
+    return {
+      tone: 'ok',
+      label: sync ? '同步完成' : '正常',
+      hint: sync
+        ? `最近一次同步成功：${when(last)}。${deltaText(status)}。`
+        : `最近一次抓取成功：${when(last)}。`,
+      note: sync ? `${ago(last)} · ${deltaText(status)}` : ago(last),
+    };
+  }
+  return {
+    tone: 'muted',
+    label: sync ? '未同步' : '—',
+    hint: sync ? '还没有同步过。点「立即同步」开始。' : '还没有抓取记录。',
+  };
 }
 
 export function PlaylistPage() {
@@ -365,6 +421,8 @@ export function PlaylistPage() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [allGroups, setAllGroups] = useState<ExistingGroup[]>([]);
   const [unauthorizedSync, setUnauthorizedSync] = useState(0);
+  /** 正在切换启用状态的源 id。 */
+  const [toggling, setToggling] = useState('');
   const { node, ok, err } = useToast();
 
   const load = useCallback(async () => {
@@ -610,10 +668,35 @@ export function PlaylistPage() {
   const triggerSync = async (id: string) => {
     try {
       await api('POST', '/subs/sync', { id });
+      // 后端已把源加入队列。先本地标记，避免等下一次轮询才显示。
+      setStatuses((current) => {
+        const status = current[id];
+        return status ? { ...current, [id]: { ...status, queued: true } } : current;
+      });
       ok('已排入同步队列');
       window.setTimeout(() => void load(), 1200);
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  /** 启用/禁用是独立保存，不触发模式切换的二次确认与自动同步。 */
+  const toggleEnabled = async (source: Source) => {
+    if (toggling) return;
+    setToggling(source.id);
+    try {
+      const next = { ...source, enabled: !source.enabled };
+      await api(
+        'PUT',
+        `/playlist/sources/${encodeURIComponent(source.id)}`,
+        cleanSource(next),
+      );
+      ok(next.enabled ? '源已启用' : '源已禁用');
+      await load();
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setToggling('');
     }
   };
 
@@ -717,7 +800,7 @@ export function PlaylistPage() {
           <span className="muted">{sources.length} 个源</span>
         </div>
         <div className="table-wrap">
-          <table className="table">
+          <table className="table source-table">
             <thead>
               <tr>
                 <th>启用</th>
@@ -734,19 +817,27 @@ export function PlaylistPage() {
               {sources.map((source) => {
                 const status = statuses[source.id];
                 const view = statusView(status, global.sync_warn_removal_ratio);
+                const lastSuccess = status
+                  ? status.last_sync || status.last_ok
+                  : 0;
                 return (
                   <tr key={source.id}>
                     <td>
-                      <input
-                        type="checkbox"
-                        aria-label={`启用 ${source.name}`}
-                        checked={source.enabled}
-                        onChange={(event) =>
-                          void saveSource({ ...source, enabled: event.target.checked })
-                        }
-                      />
+                      <button
+                        className={`chip source-toggle ${source.enabled ? 'on' : 'off'}`}
+                        aria-pressed={source.enabled}
+                        title={source.enabled ? '当前已启用，点击禁用' : '当前已禁用，点击启用'}
+                        disabled={toggling === source.id}
+                        onClick={() => void toggleEnabled(source)}
+                      >
+                        {toggling === source.id
+                          ? '保存中…'
+                          : source.enabled
+                            ? '已启用'
+                            : '已禁用'}
+                      </button>
                     </td>
-                    <td>
+                    <td className="source-name">
                       <strong>{source.name || source.id}</strong>
                     </td>
                     <td className="mono" style={{ maxWidth: 320, overflowWrap: 'anywhere' }}>
@@ -758,23 +849,39 @@ export function PlaylistPage() {
                         ? `${status?.channels ?? 0} / ${status?.groups ?? 0}`
                         : '—'}
                     </td>
-                    <td>{when(status?.last_sync ?? 0)}</td>
+                    <td>{when(lastSuccess)}</td>
                     <td>
                       {view ? (
-                        <HoverTip text={view.hint}>
-                          <Badge tone={view.tone}>{view.label}</Badge>
-                        </HoverTip>
+                        <div className="source-status">
+                          <HoverTip text={view.hint}>
+                            <Badge tone={view.tone}>{view.label}</Badge>
+                          </HoverTip>
+                          {view.note ? (
+                            <span
+                              className={`source-status-note ${
+                                view.tone === 'danger' ? 'danger-text' : 'muted'
+                              }`}
+                              title={view.note}
+                            >
+                              {view.note}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : null}
                     </td>
-                    <td className="right">
+                    <td className="right source-actions">
                       {source.mode === 'sync' && (
                         <button
                           className="ghost"
-                          title="马上同步这个源"
-                          disabled={status?.syncing}
+                          title="马上同步这个源。已有任务在运行时排队等待"
+                          disabled={status?.syncing || status?.queued}
                           onClick={() => void triggerSync(source.id)}
                         >
-                          立即同步
+                          {status?.syncing
+                            ? '同步中…'
+                            : status?.queued
+                              ? '排队中…'
+                              : '立即同步'}
                         </button>
                       )}
                       <button className="ghost" onClick={() => openSource(source)}>
@@ -1006,17 +1113,17 @@ export function PlaylistPage() {
                 onChange={(event) => patch({ name: event.target.value })}
               />
             </label>
-            <label className="check form-check">
-              <input
-                type="checkbox"
+            <div className="check form-check">
+              <Switch
                 checked={drawer.draft.enabled}
-                onChange={(event) => patch({ enabled: event.target.checked })}
+                onChange={(next) => patch({ enabled: next })}
+                label="启用"
               />
               <span>
-                启用
+                {drawer.draft.enabled ? '已启用' : '已禁用'}
                 <Tip text="关闭后，这个源不参与聚合，也不自动同步。" />
               </span>
-            </label>
+            </div>
           </div>
           <label>
             地址
