@@ -608,8 +608,12 @@ export function Overview({
   const wantStats = liveFeatures?.stats !== false;
   const wantRecording = liveFeatures?.recording !== false;
 
+  /** 最新一次刷新请求的序号。旧响应晚到时直接丢弃，避免回退计数触发重启分支。 */
+  const loadTicket = useRef(0);
   const load = useCallback(
     async (manual = false) => {
+      const ticket = loadTicket.current + 1;
+      loadTicket.current = ticket;
       if (manual) setBusy('refresh');
       try {
         const [nextStatus, nextStats, nextTasks, nextDash] = await Promise.all([
@@ -622,6 +626,7 @@ export function Overview({
             : Promise.resolve(null),
           api<DashSession[]>('GET', '/dash/status').catch(() => []),
         ]);
+        if (ticket !== loadTicket.current) return;
         setStatus(nextStatus);
         setStats(nextStats);
         setTasks(Array.isArray(nextTasks) ? nextTasks : null);
@@ -629,6 +634,7 @@ export function Overview({
         setError('');
         sample(nextStatus);
       } catch (cause) {
+        if (ticket !== loadTicket.current) return;
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
         if (manual) setBusy('');

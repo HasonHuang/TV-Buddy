@@ -180,6 +180,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
   /** 当前账号是否为管理员。服务端每次请求都会复核，这里只决定显示。 */
   const [isAdmin, setIsAdmin] = useState(getRole() === 'admin');
+  /** 角色是否已确定。localStorage 有角色时立即可用，否则等 `/me` 返回。 */
+  const [roleReady, setRoleReady] = useState(() => getRole() !== null);
 
   // Cmd/Ctrl+K 聚焦分区搜索；Esc 清空并退出搜索。
   useEffect(() => {
@@ -206,7 +208,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         setRole(role);
         setIsAdmin(role === 'admin');
       })
-      .catch(() => setIsAdmin(false));
+      .catch(() => setIsAdmin(false))
+      .finally(() => setRoleReady(true));
   }, []);
 
   useEffect(() => {
@@ -309,14 +312,18 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     return !item.feature || features?.[item.feature] !== false;
   });
   const fallback: SectionId = isAdmin ? 'dashboard' : 'my';
+  // 角色未定时先显示回退分区，但不改写地址栏。`section` 仍保留深链原值，
+  // `/me` 返回管理员后 `active` 会自动回到深链分区。
   const active = visibleNav.some((item) => item.id === section) ? section : fallback;
 
   // 地址栏始终指向实际分区：首屏补上哈希，非法或无权访问的深链回落到可用分区。
+  // 角色确定前不写哈希，否则 /me 返回前管理员深链会被永久覆盖。
   useEffect(() => {
+    if (!roleReady) return;
     sectionRef.current = active;
     if (active !== section) setSection(active);
     writeSection(active, true);
-  }, [active, section]);
+  }, [active, section, roleReady]);
 
   const query = navQuery.trim().toLowerCase();
   const shownNav = query
