@@ -196,6 +196,20 @@ export function PageHead({
   );
 }
 
+/** 只在最上层遮罩响应 Esc。嵌套弹窗按 Esc 时只关最里面一层。 */
+function useTopmostEscape(overlay: React.RefObject<HTMLDivElement | null>, onClose: () => void) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const overlays = document.querySelectorAll('.modal-overlay');
+      if (overlays[overlays.length - 1] !== overlay.current) return;
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, overlay]);
+}
+
 /** 弹窗壳。遮罩点击与 Esc 都能关闭。 */
 export function Modal({
   title,
@@ -208,16 +222,11 @@ export function Modal({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const overlay = useRef<HTMLDivElement>(null);
+  useTopmostEscape(overlay, onClose);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={overlay} className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-head">
           <h3>{title}</h3>
@@ -250,16 +259,11 @@ export function Drawer({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const overlay = useRef<HTMLDivElement>(null);
+  useTopmostEscape(overlay, onClose);
 
   return (
-    <div className="modal-overlay drawer-overlay" onClick={onClose}>
+    <div ref={overlay} className="modal-overlay drawer-overlay" onClick={onClose}>
       <div className="drawer" onClick={(event) => event.stopPropagation()}>
         <div className="modal-head">
           <h3>{title}</h3>

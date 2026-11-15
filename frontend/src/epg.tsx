@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from './api';
+import { ScriptManagerModal } from './scripts';
 import { Badge, Confirm, Empty, Field, Modal, Select, Switch, Tip, useToast } from './ui';
 
 type Header = { name: string; value: string };
@@ -283,10 +284,35 @@ function SourceModal({
   const [form, setForm] = useState<SourceForm>(() => formOf(source));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  /** 脚本源的下拉选项。列表接口同时返回 Python 版本。 */
+  const [scriptNames, setScriptNames] = useState<string[]>([]);
+  const [python, setPython] = useState<string | null | undefined>(undefined);
+  const [managerOpen, setManagerOpen] = useState(false);
 
   const set = (key: keyof SourceForm, value: string | boolean) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
+
+  /** 重新读取脚本列表。返回文件名，供脚本管理关闭后校正选中项。 */
+  const loadScripts = useCallback(async () => {
+    try {
+      const body = await api<{ python?: string | null; scripts?: { name: string }[] }>(
+        'GET',
+        '/epg/scripts',
+      );
+      const names = (body.scripts ?? []).map((item) => item.name);
+      setPython(body.python ?? null);
+      setScriptNames(names);
+      return names;
+    } catch {
+      // 未安装 Python 或接口不可用时保持空列表。
+      return [] as string[];
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadScripts();
+  }, [loadScripts]);
 
   const setUrl = (index: number, key: keyof UrlForm, value: string) => {
     setForm((current) => ({
@@ -310,166 +336,219 @@ function SourceModal({
   };
 
   return (
-    <Modal
-      title={source ? '编辑 EPG 源' : '添加 EPG 源'}
-      onClose={onClose}
-      footer={
-        <>
-          <button className="ghost" onClick={onClose} disabled={busy}>
-            取消
-          </button>
-          <button onClick={() => void save()} disabled={busy || form.name.trim() === ''}>
-            {busy ? '保存中…' : '保存'}
-          </button>
-        </>
-      }
-    >
-      <div className="fields">
-        <Field label="名称" tip="面板里显示的名字。">
-          <input
-            value={form.name}
-            onChange={(event) => set('name', event.target.value)}
-            placeholder="例如 主源"
-          />
-        </Field>
-        <Field label="类型" tip="XMLTV 源抓 URL；脚本源运行 Python 脚本。">
-          <Select
-            value={form.kind}
-            options={[
-              { value: 'xml', label: 'XMLTV 源' },
-              { value: 'script', label: '脚本源' },
-            ]}
-            onChange={(next) => set('kind', next)}
-          />
-        </Field>
-      </div>
-
-      {form.kind === 'xml' ? (
-        <div className="source-urls">
-          <div className="row between">
-            <strong>URL 列表</strong>
-            <button
-              className="ghost"
-              onClick={() => setForm((current) => ({ ...current, urls: [...current.urls, emptyUrl()] }))}
-            >
-              添加 URL
+    <>
+      <Modal
+        title={source ? '编辑 EPG 源' : '添加 EPG 源'}
+        onClose={onClose}
+        footer={
+          <>
+            <button className="ghost" onClick={onClose} disabled={busy}>
+              取消
             </button>
-          </div>
-          <p className="muted">
-            同一个源可挂多个 URL。多个 URL 含同一频道时，优先级数字小的 URL 获胜。
-          </p>
-          {form.urls.map((url, index) => (
-            <div className="source-url" key={index}>
-              <div className="row">
-                <input
-                  aria-label="URL 优先级"
-                  title="数字越小越优先"
-                  type="number"
-                  style={{ width: 76 }}
-                  value={url.priority}
-                  onChange={(event) => setUrl(index, 'priority', event.target.value)}
-                />
-                <input
-                  aria-label="EPG URL"
-                  placeholder="https://example.com/epg.xml.gz"
-                  value={url.url}
-                  onChange={(event) => setUrl(index, 'url', event.target.value)}
-                />
-                <button
-                  className="icon-btn danger-text"
-                  title="删除这个 URL"
-                  onClick={() =>
-                    setForm((current) => ({
-                      ...current,
-                      urls:
-                        current.urls.length > 1
-                          ? current.urls.filter((_, at) => at !== index)
-                          : [emptyUrl()],
-                    }))
-                  }
-                >
-                  删除
-                </button>
-              </div>
-              <input
-                aria-label="User-Agent"
-                placeholder="User-Agent（留空用默认）"
-                value={url.user_agent}
-                onChange={(event) => setUrl(index, 'user_agent', event.target.value)}
-              />
-              <textarea
-                aria-label="自定义请求头"
-                placeholder={'自定义请求头，每行 Header: Value\nReferer: https://example.com/'}
-                rows={2}
-                value={url.headers}
-                onChange={(event) => setUrl(index, 'headers', event.target.value)}
-              />
-            </div>
-          ))}
-        </div>
-      ) : (
+            <button onClick={() => void save()} disabled={busy || form.name.trim() === ''}>
+              {busy ? '保存中…' : '保存'}
+            </button>
+          </>
+        }
+      >
         <div className="fields">
-          <Field label="脚本文件名" tip="位于缓存目录 epg/scripts 下的 .py 文件。">
+          <Field label="名称" tip="面板里显示的名字。">
             <input
-              value={form.script}
-              onChange={(event) => set('script', event.target.value)}
-              placeholder="mysource.py"
+              value={form.name}
+              onChange={(event) => set('name', event.target.value)}
+              placeholder="例如 主源"
             />
           </Field>
-          <Field label="产物文件" tip="脚本没有标准输出时，按顺序读取这些文件。">
-            <input
-              value={form.output_files}
-              onChange={(event) => set('output_files', event.target.value)}
-              placeholder="epg.xml, epg2.xml"
+          <Field label="类型" tip="XMLTV 源抓 URL；脚本源运行 Python 脚本。">
+            <Select
+              value={form.kind}
+              options={[
+                { value: 'xml', label: 'XMLTV 源' },
+                { value: 'script', label: '脚本源' },
+              ]}
+              onChange={(next) => set('kind', next)}
             />
           </Field>
-          <Field label="超时（秒）" tip="0 表示使用全局脚本超时。">
+        </div>
+
+        {form.kind === 'xml' ? (
+          <div className="source-urls">
+            <div className="row between">
+              <strong>URL 列表</strong>
+              <button
+                className="ghost"
+                onClick={() => setForm((current) => ({ ...current, urls: [...current.urls, emptyUrl()] }))}
+              >
+                添加 URL
+              </button>
+            </div>
+            <p className="muted">
+              同一个源可挂多个 URL。多个 URL 含同一频道时，优先级数字小的 URL 获胜。
+            </p>
+            {form.urls.map((url, index) => (
+              <div className="source-url" key={index}>
+                <div className="row">
+                  <input
+                    aria-label="URL 优先级"
+                    title="数字越小越优先"
+                    type="number"
+                    style={{ width: 76 }}
+                    value={url.priority}
+                    onChange={(event) => setUrl(index, 'priority', event.target.value)}
+                  />
+                  <input
+                    aria-label="EPG URL"
+                    placeholder="https://example.com/epg.xml.gz"
+                    value={url.url}
+                    onChange={(event) => setUrl(index, 'url', event.target.value)}
+                  />
+                  <button
+                    className="icon-btn danger-text"
+                    title="删除这个 URL"
+                    onClick={() =>
+                      setForm((current) => ({
+                        ...current,
+                        urls:
+                          current.urls.length > 1
+                            ? current.urls.filter((_, at) => at !== index)
+                            : [emptyUrl()],
+                      }))
+                    }
+                  >
+                    删除
+                  </button>
+                </div>
+                <input
+                  aria-label="User-Agent"
+                  placeholder="User-Agent（留空用默认）"
+                  value={url.user_agent}
+                  onChange={(event) => setUrl(index, 'user_agent', event.target.value)}
+                />
+                <textarea
+                  aria-label="自定义请求头"
+                  placeholder={'自定义请求头，每行 Header: Value\nReferer: https://example.com/'}
+                  rows={2}
+                  value={url.headers}
+                  onChange={(event) => setUrl(index, 'headers', event.target.value)}
+                />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="fields">
+              <Field
+                label="脚本"
+                tip="选择缓存目录 epg/scripts 下的 .py 文件。点「管理」可上传、覆盖或删除脚本。"
+                hint="脚本的标准输出写 XMLTV。"
+              >
+                <div className="input-group">
+                  <Select
+                    ariaLabel="EPG 脚本"
+                    value={form.script}
+                    options={[
+                      { value: '', label: '（请选择）' },
+                      // 源引用的脚本可能已被删除。保留当前值，避免保存时被清空。
+                      ...(form.script !== '' && !scriptNames.includes(form.script)
+                        ? [{ value: form.script, label: `${form.script}（未找到）` }]
+                        : []),
+                      ...scriptNames.map((name) => ({ value: name, label: name })),
+                    ]}
+                    onChange={(next) => set('script', next)}
+                  />
+                  <button
+                    className="ghost"
+                    type="button"
+                    title="管理采集脚本，查看脚本开发指南"
+                    onClick={() => setManagerOpen(true)}
+                  >
+                    管理
+                  </button>
+                </div>
+              </Field>
+              <Field label="产物文件" tip="脚本没有标准输出时，按顺序读取这些文件。">
+                <input
+                  value={form.output_files}
+                  onChange={(event) => set('output_files', event.target.value)}
+                  placeholder="epg.xml, epg2.xml"
+                />
+              </Field>
+              <Field label="超时（秒）" tip="0 表示使用全局脚本超时。">
+                <input
+                  type="number"
+                  value={form.timeout_secs}
+                  onChange={(event) => set('timeout_secs', event.target.value)}
+                />
+              </Field>
+            </div>
+            {python === null ? (
+              <div className="msg warn">
+                服务端未检测到 python3。脚本源不能运行。请先安装 Python 3。
+              </div>
+            ) : null}
+          </>
+        )}
+
+        <div className="fields">
+          <Field label="刷新间隔（分钟）" tip="0 表示沿用 cron 或全局采集节奏。">
             <input
               type="number"
-              value={form.timeout_secs}
-              onChange={(event) => set('timeout_secs', event.target.value)}
+              value={form.refresh_mins}
+              onChange={(event) => set('refresh_mins', event.target.value)}
+            />
+          </Field>
+          <Field label="源优先级" tip="数字越小越优先。多源同频道时高优先级覆盖低优先级。">
+            <input
+              type="number"
+              value={form.priority}
+              onChange={(event) => set('priority', event.target.value)}
+            />
+          </Field>
+          <Field label="时区偏移（分钟）" tip="节目时间整体平移。0 表示不改。">
+            <input
+              type="number"
+              value={form.tz_shift_mins}
+              onChange={(event) => set('tz_shift_mins', event.target.value)}
+            />
+          </Field>
+          <Field label="旧 cron" tip="仅旧配置使用。非空时按 cron 调度。">
+            <input
+              value={form.cron}
+              onChange={(event) => set('cron', event.target.value)}
+              placeholder="留空不用"
             />
           </Field>
         </div>
+
+        <label className="row">
+          <Switch checked={form.enabled} onChange={(next) => set('enabled', next)} label="启用源" />
+          <span>启用</span>
+        </label>
+        {error && <div className="msg err">{error}</div>}
+      </Modal>
+      {managerOpen && (
+        <ScriptManagerModal
+          kind="epg"
+          initialName={form.script}
+          onClose={() => setManagerOpen(false)}
+          onChanged={(saved) => {
+            void loadScripts().then((names) => {
+              // 从脚本管理返回后直接选中刚保存的文件。
+              if (saved) {
+                set('script', saved);
+                return;
+              }
+              // 选中的脚本被删除时清空，避免保存失效引用。
+              setForm((current) =>
+                current.script === '' || names.includes(current.script)
+                  ? current
+                  : { ...current, script: '' },
+              );
+            });
+          }}
+        />
       )}
-
-      <div className="fields">
-        <Field label="刷新间隔（分钟）" tip="0 表示沿用 cron 或全局采集节奏。">
-          <input
-            type="number"
-            value={form.refresh_mins}
-            onChange={(event) => set('refresh_mins', event.target.value)}
-          />
-        </Field>
-        <Field label="源优先级" tip="数字越小越优先。多源同频道时高优先级覆盖低优先级。">
-          <input
-            type="number"
-            value={form.priority}
-            onChange={(event) => set('priority', event.target.value)}
-          />
-        </Field>
-        <Field label="时区偏移（分钟）" tip="节目时间整体平移。0 表示不改。">
-          <input
-            type="number"
-            value={form.tz_shift_mins}
-            onChange={(event) => set('tz_shift_mins', event.target.value)}
-          />
-        </Field>
-        <Field label="旧 cron" tip="仅旧配置使用。非空时按 cron 调度。">
-          <input
-            value={form.cron}
-            onChange={(event) => set('cron', event.target.value)}
-            placeholder="留空不用"
-          />
-        </Field>
-      </div>
-
-      <label className="row">
-        <Switch checked={form.enabled} onChange={(next) => set('enabled', next)} label="启用源" />
-        <span>启用</span>
-      </label>
-      {error && <div className="msg err">{error}</div>}
-    </Modal>
+    </>
   );
 }
 
@@ -478,6 +557,8 @@ export function EpgSourcesTab() {
   const [editing, setEditing] = useState<Source | undefined>();
   const [adding, setAdding] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Source | null>(null);
+  /** 脚本源的脚本管理弹窗。`initialName` 指向源引用的文件。 */
+  const [scriptManager, setScriptManager] = useState<{ initialName: string } | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -640,6 +721,15 @@ export function EpgSourcesTab() {
                 </td>
                 <td className="right">
                   <div className="row" style={{ justifyContent: 'flex-end' }}>
+                    {source.kind === 'script' ? (
+                      <button
+                        className="ghost"
+                        title="管理这个源使用的采集脚本"
+                        onClick={() => setScriptManager({ initialName: source.script })}
+                      >
+                        脚本
+                      </button>
+                    ) : null}
                     <button
                       className="ghost"
                       title="立即采集这个源"
@@ -681,6 +771,14 @@ export function EpgSourcesTab() {
             setEditing(undefined);
           }}
           onSaved={() => void load()}
+        />
+      )}
+      {scriptManager && (
+        <ScriptManagerModal
+          kind="epg"
+          initialName={scriptManager.initialName}
+          onClose={() => setScriptManager(null)}
+          onChanged={() => void load()}
         />
       )}
       {pendingDelete && (

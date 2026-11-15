@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import { formatUptime } from './format';
 import { Icon } from './icons';
-import { Badge, Confirm, PageHead, Tip, useToast } from './ui';
+import { ScriptManagerCard } from './scripts';
+import { Badge, PageHead, Tip, useToast } from './ui';
 
 type HealthEntry = {
   checked_at: number;
@@ -31,8 +32,6 @@ type Health = {
   [key: string]: unknown;
 };
 
-type ResolverList = { count: number; scripts: { name: string; bytes: number }[] };
-
 /** `/panel/api/dash/status` 的单条会话。 */
 type DashSession = {
   stream_key: string;
@@ -57,9 +56,7 @@ const PROBE_PAGE_SIZE = 10;
 
 export function SystemPage({ embedded = false }: { embedded?: boolean }) {
   const [health, setHealth] = useState<Health | null>(null);
-  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
   const [ffmpeg, setFfmpeg] = useState<{ installed: boolean; version: string | null } | null>(null);
-  const [resolvers, setResolvers] = useState<ResolverList | null>(null);
   const [timeshift, setTimeshift] = useState<Timeshift | null>(null);
   const [dash, setDash] = useState<DashSession[]>([]);
   const [scanUrl, setScanUrl] = useState('');
@@ -71,33 +68,20 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
 
   const load = useCallback(async () => {
     try {
-      const [nextHealth, nextFfmpeg, nextResolvers, nextTimeshift, nextDash] = await Promise.all([
+      const [nextHealth, nextFfmpeg, nextTimeshift, nextDash] = await Promise.all([
         api<Health>('GET', '/health'),
         api<{ installed: boolean; version: string | null }>('GET', '/assets/ffmpeg-status'),
-        api<ResolverList>('GET', '/resolver/scripts'),
         api<Timeshift>('GET', '/dash-timeshift/status'),
         api<DashSession[]>('GET', '/dash/status').catch(() => []),
       ]);
       setHealth(nextHealth);
       setFfmpeg(nextFfmpeg);
-      setResolvers(nextResolvers);
       setTimeshift(nextTimeshift);
       setDash(Array.isArray(nextDash) ? nextDash : []);
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     }
   }, [err]);
-
-  /** 删除解析脚本：`POST /resolver/remove {name}`。 */
-  const removeResolver = async (name: string) => {
-    try {
-      await api('POST', '/resolver/remove', { name });
-      ok('解析脚本已删除');
-      await load();
-    } catch (error) {
-      err(error instanceof Error ? error.message : String(error));
-    }
-  };
 
   useEffect(() => {
     void load();
@@ -217,29 +201,13 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
                 <Badge tone="muted">未启用</Badge>
               )}
             </dd>
-            <dt>解析脚本</dt>
-            <dd>
-              {resolvers ? `${resolvers.count} 个` : '—'}
-              {resolvers?.scripts.map((script) => (
-                <div key={script.name} className="row between">
-                  <span className="muted">
-                    {script.name}（{Math.round(script.bytes / 1024)} KB）
-                  </span>
-                  <button
-                    className="ghost danger-text"
-                    title="删除这个解析脚本"
-                    onClick={() => setPendingRemove(script.name)}
-                  >
-                    删除
-                  </button>
-                </div>
-              ))}
-            </dd>
           </dl>
         ) : (
           <p className="muted">加载中…</p>
         )}
       </div>
+
+      <ScriptManagerCard kind="resolver" />
 
       <div className="card">
         <h2>DASH 会话</h2>
@@ -359,19 +327,6 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
         )}
       </div>
 
-      {pendingRemove ? (
-        <Confirm
-          title="删除解析脚本？"
-          text={`解析脚本「${pendingRemove}」删除后，引用它的频道需要改用固定地址或其他脚本。`}
-          confirmText="删除脚本"
-          onCancel={() => setPendingRemove(null)}
-          onConfirm={() => {
-            const name = pendingRemove;
-            setPendingRemove(null);
-            void removeResolver(name);
-          }}
-        />
-      ) : null}
       {node}
     </>
   );

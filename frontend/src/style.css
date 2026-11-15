@@ -1588,6 +1588,42 @@ label.check input {
   flex: none;
 }
 
+/* --- Python 脚本管理 --- */
+
+.script-manager .script-editor-head {
+  margin-top: 16px;
+}
+
+.script-manager .script-editor-head .section-title {
+  margin: 0;
+}
+
+.script-manager .script-guide {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text2);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.script-manager .script-guide li + li {
+  margin-top: 4px;
+}
+
+/* 指南里的示例代码：与行内代码同色，但保持多行。 */
+.script-sample {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text2);
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+}
+
 /* --- 按钮 --- */
 
 button {

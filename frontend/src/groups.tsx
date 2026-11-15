@@ -12,6 +12,7 @@ import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { api, copyText, putConfig } from './api';
 import { Icon } from './icons';
 import { modeCode, modeOptions, modeTip } from './modes';
+import { ScriptManagerModal } from './scripts';
 import {
   Badge,
   Confirm,
@@ -482,6 +483,8 @@ export function GroupsPage() {
   const searching = useRef(false);
   /** 解析脚本列表；打开频道弹窗时按需加载。 */
   const [scripts, setScripts] = useState<string[]>([]);
+  /** 解析脚本管理弹窗。从频道表单打开，不离开当前编辑。 */
+  const [scriptManagerOpen, setScriptManagerOpen] = useState(false);
   /** 当前账号的播放凭证。复制播放地址时附上，否则在开启凭证校验时是死链。 */
   const [playToken, setPlayToken] = useState('');
   /** 来源 id → 源名称。分组与频道徽章用。 */
@@ -553,12 +556,16 @@ export function GroupsPage() {
     });
   }, [groups]);
 
+  /** 重新读取解析脚本。返回文件名，供脚本管理关闭后校正选中项。 */
   const loadScripts = useCallback(async () => {
     try {
       const body = await api<{ scripts?: { name: string }[] }>('GET', '/resolver/scripts');
-      setScripts((body.scripts ?? []).map((item) => item.name));
+      const names = (body.scripts ?? []).map((item) => item.name);
+      setScripts(names);
+      return names;
     } catch {
       // 没有脚本目录时保持空列表。
+      return [] as string[];
     }
   }, []);
 
@@ -937,6 +944,7 @@ export function GroupsPage() {
   };
 
   const openChannel = (gid: string, channel?: Channel) => {
+    setScriptManagerOpen(false);
     void loadScripts();
     const script = channel ? text(channel, 'resolver_script') : '';
     setChannelForm({
@@ -1851,23 +1859,33 @@ export function GroupsPage() {
             <div className="fields">
               <Field
                 label="脚本"
-                tip="解析脚本放在缓存目录的 resolvers 文件夹。脚本的输出就是源地址。"
+                tip="脚本的输出就是源地址。点「管理」可上传、覆盖或删除脚本。"
                 hint="位于 <缓存目录>/resolvers/。"
               >
-                <Select
-                  ariaLabel="脚本"
-                  value={channelForm.form.script}
-                  options={[
-                    { value: '', label: '（请选择）' },
-                    ...scripts.map((name) => ({ value: name, label: name })),
-                  ]}
-                  onChange={(next) =>
-                    setChannelForm({
-                      ...channelForm,
-                      form: { ...channelForm.form, script: next },
-                    })
-                  }
-                />
+                <div className="input-group">
+                  <Select
+                    ariaLabel="脚本"
+                    value={channelForm.form.script}
+                    options={[
+                      { value: '', label: '（请选择）' },
+                      ...scripts.map((name) => ({ value: name, label: name })),
+                    ]}
+                    onChange={(next) =>
+                      setChannelForm({
+                        ...channelForm,
+                        form: { ...channelForm.form, script: next },
+                      })
+                    }
+                  />
+                  <button
+                    className="ghost"
+                    type="button"
+                    title="管理解析脚本，查看脚本开发指南"
+                    onClick={() => setScriptManagerOpen(true)}
+                  >
+                    管理
+                  </button>
+                </div>
               </Field>
               <Field label="脚本参数" tip="传给解析脚本的参数。不需要时留空。">
                 <input
@@ -1992,6 +2010,33 @@ export function GroupsPage() {
             onPrefetch={(prefetch) => setChannelForm({ ...channelForm, prefetch })}
           />
         </Modal>
+      )}
+
+      {channelForm && scriptManagerOpen && (
+        <ScriptManagerModal
+          kind="resolver"
+          initialName={channelForm.form.script}
+          onClose={() => setScriptManagerOpen(false)}
+          onChanged={(saved) => {
+            void loadScripts().then((names) => {
+              setChannelForm((current) => {
+                if (!current) return current;
+                // 从脚本管理返回后直接选中刚保存的文件。
+                if (saved) {
+                  return {
+                    ...current,
+                    form: { ...current.form, upstream: 'script', script: saved },
+                  };
+                }
+                // 选中的脚本被删除时清空，避免保存失效引用。
+                if (current.form.script === '' || names.includes(current.form.script)) {
+                  return current;
+                }
+                return { ...current, form: { ...current.form, script: '' } };
+              });
+            });
+          }}
+        />
       )}
 
       {importing && (

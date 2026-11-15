@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiText, getToken, putConfig } from './api';
 import { EpgBindingsTab, EpgRulesTab, EpgSourcesTab } from './epg';
 import { Icon } from './icons';
+import { ScriptManagerCard } from './scripts';
 import { Badge, Confirm, Field, NumberBox, PageHead, Select, Tip } from './ui';
 
 type IpEntry = {
@@ -1570,7 +1571,7 @@ export function EpgPanelPage() {
       <EpgCronCard onChanged={() => void load()} />
       <EpgTranslateCard onChanged={() => void load()} />
       <EpgModelsCard />
-      <EpgScriptsCard />
+      <ScriptManagerCard kind="epg" />
       <EpgMatchReportCard />
       <EpgViewerCard />
       <div className="card">
@@ -1740,148 +1741,6 @@ export function EpgPanelPage() {
         </>
       )}
     </>
-  );
-}
-
-/** EPG 采集脚本管理：`GET /epg/scripts`、`POST /epg/script`、`POST /epg/script-delete`。 */
-function EpgScriptsCard() {
-  const [python, setPython] = useState('');
-  const [scripts, setScripts] = useState<{ name: string; size: number }[]>([]);
-  const [name, setName] = useState('');
-  const [content, setContent] = useState('');
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await api<{ python: string; scripts: { name: string; size: number }[] }>(
-        'GET',
-        '/epg/scripts',
-      );
-      setPython(data.python ?? '');
-      setScripts(data.scripts ?? []);
-      setError('');
-    } catch (err) {
-      setError(errorText(err));
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const save = async () => {
-    setMessage('');
-    setError('');
-    try {
-      await api('POST', '/epg/script', { name: name.trim(), content });
-      setMessage(`脚本 ${name.trim()} 已保存`);
-      setName('');
-      setContent('');
-      await load();
-    } catch (err) {
-      setError(errorText(err));
-    }
-  };
-
-  const remove = async (target: string) => {
-    setMessage('');
-    setError('');
-    try {
-      await api('POST', '/epg/script-delete', { name: target });
-      setMessage(`脚本 ${target} 已删除`);
-      await load();
-    } catch (err) {
-      setError(errorText(err));
-    }
-  };
-
-  return (
-    <div className="card">
-      <div className="row between">
-        <h2>采集脚本</h2>
-        <span className="muted">{python ? `Python ${python}` : 'Python —'}</span>
-      </div>
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>文件</th>
-              <th className="right">大小</th>
-              <th className="right">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {scripts.map((script) => (
-              <tr key={script.name}>
-                <td className="mono">{script.name}</td>
-                <td className="right">{Math.max(1, Math.round(script.size / 1024))} KB</td>
-                <td className="right">
-                  <button
-                    className="icon-btn danger-text"
-                    title="删除这个采集脚本"
-                    onClick={() => setPendingDelete(script.name)}
-                  >
-                    删除
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {scripts.length === 0 && (
-              <tr>
-                <td colSpan={3} className="muted">
-                  暂无脚本。
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div className="row" style={{ marginTop: 8 }}>
-        <input
-          aria-label="脚本文件名"
-          title="以 .py 结尾。同名文件会被覆盖"
-          placeholder="脚本名，例如 mysource.py"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          style={{ flex: 1 }}
-        />
-        <button
-          title="保存脚本文件；同名文件直接覆盖"
-          onClick={() => void save()}
-          disabled={name.trim() === ''}
-        >
-          上传/覆盖
-        </button>
-        <Tip text="脚本在服务端以 Python 运行。只上传可信脚本。" />
-      </div>
-      <textarea
-        aria-label="脚本正文"
-        title="Python 脚本正文。保存后按采集计划运行"
-        placeholder="脚本正文"
-        value={content}
-        onChange={(event) => setContent(event.target.value)}
-        rows={8}
-        style={{ width: '100%', marginTop: 8 }}
-      />
-      {message && <div className="msg ok">{message}</div>}
-      {error && <div className="msg err">{error}</div>}
-
-      {pendingDelete ? (
-        <Confirm
-          title="删除采集脚本？"
-          text={`脚本「${pendingDelete}」删除后，引用它的节目源会采集失败。`}
-          confirmText="删除脚本"
-          onCancel={() => setPendingDelete(null)}
-          onConfirm={() => {
-            const name = pendingDelete;
-            setPendingDelete(null);
-            void remove(name);
-          }}
-        />
-      ) : null}
-    </div>
   );
 }
 
