@@ -15,6 +15,10 @@ use crate::{
         Config,
     },
     health::Health,
+    quality::{
+        rules::{effective_rules, Action, Reason},
+        state::{url_hash, QualityState},
+    },
     subs::{matches_filter, FilterItem, GroupRules},
 };
 
@@ -30,6 +34,7 @@ pub fn render_user(
     base: &str,
     token: &str,
     health: Option<&Health>,
+    quality: Option<&QualityState>,
 ) -> String {
     let epg_path = format!("/sub/{token}/epg.xml.gz");
     let mut body = header(config, base, &epg_path);
@@ -37,7 +42,7 @@ pub fn render_user(
         if group.access == "archived" || !user.can_see_group(&group.id) {
             continue;
         }
-        push_group(&mut body, config, user, group, base, token, health);
+        push_group(&mut body, config, user, group, base, token, health, quality);
     }
     body
 }
@@ -52,6 +57,7 @@ pub fn render_user_group(
     base: &str,
     token: &str,
     health: Option<&Health>,
+    quality: Option<&QualityState>,
     gid: &str,
 ) -> Option<String> {
     let group = config.groups.iter().find(|group| group.id == gid)?;
@@ -60,7 +66,7 @@ pub fn render_user_group(
     }
     let epg_path = format!("/sub/{token}/epg.xml.gz");
     let mut body = header(config, base, &epg_path);
-    push_group(&mut body, config, user, group, base, token, health);
+    push_group(&mut body, config, user, group, base, token, health, quality);
     Some(body)
 }
 
@@ -73,12 +79,13 @@ fn push_group(
     base: &str,
     token: &str,
     health: Option<&Health>,
+    quality: Option<&QualityState>,
 ) {
     for channel in &group.channels {
         if !user.can_see_channel(&group.id, &channel.id) {
             continue;
         }
-        if offline(config, health, group, channel) {
+        if offline(config, health, group, channel) || quality_hidden(config, quality, group, channel) {
             continue;
         }
         push_entry(body, group, channel, base, Some(token));
@@ -89,6 +96,40 @@ fn push_group(
 ///
 /// 三个条件同时成立才下线：探测已启用、有效开关为开、最近一次探测失败。
 /// 没有探测记录按在线处理。
+pub(crate) fn quality_hidden(
+    config: &Config,
+    quality: Option<&QualityState>,
+    group: &Group,
+    channel: &Channel,
+) -> bool {
+    if !config.quality.enabled {
+        return false;
+    }
+    if group.mode == "passthrough" && !config.quality.probe_passthrough {
+        return false;
+    }
+    let rules = effective_rules(config, group, channel);
+    if !rules.enabled || rules.retain || rules.action != Action::Hide {
+        return false;
+    }
+    let Some(entry) = quality.and_then(|quality| quality.get(&group.id, &channel.id)) else {
+        return false;
+    };
+    if entry.url_hash != url_hash(&channel.url) {
+        return false;
+    }
+    if matches!(
+        entry.reason,
+        Reason::Pass | Reason::Retained | Reason::Supply | Reason::ProbeError | Reason::Unknown
+    ) {
+        return false;
+    }
+    let Some(first_fail_at) = entry.first_fail_at else {
+        return false;
+    };
+    crate::schedule::now_epoch() - first_fail_at >= rules.stale_keep_secs as i64
+}
+
 fn offline(config: &Config, health: Option<&Health>, group: &Group, channel: &Channel) -> bool {
     if !config.health.enabled {
         return false;
@@ -126,6 +167,7 @@ pub fn user_view(
     base: &str,
     token: &str,
     health: Option<&Health>,
+    quality: Option<&QualityState>,
 ) -> Vec<UserGroup> {
     let mut groups = Vec::new();
     for group in &config.groups {
@@ -137,7 +179,9 @@ pub fn user_view(
             if !user.can_see_channel(&group.id, &channel.id) {
                 continue;
             }
-            if offline(config, health, group, channel) {
+            if offline(config, health, group, channel)
+                || quality_hidden(config, quality, group, channel)
+            {
                 continue;
             }
             channels.push(UserChannel {
@@ -303,7 +347,7 @@ mod tests {
             group("g1", "public", "proxy"),
             group("g4", "archived", "proxy"),
         ]);
-        let body = render_user(&config, &admin(), "http://host", "tok", None);
+        let body = render_user(&config, &admin(), "http://host", "tok", None, None);
         assert!(body.contains("http://host/l/tok/g1/c1.m3u8"));
         assert!(!body.contains("?token="), "订阅条目不用查询参数");
         assert!(!body.contains("/g4/"), "归档组停播，不进订阅");
@@ -315,7 +359,7 @@ mod tests {
             group("g1", "public", "proxy"),
             group("g2", "public", "proxy"),
         ]);
-        let body = render_user(&config, &plain(&["g1"]), "http://host", "tok", None);
+        let body = render_user(&config, &plain(&["g1"]), "http://host", "tok", None, None);
         assert!(body.contains("/g1/"));
         assert!(!body.contains("/g2/"));
     }
@@ -326,7 +370,7 @@ mod tests {
             group("g1", "public", "proxy"),
             group("g2", "public", "proxy"),
         ]);
-        let body = render_user(&config, &plain(&[]), "http://host", "tok", None);
+        let body = render_user(&config, &plain(&[]), "http://host", "tok", None, None);
         assert!(body.contains("/g1/"));
         assert!(body.contains("/g2/"));
     }
@@ -334,14 +378,14 @@ mod tests {
     #[test]
     fn public_group_entry_has_token() {
         let config = config_with(vec![group("g3", "public", "proxy")]);
-        let body = render_user(&config, &admin(), "http://host", "tok", None);
+        let body = render_user(&config, &admin(), "http://host", "tok", None, None);
         assert!(body.contains("http://host/l/tok/g3/c1.m3u8\n"));
     }
 
     #[test]
     fn passthrough_uses_upstream_url() {
         let config = config_with(vec![group("g5", "public", "passthrough")]);
-        let body = render_user(&config, &admin(), "http://host", "tok", None);
+        let body = render_user(&config, &admin(), "http://host", "tok", None, None);
         assert!(body.contains("http://upstream/x.m3u8"));
         assert!(!body.contains("/g5/c1"));
     }
@@ -350,7 +394,7 @@ mod tests {
     fn epg_header_points_at_own_subscription() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.epg.enabled = true;
-        let body = render_user(&config, &admin(), "http://host/", "tok", None);
+        let body = render_user(&config, &admin(), "http://host/", "tok", None, None);
         let first = body.lines().next().unwrap();
         assert_eq!(
             first,
@@ -362,7 +406,7 @@ mod tests {
     fn epg_header_is_absent_when_disabled() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.epg.enabled = false;
-        let body = render_user(&config, &admin(), "http://host", "tok", None);
+        let body = render_user(&config, &admin(), "http://host", "tok", None, None);
         let first = body.lines().next().unwrap();
         assert_eq!(first, "#EXTM3U");
     }
@@ -371,7 +415,7 @@ mod tests {
     fn header_lines_are_emitted() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.server.m3u_header_lines = vec!["#EXTVLCOPT:http-user-agent=Rea/1.0".into()];
-        let body = render_user(&config, &admin(), "http://host", "tok", None);
+        let body = render_user(&config, &admin(), "http://host", "tok", None, None);
         let first = body.lines().nth(1).unwrap();
         assert_eq!(first, "#EXTVLCOPT:http-user-agent=Rea/1.0");
     }
@@ -380,7 +424,7 @@ mod tests {
     fn mpd_format_uses_mpd_ext() {
         let mut config = config_with(vec![group("g6", "public", "dash")]);
         config.groups[0].format = "mpd".into();
-        let body = render_user(&config, &admin(), "http://host", "tok", None);
+        let body = render_user(&config, &admin(), "http://host", "tok", None, None);
         assert!(body.contains("http://host/l/tok/g6/c1.mpd"));
     }
 
@@ -391,7 +435,7 @@ mod tests {
             group("g2", "public", "proxy"),
             group("g4", "archived", "proxy"),
         ]);
-        let groups = user_view(&config, &plain(&["g1", "g2"]), "http://host", "tok", None);
+        let groups = user_view(&config, &plain(&["g1", "g2"]), "http://host", "tok", None, None);
         assert_eq!(groups.len(), 2, "归档组不进视图");
         assert_eq!(groups[0].id, "g1");
         assert_eq!(groups[0].channels[0].url, "http://host/l/tok/g1/c1.m3u8");
@@ -401,7 +445,7 @@ mod tests {
     fn user_view_skips_empty_groups() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.groups[0].channels.clear();
-        assert!(user_view(&config, &admin(), "http://host", "tok", None).is_empty());
+        assert!(user_view(&config, &admin(), "http://host", "tok", None, None).is_empty());
     }
 
     #[test]
@@ -410,15 +454,15 @@ mod tests {
         config.groups[0].offline_on_fail = true;
         let health = Health::new();
 
-        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health));
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health), None);
         assert!(body.contains("/g1/"), "没有探测记录时按在线处理");
 
         health.record_for_test("g1", "c1", false);
-        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health));
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health), None);
         assert!(!body.contains("/g1/"), "探测失败后不进订阅");
 
         health.record_for_test("g1", "c1", true);
-        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health));
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health), None);
         assert!(body.contains("/g1/"), "探测成功后恢复");
     }
 
@@ -436,7 +480,7 @@ mod tests {
         health.record_for_test("g1", "c1", false);
         health.record_for_test("g2", "c1", false);
 
-        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health));
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health), None);
         assert!(body.contains("/g1/"), "频道级关闭覆盖分组级开启");
         assert!(!body.contains("/g2/"), "频道级开启覆盖分组级关闭");
     }
@@ -449,7 +493,7 @@ mod tests {
         let health = Health::new();
         health.record_for_test("g1", "c1", false);
 
-        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health));
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&health), None);
         assert!(body.contains("/g1/"), "探测关闭时不下线");
     }
 
@@ -460,8 +504,153 @@ mod tests {
         let health = Health::new();
         health.record_for_test("g1", "c1", false);
 
-        let groups = user_view(&config, &admin(), "http://host", "tok", Some(&health));
+        let groups = user_view(&config, &admin(), "http://host", "tok", Some(&health), None);
         assert!(groups.is_empty(), "频道全部下线时分组也不显示");
+    }
+
+
+    use crate::quality::rules::Reason;
+    use crate::quality::state::{url_hash, QualityState, FLAG_OK, FLAG_REACHABLE};
+
+    fn quality_with(reason: Reason, checked_at: i64, first_fail_at: Option<i64>) -> QualityState {
+        let quality = QualityState::new();
+        quality.put(
+            "g1",
+            "c1",
+            crate::quality::state::Entry {
+                url_hash: url_hash("http://upstream/x.m3u8"),
+                checked_at,
+                first_fail_at,
+                last_ok_at: if reason == Reason::Pass {
+                    Some(checked_at)
+                } else {
+                    None
+                },
+                next_check_at: 0,
+                delay_ms: 100,
+                speed_kib: 1024,
+                width: 1920,
+                height: 1080,
+                flags: if reason == Reason::Pass {
+                    FLAG_OK | FLAG_REACHABLE
+                } else {
+                    FLAG_REACHABLE
+                },
+                reason,
+                consecutive_fails: if reason == Reason::Pass { 0 } else { 1 },
+            },
+        );
+        quality
+    }
+
+    #[test]
+    fn quality_off_leaves_playlist_unchanged() {
+        let config = config_with(vec![group("g1", "public", "proxy")]);
+        let plain = render_user(
+            &config,
+            &admin(),
+            "http://host",
+            "tok",
+            Some(&Health::new()),
+            None,
+        );
+        let with_state = render_user(
+            &config,
+            &admin(),
+            "http://host",
+            "tok",
+            Some(&Health::new()),
+            Some(&QualityState::new()),
+        );
+        assert_eq!(plain, with_state);
+    }
+
+    #[test]
+    fn failed_channel_hides_only_after_grace() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.quality.enabled = true;
+        config.quality.rules.action = "hide".into();
+        let now = crate::schedule::now_epoch();
+        let state = quality_with(Reason::Unreachable, now, Some(now - 1801));
+        let body = render_user(
+            &config,
+            &admin(),
+            "http://host",
+            "tok",
+            Some(&Health::new()),
+            Some(&state),
+        );
+        assert!(!body.contains("C1"), "超过宽限应隐藏: {body}");
+
+        let state = quality_with(Reason::Unreachable, now, Some(now - 60));
+        let body = render_user(
+            &config,
+            &admin(),
+            "http://host",
+            "tok",
+            Some(&Health::new()),
+            Some(&state),
+        );
+        assert!(body.contains("C1"), "宽限内应可见: {body}");
+    }
+
+    #[test]
+    fn probe_error_and_unknown_stay_visible() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.quality.enabled = true;
+        let now = crate::schedule::now_epoch();
+        for reason in [Reason::ProbeError, Reason::Unknown] {
+            let state = quality_with(reason, now, None);
+            let body = render_user(
+                &config,
+                &admin(),
+                "http://host",
+                "tok",
+                Some(&Health::new()),
+                Some(&state),
+            );
+            assert!(body.contains("C1"), "{reason:?} 不应隐藏: {body}");
+        }
+    }
+
+    #[test]
+    fn retain_mark_and_passthrough_stay_visible() {
+        let now = crate::schedule::now_epoch();
+        let old = Some(now - 3600);
+
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.quality.enabled = true;
+        config.groups[0].channels[0].quality = Some(crate::config::model::QualityOverride {
+            retain: Some(true),
+            ..Default::default()
+        });
+        let state = quality_with(Reason::Unreachable, now, old);
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&Health::new()), Some(&state));
+        assert!(body.contains("C1"), "retain 不应隐藏: {body}");
+
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.quality.enabled = true;
+        config.quality.rules.action = "mark".into();
+        let state = quality_with(Reason::Unreachable, now, old);
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&Health::new()), Some(&state));
+        assert!(body.contains("C1"), "mark 不应隐藏: {body}");
+
+        let mut config = config_with(vec![group("g1", "public", "passthrough")]);
+        config.quality.enabled = true;
+        let state = quality_with(Reason::Unreachable, now, old);
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&Health::new()), Some(&state));
+        assert!(body.contains("C1"), "passthrough 不应隐藏: {body}");
+    }
+
+    #[test]
+    fn url_change_hides_old_result() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.quality.enabled = true;
+        let now = crate::schedule::now_epoch();
+        let state = quality_with(Reason::Unreachable, now, Some(now - 3600));
+        config.groups[0].channels[0].url = "http://upstream/changed.m3u8".into();
+        let body = render_user(&config, &admin(), "http://host", "tok", Some(&Health::new()), Some(&state));
+        assert!(body.contains("C1"), "地址变化后旧结果不应隐藏: {body}");
     }
 }
 
