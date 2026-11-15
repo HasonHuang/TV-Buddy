@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     probe::{probe, ProbeLimits, ProbeMode},
-    rules::{effective_rules, evaluate, Action, Reason},
+    rules::{effective_rules, evaluate, Action, Measurement, Reason},
     state::{
         url_hash, Entry, RunError, RunMode, RunScope, FLAG_OK, FLAG_REACHABLE,
     },
@@ -49,7 +49,25 @@ pub fn run_limit(budget_mb: u64, per_channel_mb: f64, max_channels: u64) -> usiz
         return by_count;
     }
     let by_budget = (budget_mb as f64 / per_channel_mb).floor() as usize;
-    by_budget.min(by_count)
+    // 预算小于单频道估算时仍跑一个。否则设置一个合法预算会让功能静默失效。
+    by_budget.max(1).min(by_count)
+}
+
+/// 判断本轮下载量是否达到预算的 90%。
+fn budget_reached(bytes: u64, budget_bytes: u64) -> bool {
+    budget_bytes > 0 && bytes >= budget_bytes.saturating_mul(9) / 10
+}
+
+/// 判断范围是否指向配置里存在的对象。
+pub fn scope_exists(config: &Config, scope: &RunScope) -> bool {
+    match scope {
+        RunScope::All => true,
+        RunScope::Source(id) => config.playlist.sources.iter().any(|source| &source.id == id),
+        RunScope::Group(id) => config.group(id).is_some(),
+        RunScope::Channel(gid, cid) => config
+            .group(gid)
+            .is_some_and(|group| group.channels.iter().any(|channel| &channel.id == cid)),
+    }
 }
 
 fn probe_mode(value: &str) -> ProbeMode {
@@ -122,7 +140,7 @@ async fn run_targets(
         if state.quality.is_cancelled() {
             break;
         }
-        if budget_bytes > 0 && bytes >= budget_bytes.saturating_mul(9) / 10 {
+        if budget_reached(bytes, budget_bytes) {
             break;
         }
         let mut jobs = Vec::new();
@@ -193,9 +211,10 @@ async fn probe_one(
         Ok(None) => channel.url.clone(),
         Err(error) => {
             let mut entry = missing_entry(channel, now, interval);
-            entry.first_fail_at = previous.as_ref().and_then(|entry| entry.first_fail_at);
-            entry.consecutive_fails = previous.as_ref().map_or(0, |entry| entry.consecutive_fails);
-            entry.last_ok_at = previous.as_ref().and_then(|entry| entry.last_ok_at);
+            let previous = previous_for(channel, previous.as_ref());
+            entry.first_fail_at = previous.and_then(|entry| entry.first_fail_at);
+            entry.consecutive_fails = previous.map_or(0, |entry| entry.consecutive_fails);
+            entry.last_ok_at = previous.and_then(|entry| entry.last_ok_at);
             tracing::debug!(gid, cid, %error, "质量探测地址解析失败");
             return (
                 gid.to_string(),
@@ -236,11 +255,7 @@ async fn probe_one(
             cid,
             out.measurement.reachable,
             out.measurement.http_status,
-            if out.measurement.reachable {
-                None
-            } else {
-                out.measurement.error.clone()
-            },
+            health_error(&out.measurement),
             out.measurement.delay_ms.map(u64::from),
         );
     }
@@ -286,6 +301,22 @@ fn missing_entry(channel: &Channel, now: i64, interval: u64) -> Entry {
     }
 }
 
+/// 只复用同一地址的旧结果。地址变了就重新起算失败宽限。
+fn previous_for<'a>(channel: &Channel, previous: Option<&'a Entry>) -> Option<&'a Entry> {
+    previous.filter(|entry| entry.url_hash == url_hash(&channel.url))
+}
+
+/// 健康接口展示的失败原因。不要带原始地址，避免泄露查询令牌。
+fn health_error(measurement: &Measurement) -> Option<String> {
+    if measurement.reachable {
+        return None;
+    }
+    measurement
+        .http_status
+        .map(|status| format!("HTTP {status}"))
+        .or_else(|| Some("连接失败".to_string()))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_entry(
     channel: &Channel,
@@ -297,7 +328,8 @@ fn build_entry(
     reason: Reason,
     reachable: bool,
 ) -> Entry {
-    let previous = previous.cloned().unwrap_or_default();
+    let current_hash = url_hash(&channel.url);
+    let previous = previous_for(channel, previous).cloned().unwrap_or_default();
     let probe_error = reason == Reason::ProbeError;
     let failed = !ok && !probe_error;
     let consecutive = if ok {
@@ -328,7 +360,7 @@ fn build_entry(
         flags |= FLAG_REACHABLE;
     }
     Entry {
-        url_hash: url_hash(&channel.url),
+        url_hash: current_hash,
         checked_at: now,
         first_fail_at,
         last_ok_at: if ok {
@@ -361,7 +393,7 @@ pub async fn run_now(
     scope: RunScope,
     _mode: RunMode,
     force: bool,
-) -> Result<String, RunError> {
+) -> Result<(String, usize), RunError> {
     let config = (*state.snapshot()).clone();
     if !config.quality.enabled && !force {
         return Err(RunError::Disabled);
@@ -375,6 +407,7 @@ pub async fn run_now(
     if targets.is_empty() {
         return Err(RunError::InvalidScope);
     }
+    let queued = targets.len();
     let run_id = format!("q-{}", uuid::Uuid::new_v4());
     if !state.quality.try_start_run(&run_id, targets.len()) {
         return Err(RunError::Busy);
@@ -383,13 +416,10 @@ pub async fn run_now(
     let run_id_for_task = run_id.clone();
     tokio::spawn(async move {
         run_targets(state_for_task.clone(), targets, config, force).await;
-        state_for_task.quality.update_run(|run| {
-            run.finished = true;
-            run.run_id = run_id_for_task;
-        });
-        state_for_task.quality.finish_run();
+        // 只结束本次任务。任务已被替换时不要碰新任务。
+        state_for_task.quality.finish_run_id(&run_id_for_task);
     });
-    Ok(run_id)
+    Ok((run_id, queued))
 }
 
 /// 周期调度。启动后等待 60 秒，每 60 秒检查一次。
@@ -559,5 +589,115 @@ mod tests {
         assert_eq!(run_limit(64, 8.0, 3), 3);
         assert_eq!(run_limit(0, 8.0, 5), 5);
         assert_eq!(run_limit(64, 0.0, 0), usize::MAX);
+    }
+
+    #[test]
+    fn run_limit_keeps_one_channel_for_small_budget() {
+        // 预算小于单频道估算时仍要跑一个，否则功能静默失效。
+        assert_eq!(run_limit(4, 8.0, 0), 1);
+        assert_eq!(run_limit(1, 8.0, 3), 1);
+    }
+
+    #[test]
+    fn budget_reached_at_ninety_percent() {
+        assert!(!budget_reached(0, 0), "0 表示不限制");
+        assert!(!budget_reached(100, 0));
+        assert!(!budget_reached(89, 100));
+        assert!(budget_reached(90, 100));
+        assert!(budget_reached(150, 100));
+    }
+
+    #[test]
+    fn address_change_resets_failure_clock() {
+        let channel = Channel {
+            id: "c".into(),
+            url: "http://up/new.m3u8".into(),
+            ..Channel::default()
+        };
+        let old = Entry {
+            url_hash: url_hash("http://up/old.m3u8"),
+            first_fail_at: Some(100),
+            last_ok_at: Some(50),
+            consecutive_fails: 4,
+            ..Entry::default()
+        };
+        let down = super::super::probe::ProbeOutput {
+            measurement: super::super::rules::Measurement {
+                reachable: false,
+                probe_error: false,
+                http_status: None,
+                delay_ms: None,
+                speed_mib: None,
+                width: None,
+                height: None,
+                error: Some("timeout".into()),
+            },
+            bytes: 0,
+            duration_ms: 0,
+        };
+        let entry = build_entry(
+            &channel,
+            Some(&old),
+            1000,
+            900,
+            &down,
+            false,
+            Reason::Unreachable,
+            false,
+        );
+        assert_eq!(entry.first_fail_at, Some(1000), "新地址重新起算宽限");
+        assert_eq!(entry.consecutive_fails, 1, "新地址不继承旧失败次数");
+        assert_eq!(entry.last_ok_at, None, "新地址不继承旧成功时间");
+    }
+
+    #[test]
+    fn scope_exists_checks_config_ids() {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g".into(),
+            channels: vec![Channel {
+                id: "c".into(),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        config.playlist.sources.push(crate::config::model::PlaylistSource {
+            id: "s".into(),
+            ..Default::default()
+        });
+        assert!(scope_exists(&config, &RunScope::All));
+        assert!(scope_exists(&config, &RunScope::Source("s".into())));
+        assert!(!scope_exists(&config, &RunScope::Source("x".into())));
+        assert!(scope_exists(&config, &RunScope::Group("g".into())));
+        assert!(!scope_exists(&config, &RunScope::Group("x".into())));
+        assert!(scope_exists(
+            &config,
+            &RunScope::Channel("g".into(), "c".into())
+        ));
+        assert!(!scope_exists(
+            &config,
+            &RunScope::Channel("g".into(), "x".into())
+        ));
+    }
+
+    #[test]
+    fn health_error_does_not_leak_url() {
+        let mut measurement = super::super::rules::Measurement {
+            reachable: false,
+            probe_error: false,
+            http_status: Some(500),
+            delay_ms: None,
+            speed_mib: None,
+            width: None,
+            height: None,
+            error: Some("http://up/live.m3u8?token=SECRET".into()),
+        };
+        assert_eq!(health_error(&measurement).as_deref(), Some("HTTP 500"));
+        measurement.http_status = None;
+        let message = health_error(&measurement).expect("有错误");
+        assert!(!message.contains("SECRET"));
+        assert!(!message.contains("http"));
+        measurement.reachable = true;
+        assert_eq!(health_error(&measurement), None);
     }
 }

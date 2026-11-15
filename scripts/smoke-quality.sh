@@ -199,6 +199,7 @@ CODE=$(curl -s -o "$WORK/run.json" -w '%{http_code}' -X POST "$B/panel/api/quali
 check "发起校验 202" "202" "$CODE"
 RUN_ID=$(jq -r '.run_id // ""' "$WORK/run.json")
 check "返回 run_id" "yes" "$([ -n "$RUN_ID" ] && echo yes || echo no)"
+check "queued 为频道数" "3" "$(jq -r '.queued' "$WORK/run.json")"
 
 # 3) 轮询到完成。慢速源采样 2 秒，留足余量。
 STATUS='{}'

@@ -121,6 +121,8 @@ fn parse_stream_inf(attrs: &str) -> (u64, Option<u16>, Option<u16>) {
 }
 
 /// 解析媒体清单中的切片地址。跳过最后一个切片，避免取到未写完的切片。
+///
+/// 只保留末尾 `limit + 1` 个地址，避免长清单占用过多内存。
 pub fn parse_media_segments(body: &str, base: &str, limit: usize) -> Vec<String> {
     if limit == 0 {
         return Vec::new();
@@ -128,27 +130,23 @@ pub fn parse_media_segments(body: &str, base: &str, limit: usize) -> Vec<String>
     let Ok(base) = Url::parse(base) else {
         return Vec::new();
     };
-    let mut urls: Vec<String> = body
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .filter_map(|line| base.join(line).ok().map(|url| url.to_string()))
-        .collect();
-    if urls.is_empty() {
-        return Vec::new();
+    let mut urls: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    for line in body.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Ok(url) = base.join(line) else {
+            continue;
+        };
+        urls.push_back(url.to_string());
+        if urls.len() > limit.saturating_add(1) {
+            urls.pop_front();
+        }
     }
-    let all = urls.clone();
     if urls.len() > 1 {
-        urls.pop();
-    } else {
-        // 只有一个切片时没有“倒数第二片”。保留它，避免整条频道判失败。
-        return all;
+        urls.pop_back();
     }
-    if urls.is_empty() {
-        return all.into_iter().rev().take(limit).collect::<Vec<_>>().into_iter().rev().collect();
-    }
-    let start = urls.len().saturating_sub(limit);
-    urls[start..].to_vec()
+    urls.into_iter().collect()
 }
 
 fn with_headers(mut request: RequestBuilder, headers: &[(String, String)]) -> RequestBuilder {
@@ -191,6 +189,95 @@ async fn read_bounded(
     Ok((body, started.elapsed()))
 }
 
+/// 首块读出后的判定结果。连续流不保留正文，只计数。
+enum ProbeBody {
+    Hls(Vec<u8>),
+    Stream { bytes: u64, elapsed: Duration },
+}
+
+fn starts_hls(chunk: &[u8]) -> bool {
+    String::from_utf8_lossy(chunk)
+        .trim_start()
+        .starts_with("#EXTM3U")
+}
+
+/// 读首块判定 HLS。HLS 保留正文到清单上限；连续流只累计字节数。
+async fn read_probe_body(
+    mut response: Response,
+    hls_hint: bool,
+    playlist_limit: usize,
+    stream_limit: usize,
+    max_secs: f64,
+) -> Result<ProbeBody, String> {
+    let started = Instant::now();
+    let mut head = Vec::new();
+    let mut total = 0u64;
+    let mut decided = hls_hint;
+    let mut is_hls = hls_hint;
+    loop {
+        let limit = if is_hls { playlist_limit } else { stream_limit } as u64;
+        if total >= limit || started.elapsed().as_secs_f64() >= max_secs {
+            break;
+        }
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if !decided {
+                    is_hls = hls_hint || starts_hls(&chunk);
+                    decided = true;
+                }
+                let limit = if is_hls { playlist_limit } else { stream_limit } as u64;
+                let remaining = limit.saturating_sub(total) as usize;
+                let take = chunk.len().min(remaining);
+                total = total.saturating_add(take as u64);
+                if is_hls {
+                    head.extend_from_slice(&chunk[..take]);
+                }
+                if take < chunk.len() {
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    if is_hls {
+        Ok(ProbeBody::Hls(head))
+    } else {
+        Ok(ProbeBody::Stream {
+            bytes: total,
+            elapsed: started.elapsed(),
+        })
+    }
+}
+
+/// 只读不存。用于测速样本。
+async fn read_counted(
+    mut response: Response,
+    max_bytes: usize,
+    max_secs: f64,
+) -> Result<(u64, Duration), String> {
+    let started = Instant::now();
+    let mut total = 0u64;
+    loop {
+        if total >= max_bytes as u64 || started.elapsed().as_secs_f64() >= max_secs {
+            break;
+        }
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let remaining = max_bytes.saturating_sub(total as usize);
+                let take = chunk.len().min(remaining);
+                total = total.saturating_add(take as u64);
+                if take < chunk.len() {
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok((total, started.elapsed()))
+}
+
 fn content_type(response: &Response) -> String {
     response
         .headers()
@@ -198,6 +285,16 @@ fn content_type(response: &Response) -> String {
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase()
+}
+
+/// 去掉地址末尾的 `$描述` 段。上游只认基地址。
+pub fn clean_url(url: &str) -> &str {
+    url.split('$').next().unwrap_or(url).trim()
+}
+
+fn is_dash(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    path.to_ascii_lowercase().ends_with(".mpd")
 }
 
 fn looks_like_hls(url: &str, content_type: &str) -> bool {
@@ -229,6 +326,7 @@ pub async fn probe(
     limits: &ProbeLimits,
 ) -> ProbeOutput {
     let started = Instant::now();
+    let url = clean_url(url);
     let mut total_bytes = 0u64;
     let mut measurement = Measurement {
         reachable: false,
@@ -240,6 +338,15 @@ pub async fn probe(
         height: None,
         error: None,
     };
+
+    // P1 不解析 DASH。按探测能力缺失处理，不判不可达。
+    if is_dash(url) {
+        return ProbeOutput {
+            measurement: probe_error("DASH 清单暂不支持", true),
+            bytes: 0,
+            duration_ms: started.elapsed().as_millis() as u64,
+        };
+    }
 
     let request = with_headers(client.get(url).timeout(limits.timeout), headers);
     let response = match request.send().await {
@@ -278,12 +385,10 @@ pub async fn probe(
     }
 
     let hls = looks_like_hls(url, &content_type);
-    let read_limit = if hls {
-        limits.max_playlist_bytes
-    } else if mode == ProbeMode::Playlist {
+    let stream_limit = if mode == ProbeMode::Playlist {
         limits.max_playlist_bytes
     } else {
-        limits.max_sample_bytes.min(limits.max_playlist_bytes as u64) as usize
+        limits.max_sample_bytes as usize
     };
     let read_secs = if hls || mode == ProbeMode::Playlist {
         limits.timeout.as_secs_f64()
@@ -291,8 +396,45 @@ pub async fn probe(
         limits.max_sample_secs
     };
 
-    let (body, read_time) = match read_bounded(response, read_limit, read_secs).await {
-        Ok(value) => value,
+    let body = match read_probe_body(
+        response,
+        hls,
+        limits.max_playlist_bytes,
+        stream_limit,
+        read_secs,
+    )
+    .await
+    {
+        Ok(ProbeBody::Hls(body)) => body,
+        Ok(ProbeBody::Stream { bytes, elapsed }) => {
+            total_bytes = total_bytes.saturating_add(bytes);
+            if mode == ProbeMode::Playlist {
+                return ProbeOutput {
+                    measurement,
+                    bytes: total_bytes,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                };
+            }
+            if bytes == 0 {
+                measurement.reachable = false;
+                measurement.error = Some("空响应".to_string());
+                return ProbeOutput {
+                    measurement,
+                    bytes: total_bytes,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                };
+            }
+            measurement.speed_mib = Some(if elapsed > Duration::ZERO {
+                bytes as f64 / elapsed.as_secs_f64() / 1024.0 / 1024.0
+            } else {
+                0.0
+            });
+            return ProbeOutput {
+                measurement,
+                bytes: total_bytes,
+                duration_ms: started.elapsed().as_millis() as u64,
+            };
+        }
         Err(error) => {
             measurement.reachable = false;
             measurement.error = Some(error);
@@ -306,28 +448,6 @@ pub async fn probe(
     total_bytes = total_bytes.saturating_add(body.len() as u64);
 
     let body_text = String::from_utf8_lossy(&body);
-    let is_hls = hls || body_text.starts_with("#EXTM3U");
-
-    if !is_hls {
-        if mode == ProbeMode::Playlist {
-            return ProbeOutput {
-                measurement,
-                bytes: total_bytes,
-                duration_ms: started.elapsed().as_millis() as u64,
-            };
-        }
-        let elapsed = read_time.as_secs_f64();
-        measurement.speed_mib = if elapsed > 0.0 {
-            Some(body.len() as f64 / elapsed / 1024.0 / 1024.0)
-        } else {
-            Some(0.0)
-        };
-        return ProbeOutput {
-            measurement,
-            bytes: total_bytes,
-            duration_ms: started.elapsed().as_millis() as u64,
-        };
-    }
 
     let (media_url, media_body, variant_width, variant_height) =
         if body_text.contains("#EXT-X-STREAM-INF") {
@@ -398,6 +518,9 @@ pub async fn probe(
             )
         };
 
+    // 变体与切片地址已提取。释放清单正文，降低并发探测的峰值内存。
+    drop(body_text);
+    drop(body);
     measurement.width = variant_width;
     measurement.height = variant_height;
     let segments = parse_media_segments(&media_body, &media_url, limits.sample_segments);
@@ -434,7 +557,7 @@ pub async fn probe(
         if first_delay.is_none() {
             first_delay = Some(segment_started.elapsed().as_millis() as u32);
         }
-        let (bytes, elapsed) = match read_bounded(
+        let (bytes, elapsed) = match read_counted(
             response,
             limits.max_sample_bytes as usize,
             limits.max_sample_secs,
@@ -444,7 +567,7 @@ pub async fn probe(
             Ok(value) => value,
             Err(_) => continue,
         };
-        sample_bytes = sample_bytes.saturating_add(bytes.len() as u64);
+        sample_bytes = sample_bytes.saturating_add(bytes);
         sample_time = sample_time.saturating_add(elapsed);
     }
     total_bytes = total_bytes.saturating_add(sample_bytes);
@@ -583,5 +706,81 @@ high/index.m3u8\n";
         assert!(!out.measurement.probe_error);
         assert!(out.measurement.speed_mib.unwrap_or(0.0) > 0.0);
         assert!(out.bytes >= 64 * 1024);
+    }
+
+    /// 只接受指定路径；其他路径返回 404，用来验证请求地址已被规范化。
+    async fn serve_path(expected: &'static str, body: String) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 1024];
+            let read = socket.read(&mut buf).await.unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..read]);
+            let ok = request.starts_with(&format!("GET {expected} "));
+            let (status, payload) = if ok {
+                ("200 OK", body)
+            } else {
+                ("404 Not Found", String::new())
+            };
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: video/mp2t\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                payload.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn probe_strips_dollar_description_before_request() {
+        let base = serve_path("/live.ts", "x".repeat(4096)).await;
+        let client = reqwest::Client::new();
+        let out = probe(
+            &client,
+            &format!("{base}/live.ts$CCTV"),
+            &[],
+            ProbeMode::Speed,
+            None,
+            &ProbeLimits::for_test(),
+        )
+        .await;
+        assert!(out.measurement.reachable, "{:?}", out.measurement.error);
+    }
+
+    #[tokio::test]
+    async fn probe_marks_dash_playlist_as_probe_error() {
+        let client = reqwest::Client::new();
+        let out = probe(
+            &client,
+            "http://127.0.0.1:9/live.mpd",
+            &[],
+            ProbeMode::Speed,
+            None,
+            &ProbeLimits::for_test(),
+        )
+        .await;
+        assert!(out.measurement.probe_error);
+        assert!(out.measurement.reachable, "解析能力缺失不算不可达");
+    }
+
+    #[tokio::test]
+    async fn probe_marks_empty_stream_unreachable() {
+        let url = serve_once("/empty.ts", "video/mp2t", String::new(), "200 OK").await;
+        let client = reqwest::Client::new();
+        let out = probe(
+            &client,
+            &url,
+            &[],
+            ProbeMode::Speed,
+            None,
+            &ProbeLimits::for_test(),
+        )
+        .await;
+        assert!(!out.measurement.reachable);
+        assert!(!out.measurement.probe_error);
     }
 }

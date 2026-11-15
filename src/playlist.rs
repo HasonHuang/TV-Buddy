@@ -566,6 +566,21 @@ mod tests {
     }
 
     #[test]
+    fn quality_enabled_without_results_keeps_channels() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.quality.enabled = true;
+        let body = render_user(
+            &config,
+            &admin(),
+            "http://host",
+            "tok",
+            Some(&Health::new()),
+            Some(&QualityState::new()),
+        );
+        assert!(body.contains("C1"), "没有结果时不能隐藏: {body}");
+    }
+
+    #[test]
     fn failed_channel_hides_only_after_grace() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.quality.enabled = true;

@@ -171,6 +171,18 @@ impl QualityState {
         }
     }
 
+    /// 只结束指定任务。任务已被新任务替换时返回 `false`。
+    pub fn finish_run_id(&self, run_id: &str) -> bool {
+        let mut run = self.run.lock().unwrap_or_else(|error| error.into_inner());
+        match run.as_mut() {
+            Some(state) if state.run_id == run_id => {
+                state.finished = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn run_status(&self) -> Option<RunState> {
         self.run
             .lock()
@@ -250,6 +262,18 @@ mod tests {
         assert!(!state.try_start_run("r2", 10));
         state.finish_run();
         assert!(state.try_start_run("r3", 10));
+    }
+
+    #[test]
+    fn stale_run_cannot_finish_new_run() {
+        let state = QualityState::new();
+        assert!(state.try_start_run("r1", 1));
+        assert!(state.finish_run_id("r1"));
+        assert!(state.try_start_run("r2", 1));
+        assert!(!state.finish_run_id("r1"), "旧任务不能结束新任务");
+        let run = state.run_status().expect("run");
+        assert_eq!(run.run_id, "r2");
+        assert!(!run.finished);
     }
 
     #[test]

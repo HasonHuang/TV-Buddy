@@ -13,7 +13,7 @@ use std::{
 };
 
 use axum::{
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
@@ -6341,4 +6341,44 @@ async fn deleting_last_epg_source_clears_output() {
     // 没有源后旧节目单必须失效，不能继续下发。
     let response = fetch(&fixture, &fixture.sub(&fixture.token, "epg.xml")).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// 删除频道或分组后，质量结果必须一起清掉。
+///
+/// 否则重建同 id 频道会命中旧结果，按旧失败时钟立即隐藏。
+#[tokio::test]
+async fn deleting_channel_and_group_clears_quality_results() {
+    use tv_buddy::quality::state::Entry;
+
+    let fixture = fixture().await;
+    let entry = Entry {
+        checked_at: 1,
+        ..Entry::default()
+    };
+    fixture.state.quality.put("pg", "c1", entry.clone());
+    fixture.state.quality.put("pm", "c1", entry);
+
+    let response = tv_buddy::http::routes::groups::delete_channel(
+        tv_buddy::http::ext::PanelAuth(String::new()),
+        State(fixture.state.clone()),
+        Path(("pg".to_string(), "c1".to_string())),
+    )
+    .await
+    .expect("删除频道");
+    let _ = response;
+    assert!(fixture.state.quality.get("pg", "c1").is_none());
+    assert!(
+        fixture.state.quality.get("pm", "c1").is_some(),
+        "其他分组的结果不能误删"
+    );
+
+    let response = tv_buddy::http::routes::groups::delete_group(
+        tv_buddy::http::ext::PanelAuth(String::new()),
+        State(fixture.state.clone()),
+        Path("pm".to_string()),
+    )
+    .await
+    .expect("删除分组");
+    let _ = response;
+    assert!(fixture.state.quality.get("pm", "c1").is_none());
 }

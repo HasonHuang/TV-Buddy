@@ -123,6 +123,7 @@ pub async fn delete_group(
         })
         .map_err(|err| ApiError::internal(err.to_string()))?;
     state.health.forget_group(&gid);
+    state.quality.forget_group(&gid);
     tracing::info!(group = %gid, "删除分组");
     Ok(Json(json!({ "ok": true })))
 }
@@ -176,6 +177,7 @@ pub async fn create_channel(
         })
         .map_err(|err| ApiError::internal(err.to_string()))?;
     state.health.forget(&gid, &id);
+    state.quality.forget(&gid, &id);
     tracing::info!(group = %gid, channel = %id, "新建频道");
     Ok(Json(json!({ "ok": true })))
 }
@@ -219,6 +221,7 @@ pub async fn update_channel(
         .map_err(|err| ApiError::internal(err.to_string()))?;
     if offline_changed || upstream_changed || resolver_changed {
         state.health.forget(&gid, &cid);
+        state.quality.forget(&gid, &cid);
     }
     Ok(Json(json!({ "ok": true })))
 }
@@ -249,6 +252,7 @@ pub async fn delete_channel(
         })
         .map_err(|err| ApiError::internal(err.to_string()))?;
     state.health.forget(&gid, &cid);
+    state.quality.forget(&gid, &cid);
     tracing::info!(group = %gid, channel = %cid, "删除频道");
     Ok(Json(json!({ "ok": true })))
 }
@@ -350,6 +354,7 @@ fn import(
     // 覆盖导入可能换掉频道地址。丢掉旧探测结果，按在线处理到下一轮探测。
     for group in &groups {
         state.health.forget_group(&group.id);
+        state.quality.forget_group(&group.id);
     }
 
     Ok(Json(json!({
@@ -603,6 +608,7 @@ pub async fn import_m3u(
     // 替换导入会换掉频道地址与设置。丢掉旧探测结果。
     for gid in &draft_ids {
         state.health.forget_group(gid);
+        state.quality.forget_group(gid);
     }
 
     Ok(Json(json!({

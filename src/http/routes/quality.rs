@@ -17,7 +17,7 @@ use crate::{
     http::{error::ApiError, ext::PanelAuth},
     playlist::quality_hidden,
     quality::{
-        schedule::run_now,
+        schedule::{run_now, scope_exists},
         state::{Entry, QualityState, RunError, RunMode, RunScope, RunState},
     },
     state::AppState,
@@ -73,6 +73,18 @@ fn required_id(body: &Value, scope: &str) -> Result<String, ApiError> {
         .ok_or_else(|| ApiError::bad_request(format!("scope={scope} 需要 id")))
 }
 
+fn run_state_label(run: &RunState) -> &'static str {
+    if run.cancelled {
+        "cancelled"
+    } else if run.finished {
+        "done"
+    } else if run.tested == 0 {
+        "queued"
+    } else {
+        "running"
+    }
+}
+
 fn run_json(run: &RunState) -> Value {
     json!({
         "run_id": run.run_id,
@@ -84,6 +96,7 @@ fn run_json(run: &RunState) -> Value {
         "bytes": run.bytes,
         "cancelled": run.cancelled,
         "finished": run.finished,
+        "status": run_state_label(run),
         "error": run.error,
     })
 }
@@ -195,11 +208,15 @@ pub async fn run(
     Json(body): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let request = RunRequest::from_json(&body)?;
-    if !state.snapshot().quality.enabled && !request.force {
+    let config = state.snapshot();
+    if !config.quality.enabled && !request.force {
         return Ok((
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "质量校验未启用", "code": "quality_disabled" })),
         ));
+    }
+    if !scope_exists(&config, &request.scope) {
+        return Err(ApiError::not_found("范围不存在"));
     }
     match run_now(
         state.clone(),
@@ -209,9 +226,9 @@ pub async fn run(
     )
     .await
     {
-        Ok(run_id) => Ok((
+        Ok((run_id, queued)) => Ok((
             StatusCode::ACCEPTED,
-            Json(json!({ "ok": true, "run_id": run_id, "queued": true })),
+            Json(json!({ "ok": true, "run_id": run_id, "queued": queued })),
         )),
         Err(RunError::Busy) => Err(ApiError::conflict_code(
             "run_active",
@@ -298,5 +315,28 @@ mod tests {
     fn run_request_rejects_missing_id() {
         let body = serde_json::json!({ "scope": "group" });
         assert!(RunRequest::from_json(&body).is_err());
+    }
+
+    #[test]
+    fn run_json_reports_derived_status() {
+        let mut run = RunState {
+            run_id: "q-1".into(),
+            started_at: 1,
+            total: 3,
+            tested: 0,
+            valid: 0,
+            hidden: 0,
+            bytes: 0,
+            cancelled: false,
+            finished: false,
+            error: None,
+        };
+        assert_eq!(run_json(&run)["status"], "queued");
+        run.tested = 1;
+        assert_eq!(run_json(&run)["status"], "running");
+        run.finished = true;
+        assert_eq!(run_json(&run)["status"], "done");
+        run.cancelled = true;
+        assert_eq!(run_json(&run)["status"], "cancelled");
     }
 }

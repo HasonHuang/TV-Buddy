@@ -225,8 +225,8 @@ export function runQuality(
   id?: string,
   mode: 'quick' | 'full' = 'quick',
   force = false,
-): Promise<{ ok: boolean; run_id: string; queued: boolean }> {
-  return api<{ ok: boolean; run_id: string; queued: boolean }>('POST', '/quality/run', {
+): Promise<{ ok: boolean; run_id: string; queued: number }> {
+  return api<{ ok: boolean; run_id: string; queued: number }>('POST', '/quality/run', {
     scope,
     ...(id ? { id } : {}),
     run_mode: mode,
