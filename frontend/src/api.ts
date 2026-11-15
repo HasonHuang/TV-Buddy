@@ -123,3 +123,113 @@ export async function copyText(text: string): Promise<boolean> {
     return ok;
   }
 }
+
+/** 质量判定原因。与后端 `Reason::as_str` 一致。 */
+export type QualityReason =
+  | 'pass'
+  | 'retained'
+  | 'unreachable'
+  | 'speed_low'
+  | 'resolution_low'
+  | 'resolution_high'
+  | 'delay_high'
+  | 'supply'
+  | 'probe_error'
+  | 'unknown';
+
+/** 单频道质量结果。字段来自 `GET /quality/results`。 */
+export type QualityResult = {
+  gid: string;
+  cid: string;
+  name: string;
+  source_id: string;
+  checked_at: number;
+  next_check_at: number;
+  last_ok_at: number | null;
+  first_fail_at: number | null;
+  ok: boolean;
+  reachable: boolean;
+  reason: QualityReason;
+  delay_ms: number;
+  speed_mib: number;
+  width: number;
+  height: number;
+  resolution: string;
+  consecutive_fails: number;
+  flags: number;
+  hidden: boolean;
+  stale: boolean;
+};
+
+/** 一次校验任务的进度。 */
+export type QualityRun = {
+  run_id: string;
+  started_at: number;
+  total: number;
+  tested: number;
+  valid: number;
+  hidden: number;
+  bytes: number;
+  cancelled: boolean;
+  finished: boolean;
+  error: string | null;
+};
+
+export type QualityStatus = {
+  enabled: boolean;
+  probe_mode: string;
+  interval_secs: number;
+  running: boolean;
+  run: QualityRun | null;
+  rules: {
+    action: string;
+    retain: boolean;
+    supply: boolean;
+    min_speed_mib: number;
+    max_delay_ms: number;
+    min_resolution: string;
+    max_resolution: string;
+    stale_keep_secs: number;
+  };
+  ffprobe: { installed: boolean; required: boolean };
+  entries: number;
+};
+
+export type QualityScope = 'all' | 'source' | 'group' | 'channel';
+
+/** 读取质量校验状态。 */
+export function fetchQualityStatus(): Promise<QualityStatus> {
+  return api<QualityStatus>('GET', '/quality/status');
+}
+
+/** 读取质量结果。可按分组、频道过滤。 */
+export function fetchQualityResults(params: {
+  gid?: string;
+  cid?: string;
+  limit?: number;
+} = {}): Promise<{ total: number; items: QualityResult[] }> {
+  const search = new URLSearchParams();
+  if (params.gid) search.set('gid', params.gid);
+  if (params.cid) search.set('cid', params.cid);
+  if (params.limit !== undefined) search.set('limit', String(params.limit));
+  const query = search.toString();
+  return api<{ total: number; items: QualityResult[] }>(
+    'GET',
+    `/quality/results${query ? `?${query}` : ''}`,
+  );
+}
+
+/** 发起一次质量校验。`id` 在非 `all` 范围必填；频道用 `gid/cid`。 */
+export function runQuality(
+  scope: QualityScope,
+  id?: string,
+  mode: 'quick' | 'full' = 'quick',
+  force = false,
+): Promise<{ ok: boolean; run_id: string; queued: boolean }> {
+  return api<{ ok: boolean; run_id: string; queued: boolean }>('POST', '/quality/run', {
+    scope,
+    ...(id ? { id } : {}),
+    run_mode: mode,
+    force,
+  });
+}

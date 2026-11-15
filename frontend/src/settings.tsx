@@ -18,7 +18,7 @@ import {
   useState,
 } from 'react';
 
-import { api, putConfig } from './api';
+import { api, putConfig, runQuality } from './api';
 import { Icon } from './icons';
 import type { Recommend } from './lowcfg';
 import { BackupPage } from './ops';
@@ -751,6 +751,18 @@ export function SettingsPage({
     }
   };
 
+  const runQualityAll = async () => {
+    setBusy('quality');
+    try {
+      const result = await runQuality('all');
+      ok(`已排入质量校验（${result.run_id}）`);
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy('');
+    }
+  };
+
   const ttlHint =
     asNumber(draft ?? {}, 'cdn.segment_max_age_secs') === 0
       ? `自动（当前 ${recommend?.ttl_secs ?? '—'}s）`
@@ -1454,6 +1466,115 @@ export function SettingsPage({
                       unit="秒"
                       tip="一段时间内播放过的设备算作在线。这里设置这段时间的长度。"
                       hint="这段时间内播放过的设备算作在线"
+                    />
+                  </div>
+                </Card>
+                <Card
+                  title="可用性校验"
+                  note="按规则探测频道并隐藏不合格项"
+                  tip="独立于健康探测。关闭后订阅清单不受质量规则影响，健康探测照常运行。「立即校验全部」使用已保存的设置。"
+                  wide
+                  actions={
+                    <button
+                      className="ghost"
+                      title="按已保存的设置校验全部频道"
+                      disabled={busy === 'quality'}
+                      onClick={() => void runQualityAll()}
+                    >
+                      {busy === 'quality' ? '已排入…' : '立即校验全部'}
+                    </button>
+                  }
+                >
+                  <div className="fields">
+                    <BoolPick
+                      label="质量校验"
+                      path="quality.enabled"
+                      tip="开启后按周期探测频道，并按规则决定是否从订阅清单隐藏。"
+                      hint="关闭后不影响现有健康探测"
+                    />
+                    <Pick
+                      label="探测档位"
+                      path="quality.probe_mode"
+                      tip="档位越高，耗时与流量越多。完整档位在第一版按测速执行。"
+                      options={[
+                        { value: 'reachability', label: '连通', desc: '只检查能否建立连接' },
+                        { value: 'playlist', label: '清单', desc: '读取清单并请求首个切片' },
+                        { value: 'speed', label: '测速', desc: '下载样本并测量速率' },
+                        { value: 'full', label: '完整', desc: '第一版按测速执行' },
+                      ]}
+                    />
+                    <Num
+                      label="校验周期"
+                      path="quality.interval_secs"
+                      unit="秒"
+                      tip="两次质量校验之间的间隔。0 表示不定时校验。"
+                    />
+                    <Num
+                      label="校验超时"
+                      path="quality.timeout_secs"
+                      unit="秒"
+                      tip="单次连通或清单请求的超时时间。"
+                    />
+                    <Num
+                      label="校验并发"
+                      path="quality.concurrency"
+                      unit="个"
+                      tip="同时探测的频道数。低配机器建议 2 到 3。"
+                    />
+                    <Num
+                      label="单轮流量预算"
+                      path="quality.budget_mb_per_run"
+                      unit="MB"
+                      tip="一轮校验下载量的上限。达到预算后跳过剩余频道。"
+                      hint="0 = 不限制"
+                    />
+                    <Num
+                      label="单轮频道上限"
+                      path="quality.max_channels_per_run"
+                      unit="个"
+                      tip="一轮最多校验的频道数。频道较多时用来控制耗时。"
+                      hint="0 = 不限制"
+                    />
+                    <Num
+                      label="失败宽限"
+                      path="quality.stale_keep_secs"
+                      unit="秒"
+                      tip="频道首次失败后，继续保留在订阅里的时间。超过后按规则隐藏。"
+                    />
+                    <Num
+                      label="最低速率"
+                      path="quality.rules.min_speed_mib"
+                      unit="MiB/s"
+                      step={0.1}
+                      tip="测速结果低于该值时判为速率低。0 = 不限制。"
+                    />
+                    <Num
+                      label="最大延迟"
+                      path="quality.rules.max_delay_ms"
+                      unit="毫秒"
+                      tip="首字节延迟高于该值时判为延迟高。0 = 不限制。"
+                    />
+                    <Text
+                      label="最低分辨率"
+                      path="quality.rules.min_resolution"
+                      placeholder="1280x720"
+                      tip="低于该分辨率判为不合格。留空不限制。"
+                    />
+                    <Text
+                      label="最高分辨率"
+                      path="quality.rules.max_resolution"
+                      placeholder="3840x2160"
+                      tip="高于该分辨率判为不合格。留空不限制。"
+                    />
+                    <Pick
+                      label="默认动作"
+                      path="quality.rules.action"
+                      tip="不合格频道的处理方式：隐藏、只标记、或关闭判定。"
+                      options={[
+                        { value: 'hide', label: '隐藏', desc: '从订阅清单移除' },
+                        { value: 'mark', label: '标记', desc: '只在面板显示结果' },
+                        { value: 'off', label: '关闭', desc: '不执行质量判定' },
+                      ]}
                     />
                   </div>
                 </Card>

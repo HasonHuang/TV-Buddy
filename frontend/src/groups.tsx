@@ -9,9 +9,17 @@
 
 import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react';
 
-import { api, copyText, putConfig } from './api';
+import {
+  type QualityResult,
+  api,
+  copyText,
+  fetchQualityResults,
+  putConfig,
+  runQuality,
+} from './api';
 import { Icon } from './icons';
 import { modeCode, modeOptions, modeTip } from './modes';
+import { QualityBadges, qualityCounts } from './quality';
 import { ScriptManagerModal } from './scripts';
 import {
   Badge,
@@ -460,6 +468,10 @@ export function GroupsPage() {
   const [health, setHealth] = useState<Record<string, HealthEntry>>({});
   /** `[health].enabled`。关闭时不按探测结果下线。 */
   const [healthEnabled, setHealthEnabled] = useState(true);
+  /** 质量结果，键为 `gid/cid`。读取失败时保持空，不影响分组页。 */
+  const [quality, setQuality] = useState<Record<string, QualityResult>>({});
+  /** 正在发起单频道质量校验的 `gid/cid`。 */
+  const [checkingQuality, setCheckingQuality] = useState('');
   const [tracks, setTracks] = useState<{ gid: string; cid: string; body: string } | null>(null);
   /** 多选：批量删除与批量导出。 */
   const [multi, setMulti] = useState(false);
@@ -536,6 +548,37 @@ export function GroupsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 质量结果单独读取。接口关闭或失败时不提示，分组页照常可用。
+  useEffect(() => {
+    let active = true;
+    fetchQualityResults({ limit: 1000 })
+      .then((body) => {
+        if (!active) return;
+        setQuality(
+          Object.fromEntries((body.items ?? []).map((item) => [`${item.gid}/${item.cid}`, item])),
+        );
+      })
+      .catch(() => {
+        if (active) setQuality({});
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const checkQuality = async (gid: string, cid: string) => {
+    const key = `${gid}/${cid}`;
+    setCheckingQuality(key);
+    try {
+      await runQuality('channel', key, 'quick', true);
+      ok('已排入质量校验');
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCheckingQuality('');
+    }
+  };
 
   // 分组或频道被单独删除后，清掉已失效的选中项。
   useEffect(() => {
@@ -1188,6 +1231,7 @@ export function GroupsPage() {
         // 排序按 `groups` 的绝对下标；搜索过滤时也不会错位。
         const groupIndex = groups.indexOf(group);
         const isCollapsed = collapsed.includes(group.id);
+        const counts = qualityCounts(channels, quality, group.id);
         return (
           <div
             className={`card flush group-card${dragging === group.id ? ' dragging' : ''}`}
@@ -1282,6 +1326,15 @@ export function GroupsPage() {
                 <HoverTip text={modeTip(group.mode)}>
                   <span className={`badge mode ${group.mode}`}>{modeCode(group.mode)}</span>
                 </HoverTip>
+                {counts.tested > 0 && (
+                  <HoverTip
+                    text={`已测 ${counts.tested} 个频道；合格 ${counts.valid} 个。未测频道不计入。`}
+                  >
+                    <span className={`badge ${counts.valid === counts.tested ? 'ok' : 'warn'}`}>
+                      合格 {counts.valid} / {counts.tested}
+                    </span>
+                  </HoverTip>
+                )}
                 <span
                   className="count"
                   title={
@@ -1375,6 +1428,7 @@ export function GroupsPage() {
               // 排序按钮按完整列表的下标判断边界，搜索过滤不影响排序。
               const channelIndex = channels.indexOf(channel);
               const state = health[`${group.id}/${channel.id}`];
+              const qualityResult = quality[`${group.id}/${channel.id}`];
               const offlineOnFail =
                 channel.offline_on_fail ?? (group.offline_on_fail === true);
               const offline = healthEnabled && offlineOnFail && state?.ok === false;
@@ -1504,6 +1558,7 @@ export function GroupsPage() {
                       {tvgId !== '' && <Badge tone="muted">tvg-id</Badge>}
                       {logo !== '' && <Badge tone="muted">Logo</Badge>}
                       <PrefetchBadge raw={channel.prefetch} />
+                      <QualityBadges result={qualityResult} />
                     </div>
                   </div>
                   <div className="ch-ops">
@@ -1548,6 +1603,14 @@ export function GroupsPage() {
                         <Icon name="search" size={13} />
                       </button>
                     )}
+                    <button
+                      className="chip"
+                      title="立即校验这个频道。使用已保存的质量规则。"
+                      disabled={checkingQuality === `${group.id}/${channel.id}`}
+                      onClick={() => void checkQuality(group.id, channel.id)}
+                    >
+                      {checkingQuality === `${group.id}/${channel.id}` ? '已排入…' : '校验'}
+                    </button>
                     <button
                       className="chip"
                       aria-label="编辑频道"
