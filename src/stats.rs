@@ -94,6 +94,22 @@ impl Stats {
             .contains_key(key)
     }
 
+    /// 只保留配置里仍存在的分组键。配置删除分组后调用，避免旧键常驻。
+    pub fn retain_groups<F: Fn(&str) -> bool>(&self, keep: F) {
+        self.per_group
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|id, _| keep(id));
+    }
+
+    /// 只保留配置里仍存在的频道键。
+    pub fn retain_channels<F: Fn(&str) -> bool>(&self, keep: F) {
+        self.per_channel
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|key, _| keep(key));
+    }
+
     pub fn record_playlist(&self) {
         self.playlists.fetch_add(1, Ordering::Relaxed);
     }
@@ -153,6 +169,23 @@ mod tests {
         assert_eq!(snapshot.playlists, 1);
         assert_eq!(snapshot.upstream_failures, 1);
         assert_eq!(snapshot.groups, vec![("g1".into(), 2), ("g2".into(), 1)]);
+    }
+
+    #[test]
+    fn retains_only_configured_keys() {
+        let stats = Stats::default();
+        stats.record_request("g1");
+        stats.record_request("g2");
+        stats.record_channel("g1/c1");
+        stats.record_channel("g2/c2");
+
+        stats.retain_groups(|id| id == "g1");
+        stats.retain_channels(|key| key == "g1/c1");
+
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.groups, vec![("g1".into(), 1)]);
+        assert!(stats.channel_tracked("g1/c1"));
+        assert!(!stats.channel_tracked("g2/c2"));
     }
 
     #[test]

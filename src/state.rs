@@ -4,6 +4,7 @@
 //! 配置改动走 [`AppState::mutate`]：以数据库为准重读 → 改 → 校验落库 → 替换快照。
 
 use std::{
+    collections::HashSet,
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -36,6 +37,9 @@ pub struct AppState {
     pub config_store: crate::config::ConfigStore,
     /// 当前配置快照。
     pub config: ArcSwap<Config>,
+    /// 配置里的频道键 `gid/cid`。统计中间件用它做 O(1) 校验，
+    /// 避免随机 cid 每次都扫描分组频道列表。
+    channel_keys: ArcSwap<HashSet<String>>,
     /// 面板会话（内存，重启失效）。
     pub sessions: SessionStore,
     /// 用户、角色与访问令牌（SQLite，跨重启保留）。
@@ -159,10 +163,12 @@ impl AppState {
         let sources_ttl = Duration::from_secs(config.cache.ttl.sub_url_secs.max(1));
         let estimate = crate::cache_estimate::Estimator::load_or_default(&cache_dir);
         estimate.set_auto_tune(config.cdn.auto_tune);
+        let channel_keys = channel_keys_of(&config);
         Ok(Self {
             db_path,
             config_store,
             config: ArcSwap::from_pointee(config),
+            channel_keys: ArcSwap::from_pointee(channel_keys),
             sessions: SessionStore::new(ttl),
             users,
             http: reqwest::Client::builder()
@@ -296,7 +302,22 @@ impl AppState {
         self.sources
             .set_ttl(Duration::from_secs(config.cache.ttl.sub_url_secs.max(1)));
         self.estimate.set_auto_tune(config.cdn.auto_tune);
+        // 配置删除分组/频道后，统计键和频道校验集一起收缩，避免旧键常驻。
+        let channel_keys = channel_keys_of(&config);
+        let group_ids: HashSet<&str> = config
+            .groups
+            .iter()
+            .map(|group| group.id.as_str())
+            .collect();
+        self.stats.retain_groups(|id| group_ids.contains(id));
+        self.stats.retain_channels(|key| channel_keys.contains(key));
+        self.channel_keys.store(Arc::new(channel_keys));
         self.config.store(Arc::new(config));
+    }
+
+    /// 频道键是否在当前配置中。`key` 形如 `gid/cid`。
+    pub fn channel_configured(&self, key: &str) -> bool {
+        self.channel_keys.load().contains(key)
     }
 
     /// 保存整份配置。与 [`AppState::mutate`] 共用写锁，避免并发丢更新。
@@ -358,6 +379,17 @@ impl AppState {
     pub fn playlist_cache_entries(&self) -> usize {
         self.playlists.len()
     }
+}
+
+/// 收集配置里的 `gid/cid`。统计中间件用它判断请求是否指向真实频道。
+fn channel_keys_of(config: &Config) -> HashSet<String> {
+    let mut keys = HashSet::new();
+    for group in &config.groups {
+        for channel in &group.channels {
+            keys.insert(format!("{}/{}", group.id, channel.id));
+        }
+    }
+    keys
 }
 
 /// 建立缓存子目录。失败只记日志（后续写缓存会再报错）。

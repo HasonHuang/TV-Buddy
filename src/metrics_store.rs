@@ -198,8 +198,12 @@ pub fn spawn(state: Arc<AppState>) {
                         cpu_host: host,
                         cpu_proc: (cpu - last_cpu).max(0.0) / seconds / cores * 100.0,
                     };
-                    if let Err(error) = state.history.insert(&sample) {
-                        tracing::warn!(%error, "写指标采样失败");
+                    // SQLite 写入放到阻塞线程池，避免占住 tokio worker。
+                    let store = state.history.clone();
+                    match tokio::task::spawn_blocking(move || store.insert(&sample)).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => tracing::warn!(%error, "写指标采样失败"),
+                        Err(error) => tracing::warn!(%error, "写指标采样任务失败"),
                     }
                 }
             }
@@ -208,12 +212,15 @@ pub fn spawn(state: Arc<AppState>) {
                 purge_due = false;
                 purged_at = Instant::now();
                 let before = crate::schedule::now_epoch() - RETENTION_SECS;
-                match state.history.purge(before) {
-                    Ok(removed) if removed > 0 => {
+                // 每小时一次的大范围 DELETE 同样放到阻塞线程池。
+                let store = state.history.clone();
+                match tokio::task::spawn_blocking(move || store.purge(before)).await {
+                    Ok(Ok(removed)) if removed > 0 => {
                         tracing::info!(removed, "已清理过期指标采样");
                     }
-                    Ok(_) => {}
-                    Err(error) => tracing::warn!(%error, "清理指标采样失败"),
+                    Ok(Ok(_)) => {}
+                    Ok(Err(error)) => tracing::warn!(%error, "清理指标采样失败"),
+                    Err(error) => tracing::warn!(%error, "清理指标采样任务失败"),
                 }
             }
         }

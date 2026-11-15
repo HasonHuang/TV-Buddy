@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api } from './api';
+import { formatBytes, formatUptime } from './format';
 import { Icon } from './icons';
 import { RecommendCard, type Recommend } from './lowcfg';
 import { Confirm, Empty, PageHead, Tip } from './ui';
@@ -37,32 +38,6 @@ type Stats = {
   /** 频道排行：只含窗口内有人观看的频道，按在线人数降序。 */
   channels?: { gid: string; cid: string; name: string; online: number; requests: number }[];
 };
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  }
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
-
-function formatUptime(seconds: number): string {
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (days > 0) {
-    return `${days} 天 ${hours} 小时`;
-  }
-  if (hours > 0) {
-    return `${hours} 小时 ${minutes} 分`;
-  }
-  return `${minutes} 分`;
-}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

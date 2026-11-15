@@ -135,6 +135,18 @@ pub async fn stats(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) 
         })
         .collect();
     let active_channels = channels.len();
+    // 配置删除分组后，统计表可能还有旧键。响应只保留当前配置里的分组。
+    let configured: std::collections::HashSet<&str> = config
+        .groups
+        .iter()
+        .map(|group| group.id.as_str())
+        .collect();
+    let groups: Vec<Value> = snapshot
+        .groups
+        .iter()
+        .filter(|(id, _)| configured.contains(id.as_str()))
+        .map(|(id, requests)| json!({ "id": id, "requests": requests }))
+        .collect();
     Json(json!({
         "version": state.version(),
         "uptime_secs": state.uptime_secs(),
@@ -147,11 +159,7 @@ pub async fn stats(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) 
         "online_viewers": state.metrics.online(config.stats.online_window_secs),
         "active_channels": active_channels,
         "channels": channels,
-        "groups": snapshot
-            .groups
-            .iter()
-            .map(|(id, requests)| json!({ "id": id, "requests": requests }))
-            .collect::<Vec<_>>(),
+        "groups": groups,
     }))
 }
 
@@ -211,14 +219,12 @@ pub async fn count_request(
         // 快照只在有首段路径时读取。未知分组只增加总数。
         let config = state.snapshot();
         match config.group(&gid) {
-            Some(group) => {
+            Some(_) => {
                 state.stats.record_request(&gid);
-                if let Some(key) = channel_of(path) {
-                    // 已登记的频道键直接累加；新键要求频道在配置里，
-                    // 避免任意 cid 占满统计表，挤掉真实频道。
-                    let tracked = state.stats.channel_tracked(&key);
-                    let cid = key.split_once('/').map(|(_, cid)| cid).unwrap_or_default();
-                    if tracked || group.channels.iter().any(|channel| channel.id == cid) {
+                if let Some(key) = channel_of(path, &gid) {
+                    // 配置里的频道键做 O(1) 判定；已登记的键继续累加。
+                    // 未知 cid 不写统计表，也不扫描频道列表。
+                    if state.channel_configured(&key) || state.stats.channel_tracked(&key) {
                         state.stats.record_channel(&key);
                     }
                 }
@@ -262,9 +268,8 @@ fn group_of(path: &str) -> Option<String> {
     Some(first.to_string())
 }
 
-/// 取路径前两段作为频道键 `gid/cid`。非频道路径返回 `None`。
-fn channel_of(path: &str) -> Option<String> {
-    let gid = group_of(path)?;
+/// 取路径前两段组成频道键 `gid/cid`。非频道路径返回 `None`。
+fn channel_of(path: &str, gid: &str) -> Option<String> {
     let mut parts = path.trim_start_matches('/').splitn(3, '/');
     parts.next()?;
     let cid = parts.next()?;

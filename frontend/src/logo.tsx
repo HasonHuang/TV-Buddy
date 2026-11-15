@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken } from './api';
+import { formatBytes } from './format';
 import { Confirm, Empty, Modal, NumberBox, PageHead, Select, Tip } from './ui';
 import './style.css';
 
@@ -121,16 +122,6 @@ type Suggestion = {
   name: string;
   suggest: { file: string; score: number }[];
 };
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
 
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

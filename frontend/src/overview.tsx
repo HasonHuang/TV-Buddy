@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { api } from './api';
+import { formatBytes, formatUptime } from './format';
 import { Icon, type IconName } from './icons';
 import { MODES } from './modes';
 import { STATUS_LABELS, STATUS_TONE } from './schedule';
@@ -97,35 +98,9 @@ function modeLabel(mode: string): string {
   return MODES.find((item) => item.value === mode)?.label ?? mode;
 }
 
-/** 字节数转可读文本。 */
-function bytes(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let size = value;
-  let index = 0;
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024;
-    index += 1;
-  }
-  // 不足 1 单位时保留一位小数，纵轴刻度不会都取整成同一个数。
-  if (index === 0 && !Number.isInteger(size)) return `${size.toFixed(1)} ${units[0]}`;
-  return `${size >= 100 || index === 0 ? Math.round(size) : size.toFixed(2)} ${units[index]}`;
-}
-
-/** 秒数转「N 小时 M 分钟」。 */
-export function uptime(secs: number): string {
-  const total = Math.max(0, Math.floor(secs));
-  const days = Math.floor(total / 86400);
-  const hours = Math.floor((total % 86400) / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  if (days > 0) return `${days} 天 ${hours} 小时`;
-  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
-  return `${minutes} 分钟`;
-}
-
 /** 速率的可读文本。 */
 function rate(value: number): string {
-  return `${bytes(value)}/s`;
+  return `${formatBytes(value)}/s`;
 }
 
 /** 百分比：保留一位小数，并夹在 0–100。 */
@@ -287,6 +262,7 @@ function Sparkline({
   times,
   max,
   timeFormat,
+  ariaLabel,
   height = 112,
 }: {
   series: SparkSeries[];
@@ -295,6 +271,8 @@ function Sparkline({
   max: number;
   /** 悬停提示的时间格式。 */
   timeFormat: (ms: number) => string;
+  /** 读屏用的曲线说明，含当前窗口。 */
+  ariaLabel: string;
   height?: number;
 }) {
   const rawId = useId();
@@ -329,7 +307,9 @@ function Sparkline({
   };
 
   const active = hover !== null && hover >= 0 && hover < count ? hover : null;
-  const activeRatio = active === null || count <= 1 ? 0 : active / (count - 1);
+  // 圆点与提示框跟折线一样按时间比例定位，采样缺口时不会错位。
+  const activeRatio =
+    active === null || count <= 1 ? 0 : (times[active] - start) / span;
   // 靠近左右边缘时改变对齐方向，提示框不会越出卡片。
   const tipShift = activeRatio < 0.2 ? '0' : activeRatio > 0.8 ? '-100%' : '-50%';
 
@@ -344,7 +324,7 @@ function Sparkline({
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="none"
         role="img"
-        aria-label="最近两分钟的采样曲线"
+        aria-label={ariaLabel}
       >
         <defs>
           {series.map((item, index) => (
@@ -455,6 +435,7 @@ function ChartCard({
   emptyText,
   axisFormat,
   tipFormat,
+  rangeLabel,
 }: {
   title: string;
   icon: IconName;
@@ -467,6 +448,8 @@ function ChartCard({
   emptyText: string;
   axisFormat: (ms: number) => string;
   tipFormat: (ms: number) => string;
+  /** 当前趋势窗口的可读名称，如「5 分钟」。 */
+  rangeLabel: string;
 }) {
   // 纵轴上限与曲线共用。序列单位一致，刻度取第一条的单位文本。
   const max = niceMax(Math.max(0, ...series.flatMap((item) => item.values)));
@@ -498,6 +481,7 @@ function ChartCard({
             times={times}
             max={max}
             timeFormat={tipFormat}
+            ariaLabel={`最近 ${rangeLabel}的采样曲线`}
           />
           <div className="ov-x-axis">
             <span>{axisFormat(times[0])}</span>
@@ -760,6 +744,7 @@ export function Overview({
   const historyTimes = points.map((point) => point.ts * 1000);
   const lastPoint = points.length > 0 ? points[points.length - 1] : null;
   const historyReady = points.length >= 2;
+  const rangeLabel = RANGES.find((item) => item.key === range)?.label ?? range;
 
   // 与侧栏同一口径：缺少键也算启用，只有显式 false 才隐藏。
   const enabledFeatures = liveFeatures
@@ -781,7 +766,7 @@ export function Overview({
         sub="实时运行状态、播放流量与资源占用"
         sticky
       >
-        <span className="badge ok">● 运行 {uptime(uptimeSecs)}</span>
+        <span className="badge ok">● 运行 {formatUptime(uptimeSecs)}</span>
         {status !== null && groupCount > 0 ? (
           <>
             <button
@@ -842,14 +827,14 @@ export function Overview({
           tone="violet"
           icon="network"
           label="本次出网"
-          value={bytes(outBytes)}
-          sub={`当前 ${rate(lastRate?.rate ?? 0)} · 缓存 ${bytes(cacheMb * 1024 * 1024)}`}
+          value={formatBytes(outBytes)}
+          sub={`当前 ${rate(lastRate?.rate ?? 0)} · 缓存 ${formatBytes(cacheMb * 1024 * 1024)}`}
         />
         <Kpi
           tone="amber"
           icon="schedule"
           label="运行时长"
-          value={uptime(uptimeSecs)}
+          value={formatUptime(uptimeSecs)}
           sub={`${version} · 监听 ${bind}`}
         />
       </div>
@@ -889,7 +874,7 @@ export function Overview({
         <div className="ov-mini-row">
           <Mini label="当前播放" value={String(onlineViewers)} unit="人" icon="users" />
           <Mini label="活跃频道" value={String(activeChannels)} unit="个" icon="activity" />
-          <Mini label="本次流量" value={bytes(outBytes)} icon="upload" />
+          <Mini label="本次流量" value={formatBytes(outBytes)} icon="upload" />
           <Mini label="当前速率" value={rate(lastRate?.rate ?? 0)} icon="network" />
         </div>
         {!statsEnabled ? (
@@ -957,14 +942,14 @@ export function Overview({
           tone="green"
           value={
             memTotalMb > 0
-              ? `${bytes(rssMb * 1024 * 1024)} / ${bytes(memTotalMb * 1024 * 1024)}`
-              : bytes(rssMb * 1024 * 1024)
+              ? `${formatBytes(rssMb * 1024 * 1024)} / ${formatBytes(memTotalMb * 1024 * 1024)}`
+              : formatBytes(rssMb * 1024 * 1024)
           }
           percentValue={memPercent}
           hint={memTotalMb > 0 ? undefined : '读不到主机内存总量'}
           rows={[
-            `进程 RSS ${bytes(rssMb * 1024 * 1024)}`,
-            `整盘内存预算 ${bytes(num(status, 'whole_file_budget'))}`,
+            `进程 RSS ${formatBytes(rssMb * 1024 * 1024)}`,
+            `整盘内存预算 ${formatBytes(num(status, 'whole_file_budget'))}`,
           ]}
         />
         <Resource
@@ -973,15 +958,15 @@ export function Overview({
           tone="violet"
           value={
             diskTotalMb > 0
-              ? `${bytes(diskFsUsedMb * 1024 * 1024)} / ${bytes(diskTotalMb * 1024 * 1024)}`
-              : bytes(diskUsedMb * 1024 * 1024)
+              ? `${formatBytes(diskFsUsedMb * 1024 * 1024)} / ${formatBytes(diskTotalMb * 1024 * 1024)}`
+              : formatBytes(diskUsedMb * 1024 * 1024)
           }
           percentValue={diskPercent}
           hint={diskTotalMb > 0 ? undefined : '读不到磁盘容量'}
           rows={[
-            `缓存 ${bytes(cacheMb * 1024 * 1024)} · 录制 ${bytes(recordingMb * 1024 * 1024)}`,
+            `缓存 ${formatBytes(cacheMb * 1024 * 1024)} · 录制 ${formatBytes(recordingMb * 1024 * 1024)}`,
             <>
-              可用 {diskTotalMb > 0 ? bytes(diskFreeMb * 1024 * 1024) : '—'} ·{' '}
+              可用 {diskTotalMb > 0 ? formatBytes(diskFreeMb * 1024 * 1024) : '—'} ·{' '}
               <span className="mono">{cachePath}</span>
             </>,
           ]}
@@ -1030,6 +1015,7 @@ export function Overview({
           times={historyTimes}
           ready={historyReady}
           loading={history === null}
+          rangeLabel={rangeLabel}
           emptyText={historyError || '该窗口暂无数据'}
           axisFormat={(ms) => axisTime(ms, range)}
           tipFormat={(ms) => tipTime(ms, range)}
@@ -1067,6 +1053,7 @@ export function Overview({
           times={historyTimes}
           ready={historyReady}
           loading={history === null}
+          rangeLabel={rangeLabel}
           emptyText={historyError || '该窗口暂无数据'}
           axisFormat={(ms) => axisTime(ms, range)}
           tipFormat={(ms) => tipTime(ms, range)}
@@ -1118,7 +1105,7 @@ export function Overview({
               </div>
               <div className="kv">
                 <span>运行时长</span>
-                <b>{uptime(uptimeSecs)}</b>
+                <b>{formatUptime(uptimeSecs)}</b>
               </div>
               <div className="kv">
                 <span>缓存位置</span>

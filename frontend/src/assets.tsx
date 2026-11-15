@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
+import { formatBytes } from './format';
 import { Badge, Confirm, Empty, PageHead, Select, Tip } from './ui';
 
 type Entry = {
@@ -48,16 +49,6 @@ function readAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /** 带会话头下载面板文件。 */

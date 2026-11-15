@@ -3266,6 +3266,67 @@ async fn subs_status_lists_configured_sources() {
 }
 
 #[tokio::test]
+async fn stats_ignore_unknown_channels_and_deleted_groups() {
+    let fixture = fixture().await;
+    let auth = format!("Bearer {}", login(&fixture).await);
+
+    // 路径统计只认配置里的分组与频道。未知 cid 不登记。
+    fetch(&fixture, "/pg").await;
+    fetch(&fixture, "/pg/c1").await;
+    fetch(&fixture, "/pg/unknown").await;
+    assert!(fixture.state.channel_configured("pg/c1"));
+    assert!(!fixture.state.channel_configured("pg/unknown"));
+
+    let stats = |fixture: &Fixture, auth: &str| {
+        fixture
+            .client
+            .get(format!("{}/panel/api/stats", fixture.base))
+            .header("authorization", auth)
+            .send()
+    };
+    let body: serde_json::Value = serde_json::from_str(
+        &stats(&fixture, &auth)
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("正文"),
+    )
+    .expect("解析 JSON");
+    assert!(body["groups"]
+        .as_array()
+        .expect("groups")
+        .iter()
+        .any(|item| item["id"] == "pg"));
+
+    // 删除分组后，统计响应和频道校验集都不再包含旧键。
+    let response = fixture
+        .client
+        .delete(format!("{}/panel/api/groups/pg", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("删除分组");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!fixture.state.channel_configured("pg/c1"));
+
+    let body: serde_json::Value = serde_json::from_str(
+        &stats(&fixture, &auth)
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("正文"),
+    )
+    .expect("解析 JSON");
+    assert!(!body["groups"]
+        .as_array()
+        .expect("groups")
+        .iter()
+        .any(|item| item["id"] == "pg"));
+}
+
+#[tokio::test]
 async fn panel_subs_aliases_require_session_and_share_logic() {
     let fixture = fixture().await;
     let path = format!("{}/panel/api/subs/preview", fixture.base);

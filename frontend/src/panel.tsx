@@ -14,7 +14,8 @@ import { UsersPage } from './users';
 import { PlaylistPage } from './playlist';
 import { LivestreamPage, SchedulePage } from './schedule';
 import { MySubsPage } from './my';
-import { Overview, uptime } from './overview';
+import { formatUptime } from './format';
+import { Overview } from './overview';
 import './style.css';
 
 /** 侧栏分区；顺序按目标面板。 */
@@ -264,7 +265,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       }
       if (next === sectionRef.current) return;
       if (sectionRef.current === 'settings' && settingsDirtyRef.current) {
-        writeSection(sectionRef.current, true);
+        // pushState 保留后退目标条目；replaceState 会把目标改写成设置页，
+        // 取消离开后历史记录就被破坏。
+        writeSection(sectionRef.current);
         setPendingNav(next);
         return;
       }
@@ -392,7 +395,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             </div>
             <div className="kv">
               <span>已运行</span>
-              <span className="v">{meta ? uptime(meta.uptime) : '—'}</span>
+              <span className="v">{meta ? formatUptime(meta.uptime) : '—'}</span>
             </div>
           </div>
         )}

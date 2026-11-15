@@ -8,8 +8,8 @@
 import { useState } from 'react';
 
 import { copyText } from './api';
+import { formatBytes } from './format';
 import { Tip } from './ui';
-
 
 /** `GET /panel/api/cache/stats` 的 `recommend` 块。 */
 export type Recommend = {
@@ -40,13 +40,6 @@ function formatMB(mb: number | null | undefined): string {
     return '—';
   }
   return `${mb} MB`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 function formatAgo(seconds: number | null): string {

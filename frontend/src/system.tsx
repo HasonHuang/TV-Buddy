@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from './api';
+import { formatUptime } from './format';
 import { Icon } from './icons';
 import { Badge, Confirm, PageHead, Tip, useToast } from './ui';
 
@@ -53,15 +54,6 @@ const PHASES: Record<string, string> = { ready: '就绪', starting: '启动中' 
 
 /** 频道探测每页条数。条目多时不再把整页撑长。 */
 const PROBE_PAGE_SIZE = 10;
-
-function uptime(seconds: number): string {
-  const days = Math.floor(seconds / 86_400);
-  const hours = Math.floor((seconds % 86_400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (days) return `${days} 天 ${hours} 小时`;
-  if (hours) return `${hours} 小时 ${minutes} 分`;
-  return `${minutes} 分`;
-}
 
 export function SystemPage({ embedded = false }: { embedded?: boolean }) {
   const [health, setHealth] = useState<Health | null>(null);
@@ -187,7 +179,7 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
                 <dt>版本</dt>
                 <dd>{health.version}</dd>
                 <dt>运行时长</dt>
-                <dd>{uptime(health.uptime_secs)}</dd>
+                <dd>{formatUptime(health.uptime_secs)}</dd>
                 <dt>监听</dt>
                 <dd>{health.bind}</dd>
                 <dt>分组 / 频道</dt>
