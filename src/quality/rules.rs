@@ -60,6 +60,7 @@ impl Reason {
 pub struct Measurement {
     pub reachable: bool,
     pub probe_error: bool,
+    pub http_status: Option<u16>,
     pub delay_ms: Option<u32>,
     pub speed_mib: Option<f64>,
     pub width: Option<u16>,
@@ -390,6 +391,7 @@ mod tests {
         let ok = Measurement {
             reachable: true,
             probe_error: false,
+            http_status: Some(200),
             delay_ms: Some(100),
             speed_mib: Some(2.0),
             width: Some(1920),
@@ -433,6 +435,7 @@ mod tests {
         let down = Measurement {
             reachable: false,
             probe_error: false,
+            http_status: None,
             delay_ms: None,
             speed_mib: None,
             width: None,
@@ -460,6 +463,7 @@ mod tests {
         let slow = Measurement {
             reachable: true,
             probe_error: false,
+            http_status: Some(200),
             delay_ms: Some(10),
             speed_mib: Some(0.1),
             width: None,
@@ -470,6 +474,7 @@ mod tests {
         let down = Measurement {
             reachable: false,
             probe_error: false,
+            http_status: None,
             delay_ms: None,
             speed_mib: None,
             width: None,

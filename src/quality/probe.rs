@@ -210,6 +210,7 @@ fn probe_error(message: impl Into<String>, reachable: bool) -> Measurement {
     Measurement {
         reachable,
         probe_error: true,
+        http_status: None,
         delay_ms: None,
         speed_mib: None,
         width: None,
@@ -232,6 +233,7 @@ pub async fn probe(
     let mut measurement = Measurement {
         reachable: false,
         probe_error: false,
+        http_status: None,
         delay_ms: None,
         speed_mib: None,
         width: None,
@@ -252,6 +254,7 @@ pub async fn probe(
         }
     };
 
+    measurement.http_status = Some(response.status().as_u16());
     if !response.status().is_success() {
         measurement.error = Some(format!("HTTP {}", response.status()));
         return ProbeOutput {

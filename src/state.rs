@@ -78,6 +78,8 @@ pub struct AppState {
     pub watchdog: Watchdog,
     /// 逐频道上游健康探测结果。
     pub health: crate::health::Health,
+    /// 可用性校验结果与运行状态。
+    pub quality: crate::quality::state::QualityState,
     /// 节目单状态。
     pub epg: crate::epg::EpgState,
     /// EPG 源、绑定与关键字规则（SQLite）。
@@ -98,6 +100,8 @@ pub struct AppState {
     pub estimate: crate::cache_estimate::Estimator,
     /// 按代理配置缓存的 HTTP 客户端。
     proxy_clients: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
+    /// 质量探测客户端。重定向上限更小。
+    probe_clients: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
     /// 同一时间只跑一次订阅同步。
     pub sync_lock: Arc<tokio::sync::Mutex<()>>,
     /// 已排队或正在执行的手动同步源 id。同一源不重复排队。
@@ -195,6 +199,7 @@ impl AppState {
             metrics: Arc::new(crate::metrics::Metrics::new()),
             watchdog: Watchdog::new(),
             health: crate::health::Health::new(),
+            quality: crate::quality::state::QualityState::new(),
             ip_guard: crate::auth::IpGuard::new(),
             play_sessions: crate::auth::SessionGuard::new(),
             rate_limiter: crate::auth::RateLimiter::new(),
@@ -202,6 +207,7 @@ impl AppState {
             unban_quota: crate::auth::UnbanQuota::new(),
             estimate,
             proxy_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
+            probe_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
             sync_lock: Arc::new(tokio::sync::Mutex::new(())),
             sync_pending: Mutex::new(std::collections::HashSet::new()),
             logs,
@@ -287,6 +293,71 @@ impl AppState {
             }
             Err(error) => {
                 tracing::warn!(%error, "代理客户端创建失败；改用直连");
+                self.http.clone()
+            }
+        }
+    }
+
+    /// 质量探测客户端。重定向上限 5，按代理配置缓存。
+    pub fn probe_client_for(&self, gid: &str, cid: &str) -> reqwest::Client {
+        let config = self.snapshot();
+        let Some(proxy) = config.proxy_for(gid, cid) else {
+            return self.probe_client(None);
+        };
+        self.probe_client(Some(proxy))
+    }
+
+    fn probe_client(&self, proxy: Option<&crate::config::model::ProxyCfg>) -> reqwest::Client {
+        let key = proxy
+            .map(|proxy| {
+                format!(
+                    "{}|{}|{}",
+                    proxy.url().unwrap_or_default(),
+                    proxy.username().unwrap_or(""),
+                    proxy.password().unwrap_or("")
+                )
+            })
+            .unwrap_or_else(|| "direct".to_string());
+        {
+            let cache = self
+                .probe_clients
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(client) = cache.get(&key) {
+                return client.clone();
+            }
+        }
+        let mut builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(UPSTREAM_TIMEOUT_SECS))
+            .user_agent(DEFAULT_USER_AGENT)
+            .redirect(reqwest::redirect::Policy::limited(5));
+        if let Some(proxy) = proxy {
+            if let Some(addr) = proxy.url() {
+                let user = proxy.username().unwrap_or("");
+                let pass = proxy.password().unwrap_or("");
+                let built = reqwest::Proxy::all(&addr).and_then(|mut candidate| {
+                    if !user.is_empty() {
+                        candidate = candidate.basic_auth(user, pass);
+                    }
+                    Ok(candidate)
+                });
+                match built {
+                    Ok(candidate) => builder = builder.proxy(candidate),
+                    Err(error) => tracing::warn!(%error, "探测代理创建失败；改用直连"),
+                }
+            }
+        }
+        match builder.build() {
+            Ok(client) => {
+                let mut cache = self
+                    .probe_clients
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                cache.insert(key, client.clone());
+                client
+            }
+            Err(error) => {
+                tracing::warn!(%error, "探测客户端创建失败；改用直连");
                 self.http.clone()
             }
         }
