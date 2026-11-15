@@ -95,6 +95,15 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/logout", post(routes::panel::logout))
         .route("/panel/api/status", get(routes::panel::status))
         .route("/panel/api/health", get(routes::dash::health))
+        .route("/panel/api/quality/status", get(routes::quality::status))
+        .route("/panel/api/quality/results", get(routes::quality::results))
+        .route("/panel/api/quality/run", post(routes::quality::run))
+        .route(
+            "/panel/api/quality/runs/:run_id",
+            get(routes::quality::run_status),
+        )
+        .route("/panel/api/quality/cancel", post(routes::quality::cancel))
+        .route("/panel/api/quality/preview", post(routes::quality::preview))
         .route("/panel/api/subs/status", get(routes::subs::panel_status))
         .route("/panel/api/subs/groups", post(routes::subs::panel_groups))
         .route("/panel/api/subs/preview", post(routes::subs::panel_preview))

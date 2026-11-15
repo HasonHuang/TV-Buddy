@@ -11,6 +11,7 @@ pub mod media;
 pub mod panel;
 pub mod playlist;
 pub mod public;
+pub mod quality;
 pub mod schedule;
 pub mod security;
 pub mod share;
