@@ -34,6 +34,7 @@ pub mod metrics;
 pub mod metrics_store;
 pub mod playlist;
 pub mod proxy;
+pub mod quality;
 pub mod reload;
 pub mod remux;
 pub mod resolver;
