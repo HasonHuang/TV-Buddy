@@ -7,7 +7,9 @@
 #   发布包目录：sudo ./install.sh                 # 用旁边的已解包文件，不再下载
 #   仓库根目录：sudo ./install.sh --local         # 改用 dist/ 中最新的同架构包
 #   指定安装包：sudo ./install.sh --archive /path/to/tv-buddy-<version>-linux-<arch>.tar.gz
-#   低配机器：  sudo ./install.sh --low-spec   # 写入省内存/省 CPU 的参数
+#   低配机器：  sudo ./install.sh --low-spec   # 直接写入省内存/省 CPU 的参数
+#   高配机器：  sudo ./install.sh --no-low-spec # 直接跳过低配参数
+#   不指定时：  安装前询问是否使用低配参数
 #   远程安装包：sudo ./install.sh --archive https://example.com/tv-buddy.tar.gz
 #
 # 只支持 Linux amd64/arm64。脚本幂等；已有数据库不覆盖。
@@ -25,7 +27,8 @@ DO_SERVICE=1
 DO_LINK=1
 DO_START=1
 USE_DIST=0
-LOW_SPEC=0
+# 空值表示尚未选择，安装前询问。1 用低配，0 不用。
+LOW_SPEC=
 TMP_DIR=
 DOWNLOADED=
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -44,7 +47,8 @@ usage() {
   --local            不从 Release 下载，改用本地 dist/ 中的安装包
   --no-service       不注册 systemd/OpenRC 服务
   --no-link          不创建 tv-buddy 命令软链
-  --low-spec         安装时写入低配参数（省内存与 CPU）
+  --low-spec         使用低配参数（省内存与 CPU），不询问
+  --no-low-spec      不使用低配参数，不询问
   --no-start         安装后不启动服务（默认会启动）
   --start            安装后启动服务（默认行为，保留以兼容旧用法）
   -h, --help         显示本帮助
@@ -73,6 +77,45 @@ trap cleanup EXIT HUP INT TERM
 ensure_tmp() {
     if [ -z "$TMP_DIR" ]; then
         TMP_DIR=$(mktemp -d)
+    fi
+}
+
+# 安装前询问是否使用低配参数。`--low-spec` 与 `--no-low-spec` 跳过询问。
+# 无交互终端时默认不使用，保持自动化安装的旧行为。
+ask_low_spec() {
+    [ -z "$LOW_SPEC" ] || return 0
+
+    # 优先读控制终端，兼容 `curl ... | sh` 的安装方式。
+    if { : </dev/tty; } 2>/dev/null; then
+        exec 3</dev/tty
+    elif [ -t 0 ]; then
+        exec 3<&0
+    else
+        LOW_SPEC=0
+        echo "无交互终端，默认不使用低配参数。需要时加 --low-spec。"
+        return 0
+    fi
+
+    mem_mb=$(awk '/^MemTotal:/ { printf "%d", $2 / 1024 }' /proc/meminfo 2>/dev/null) || mem_mb=
+    cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null) || cores=
+    [ -n "$cores" ] || cores=$(nproc 2>/dev/null) || cores=
+    case "$mem_mb" in ''|*[!0-9]*) mem_mb= ;; esac
+    case "$cores" in ''|*[!0-9]*) cores= ;; esac
+    [ -n "$mem_mb" ] || mem_mb=未知
+    [ -n "$cores" ] || cores=未知
+
+    echo "检测到：内存 ${mem_mb} MB，CPU ${cores} 核。"
+    printf '是否使用低配参数（省内存与 CPU）？[y/N] '
+    IFS= read -r answer <&3 || answer=
+    exec 3<&-
+    case "$answer" in
+        [Yy]|[Yy][Ee][Ss]) LOW_SPEC=1 ;;
+        *) LOW_SPEC=0 ;;
+    esac
+    if [ "$LOW_SPEC" = 1 ]; then
+        echo "低配模式：启用"
+    else
+        echo "低配模式：不启用"
     fi
 }
 
@@ -122,6 +165,10 @@ while [ "$#" -gt 0 ]; do
             LOW_SPEC=1
             shift
             ;;
+        --no-low-spec)
+            LOW_SPEC=0
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -159,6 +206,9 @@ esac
 if [ "$DO_SERVICE" = 1 ] && [ "$(id -u)" -ne 0 ]; then
     fail "注册系统服务需要 root；可改用 sudo，或加 --no-service"
 fi
+
+# 安装动作开始前询问一次低配选择。
+ask_low_spec
 
 # 校验同名 .sha256 文件。缺失时跳过。
 verify_digest() {

@@ -192,8 +192,12 @@ sudo ./install.sh
 | `--no-link` | 不创建命令软链 |
 | `--no-start` | 安装后不启动服务 |
 | `--start` | 安装后启动服务（默认行为，保留以兼容旧用法） |
-| `--low-spec` | 写入低配参数：省内存、省 CPU |
+| `--low-spec` | 写入低配参数：省内存、省 CPU。不询问 |
+| `--no-low-spec` | 不写入低配参数。不询问 |
 | `-h`、`--help` | 显示帮助 |
+
+不加 `--low-spec` 或 `--no-low-spec` 时，安装前询问是否使用低配参数。
+脚本显示检测到的内存与 CPU 核数。无交互终端时默认不使用。
 
 ### 安装内容
 
@@ -403,7 +407,7 @@ TRANSLATE_URL=http://127.0.0.1:8989 TRANSLATE_TOKEN=secret scripts/smoke-transla
 
 TV Buddy 可在 **1 vCPU / 128 MB 内存 / 1 GB 磁盘** 的实例上运行。前提是前面挂 CDN，把播放流量挡在边缘。
 
-装的时候加 `--low-spec`：`sudo ./install.sh --low-spec`。
+装的时候脚本会询问是否使用低配参数。也可加 `--low-spec` 跳过询问：`sudo ./install.sh --low-spec`。
 样例：[`docs/design/config-low-spec.json`](docs/design/config-low-spec.json)。
 导入：`tv-buddy config import docs/design/config-low-spec.json --db tv-buddy.db --force`。
 原理与公式：[`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md)。
