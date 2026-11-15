@@ -913,6 +913,7 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | 低配置示例 | [`docs/design/config-low-spec.json`](docs/design/config-low-spec.json) |
 | 架构 | [`docs/design/02-architecture.md`](docs/design/02-architecture.md) |
 | 面板字段清单 | [`docs/design/05-frontend.md`](docs/design/05-frontend.md) |
+| Python 脚本开发 | [`docs/design/12-python-scripts.md`](docs/design/12-python-scripts.md) |
 | 手工验收测试 | [`docs/tests/README.md`](docs/tests/README.md) |
 | 发现索引 | [`docs/findings/README.md`](docs/findings/README.md) |
 
