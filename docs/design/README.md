@@ -31,7 +31,7 @@
 | [`06-low-spec-optimization.md`](06-low-spec-optimization.md) | 低配置 + 多 CDN 优化：边缘缓存、推荐值、磁盘回收、预取覆盖 | ✅ 已实施（T0 待人工） |
 | [`11-subscription-sync.md`](11-subscription-sync.md) | 定时订阅 M3U：物化分组/频道、差异同步、保护规则、调度与管理 | ✅ 已实施 |
 | [`12-python-scripts.md`](12-python-scripts.md) | Python 脚本：解析脚本与 EPG 采集脚本的契约、示例、调试与安全 | ✅ 已实施 |
-| [`13-availability-and-speedtest.md`](13-availability-and-speedtest.md) | 可用性校验与测速筛选：三级规则、分档探测、结果存储、隐藏/恢复、低配调度；含 3 个整体方案对比 | 📝 方案 B 已选（待批准） |
+| [`13-availability-and-speedtest.md`](13-availability-and-speedtest.md) | 可用性校验与测速筛选：三级规则、分档探测、结果存储、隐藏/恢复、低配调度；含 3 个整体方案对比 | ✅ P0/P1 已实施 |
 | [`config-low-spec.json`](config-low-spec.json) | 低配 + 多 CDN 示例配置（1 vCPU / 128 MB / 1 GB） | ✅ 已试跑 |
 | [`reference/`](reference/) | 目标 UI 参考截图（30 张）+ 功能与证据映射 | ✅ 已采集 |
 
