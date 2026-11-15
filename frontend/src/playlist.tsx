@@ -1145,14 +1145,14 @@ export function PlaylistPage() {
               value={drawer.draft.mode}
               options={[
                 {
-                  value: 'aggregate',
-                  label: '聚合',
-                  desc: '直接转发源里的频道，不在本地保存。不能改频道名、排序、授权或设置节目单。',
-                },
-                {
                   value: 'sync',
                   label: '托管',
                   desc: '把源里的频道保存到本地。可以改频道名、排序、授权或设置节目单。',
+                },
+                {
+                  value: 'aggregate',
+                  label: '聚合',
+                  desc: '直接转发源里的频道，不在本地保存。不能改频道名、排序、授权或设置节目单。',
                 },
               ]}
               onChange={(next) =>
