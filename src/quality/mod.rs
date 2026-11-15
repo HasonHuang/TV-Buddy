@@ -2,4 +2,5 @@
 //!
 //! 设计见 `docs/design/13-availability-and-speedtest.md`。
 
+pub mod probe;
 pub mod rules;
