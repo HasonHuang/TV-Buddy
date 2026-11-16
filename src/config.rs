@@ -88,6 +88,30 @@ fn validate_quality(quality: &crate::config::model::QualityCfg) -> anyhow::Resul
     if quality.interval_secs != 0 && quality.interval_secs < 60 {
         bail!("quality.interval_secs 必须为 0 或至少 60");
     }
+    if !matches!(quality.schedule.as_str(), "interval" | "cron") {
+        bail!("quality.schedule 只能是 interval 或 cron");
+    }
+    if !(1..=8760).contains(&quality.interval_hours) {
+        bail!("quality.interval_hours 必须在 1–8760 之间");
+    }
+    if crate::cron::parse_cron(&quality.cron).is_err() {
+        bail!("quality.cron 不是有效的 5 段表达式");
+    }
+    if !quality.max_remove_ratio.is_finite()
+        || !(0.0..=1.0).contains(&quality.max_remove_ratio)
+        || quality.max_remove_ratio == 0.0
+    {
+        bail!("quality.max_remove_ratio 必须在 (0,1] 之间");
+    }
+    if !(1..=100_000).contains(&quality.min_remove_count) {
+        bail!("quality.min_remove_count 必须在 1–100000 之间");
+    }
+    if quality.result_retention_days > 3650 {
+        bail!("quality.result_retention_days 不能超过 3650");
+    }
+    if quality.gate_time_budget_secs > 86_400 {
+        bail!("quality.gate_time_budget_secs 不能超过 86400");
+    }
     if !(1..=32).contains(&quality.concurrency) {
         bail!("quality.concurrency 必须在 1–32 之间");
     }
@@ -474,6 +498,26 @@ mod tests {
         let mut config = Config::default();
         config.playlist.sync_schedule = "daily".into();
         config.playlist.sync_daily_at.clear();
+        assert!(validate(&config).is_err());
+    }
+
+    #[test]
+    fn quality_admission_rejects_bad_schedule_and_guard() {
+        let mut config = Config::default();
+        config.quality.interval_hours = 0;
+        assert!(validate(&config).is_err());
+        config.quality.interval_hours = 6;
+        config.quality.schedule = "cron".into();
+        config.quality.cron = "bad".into();
+        assert!(validate(&config).is_err());
+        config.quality.cron = "0 */6 * * *".into();
+        config.quality.max_remove_ratio = 0.0;
+        assert!(validate(&config).is_err());
+        config.quality.max_remove_ratio = 0.5;
+        config.quality.min_remove_count = 0;
+        assert!(validate(&config).is_err());
+        config.quality.min_remove_count = 10;
+        config.quality.gate_time_budget_secs = 86_401;
         assert!(validate(&config).is_err());
     }
 

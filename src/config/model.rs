@@ -903,6 +903,22 @@ pub struct QualityCfg {
     pub probe_mode: String,
     /// 0 表示只手动运行。
     pub interval_secs: u64,
+    /// `interval` 或 `cron`。
+    pub schedule: String,
+    /// 周期小时数。1–8760。
+    pub interval_hours: u64,
+    /// 5 段 cron 表达式。
+    pub cron: String,
+    /// 安全阀开关。
+    pub guard_enabled: bool,
+    /// 将移出数 / 完成判定数。
+    pub max_remove_ratio: f64,
+    /// 小于该数量不触发安全阀。
+    pub min_remove_count: u64,
+    /// 非准入结果保留天数。0 表示不自动清理。
+    pub result_retention_days: u64,
+    /// 同步门控墙钟上限（秒）。0 表示不限制。
+    pub gate_time_budget_secs: u64,
     pub timeout_secs: u64,
     pub concurrency: u32,
     pub speed_timeout_secs: u64,
@@ -929,6 +945,14 @@ impl Default for QualityCfg {
             enabled: false,
             probe_mode: "reachability".into(),
             interval_secs: 900,
+            schedule: "interval".into(),
+            interval_hours: 6,
+            cron: "0 */6 * * *".into(),
+            guard_enabled: true,
+            max_remove_ratio: 0.5,
+            min_remove_count: 10,
+            result_retention_days: 7,
+            gate_time_budget_secs: 300,
             timeout_secs: 10,
             concurrency: 2,
             speed_timeout_secs: 10,
@@ -2069,6 +2093,19 @@ mod tests {
     }
 
     #[test]
+    fn quality_admission_defaults_are_bounded() {
+        let quality = QualityCfg::default();
+        assert_eq!(quality.schedule, "interval");
+        assert_eq!(quality.interval_hours, 6);
+        assert_eq!(quality.cron, "0 */6 * * *");
+        assert!(quality.guard_enabled);
+        assert_eq!(quality.max_remove_ratio, 0.5);
+        assert_eq!(quality.min_remove_count, 10);
+        assert_eq!(quality.result_retention_days, 7);
+        assert_eq!(quality.gate_time_budget_secs, 300);
+    }
+
+    #[test]
     fn quality_defaults_are_disabled_and_bounded() {
         let config = Config::default();
         assert!(!config.quality.enabled);
@@ -2103,7 +2140,10 @@ mod tests {
         assert!(decoded.quality.enabled);
         assert_eq!(decoded.quality.rules.min_speed_mib, 1.5);
         assert_eq!(
-            decoded.groups[0].quality.as_ref().and_then(|q| q.min_speed_mib),
+            decoded.groups[0]
+                .quality
+                .as_ref()
+                .and_then(|q| q.min_speed_mib),
             Some(2.0)
         );
         assert_eq!(

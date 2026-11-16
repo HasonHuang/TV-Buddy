@@ -17,6 +17,7 @@ pub mod cache_gc;
 pub mod cache_memory;
 pub mod cli;
 pub mod config;
+pub mod cron;
 pub mod dash;
 pub mod dash_hls;
 pub mod dash_timeshift;
