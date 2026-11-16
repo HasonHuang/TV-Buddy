@@ -9,19 +9,36 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   api,
   cancelQuality,
+  deleteQualitySource,
+  disableQualitySource,
+  enableQualitySource,
+  fetchPlaylistSources,
   fetchQualityResults,
   fetchQualitySources,
   fetchQualityStatus,
   previewQualitySchedule,
   putConfig,
   runQuality,
+  syncPlaylistSource,
+  updatePlaylistSource,
+  type PlaylistSourceConfig,
   type QualityResult,
   type QualitySource,
   type QualityStatus,
 } from './api';
 import { Icon } from './icons';
-import { QualityBadges } from './quality';
-import { Badge, Card, Empty, Field, PageHead, Select, Switch, useToast } from './ui';
+import {
+  Badge,
+  Card,
+  Confirm,
+  Empty,
+  Field,
+  Modal,
+  PageHead,
+  Select,
+  Switch,
+  useToast,
+} from './ui';
 
 type Tab = 'overview' | 'rules' | 'results' | 'sources';
 type Cfg = Record<string, unknown>;
@@ -41,6 +58,28 @@ const ACTION_LABEL: Record<string, string> = {
   hidden: '下线',
   source_removed: '源移除',
 };
+
+function resultActionText(item: QualityResult): string {
+  if (item.reason === 'guard') {
+    return item.action === 'rejected' ? '暂停准入' : '暂停移出';
+  }
+  return ACTION_LABEL[item.action] ?? item.action;
+}
+
+function resultActionTone(item: QualityResult): string {
+  if (item.reason === 'guard') return 'warn';
+  switch (item.action) {
+    case 'admitted':
+      return 'ok';
+    case 'removed':
+    case 'rejected':
+      return 'danger';
+    case 'hidden':
+      return 'warn';
+    default:
+      return 'muted';
+  }
+}
 
 const REASON_LABEL: Record<string, string> = {
   pass: '合格',
@@ -85,6 +124,36 @@ function bytesText(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
   return `${bytes} B`;
+}
+
+function relativeText(epoch: number): string {
+  if (!Number.isFinite(epoch) || epoch <= 0) return '—';
+  const diff = Math.max(0, Math.floor(Date.now() / 1000) - epoch);
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86_400) return `${Math.floor(diff / 3600)} 小时前`;
+  return `${Math.floor(diff / 86_400)} 天前`;
+}
+
+function resolutionText(value: string): string {
+  const height = value.split('x')[1];
+  return height ? `${height}p` : '—';
+}
+
+type QualityRoute = { tab: Tab; gid: string; cid: string };
+
+/** 读取 `#/quality/<tab>?gid=...&cid=...`。 */
+function qualityRoute(hash = window.location.hash): QualityRoute {
+  const raw = hash.replace(/^#\/?/, '');
+  const [path, query = ''] = raw.split('?');
+  const parts = path.split('/');
+  const tab = TABS.some(([id]) => id === parts[1]) ? (parts[1] as Tab) : 'overview';
+  const params = new URLSearchParams(query);
+  return { tab, gid: params.get('gid') ?? '', cid: params.get('cid') ?? '' };
+}
+
+function broadcastQualityChanged() {
+  window.dispatchEvent(new Event('tv-buddy:quality-changed'));
 }
 
 function getPath(root: Cfg, path: string): unknown {
@@ -565,138 +634,790 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
 }
 
 /** 结果标签。 */
-function ResultsTab() {
-  const [items, setItems] = useState<QualityResult[] | null>(null);
-  const [error, setError] = useState('');
+function ResultsTab({
+  running,
+  initialGid,
+  initialCid,
+}: {
+  running: boolean;
+  initialGid: string;
+  initialCid: string;
+}) {
+  const { node, ok, err } = useToast();
+  const [filters, setFilters] = useState({
+    source_id: '',
+    gid: initialGid,
+    cid: initialCid,
+    action: '',
+    reason: '',
+    q: '',
+  });
+  const [limit, setLimit] = useState(100);
+  const [offset, setOffset] = useState(0);
+  const [data, setData] = useState<{ total: number; items: QualityResult[] } | null>(null);
+  const [groups, setGroups] = useState<{ id: string; name: string }[]>([]);
+  const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
+  const [detail, setDetail] = useState<QualityResult | null>(null);
+  const [rerun, setRerun] = useState<QualityResult | null>(null);
 
   useEffect(() => {
-    let active = true;
-    fetchQualityResults({ limit: 50 })
-      .then((body) => {
-        if (active) setItems(body.items ?? []);
+    setFilters((prev) => ({ ...prev, gid: initialGid, cid: initialCid }));
+    setOffset(0);
+  }, [initialGid, initialCid]);
+
+  useEffect(() => {
+    void api<Cfg>('GET', '/config')
+      .then((config) => {
+        const rawGroups = Array.isArray(config.groups) ? (config.groups as Cfg[]) : [];
+        setGroups(
+          rawGroups.map((group) => ({
+            id: String(group.id ?? ''),
+            name: String(group.name || group.id || ''),
+          })),
+        );
+        const playlist = (config.playlist ?? {}) as Cfg;
+        const rawSources = Array.isArray(playlist.sources)
+          ? (playlist.sources as Cfg[])
+          : [];
+        setSources(
+          rawSources
+            .filter((source) => source.mode === 'sync')
+            .map((source) => ({
+              id: String(source.id ?? ''),
+              name: String(source.name || source.id || ''),
+            })),
+        );
       })
-      .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : String(err));
+      .catch(() => {
+        // 过滤选项取不到不影响结果列表。
       });
-    return () => {
-      active = false;
-    };
   }, []);
 
-  if (error) return <Empty text={error} icon="activity" />;
-  if (!items) return <Empty text="正在读取结果…" icon="activity" />;
-  if (items.length === 0) return <Empty text="还没有质量结果" icon="activity" />;
+  const load = useCallback(async () => {
+    try {
+      const body = await fetchQualityResults({
+        ...filters,
+        limit,
+        offset,
+      });
+      setData(body);
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  }, [err, filters, limit, offset]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => void load(), 2000);
+    return () => window.clearInterval(timer);
+  }, [load, running]);
+
+  const sourceName = (id: string) =>
+    sources.find((source) => source.id === id)?.name ?? (id || '手工');
+
+  const filtered =
+    filters.source_id !== '' ||
+    filters.gid !== '' ||
+    filters.cid !== '' ||
+    filters.action !== '' ||
+    filters.reason !== '' ||
+    filters.q.trim() !== '';
+
+  const setFilter = (key: keyof typeof filters, value: string) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+    setOffset(0);
+  };
+
+  const doRerun = async () => {
+    if (!rerun) return;
+    try {
+      const result = await runQuality('channel', `${rerun.gid}/${rerun.cid}`);
+      ok(result.measure_only ? '质量已关闭，本次只测量' : '已排入重新校验');
+      setRerun(null);
+      await load();
+      broadcastQualityChanged();
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const total = data?.total ?? 0;
+  const items = data?.items ?? [];
+  const pageEnd = Math.min(offset + limit, total);
 
   return (
-    <div className="card">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>频道</th>
-            <th>来源</th>
-            <th>动作</th>
-            <th>原因</th>
-            <th>质量</th>
-            <th>校验时间</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.key}>
-              <td>{item.name || item.cid}</td>
-              <td>{item.source_id || '手工'}</td>
-              <td>{ACTION_LABEL[item.action] ?? item.action}</td>
-              <td>{REASON_LABEL[item.reason] ?? item.reason}</td>
-              <td>
-                <QualityBadges result={item} />
-              </td>
-              <td>{timeText(item.checked_at)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      {node}
+      <div className="card">
+        <div className="card-head">
+          <div className="card-head-text">
+            <h2>结果</h2>
+            <span className="muted">共 {total} 条{filters.cid ? `，频道 ${filters.cid}` : ''}</span>
+          </div>
+          <div className="card-actions">
+            <button className="ghost" onClick={() => void load()}>
+              刷新
+            </button>
+          </div>
+        </div>
+        <div className="fields">
+          <Field label="来源">
+            <Select
+              ariaLabel="来源筛选"
+              value={filters.source_id}
+              compact
+              options={[
+                { value: '', label: '全部来源' },
+                ...sources.map((source) => ({ value: source.id, label: source.name })),
+              ]}
+              onChange={(next) => setFilter('source_id', next)}
+            />
+          </Field>
+          <Field label="分组">
+            <Select
+              ariaLabel="分组筛选"
+              value={filters.gid}
+              compact
+              options={[
+                { value: '', label: '全部分组' },
+                ...groups.map((group) => ({ value: group.id, label: group.name })),
+              ]}
+              onChange={(next) => setFilter('gid', next)}
+            />
+          </Field>
+          <Field label="动作">
+            <Select
+              ariaLabel="动作筛选"
+              value={filters.action}
+              compact
+              options={[
+                { value: '', label: '全部动作' },
+                { value: 'admitted', label: '已准入' },
+                { value: 'rejected', label: '未准入' },
+                { value: 'removed', label: '已移出' },
+                { value: 'hidden', label: '已下线' },
+                { value: 'kept', label: '已保留' },
+                { value: 'source_removed', label: '源已移除' },
+              ]}
+              onChange={(next) => setFilter('action', next)}
+            />
+          </Field>
+          <Field label="原因">
+            <Select
+              ariaLabel="原因筛选"
+              value={filters.reason}
+              compact
+              options={[
+                { value: '', label: '全部原因' },
+                { value: 'pass', label: '合格' },
+                { value: 'unreachable', label: '不可达' },
+                { value: 'speed_low', label: '速率低' },
+                { value: 'resolution_low', label: '分辨率低' },
+                { value: 'resolution_high', label: '分辨率高' },
+                { value: 'delay_high', label: '延迟高' },
+                { value: 'probe_error', label: '探测错误' },
+                { value: 'guard', label: '安全阀暂停' },
+                { value: 'source_removed', label: '源已移除' },
+              ]}
+              onChange={(next) => setFilter('reason', next)}
+            />
+          </Field>
+          <Field label="搜索">
+            <input
+              value={filters.q}
+              placeholder="频道名或 id"
+              onChange={(event) => setFilter('q', event.target.value)}
+            />
+          </Field>
+          {filters.cid ? (
+            <Field label="当前频道">
+              <button
+                className="ghost"
+                onClick={() => {
+                  setFilter('gid', '');
+                  setFilter('cid', '');
+                }}
+              >
+                清除频道筛选
+              </button>
+            </Field>
+          ) : null}
+        </div>
+      </div>
+      <div className="card">
+        {items.length === 0 ? (
+          <Empty
+            text={filtered ? '没有匹配结果' : '没有结果记录'}
+            icon="activity"
+          />
+        ) : (
+          <>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>频道</th>
+                  <th>来源</th>
+                  <th>目标分组</th>
+                  <th>动作</th>
+                  <th>原因</th>
+                  <th>延迟</th>
+                  <th>速率</th>
+                  <th>分辨率</th>
+                  <th>最近校验</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.key}>
+                    <td>
+                      {item.name || item.cid}
+                      <span className="cid">[{item.cid}]</span>
+                    </td>
+                    <td>{item.source_id ? sourceName(item.source_id) : '手工'}</td>
+                    <td>{item.target_group || '—'}</td>
+                    <td>
+                      <Badge tone={resultActionTone(item)}>{resultActionText(item)}</Badge>
+                    </td>
+                    <td>{REASON_LABEL[item.reason] ?? item.reason}</td>
+                    <td>{item.delay_ms === null ? '—' : `${item.delay_ms} ms`}</td>
+                    <td>
+                      {item.speed_mib === null ? '—' : `${item.speed_mib.toFixed(1)} MiB/s`}
+                    </td>
+                    <td>{resolutionText(item.resolution)}</td>
+                    <td title={timeText(item.checked_at)}>{relativeText(item.checked_at)}</td>
+                    <td>
+                      <button className="chip" onClick={() => setDetail(item)}>
+                        详情
+                      </button>
+                      {item.action === 'admitted' ? (
+                        <button className="chip" onClick={() => setRerun(item)}>
+                          重新校验
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="card-head">
+              <span className="muted">
+                第 {total === 0 ? 0 : offset + 1}–{pageEnd} 条，共 {total} 条
+              </span>
+              <div className="card-actions">
+                <Select
+                  ariaLabel="每页数量"
+                  value={String(limit)}
+                  compact
+                  options={[
+                    { value: '50', label: '50 条' },
+                    { value: '100', label: '100 条' },
+                    { value: '200', label: '200 条' },
+                  ]}
+                  onChange={(next) => {
+                    setLimit(Number(next));
+                    setOffset(0);
+                  }}
+                />
+                <button
+                  className="ghost"
+                  disabled={offset === 0}
+                  onClick={() => setOffset(Math.max(0, offset - limit))}
+                >
+                  上一页
+                </button>
+                <button
+                  className="ghost"
+                  disabled={pageEnd >= total}
+                  onClick={() => setOffset(offset + limit)}
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+      {detail ? (
+        <Modal title="质量结果详情" onClose={() => setDetail(null)}>
+          <dl>
+            <dt>频道</dt>
+            <dd>
+              {detail.name || detail.cid} <span className="cid">[{detail.cid}]</span>
+            </dd>
+            <dt>来源</dt>
+            <dd>{detail.source_id ? sourceName(detail.source_id) : '手工'}</dd>
+            <dt>目标分组</dt>
+            <dd>{detail.target_group || '—'}</dd>
+            <dt>动作</dt>
+            <dd>{resultActionText(detail)}</dd>
+            <dt>原因</dt>
+            <dd>{REASON_LABEL[detail.reason] ?? detail.reason}</dd>
+            <dt>最近校验</dt>
+            <dd>{timeText(detail.checked_at)}</dd>
+            <dt>首次失败</dt>
+            <dd>{timeText(detail.first_fail_at ?? 0)}</dd>
+            <dt>延迟</dt>
+            <dd>{detail.delay_ms === null ? '—' : `${detail.delay_ms} ms`}</dd>
+            <dt>速率</dt>
+            <dd>
+              {detail.speed_mib === null ? '—' : `${detail.speed_mib.toFixed(2)} MiB/s`}
+            </dd>
+            <dt>分辨率</dt>
+            <dd>{detail.resolution || '—'}</dd>
+            <dt>地址哈希</dt>
+            <dd className="mono">{detail.url_hash || '—'}</dd>
+          </dl>
+          {detail.action === 'removed' || detail.action === 'source_removed' ? (
+            <p className="hint">需要重新同步源才能再次准入。</p>
+          ) : null}
+        </Modal>
+      ) : null}
+      {rerun ? (
+        <Confirm
+          title="重新校验这个频道？"
+          text={`将校验「${rerun.name || rerun.cid}」。失败会立即从分组移出。`}
+          confirmText="开始校验"
+          onCancel={() => setRerun(null)}
+          onConfirm={() => void doRerun()}
+        />
+      ) : null}
+    </>
   );
 }
 
 /** 来源标签。 */
-function SourcesTab() {
+function SourcesTab({ onChanged }: { onChanged: () => void }) {
+  const { node, ok, err } = useToast();
   const [items, setItems] = useState<QualitySource[] | null>(null);
-  const [error, setError] = useState('');
+  const [configSources, setConfigSources] = useState<PlaylistSourceConfig[]>([]);
+  const [busy, setBusy] = useState('');
+  const [gateOff, setGateOff] = useState<QualitySource | null>(null);
+  const [disable, setDisable] = useState<{
+    source: QualitySource;
+    keep: boolean;
+    remember: boolean;
+    confirm: boolean;
+  } | null>(null);
+  const [removing, setRemoving] = useState<{
+    source: QualitySource;
+    keep: boolean;
+    confirm: boolean;
+  } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [quality, playlist] = await Promise.all([
+        fetchQualitySources(),
+        fetchPlaylistSources(),
+      ]);
+      setItems(quality.items ?? []);
+      setConfigSources(playlist.sources ?? []);
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    }
+  }, [err]);
 
   useEffect(() => {
-    let active = true;
-    fetchQualitySources()
-      .then((body) => {
-        if (active) setItems(body.items ?? []);
-      })
-      .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : String(err));
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    void load();
+  }, [load]);
 
-  if (error) return <Empty text={error} icon="subs" />;
+  const change = async (message: string) => {
+    ok(message);
+    broadcastQualityChanged();
+    onChanged();
+    await load();
+  };
+
+  const toggleGate = async (item: QualitySource, next: boolean) => {
+    const config = configSources.find((source) => source.id === item.id);
+    if (!config) {
+      err('找不到源配置');
+      return;
+    }
+    setBusy(`gate-${item.id}`);
+    try {
+      const quality = { ...(config.quality ?? {}), enabled: next };
+      await updatePlaylistSource(item.id, { ...config, quality });
+      await change(next ? '门控已开启' : '门控已关闭');
+      setGateOff(null);
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const sync = async (item: QualitySource) => {
+    setBusy(`sync-${item.id}`);
+    try {
+      await syncPlaylistSource(item.id);
+      ok('已排入同步');
+      broadcastQualityChanged();
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const enable = async (item: QualitySource) => {
+    setBusy(`enable-${item.id}`);
+    try {
+      await enableQualitySource(item.id);
+      await change('源已启用');
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const doDisable = async () => {
+    if (!disable) return;
+    setBusy(`disable-${disable.source.id}`);
+    try {
+      await disableQualitySource(disable.source.id, disable.keep);
+      if (disable.keep && disable.remember) {
+        localStorage.setItem('tv_buddy_quality_disable_keep', '1');
+      } else if (!disable.keep) {
+        localStorage.removeItem('tv_buddy_quality_disable_keep');
+      }
+      setDisable(null);
+      await change(
+        disable.keep ? '源已停用，频道保留在分组' : '源已停用，频道已移出分组',
+      );
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const doRemove = async () => {
+    if (!removing) return;
+    setBusy(`remove-${removing.source.id}`);
+    try {
+      await deleteQualitySource(removing.source.id, removing.keep);
+      setRemoving(null);
+      await change(removing.keep ? '源已删除，频道转为本地频道' : '源已删除，频道已移出分组');
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy('');
+    }
+  };
+
   if (!items) return <Empty text="正在读取来源…" icon="subs" />;
-  if (items.length === 0) return <Empty text="没有同步来源" icon="subs" />;
+
+  const aggregates = configSources.filter((source) => source.mode !== 'sync');
 
   return (
-    <div className="card">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>来源</th>
-            <th>启用</th>
-            <th>门控</th>
-            <th>阶段</th>
-            <th>校验</th>
-            <th>准入</th>
-            <th>拒绝</th>
-            <th>移出</th>
-            <th>剩余候选</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id}>
-              <td>{item.name || item.id}</td>
-              <td>
-                <Badge tone={item.enabled ? 'ok' : 'muted'}>
-                  {item.enabled ? '启用' : '停用'}
-                </Badge>
-              </td>
-              <td>
-                <Badge tone={item.gate_enabled ? 'ok' : 'muted'}>
-                  {item.gate_enabled ? '开' : '关'}
-                </Badge>
-              </td>
-              <td>{item.phase || '—'}</td>
-              <td>{item.tested}</td>
-              <td>{item.admitted}</td>
-              <td>{item.rejected}</td>
-              <td>{item.removed}</td>
-              <td>
-                {item.remaining}
-                {item.paused ? <Badge tone="warn">暂停</Badge> : null}
-                {item.truncated ? <Badge tone="warn">截断</Badge> : null}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      {node}
+      <div className="card">
+        <div className="card-head">
+          <div className="card-head-text">
+            <h2>同步源</h2>
+            <span className="muted">只列托管源；关闭门控后由同步直接管理频道</span>
+          </div>
+          <div className="card-actions">
+            <button className="ghost" onClick={() => void load()}>
+              刷新
+            </button>
+          </div>
+        </div>
+        {items.length === 0 ? (
+          <Empty text="没有同步来源" icon="subs" />
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>来源</th>
+                <th>状态</th>
+                <th>门控</th>
+                <th>最近同步 / 阶段</th>
+                <th>准入</th>
+                <th>最近移出</th>
+                <th>失败率</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    {item.name || item.id}
+                    <span className="cid">[{item.id}]</span>
+                  </td>
+                  <td>
+                    <Badge tone={item.enabled ? 'ok' : 'muted'}>
+                      {item.enabled ? '已启用' : '已停用'}
+                    </Badge>
+                  </td>
+                  <td>
+                    <Switch
+                      checked={item.gate_enabled}
+                      disabled={busy !== ''}
+                      label={`${item.name || item.id} 门控`}
+                      onChange={(next) =>
+                        next ? void toggleGate(item, true) : setGateOff(item)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <div>{item.phase || '—'}</div>
+                    <div className="hint">
+                      {timeText(item.last_at)}
+                      {item.truncated
+                        ? `；本轮准入 ${item.admitted}，剩余 ${item.remaining} 个候选下一轮继续`
+                        : ''}
+                      {item.paused ? '；安全阀已暂停' : ''}
+                    </div>
+                  </td>
+                  <td>{item.admitted}</td>
+                  <td>{item.removed}</td>
+                  <td>
+                    {item.tested > 0
+                      ? `${((item.removed / item.tested) * 100).toFixed(0)}%`
+                      : '—'}
+                  </td>
+                  <td>
+                    <button
+                      className="chip"
+                      disabled={busy !== '' || !item.enabled}
+                      onClick={() => void sync(item)}
+                    >
+                      立即同步
+                    </button>
+                    {item.enabled ? (
+                      <button
+                        className="chip"
+                        disabled={busy !== ''}
+                        onClick={() => {
+                          let remember = false;
+                          try {
+                            remember =
+                              localStorage.getItem('tv_buddy_quality_disable_keep') === '1';
+                          } catch {
+                            // 隐私模式下读写失败时按未记住处理。
+                          }
+                          setDisable({
+                            source: item,
+                            keep: remember,
+                            remember,
+                            confirm: false,
+                          });
+                        }}
+                      >
+                        停用
+                      </button>
+                    ) : (
+                      <button
+                        className="chip"
+                        disabled={busy !== ''}
+                        onClick={() => void enable(item)}
+                      >
+                        启用
+                      </button>
+                    )}
+                    <button
+                      className="chip"
+                      title="到订阅源页编辑这个源"
+                      onClick={() => {
+                        window.location.hash = '#/subs';
+                      }}
+                    >
+                      编辑
+                    </button>
+                    <button
+                      className="chip danger-text"
+                      disabled={busy !== ''}
+                      onClick={() => setRemoving({ source: item, keep: true, confirm: false })}
+                    >
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {aggregates.length > 0 ? (
+        <div className="card">
+          <details>
+            <summary>聚合源不参与准入（{aggregates.length} 个）</summary>
+            <p className="hint">
+              聚合源只在生成总清单时拼接内容，没有成员同步与质量门控。
+            </p>
+            <ul>
+              {aggregates.map((source) => (
+                <li key={source.id}>{source.name || source.id}</li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      ) : null}
+      {gateOff ? (
+        <Confirm
+          title="关闭门控？"
+          text="关闭后，新频道不再校验，已准入频道不再周期移出。频道由同步直接管理。"
+          confirmText="关闭门控"
+          onCancel={() => setGateOff(null)}
+          onConfirm={() => void toggleGate(gateOff, false)}
+        />
+      ) : null}
+      {disable ? (
+        <Modal
+          title={`停用源「${disable.source.name || disable.source.id}」`}
+          onClose={() => setDisable(null)}
+          footer={
+            <>
+              <button className="ghost" onClick={() => setDisable(null)}>
+                取消
+              </button>
+              <button
+                disabled={busy !== ''}
+                onClick={() => {
+                  if (disable.confirm || disable.keep) {
+                    void doDisable();
+                  } else {
+                    setDisable({ ...disable, confirm: true });
+                  }
+                }}
+              >
+                {disable.confirm ? '确认移出' : '停用'}
+              </button>
+            </>
+          }
+        >
+          {disable.confirm ? (
+            <p>
+              将移出 {disable.source.admitted} 个频道。移出后不会自动恢复。
+            </p>
+          ) : (
+            <>
+              <p>停用后停止同步，并暂停该源的质量校验。</p>
+              <div className="section-title">已准入频道</div>
+              <label className="check">
+                <input
+                  type="radio"
+                  checked={disable.keep}
+                  onChange={() => setDisable({ ...disable, keep: true })}
+                />
+                <span>保留在分组（推荐）</span>
+              </label>
+              <label className="check">
+                <input
+                  type="radio"
+                  checked={!disable.keep}
+                  onChange={() => setDisable({ ...disable, keep: false })}
+                />
+                <span>同时移出分组</span>
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={disable.remember}
+                  disabled={!disable.keep}
+                  onChange={(event) =>
+                    setDisable({ ...disable, remember: event.target.checked })
+                  }
+                />
+                <span>记住我的选择（只记住保留）</span>
+              </label>
+            </>
+          )}
+        </Modal>
+      ) : null}
+      {removing ? (
+        <Modal
+          title={`删除源「${removing.source.name || removing.source.id}」`}
+          onClose={() => setRemoving(null)}
+          footer={
+            <>
+              <button className="ghost" onClick={() => setRemoving(null)}>
+                取消
+              </button>
+              <button
+                disabled={busy !== ''}
+                onClick={() => {
+                  if (removing.confirm || removing.keep) {
+                    void doRemove();
+                  } else {
+                    setRemoving({ ...removing, confirm: true });
+                  }
+                }}
+              >
+                {removing.confirm ? '确认删除并移出' : '删除'}
+              </button>
+            </>
+          }
+        >
+          {removing.confirm ? (
+            <p>
+              将移出 {removing.source.admitted} 个频道。删除后无法恢复源配置，频道不会自动恢复。
+            </p>
+          ) : (
+            <>
+              <p>删除后无法恢复源配置。</p>
+              <div className="section-title">已准入频道</div>
+              <label className="check">
+                <input
+                  type="radio"
+                  checked={removing.keep}
+                  onChange={() => setRemoving({ ...removing, keep: true })}
+                />
+                <span>保留为本地频道（推荐）</span>
+              </label>
+              <label className="check">
+                <input
+                  type="radio"
+                  checked={!removing.keep}
+                  onChange={() => setRemoving({ ...removing, keep: false })}
+                />
+                <span>随源删除</span>
+              </label>
+            </>
+          )}
+        </Modal>
+      ) : null}
+    </>
   );
 }
 
 /** 质量校验页。 */
 export function QualityPage() {
   const { node, ok, err } = useToast();
-  const [tab, setTab] = useState<Tab>('overview');
+  const [route, setRoute] = useState<QualityRoute>(() => qualityRoute());
+  const [tab, setTab] = useState<Tab>(route.tab);
   const [status, setStatus] = useState<QualityStatus | null>(null);
   const [busy, setBusy] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
+
+  useEffect(() => {
+    const onHash = () => {
+      const next = qualityRoute();
+      setRoute(next);
+      setTab(next.tab);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  const changeTab = (next: Tab) => {
+    setTab(next);
+    setRoute({ tab: next, gid: '', cid: '' });
+    const target = `#/quality/${next}`;
+    if (window.location.hash !== target) {
+      window.history.replaceState(null, '', target);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -722,7 +1443,8 @@ export function QualityPage() {
           : `已排入质量校验（${result.run_id}）`,
       );
       await load();
-      setTab('overview');
+      broadcastQualityChanged();
+      changeTab('overview');
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     } finally {
@@ -734,8 +1456,9 @@ export function QualityPage() {
     setBusy('cancel');
     try {
       await cancelQuality();
-      ok('已请求取消');
+      ok('取消中，已完成的结果保留');
       await load();
+      broadcastQualityChanged();
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     } finally {
@@ -767,7 +1490,7 @@ export function QualityPage() {
             role="tab"
             aria-selected={tab === id}
             className={tab === id ? 'tab active' : 'tab'}
-            onClick={() => setTab(id)}
+            onClick={() => changeTab(id)}
           >
             {label}
           </button>
@@ -782,8 +1505,14 @@ export function QualityPage() {
         />
       )}
       {tab === 'rules' && <RulesTab onSaved={() => void load()} />}
-      {tab === 'results' && <ResultsTab />}
-      {tab === 'sources' && <SourcesTab />}
+      {tab === 'results' && (
+        <ResultsTab
+          running={status?.running === true}
+          initialGid={route.gid}
+          initialCid={route.cid}
+        />
+      )}
+      {tab === 'sources' && <SourcesTab onChanged={() => void load()} />}
       {confirmCancel ? (
         <div className="modal-overlay" onClick={() => setConfirmCancel(false)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>

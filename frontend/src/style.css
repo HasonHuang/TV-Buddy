@@ -1918,6 +1918,22 @@ a.compact {
   color: var(--text3);
 }
 
+/* 分组页质量徽章：整组可点击，跳到结果页。 */
+.quality-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.quality-jump:hover .badge {
+  border-color: var(--accent-line);
+}
+
 /* 模式徽章：PROXY / DASH / REMUX 等。 */
 .mode {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

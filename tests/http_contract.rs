@@ -6695,6 +6695,7 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
             cid: "c1".into(),
             name: "通过频道".into(),
             target_group: "代理组".into(),
+            url_hash: tv_buddy::quality::admission::url_hash_hex("http://up/a.m3u8"),
             action: "admitted".into(),
             reason: "pass".into(),
             ok: true,
@@ -6742,7 +6743,11 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
     assert_eq!(item["resolution"], "1920x1080");
     assert_eq!(item["source_id"], "q-src");
     assert!(item.get("url").is_none(), "结果不能带完整地址");
-    assert!(item.get("url_hash").is_none(), "结果不能带地址哈希");
+    assert_eq!(
+        item["url_hash"].as_str().map(str::len),
+        Some(64),
+        "只暴露地址哈希"
+    );
 
     let sources: serde_json::Value = fixture
         .client

@@ -26,6 +26,29 @@ const REASON_LABEL: Record<QualityReason, string> = {
   unknown: '未校验',
 };
 
+const ACTION_LABEL: Record<string, string> = {
+  admitted: '准入',
+  rejected: '拒绝',
+  removed: '移出',
+  kept: '保留',
+  hidden: '下线',
+  source_removed: '源移除',
+};
+
+function actionTone(action: string): string {
+  switch (action) {
+    case 'admitted':
+      return 'ok';
+    case 'removed':
+    case 'rejected':
+      return 'danger';
+    case 'hidden':
+      return 'warn';
+    default:
+      return 'muted';
+  }
+}
+
 function resultTone(reason: QualityReason): string {
   switch (reason) {
     case 'pass':
@@ -49,32 +72,53 @@ function checkedText(epoch: number): string {
   return new Date(epoch * 1000).toLocaleString('zh-CN', { hour12: false });
 }
 
-/** 频道质量徽章：延迟、速率、分辨率、结果。无结果时不渲染。 */
-export function QualityBadges({ result }: { result?: QualityResult }) {
+/** 频道质量徽章：延迟、速率、分辨率、结果。无结果时不渲染。
+ *
+ * 传入 `onClick` 时整组徽章可点击，用于跳到质量结果页。
+ */
+export function QualityBadges({
+  result,
+  onClick,
+}: {
+  result?: QualityResult;
+  onClick?: () => void;
+}) {
   if (!result) return null;
-  const label = result.hidden ? '已隐藏' : REASON_LABEL[result.reason] ?? result.reason;
-  const tone = result.hidden ? 'danger' : resultTone(result.reason);
+  const hidden = result.hidden === true || result.action === 'hidden';
+  const label = hidden ? '已隐藏' : REASON_LABEL[result.reason] ?? result.reason;
+  const tone = hidden ? 'danger' : resultTone(result.reason);
   const resolution = result.resolution.split('x')[1] ?? '';
   const speed = result.speed_mib ?? 0;
   const tip = [
     `最近校验：${checkedText(result.checked_at)}`,
     `原因：${REASON_LABEL[result.reason] ?? result.reason}`,
-    result.hidden ? '当前规则下会从订阅清单隐藏' : '',
+    hidden ? '当前规则下会从订阅清单隐藏' : '',
     result.stale ? '结果已超过两个周期未更新' : '',
   ]
     .filter((line) => line !== '')
     .join('；');
-  return (
+  const content = (
     <>
       {result.delay_ms && result.delay_ms > 0 ? (
         <Badge tone="muted">{result.delay_ms}ms</Badge>
       ) : null}
       {speed > 0 ? <Badge tone="muted">{speed.toFixed(1)} MiB/s</Badge> : null}
       {resolution !== '' ? <Badge tone="muted">{resolution}p</Badge> : null}
+      {result.action ? (
+        <Badge tone={actionTone(result.action)}>
+          {ACTION_LABEL[result.action] ?? result.action}
+        </Badge>
+      ) : null}
       <HoverTip text={tip}>
         <Badge tone={tone}>{label}</Badge>
       </HoverTip>
     </>
+  );
+  if (!onClick) return content;
+  return (
+    <button type="button" className="quality-jump" title="查看质量结果" onClick={onClick}>
+      {content}
+    </button>
   );
 }
 
@@ -90,7 +134,7 @@ export function qualityCounts(
     const result = results[`${gid}/${channel.id}`];
     if (!result) continue;
     tested += 1;
-    if (result.ok && !result.hidden) valid += 1;
+    if (result.ok && !result.hidden && result.action !== 'hidden') valid += 1;
   }
   return { valid, tested };
 }

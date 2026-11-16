@@ -232,9 +232,9 @@ const PREFETCH_OPTIONS: { value: PrefetchForm['state']; label: string; desc: str
 ];
 
 const OFFLINE_OPTIONS: { value: ChannelForm['offlineOnFail']; label: string; desc: string }[] = [
-  { value: '', label: '跟随分组', desc: '使用分组里的「探测失败下线」设置。' },
-  { value: 'on', label: '开启', desc: '探测失败后从订阅清单里移除。' },
-  { value: 'off', label: '关闭', desc: '始终留在订阅清单里。' },
+  { value: '', label: '跟随分组', desc: '使用分组里的手工频道失败处理。' },
+  { value: 'off', label: '失败保留', desc: '质量失败也留在分组与订阅里。' },
+  { value: 'on', label: '失败下线', desc: '质量失败时只从订阅隐藏，不删除频道。' },
 ];
 
 function emptyProxy(): ProxyForm {
@@ -472,6 +472,11 @@ export function GroupsPage() {
   const [quality, setQuality] = useState<Record<string, QualityResult>>({});
   /** 正在发起单频道质量校验的 `gid/cid`。 */
   const [checkingQuality, setCheckingQuality] = useState('');
+  const [qualityConfirm, setQualityConfirm] = useState<{
+    gid: string;
+    cid: string;
+    label: string;
+  } | null>(null);
   const [tracks, setTracks] = useState<{ gid: string; cid: string; body: string } | null>(null);
   /** 多选：批量删除与批量导出。 */
   const [multi, setMulti] = useState(false);
@@ -550,20 +555,28 @@ export function GroupsPage() {
   }, [load]);
 
   // 质量结果单独读取。接口关闭或失败时不提示，分组页照常可用。
+  // 质量页改变结果后广播事件，这里重新拉取徽章数据。
   useEffect(() => {
     let active = true;
-    fetchQualityResults({ limit: 1000 })
-      .then((body) => {
-        if (!active) return;
-        setQuality(
-          Object.fromEntries((body.items ?? []).map((item) => [`${item.gid}/${item.cid}`, item])),
-        );
-      })
-      .catch(() => {
-        if (active) setQuality({});
-      });
+    const loadQuality = () => {
+      fetchQualityResults({ limit: 500 })
+        .then((body) => {
+          if (!active) return;
+          setQuality(
+            Object.fromEntries(
+              (body.items ?? []).map((item) => [`${item.gid}/${item.cid}`, item]),
+            ),
+          );
+        })
+        .catch(() => {
+          if (active) setQuality({});
+        });
+    };
+    loadQuality();
+    window.addEventListener('tv-buddy:quality-changed', loadQuality);
     return () => {
       active = false;
+      window.removeEventListener('tv-buddy:quality-changed', loadQuality);
     };
   }, []);
 
@@ -573,6 +586,7 @@ export function GroupsPage() {
     try {
       await runQuality('channel', key, 'quick');
       ok('已排入质量校验');
+      window.dispatchEvent(new Event('tv-buddy:quality-changed'));
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1555,10 +1569,22 @@ export function GroupsPage() {
                       ) : (
                         <Badge tone="muted">本地</Badge>
                       )}
+                      {!channel.source_id && (
+                        <Badge tone={offlineOnFail ? 'warn' : 'muted'}>
+                          {offlineOnFail ? '失败下线' : '失败保留'}
+                        </Badge>
+                      )}
                       {tvgId !== '' && <Badge tone="muted">tvg-id</Badge>}
                       {logo !== '' && <Badge tone="muted">Logo</Badge>}
                       <PrefetchBadge raw={channel.prefetch} />
-                      <QualityBadges result={qualityResult} />
+                      <QualityBadges
+                        result={qualityResult}
+                        onClick={() => {
+                          window.location.hash = `#/quality/results?gid=${encodeURIComponent(
+                            group.id,
+                          )}&cid=${encodeURIComponent(channel.id)}`;
+                        }}
+                      />
                     </div>
                   </div>
                   <div className="ch-ops">
@@ -1607,7 +1633,13 @@ export function GroupsPage() {
                       className="chip"
                       title="立即校验这个频道。使用已保存的质量规则。"
                       disabled={checkingQuality === `${group.id}/${channel.id}`}
-                      onClick={() => void checkQuality(group.id, channel.id)}
+                      onClick={() => {
+                        setQualityConfirm({
+                          gid: group.id,
+                          cid: channel.id,
+                          label: channel.name || channel.id,
+                        });
+                      }}
                     >
                       {checkingQuality === `${group.id}/${channel.id}` ? '已排入…' : '校验'}
                     </button>
@@ -2036,28 +2068,34 @@ export function GroupsPage() {
           </details>
 
           <hr className="divider" />
-          <div className="section-title">探测下线</div>
-          <Field
-            label="探测失败下线"
-            tip="开启后，最近一次探测失败时，这个频道不出现在订阅清单里。探测成功后自动恢复。"
-            hint="默认跟随分组。需要启用健康探测。"
-          >
-            <Select
-              ariaLabel="探测失败下线"
-              value={channelForm.form.offlineOnFail}
-              options={OFFLINE_OPTIONS}
-              onChange={(next) =>
-                setChannelForm({
-                  ...channelForm,
-                  form: {
-                    ...channelForm.form,
-                    offlineOnFail: next as ChannelForm['offlineOnFail'],
-                  },
-                })
-              }
-              width={200}
-            />
-          </Field>
+          <div className="section-title">失败处理</div>
+          {channelForm.form.sourceId ? (
+            <p className="hint">
+              由源门控管理，失败立即移出。源停用或删除时可选择保留频道。
+            </p>
+          ) : (
+            <Field
+              label="手工频道失败处理"
+              tip="质量校验失败时如何处理。默认跟随分组；开启后只从订阅隐藏，不删除频道。"
+              hint="质量停用时回退到健康探测的失败下线。"
+            >
+              <Select
+                ariaLabel="手工频道失败处理"
+                value={channelForm.form.offlineOnFail}
+                options={OFFLINE_OPTIONS}
+                onChange={(next) =>
+                  setChannelForm({
+                    ...channelForm,
+                    form: {
+                      ...channelForm.form,
+                      offlineOnFail: next as ChannelForm['offlineOnFail'],
+                    },
+                  })
+                }
+                width={200}
+              />
+            </Field>
+          )}
 
           <NetworkBlock
             summary="网络配置 · 留空则使用分组配置"
@@ -2214,6 +2252,20 @@ export function GroupsPage() {
           onConfirm={() => void doRemove()}
         />
       )}
+
+      {qualityConfirm ? (
+        <Confirm
+          title="重新校验这个频道？"
+          text={`将校验「${qualityConfirm.label}」。失败会立即从分组移出。`}
+          confirmText="开始校验"
+          onCancel={() => setQualityConfirm(null)}
+          onConfirm={() => {
+            const target = qualityConfirm;
+            setQualityConfirm(null);
+            void checkQuality(target.gid, target.cid);
+          }}
+        />
+      ) : null}
 
       {node}
     </>

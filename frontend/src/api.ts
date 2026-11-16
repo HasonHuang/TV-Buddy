@@ -162,6 +162,8 @@ export type QualityResult = {
   cid: string;
   name: string;
   target_group: string;
+  /** 地址哈希，不包含完整地址或查询令牌。 */
+  url_hash: string;
   action: QualityAction | string;
   reason: QualityReason;
   ok: boolean;
@@ -337,4 +339,65 @@ export function previewQualitySchedule(input: {
   cron?: string;
 }): Promise<{ times: number[] }> {
   return api<{ times: number[] }>('POST', '/quality/schedule/preview', input);
+}
+
+/** 订阅源配置。字段较多，质量页只读写需要的一小部分。 */
+export type PlaylistSourceConfig = {
+  id: string;
+  name?: string;
+  mode?: string;
+  enabled?: boolean;
+  quality?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
+
+/** 读取订阅源配置。 */
+export function fetchPlaylistSources(): Promise<{ sources: PlaylistSourceConfig[] }> {
+  return api<{ sources: PlaylistSourceConfig[] }>('GET', '/playlist');
+}
+
+/** 保存一个订阅源。 */
+export function updatePlaylistSource(
+  id: string,
+  source: PlaylistSourceConfig,
+): Promise<{ ok: boolean; source: PlaylistSourceConfig; detached: number }> {
+  return api<{ ok: boolean; source: PlaylistSourceConfig; detached: number }>(
+    'PUT',
+    `/playlist/sources/${encodeURIComponent(id)}`,
+    source,
+  );
+}
+
+/** 触发一个托管源同步。 */
+export function syncPlaylistSource(id: string): Promise<{ ok: boolean; queued?: number }> {
+  return api<{ ok: boolean; queued?: number }>('POST', '/subs/sync', { id });
+}
+
+/** 停用源。`keepChannels=false` 时同时移出频道。 */
+export function disableQualitySource(
+  id: string,
+  keepChannels: boolean,
+): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>('POST', `/playlist/sources/${encodeURIComponent(id)}/disable`, {
+    keep_channels: keepChannels,
+  });
+}
+
+/** 启用源；同步源会排入同步。 */
+export function enableQualitySource(id: string): Promise<{ ok: boolean; queued: boolean }> {
+  return api<{ ok: boolean; queued: boolean }>(
+    'POST',
+    `/playlist/sources/${encodeURIComponent(id)}/enable`,
+  );
+}
+
+/** 删除源。`keepContent=true` 时频道保留为本地频道。 */
+export function deleteQualitySource(
+  id: string,
+  keepContent: boolean,
+): Promise<{ ok: boolean; channels: number; to_manual: boolean }> {
+  return api<{ ok: boolean; channels: number; to_manual: boolean }>(
+    'DELETE',
+    `/playlist/sources/${encodeURIComponent(id)}?keep_content=${keepContent ? 1 : 0}`,
+  );
 }

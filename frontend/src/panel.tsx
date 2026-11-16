@@ -76,7 +76,8 @@ const SECTION_IDS = new Set<string>(NAV.map((item) => item.id));
  * 切换分区只改片段，刷新不会把请求打到不存在的服务端路径。
  */
 function sectionFromHash(hash = window.location.hash): SectionId | null {
-  const id = hash.replace(/^#\/?/, '');
+  // `#/quality/results?gid=...` 仍属于 `quality` 分区；子路径由页面自己解释。
+  const id = hash.replace(/^#\/?/, '').split('?')[0].split('/')[0];
   return SECTION_IDS.has(id) ? (id as SectionId) : null;
 }
 

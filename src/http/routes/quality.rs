@@ -199,6 +199,7 @@ fn result_json(item: &QualityResult) -> Value {
         "cid": item.cid,
         "name": item.name,
         "target_group": item.target_group,
+        "url_hash": item.url_hash,
         "action": item.action,
         "reason": item.reason,
         "ok": item.ok,
