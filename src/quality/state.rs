@@ -49,14 +49,22 @@ impl Entry {
 #[derive(Debug, Clone)]
 pub struct RunState {
     pub run_id: String,
+    pub trigger: String,
+    pub phase: String,
     pub started_at: i64,
     pub total: usize,
     pub tested: usize,
     pub valid: usize,
+    pub admitted: usize,
+    pub removed: usize,
+    pub rejected: usize,
+    pub skipped: usize,
     pub hidden: usize,
     pub bytes: u64,
     pub cancelled: bool,
     pub finished: bool,
+    pub paused_by_guard: bool,
+    pub measure_only: bool,
     pub error: Option<String>,
 }
 
@@ -144,21 +152,35 @@ impl QualityState {
             .clone()
     }
 
-    pub fn try_start_run(&self, run_id: &str, total: usize) -> bool {
+    pub fn try_start_run(
+        &self,
+        run_id: &str,
+        trigger: &str,
+        total: usize,
+        measure_only: bool,
+    ) -> bool {
         let mut run = self.run.lock().unwrap_or_else(|error| error.into_inner());
         if run.as_ref().is_some_and(|state| !state.finished) {
             return false;
         }
         *run = Some(RunState {
             run_id: run_id.to_string(),
+            trigger: trigger.to_string(),
+            phase: "queued".into(),
             started_at: crate::schedule::now_epoch(),
             total,
             tested: 0,
             valid: 0,
+            admitted: 0,
+            removed: 0,
+            rejected: 0,
+            skipped: 0,
             hidden: 0,
             bytes: 0,
             cancelled: false,
             finished: false,
+            paused_by_guard: false,
+            measure_only,
             error: None,
         });
         true
@@ -258,18 +280,18 @@ mod tests {
     #[test]
     fn run_lock_allows_one_run_at_a_time() {
         let state = QualityState::new();
-        assert!(state.try_start_run("r1", 10));
-        assert!(!state.try_start_run("r2", 10));
+        assert!(state.try_start_run("r1", "manual", 10, false));
+        assert!(!state.try_start_run("r2", "manual", 10, false));
         state.finish_run();
-        assert!(state.try_start_run("r3", 10));
+        assert!(state.try_start_run("r3", "manual", 10, false));
     }
 
     #[test]
     fn stale_run_cannot_finish_new_run() {
         let state = QualityState::new();
-        assert!(state.try_start_run("r1", 1));
+        assert!(state.try_start_run("r1", "manual", 1, false));
         assert!(state.finish_run_id("r1"));
-        assert!(state.try_start_run("r2", 1));
+        assert!(state.try_start_run("r2", "manual", 1, false));
         assert!(!state.finish_run_id("r1"), "旧任务不能结束新任务");
         let run = state.run_status().expect("run");
         assert_eq!(run.run_id, "r2");

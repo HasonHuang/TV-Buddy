@@ -717,7 +717,7 @@ Expected: FAIL。门控未接入。
 
 - [ ] **Step 3: Implement probing and sync integration**
 
-- `RunMemo`：键为 `url_hash`；`host_cache` 时另存 host 键。只保存 `Measurement`，不保存判定。Host 键只在可达且非 `probe_error` 时复用，避免一个 404 污染同 Host 的其他频道。生命周期为一次任务。
+- `RunMemo`：键为 `url_hash`；`host_cache` 时另存 host 键。只保存 `Measurement`，不保存判定。Host 键只在可达、非 `probe_error` 且含速率测量时复用，避免一个 200 或 404 污染同 Host 的其他频道。生命周期为一次任务。
 - `gate_expired`：`budget_secs > 0` 且已用时间达到或超过预算。
 - `filter_plan`：
   - 全局或源级 `quality.enabled=false` 时直接返回原计划，统计为 0。
@@ -768,7 +768,7 @@ git commit -m "feat(quality): 接入同步门控与单轮缓存"
   - `pub struct RunSpec { run_id, trigger, scope, measure_only }`
   - `pub struct Removal { gid, cid, url_hash }`
   - `pub struct RunSummary { run_id, tested, admitted, removed, rejected, skipped, hidden, paused_by_guard }`
-  - `pub struct EngineDecision { removals: Vec<Removal>, manual_entries: Vec<(String, String, Entry)>, results: Vec<QualityResult>, tested, removed, hidden, kept, paused }`
+  - `pub struct EngineDecision { removals: Vec<Removal>, manual_entries: Vec<(String, String, Entry)>, results: Vec<QualityResult>, tested, admitted, removed, rejected, skipped, hidden, kept, paused }`
   - `pub fn due_targets(config, results: &QualityStore, scope, now, limit, measure_only) -> anyhow::Result<Vec<Candidate>>`
   - `pub fn removal_allowed(config: &Config, removal: &Removal) -> bool`
   - `pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) -> EngineDecision`

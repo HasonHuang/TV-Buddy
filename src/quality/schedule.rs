@@ -409,7 +409,7 @@ pub async fn run_now(
     }
     let queued = targets.len();
     let run_id = format!("q-{}", uuid::Uuid::new_v4());
-    if !state.quality.try_start_run(&run_id, targets.len()) {
+    if !state.quality.try_start_run(&run_id, "manual", targets.len(), false) {
         return Err(RunError::Busy);
     }
     let state_for_task = state.clone();
@@ -459,7 +459,7 @@ pub fn spawn(state: Arc<AppState>) {
                 continue;
             }
             let run_id = format!("q-{}", uuid::Uuid::new_v4());
-            if !state.quality.try_start_run(&run_id, due.len()) {
+            if !state.quality.try_start_run(&run_id, "schedule", due.len(), false) {
                 tokio::time::sleep(Duration::from_secs(60)).await;
                 continue;
             }

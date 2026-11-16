@@ -59,6 +59,22 @@ impl Reason {
             Self::Unknown => "unknown",
         }
     }
+
+    /// 从结果记录恢复原因。未知值按 `Unknown`。
+    pub fn parse(value: &str) -> Self {
+        match value.trim() {
+            "pass" => Self::Pass,
+            "retained" => Self::Retained,
+            "unreachable" => Self::Unreachable,
+            "speed_low" => Self::SpeedLow,
+            "resolution_low" => Self::ResolutionLow,
+            "resolution_high" => Self::ResolutionHigh,
+            "delay_high" => Self::DelayHigh,
+            "supply" => Self::Supply,
+            "probe_error" => Self::ProbeError,
+            _ => Self::Unknown,
+        }
+    }
 }
 
 /// 一次测量的可用数据。没有测到的项为 `None`。

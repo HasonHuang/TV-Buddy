@@ -530,7 +530,7 @@ fn previous_first_fail(state: &AppState, candidate: &Candidate) -> Option<i64> {
         .and_then(|result| result.first_fail_at)
 }
 
-async fn probe_candidate(
+pub(crate) async fn probe_candidate(
     state: &Arc<AppState>,
     config: &Config,
     candidate: &Candidate,
@@ -547,7 +547,11 @@ async fn probe_candidate(
             .then(|| {
                 host.as_deref()
                     .and_then(|host| memo.get_host(host))
-                    .filter(|measurement| measurement.reachable && !measurement.probe_error)
+                    .filter(|measurement| {
+                        measurement.reachable
+                            && !measurement.probe_error
+                            && measurement.speed_mib.is_some()
+                    })
                     .cloned()
             })
             .flatten()

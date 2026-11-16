@@ -321,14 +321,22 @@ mod tests {
     fn run_json_reports_derived_status() {
         let mut run = RunState {
             run_id: "q-1".into(),
+            trigger: "manual".into(),
+            phase: "queued".into(),
             started_at: 1,
             total: 3,
             tested: 0,
             valid: 0,
+            admitted: 0,
+            removed: 0,
+            rejected: 0,
+            skipped: 0,
             hidden: 0,
             bytes: 0,
             cancelled: false,
             finished: false,
+            paused_by_guard: false,
+            measure_only: false,
             error: None,
         };
         assert_eq!(run_json(&run)["status"], "queued");

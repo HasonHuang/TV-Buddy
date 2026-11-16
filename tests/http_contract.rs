@@ -6461,6 +6461,167 @@ async fn sync_gate_admits_only_passing_channels() {
 }
 
 #[tokio::test]
+async fn admitted_failure_is_removed_by_engine() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "playlist", "max_channels_per_run": 10 },
+        "playlist": { "sources": [{
+            "id": "src", "name": "源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/noop.m3u8"
+        }] },
+        "groups": [{
+            "id": "removal", "name": "移除组", "mode": "proxy", "access": "public",
+            "origin": "sync", "source_id": "src",
+            "channels": [{
+                "id": "bad", "name": "坏频道", "url": "{upstream}/missing.m3u8",
+                "source_id": "src", "source_key": "bad"
+            }]
+        }]
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    fixture
+        .state
+        .quality_store
+        .upsert(&tv_buddy::quality::store::QualityResult {
+            key: "sync:src:bad".into(),
+            scope: "sync".into(),
+            source_id: "src".into(),
+            source_key: "bad".into(),
+            gid: "removal".into(),
+            cid: "bad".into(),
+            name: "坏频道".into(),
+            target_group: "移除组".into(),
+            action: "admitted".into(),
+            reason: "pass".into(),
+            ok: true,
+            checked_at: 1,
+            ..Default::default()
+        })
+        .expect("写结果");
+    let summary = tv_buddy::quality::engine::run(
+        &fixture.state,
+        tv_buddy::quality::engine::RunSpec {
+            run_id: "q-removal".into(),
+            trigger: tv_buddy::quality::engine::RunTrigger::Manual,
+            scope: tv_buddy::quality::state::RunScope::All,
+            measure_only: false,
+        },
+    )
+    .await
+    .expect("运行");
+    assert_eq!(summary.removed, 1);
+    assert!(fixture
+        .state
+        .snapshot()
+        .group("removal")
+        .is_some_and(|group| group.channels.is_empty()));
+    let item = fixture
+        .state
+        .quality_store
+        .get("sync:src:bad")
+        .expect("结果")
+        .expect("存在");
+    assert_eq!(item.action, "removed");
+}
+
+#[tokio::test]
+async fn probe_error_is_not_removed_by_engine() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "playlist", "max_channels_per_run": 10 },
+        "playlist": { "sources": [{
+            "id": "src", "name": "源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/noop.m3u8"
+        }] },
+        "groups": [{
+            "id": "dash", "name": "DASH 组", "mode": "proxy", "access": "public",
+            "origin": "sync", "source_id": "src",
+            "channels": [{
+                "id": "dash", "name": "DASH 频道", "url": "{upstream}/manifest.mpd",
+                "source_id": "src", "source_key": "dash"
+            }]
+        }]
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    fixture
+        .state
+        .quality_store
+        .upsert(&tv_buddy::quality::store::QualityResult {
+            key: "sync:src:dash".into(),
+            scope: "sync".into(),
+            source_id: "src".into(),
+            source_key: "dash".into(),
+            gid: "dash".into(),
+            cid: "dash".into(),
+            name: "DASH 频道".into(),
+            target_group: "DASH 组".into(),
+            action: "admitted".into(),
+            reason: "pass".into(),
+            ok: true,
+            ..Default::default()
+        })
+        .expect("写结果");
+    let summary = tv_buddy::quality::engine::run(
+        &fixture.state,
+        tv_buddy::quality::engine::RunSpec {
+            run_id: "q-probe-error".into(),
+            trigger: tv_buddy::quality::engine::RunTrigger::Manual,
+            scope: tv_buddy::quality::state::RunScope::All,
+            measure_only: false,
+        },
+    )
+    .await
+    .expect("运行");
+    assert_eq!(summary.removed, 0);
+    assert_eq!(
+        fixture
+            .state
+            .snapshot()
+            .group("dash")
+            .expect("组")
+            .channels
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn disabled_quality_run_is_measure_only() {
+    let extra = r#"{
+        "groups": [{
+            "id": "manual", "name": "手工组", "mode": "proxy", "access": "public",
+            "channels": [{ "id": "c", "name": "频道", "url": "{upstream}/live.m3u8" }]
+        }]
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    assert!(fixture
+        .state
+        .quality
+        .try_start_run("q-measure", "manual", 1, false));
+    let summary = tv_buddy::quality::engine::run(
+        &fixture.state,
+        tv_buddy::quality::engine::RunSpec {
+            run_id: "q-measure".into(),
+            trigger: tv_buddy::quality::engine::RunTrigger::Manual,
+            scope: tv_buddy::quality::state::RunScope::All,
+            measure_only: false,
+        },
+    )
+    .await
+    .expect("运行");
+    assert_eq!(summary.removed, 0);
+    assert!(fixture
+        .state
+        .snapshot()
+        .group("manual")
+        .is_some_and(|group| group.channels.len() == 1));
+    assert!(fixture
+        .state
+        .quality
+        .run_status()
+        .expect("运行状态")
+        .measure_only);
+}
+
+#[tokio::test]
 async fn deleting_channel_and_group_clears_quality_results() {
     use tv_buddy::quality::state::Entry;
 
