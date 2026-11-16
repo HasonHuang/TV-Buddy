@@ -60,6 +60,38 @@ pub struct PlannedChannel {
     pub dash: bool,
 }
 
+impl Plan {
+    /// 只保留指定稳定键的频道，并重建分组计数。
+    pub fn retain_keys(&self, keep: &HashSet<String>) -> Plan {
+        let channels: Vec<PlannedChannel> = self
+            .channels
+            .iter()
+            .filter(|channel| keep.contains(&channel.key))
+            .cloned()
+            .collect();
+        let groups = self
+            .groups
+            .iter()
+            .filter_map(|group| {
+                let count = channels
+                    .iter()
+                    .filter(|channel| channel.target == group.target)
+                    .count();
+                (count > 0).then(|| PlannedGroup {
+                    count,
+                    ..group.clone()
+                })
+            })
+            .collect();
+        Plan {
+            channels,
+            groups,
+            duplicates: self.duplicates,
+            trace: self.trace.clone(),
+        }
+    }
+}
+
 /// 一次同步的计划。
 #[derive(Debug, Clone)]
 pub struct Plan {

@@ -481,7 +481,7 @@ git commit -m "feat(quality): 增加候选规则与目标分组覆盖"
 **Interfaces:**
 - Produces:
   - `pub struct Guard { enabled: bool, max_remove_ratio: f64, min_remove_count: usize }`，`Default` 为关闭。
-  - `pub struct GateTargets { url_changed: Vec<Candidate>, new: Vec<Candidate>, kept: Vec<Candidate>, cursor_after: Option<String>, truncated: bool, remaining: usize }`，派生 `Default`。`kept` 是规则关闭、无需探测的候选。
+  - `pub struct GateTargets { url_changed: Vec<Candidate>, new: Vec<Candidate>, new_all: Vec<String>, kept: Vec<Candidate>, cursor_after: Option<String>, truncated: bool, remaining: usize }`，派生 `Default`。`new_all` 是本轮全部新候选键，`new` 只含被游标选中的部分；`kept` 是规则关闭、无需探测的候选。
   - `pub struct GateStats { tested, admitted, rejected, removed, source_removed }`，派生 `Default`。
   - `pub struct CandidateOutcome { candidate, measurement, verdict, bytes, duration_ms }`
   - `pub enum GateOutcome { Apply { plan, results, stats, cursor, truncated, remaining }, Paused { reason: String, results, stats } }`
