@@ -70,11 +70,8 @@
 
 ### 3.2 迁移
 
-- 保留 `interval_secs` 字段，标记为旧字段。
-- 加载配置时，若 `schedule` 为空：
-  - `interval_hours = ceil(interval_secs / 3600).clamp(1, 8760)`。
-  - 旧默认 `900` 秒迁移为 1 小时；新默认值只在没有旧配置时使用 6 小时。
-  - `schedule = "interval"`。
+- 保留 `interval_secs` 字段，避免旧配置解析失败，但新调度不再读取。
+- 新配置默认 `interval_hours=6`。旧配置首次保存后写入新字段。质量控制尚未发布，不做秒到小时的自动换算。
 - `rules.action`、`rules.retain`、`rules.supply` 保留解析，但不再控制准入。
 - 手工频道失败处理使用现有 `offline_on_fail`：
   - `false` = 保留。
@@ -241,7 +238,7 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 7. 计算安全阀：
    - `tested` = 本轮完成判定的 URL 变化频道与新候选数。
    - `removals` = URL 变化且不合格的频道数。
-   - 条件：`guard_enabled && removals >= min_remove_count && removals / tested >= max_remove_ratio`。
+   - 条件：`guard_enabled && tested > 0 && removals >= min_remove_count && removals / tested >= max_remove_ratio`。
 8. 安全阀触发：返回 `Paused`，不应用任何成员变更。
 9. 未触发：返回过滤后的计划与结果，由 `sync_locked` 原子应用。
 
@@ -299,7 +296,7 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 
 ### 5.4 安全阀
 
-- 关闭时不移出任何频道。
+- 关闭时不触发安全阀；移出照常执行。
 - 触发时不改变成员，包括新候选准入。
 - 结果记录照常写入。
 - `quality_meta.guard_tripped_at` 与 `last_run_summary` 记录。
