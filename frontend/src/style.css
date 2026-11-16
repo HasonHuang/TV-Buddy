@@ -1919,14 +1919,19 @@ a.compact {
 }
 
 /* 分组页质量徽章：整组可点击，跳到结果页。 */
-.quality-jump {
+.quality-jump,
+.quality-jump:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 4px;
+  height: auto;
   padding: 0;
   border: 0;
+  border-radius: 0;
   background: none;
   color: inherit;
+  box-shadow: none;
   cursor: pointer;
 }
 
