@@ -1,5 +1,8 @@
 //! 质量校验调度：目标选择、预算与周期运行。
 
+// 旧的逐频道探测路径保留到 P2 清理；新任务使用 `quality::engine`。
+#![allow(dead_code)]
+
 use std::{sync::Arc, time::Duration};
 
 use futures_util::future::join_all;
@@ -13,9 +16,7 @@ use crate::{
 use super::{
     probe::{probe, ProbeLimits, ProbeMode},
     rules::{effective_rules, evaluate, Action, Measurement, Reason},
-    state::{
-        url_hash, Entry, RunError, RunMode, RunScope, FLAG_OK, FLAG_REACHABLE,
-    },
+    state::{url_hash, Entry, RunError, RunMode, RunScope, FLAG_OK, FLAG_REACHABLE},
 };
 
 /// 选出需要校验的频道。`force` 时忽略质量启用状态，仅供手动干跑。
@@ -62,7 +63,11 @@ fn budget_reached(bytes: u64, budget_bytes: u64) -> bool {
 pub fn scope_exists(config: &Config, scope: &RunScope) -> bool {
     match scope {
         RunScope::All => true,
-        RunScope::Source(id) => config.playlist.sources.iter().any(|source| &source.id == id),
+        RunScope::Source(id) => config
+            .playlist
+            .sources
+            .iter()
+            .any(|source| &source.id == id),
         RunScope::Group(id) => config.group(id).is_some(),
         RunScope::Channel(gid, cid) => config
             .group(gid)
@@ -154,8 +159,10 @@ async fn run_targets(
             let limits = limits.clone();
             jobs.push(tokio::spawn(async move {
                 let _permit = permit;
-                probe_one(&state, &config, &gid, &cid, &channel, mode, &limits, interval, force)
-                    .await
+                probe_one(
+                    &state, &config, &gid, &cid, &channel, mode, &limits, interval, force,
+                )
+                .await
             }));
         }
         for job in join_all(jobs).await {
@@ -363,11 +370,7 @@ fn build_entry(
         url_hash: current_hash,
         checked_at: now,
         first_fail_at,
-        last_ok_at: if ok {
-            Some(now)
-        } else {
-            previous.last_ok_at
-        },
+        last_ok_at: if ok { Some(now) } else { previous.last_ok_at },
         next_check_at,
         delay_ms: out.measurement.delay_ms.unwrap_or(0),
         speed_kib: (out.measurement.speed_mib.unwrap_or(0.0) * 1024.0) as u32,
@@ -387,85 +390,154 @@ fn interval_or_hour(interval: u64) -> u64 {
     }
 }
 
-/// 发起一次手动校验。
+/// 全局关闭时手动校验只测量。
+pub fn measure_only_for(config: &Config) -> bool {
+    !config.quality.enabled
+}
+
+/// 下一次计划运行时间。关闭或配置非法时返回 `None`。
+pub fn next_run_at(config: &Config, last_run: i64, now: i64) -> Option<i64> {
+    if !config.quality.enabled {
+        return None;
+    }
+    match config.quality.schedule.as_str() {
+        "cron" => crate::cron::cron_preview(
+            &config.quality.cron,
+            now,
+            config.server.timezone_offset_hours as i64,
+            1,
+        )
+        .ok()
+        .and_then(|times| times.first().copied()),
+        "interval" => {
+            if last_run <= 0 {
+                return Some(now.saturating_add(60));
+            }
+            Some(
+                last_run.saturating_add(
+                    i64::try_from(config.quality.interval_hours)
+                        .unwrap_or(i64::MAX / 3_600)
+                        .saturating_mul(3_600),
+                ),
+            )
+        }
+        _ => None,
+    }
+}
+
+/// 清理过期结果。
+pub fn cleanup_quality_results(state: &AppState) -> anyhow::Result<usize> {
+    let config = state.snapshot();
+    state.quality_store.cleanup(
+        config.quality.result_retention_days,
+        crate::schedule::now_epoch(),
+    )
+}
+
+/// 发起一次手动校验。全局关闭时只测量。
 pub async fn run_now(
     state: Arc<AppState>,
     scope: RunScope,
     _mode: RunMode,
-    force: bool,
 ) -> Result<(String, usize), RunError> {
     let config = (*state.snapshot()).clone();
-    if !config.quality.enabled && !force {
-        return Err(RunError::Disabled);
-    }
-    let mut targets = targets_for_scope(&config, &scope, force);
-    targets.truncate(run_limit(
-        config.quality.budget_mb_per_run,
-        8.0,
-        config.quality.max_channels_per_run,
-    ));
-    if targets.is_empty() {
+    if !scope_exists(&config, &scope) {
         return Err(RunError::InvalidScope);
     }
-    let queued = targets.len();
     let run_id = format!("q-{}", uuid::Uuid::new_v4());
-    if !state.quality.try_start_run(&run_id, "manual", targets.len(), false) {
+    let measure_only = measure_only_for(&config);
+    if !state
+        .quality
+        .try_start_run(&run_id, "manual", 0, measure_only)
+    {
         return Err(RunError::Busy);
     }
     let state_for_task = state.clone();
     let run_id_for_task = run_id.clone();
+    let scope_for_task = scope.clone();
     tokio::spawn(async move {
-        run_targets(state_for_task.clone(), targets, config, force).await;
-        // 只结束本次任务。任务已被替换时不要碰新任务。
-        state_for_task.quality.finish_run_id(&run_id_for_task);
+        let spec = super::engine::RunSpec {
+            run_id: run_id_for_task.clone(),
+            trigger: super::engine::RunTrigger::Manual,
+            scope: scope_for_task,
+            measure_only,
+        };
+        if let Err(error) = super::engine::run(&state_for_task, spec).await {
+            tracing::warn!(run_id = %run_id_for_task, %error, "质量校验失败");
+            state_for_task.quality.update_run(|run| {
+                run.error = Some(format!("{error:#}"));
+                run.phase = "failed".into();
+                run.finished = true;
+            });
+        }
     });
-    Ok((run_id, queued))
+    Ok((run_id, 0))
 }
 
-/// 周期调度。启动后等待 60 秒，每 60 秒检查一次。
+/// 周期调度。启动后等待 60 秒，每 30 秒检查一次。
 pub fn spawn(state: Arc<AppState>) {
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(60)).await;
+        let startup_due_at = crate::schedule::now_epoch();
+        let mut last_cleanup = 0i64;
         loop {
             let config = (*state.snapshot()).clone();
-            if !config.quality.enabled || config.quality.interval_secs == 0 {
+            let now = crate::schedule::now_epoch();
+            if now.saturating_sub(last_cleanup) >= 86_400 {
+                if let Err(error) = cleanup_quality_results(&state) {
+                    tracing::warn!(%error, "清理质量结果失败");
+                }
+                last_cleanup = now;
+            }
+            if !config.quality.enabled || next_run_at(&config, 0, now).is_none() {
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 continue;
             }
-            let now = crate::schedule::now_epoch();
-            let mut due: Vec<(String, String, Channel)> = target_channels(&config, false)
-                .into_iter()
-                .filter(|(gid, cid, _)| {
-                    state
-                        .quality
-                        .get(gid, cid)
-                        .is_none_or(|entry| entry.next_check_at <= now)
-                })
-                .collect();
-            due.sort_by_key(|(gid, cid, _)| {
-                state
-                    .quality
-                    .get(gid, cid)
-                    .map_or(0, |entry| entry.next_check_at)
-            });
-            let limit = run_limit(
-                config.quality.budget_mb_per_run,
-                8.0,
-                config.quality.max_channels_per_run,
-            );
-            due.truncate(limit);
-            if due.is_empty() {
-                tokio::time::sleep(Duration::from_secs(60)).await;
+            let last_run = state
+                .quality_store
+                .meta_get("last_run_at")
+                .ok()
+                .flatten()
+                .and_then(|value| value.parse::<i64>().ok())
+                .unwrap_or(0);
+            let due = if last_run <= 0 {
+                now >= startup_due_at
+            } else {
+                next_run_at(&config, last_run, now).is_some_and(|next| now >= next)
+            };
+            if !due || state.quality.run_status().is_some_and(|run| !run.finished) {
+                tokio::time::sleep(Duration::from_secs(30)).await;
                 continue;
             }
             let run_id = format!("q-{}", uuid::Uuid::new_v4());
-            if !state.quality.try_start_run(&run_id, "schedule", due.len(), false) {
-                tokio::time::sleep(Duration::from_secs(60)).await;
+            if !state.quality.try_start_run(&run_id, "schedule", 0, false) {
+                tokio::time::sleep(Duration::from_secs(30)).await;
                 continue;
             }
-            run_targets(state.clone(), due, config, false).await;
-            state.quality.finish_run();
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            let spec = super::engine::RunSpec {
+                run_id: run_id.clone(),
+                trigger: super::engine::RunTrigger::Schedule,
+                scope: RunScope::All,
+                measure_only: false,
+            };
+            if let Err(error) = super::engine::run(&state, spec).await {
+                tracing::warn!(%error, "周期质量校验失败");
+                state.quality.update_run(|run| {
+                    run.error = Some(format!("{error:#}"));
+                    run.phase = "failed".into();
+                    run.finished = true;
+                });
+            }
+            let finished = crate::schedule::now_epoch();
+            let _ = state
+                .quality_store
+                .meta_set("last_run_at", &finished.to_string());
+            if let Some(next) = next_run_at(&(*state.snapshot()).clone(), finished, finished) {
+                let _ = state
+                    .quality_store
+                    .meta_set("next_run_at", &next.to_string());
+            }
+            tokio::time::sleep(Duration::from_secs(30)).await;
         }
     });
 }
@@ -474,6 +546,29 @@ pub fn spawn(state: Arc<AppState>) {
 mod tests {
     use super::*;
     use crate::config::model::{Channel, Config, Group, QualityOverride};
+
+    #[test]
+    fn next_run_interval_and_cron() {
+        let mut config = Config::default();
+        config.quality.enabled = true;
+        config.quality.schedule = "interval".into();
+        config.quality.interval_hours = 6;
+        assert_eq!(next_run_at(&config, 100, 200), Some(100 + 6 * 3600));
+
+        config.quality.schedule = "cron".into();
+        config.quality.cron = "0 * * * *".into();
+        let next = next_run_at(&config, 0, 1_700_000_000).expect("next");
+        assert!(next > 1_700_000_000);
+    }
+
+    #[test]
+    fn disabled_config_means_measure_only() {
+        let mut config = Config::default();
+        config.quality.enabled = false;
+        assert!(measure_only_for(&config));
+        config.quality.enabled = true;
+        assert!(!measure_only_for(&config));
+    }
 
     #[test]
     fn targets_skip_archived_and_passthrough_unless_enabled() {
@@ -531,10 +626,13 @@ mod tests {
         assert_eq!(target_channels(&config, true).len(), 1);
     }
 
-
     #[test]
     fn build_entry_tracks_first_failure_and_recovers() {
-        let channel = Channel { id: "c".into(), url: "http://up/c.m3u8".into(), ..Channel::default() };
+        let channel = Channel {
+            id: "c".into(),
+            url: "http://up/c.m3u8".into(),
+            ..Channel::default()
+        };
         let down = super::super::probe::ProbeOutput {
             measurement: super::super::rules::Measurement {
                 reachable: false,
@@ -550,11 +648,29 @@ mod tests {
             duration_ms: 0,
         };
         let now = 1000;
-        let first = build_entry(&channel, None, now, 900, &down, false, Reason::Unreachable, false);
+        let first = build_entry(
+            &channel,
+            None,
+            now,
+            900,
+            &down,
+            false,
+            Reason::Unreachable,
+            false,
+        );
         assert_eq!(first.first_fail_at, Some(now));
         assert_eq!(first.consecutive_fails, 1);
 
-        let second = build_entry(&channel, Some(&first), now + 900, 900, &down, false, Reason::Unreachable, false);
+        let second = build_entry(
+            &channel,
+            Some(&first),
+            now + 900,
+            900,
+            &down,
+            false,
+            Reason::Unreachable,
+            false,
+        );
         assert_eq!(second.first_fail_at, Some(now), "重复失败不重置起点");
         assert_eq!(second.consecutive_fails, 2);
 
@@ -572,13 +688,31 @@ mod tests {
             bytes: 10,
             duration_ms: 10,
         };
-        let recovered = build_entry(&channel, Some(&second), now + 1800, 900, &ok, true, Reason::Pass, true);
+        let recovered = build_entry(
+            &channel,
+            Some(&second),
+            now + 1800,
+            900,
+            &ok,
+            true,
+            Reason::Pass,
+            true,
+        );
         assert_eq!(recovered.first_fail_at, None);
         assert_eq!(recovered.consecutive_fails, 0);
         assert_eq!(recovered.last_ok_at, Some(now + 1800));
         assert!(recovered.ok());
 
-        let probe_error = build_entry(&channel, Some(&second), now + 1800, 900, &down, false, Reason::ProbeError, true);
+        let probe_error = build_entry(
+            &channel,
+            Some(&second),
+            now + 1800,
+            900,
+            &down,
+            false,
+            Reason::ProbeError,
+            true,
+        );
         assert_eq!(probe_error.first_fail_at, second.first_fail_at);
         assert_eq!(probe_error.consecutive_fails, second.consecutive_fails);
     }
@@ -661,10 +795,13 @@ mod tests {
             }],
             ..Group::default()
         });
-        config.playlist.sources.push(crate::config::model::PlaylistSource {
-            id: "s".into(),
-            ..Default::default()
-        });
+        config
+            .playlist
+            .sources
+            .push(crate::config::model::PlaylistSource {
+                id: "s".into(),
+                ..Default::default()
+            });
         assert!(scope_exists(&config, &RunScope::All));
         assert!(scope_exists(&config, &RunScope::Source("s".into())));
         assert!(!scope_exists(&config, &RunScope::Source("x".into())));

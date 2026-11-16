@@ -218,22 +218,12 @@ pub async fn run(
     if !scope_exists(&config, &request.scope) {
         return Err(ApiError::not_found("范围不存在"));
     }
-    match run_now(
-        state.clone(),
-        request.scope,
-        request.mode,
-        request.force,
-    )
-    .await
-    {
+    match run_now(state.clone(), request.scope, request.mode).await {
         Ok((run_id, queued)) => Ok((
             StatusCode::ACCEPTED,
             Json(json!({ "ok": true, "run_id": run_id, "queued": queued })),
         )),
-        Err(RunError::Busy) => Err(ApiError::conflict_code(
-            "run_active",
-            "已有质量校验在运行",
-        )),
+        Err(RunError::Busy) => Err(ApiError::conflict_code("run_active", "已有质量校验在运行")),
         Err(RunError::Disabled) => Err(ApiError::bad_request("质量校验未启用")),
         Err(RunError::InvalidScope) => Err(ApiError::bad_request("范围内没有可校验的频道")),
     }
@@ -254,14 +244,8 @@ pub async fn run_status(
 }
 
 /// `POST /panel/api/quality/cancel`。
-pub async fn cancel(
-    PanelAuth(_): PanelAuth,
-    State(state): State<Arc<AppState>>,
-) -> Json<Value> {
-    let running = state
-        .quality
-        .run_status()
-        .is_some_and(|run| !run.finished);
+pub async fn cancel(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
+    let running = state.quality.run_status().is_some_and(|run| !run.finished);
     if running {
         state.quality.cancel_run();
     }
@@ -269,10 +253,7 @@ pub async fn cancel(
 }
 
 /// `POST /panel/api/quality/preview`。统计当前结果中会被隐藏的频道，不写状态。
-pub async fn preview(
-    PanelAuth(_): PanelAuth,
-    State(state): State<Arc<AppState>>,
-) -> Json<Value> {
+pub async fn preview(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
     let mut hidden = Vec::new();
     for group in &config.groups {
