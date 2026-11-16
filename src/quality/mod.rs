@@ -4,6 +4,7 @@
 
 pub mod probe;
 pub mod rules;
+pub mod store;
 
 pub mod schedule;
 pub mod state;
