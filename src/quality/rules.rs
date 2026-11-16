@@ -243,13 +243,6 @@ pub fn effective_rules(config: &Config, group: &Group, channel: &Channel) -> Eff
 
 /// 按有效规则判定一条测量结果。
 pub fn evaluate(rules: &EffectiveRules, measurement: &Measurement) -> Verdict {
-    if rules.retain {
-        return Verdict {
-            ok: true,
-            reachable: measurement.reachable,
-            reason: Reason::Retained,
-        };
-    }
     if measurement.probe_error {
         return Verdict {
             ok: false,
@@ -499,8 +492,47 @@ mod tests {
     }
 
     #[test]
-    fn supply_and_retain_bypass_thresholds_but_not_reachability() {
-        let mut rules = EffectiveRules {
+    fn supply_bypasses_thresholds_but_not_reachability() {
+        let rules = EffectiveRules {
+            enabled: true,
+            action: Action::Hide,
+            retain: false,
+            min_speed_mib: 1.0,
+            max_delay_ms: 0,
+            min_resolution_px: None,
+            max_resolution_px: None,
+            resolution_speed_map: BTreeMap::new(),
+            supply: true,
+            host_cache: true,
+            stale_keep_secs: 1800,
+        };
+        let slow = Measurement {
+            reachable: true,
+            probe_error: false,
+            http_status: Some(200),
+            delay_ms: Some(10),
+            speed_mib: Some(0.1),
+            width: None,
+            height: None,
+            error: None,
+        };
+        assert!(evaluate(&rules, &slow).ok, "supply 保留可连通项");
+        let down = Measurement {
+            reachable: false,
+            probe_error: false,
+            http_status: None,
+            delay_ms: None,
+            speed_mib: None,
+            width: None,
+            height: None,
+            error: Some("x".into()),
+        };
+        assert!(!evaluate(&rules, &down).ok, "supply 不保留不可连通项");
+    }
+
+    #[test]
+    fn retain_does_not_bypass_thresholds() {
+        let rules = EffectiveRules {
             enabled: true,
             action: Action::Hide,
             retain: true,
@@ -523,7 +555,7 @@ mod tests {
             height: None,
             error: None,
         };
-        assert!(evaluate(&rules, &slow).ok);
+        assert_eq!(evaluate(&rules, &slow).reason, Reason::SpeedLow);
         let down = Measurement {
             reachable: false,
             probe_error: false,
@@ -534,11 +566,6 @@ mod tests {
             height: None,
             error: Some("x".into()),
         };
-        assert!(evaluate(&rules, &down).ok, "retain 不因不可达隐藏");
-
-        rules.retain = false;
-        rules.supply = true;
-        assert!(evaluate(&rules, &slow).ok, "supply 保留可连通项");
-        assert!(!evaluate(&rules, &down).ok, "supply 不保留不可连通项");
+        assert_eq!(evaluate(&rules, &down).reason, Reason::Unreachable);
     }
 }

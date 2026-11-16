@@ -173,6 +173,7 @@ export type QualityResult = {
   delay_ms: number | null;
   speed_mib: number | null;
   resolution: string;
+  http_status: number | null;
   checked_at: number;
   next_check_at: number;
   first_fail_at: number | null;
@@ -233,6 +234,7 @@ export type QualitySource = {
   id: string;
   name: string;
   enabled: boolean;
+  channels: number;
   gate_enabled: boolean;
   phase: string;
   tested: number;

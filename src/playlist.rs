@@ -85,7 +85,8 @@ fn push_group(
         if !user.can_see_channel(&group.id, &channel.id) {
             continue;
         }
-        if offline(config, health, group, channel) || manual_hidden(config, quality, group, channel) {
+        if offline(config, health, group, channel) || manual_hidden(config, quality, group, channel)
+        {
             continue;
         }
         push_entry(body, group, channel, base, Some(token));
@@ -436,7 +437,14 @@ mod tests {
             group("g2", "public", "proxy"),
             group("g4", "archived", "proxy"),
         ]);
-        let groups = user_view(&config, &plain(&["g1", "g2"]), "http://host", "tok", None, None);
+        let groups = user_view(
+            &config,
+            &plain(&["g1", "g2"]),
+            "http://host",
+            "tok",
+            None,
+            None,
+        );
         assert_eq!(groups.len(), 2, "归档组不进视图");
         assert_eq!(groups[0].id, "g1");
         assert_eq!(groups[0].channels[0].url, "http://host/l/tok/g1/c1.m3u8");
@@ -508,7 +516,6 @@ mod tests {
         let groups = user_view(&config, &admin(), "http://host", "tok", Some(&health), None);
         assert!(groups.is_empty(), "频道全部下线时分组也不显示");
     }
-
 
     use crate::quality::rules::Reason;
     use crate::quality::state::{url_hash, QualityState, FLAG_OK, FLAG_REACHABLE};
@@ -633,7 +640,10 @@ mod tests {
             Some(&Health::new()),
             Some(&state),
         );
-        assert!(body.contains("C1"), "同步频道由准入管理，不按结果隐藏: {body}");
+        assert!(
+            body.contains("C1"),
+            "同步频道由准入管理，不按结果隐藏: {body}"
+        );
     }
 
     #[test]

@@ -202,7 +202,14 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
                 && outcome.verdict.reason != Reason::ProbeError
         })
         .count();
-    let paused = !measure_only && guard_trip(guard, outcomes.len(), sync_removals);
+    let sync_tested = outcomes
+        .iter()
+        .filter(|outcome| {
+            outcome.candidate.scope == CandidateScope::Sync
+                && !matches!(outcome.verdict.reason, Reason::ProbeError | Reason::Unknown)
+        })
+        .count();
+    let paused = !measure_only && guard_trip(guard, sync_tested, sync_removals);
 
     for outcome in outcomes {
         let candidate = &outcome.candidate;
@@ -750,6 +757,56 @@ mod tests {
     }
 
     #[test]
+    fn guard_ignores_manual_and_probe_errors_in_denominator() {
+        let guard = Guard {
+            enabled: true,
+            max_remove_ratio: 0.5,
+            min_remove_count: 10,
+        };
+        let mut outcomes: Vec<_> = (0..100)
+            .map(|i| outcome(&format!("channel:g/c{i}"), true, false, true, Reason::Pass))
+            .collect();
+        outcomes.extend((0..10).map(|i| {
+            outcome(
+                &format!("sync:s1:c{i}"),
+                false,
+                false,
+                false,
+                Reason::Unreachable,
+            )
+        }));
+        assert!(
+            decide(&outcomes, false, &guard).paused,
+            "手工频道不得稀释比例"
+        );
+
+        let mut outcomes: Vec<_> = (0..90)
+            .map(|i| {
+                outcome(
+                    &format!("sync:s1:e{i}"),
+                    false,
+                    false,
+                    false,
+                    Reason::ProbeError,
+                )
+            })
+            .collect();
+        outcomes.extend((0..10).map(|i| {
+            outcome(
+                &format!("sync:s1:c{i}"),
+                false,
+                false,
+                false,
+                Reason::Unreachable,
+            )
+        }));
+        assert!(
+            decide(&outcomes, false, &guard).paused,
+            "探测错误不得稀释比例"
+        );
+    }
+
+    #[test]
     fn manual_run_includes_not_due_results() {
         let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
         let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
@@ -768,27 +825,11 @@ mod tests {
             })
             .expect("写结果");
         let config = config_with_sync_channel();
-        let due = due_targets(
-            &config,
-            &store,
-            &RunScope::All,
-            100,
-            0,
-            false,
-            false,
-        )
-        .expect("到期目标");
+        let due =
+            due_targets(&config, &store, &RunScope::All, 100, 0, false, false).expect("到期目标");
         assert!(due.is_empty(), "未到期不进入周期校验");
-        let forced = due_targets(
-            &config,
-            &store,
-            &RunScope::All,
-            100,
-            0,
-            false,
-            true,
-        )
-        .expect("手动目标");
+        let forced =
+            due_targets(&config, &store, &RunScope::All, 100, 0, false, true).expect("手动目标");
         assert_eq!(forced.len(), 1, "手动校验忽略下次检查时间");
         let _ = std::fs::remove_dir_all(dir);
     }

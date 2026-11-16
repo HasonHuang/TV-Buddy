@@ -240,7 +240,8 @@ fn filter_sql(filter: &QualityFilter) -> (String, Vec<Value>) {
         values.push(Value::Text(reason.to_string()));
     }
     if let Some(q) = filter.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
-        clauses.push("name LIKE ?".into());
+        clauses.push("(name LIKE ? OR cid LIKE ?)".into());
+        values.push(Value::Text(format!("%{q}%")));
         values.push(Value::Text(format!("%{q}%")));
     }
     (format!("WHERE {}", clauses.join(" AND ")), values)
@@ -438,6 +439,18 @@ mod tests {
         );
         assert!(store.get("sync:s1:b").unwrap().is_none());
         assert!(store.get("sync:s1:c").unwrap().is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn search_matches_channel_id() {
+        let (store, dir) = store();
+        store.upsert(&result("sync:s1:a", "admitted", 1)).unwrap();
+        let filter = QualityFilter {
+            q: Some("c5".into()),
+            ..QualityFilter::default()
+        };
+        assert_eq!(store.list(&filter).unwrap().0, 1, "搜索应匹配频道 id");
         let _ = std::fs::remove_dir_all(dir);
     }
 

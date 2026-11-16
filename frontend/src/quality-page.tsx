@@ -146,16 +146,32 @@ function resolutionText(value: string): string {
   return height ? `${height}p` : '—';
 }
 
-type QualityRoute = { tab: Tab; gid: string; cid: string };
+type QualityRoute = {
+  tab: Tab;
+  gid: string;
+  cid: string;
+  source_id: string;
+  action: string;
+  reason: string;
+  q: string;
+};
 
-/** 读取 `#/quality/<tab>?gid=...&cid=...`。 */
+/** 读取 `#/quality/<tab>?...`。 */
 function qualityRoute(hash = window.location.hash): QualityRoute {
   const raw = hash.replace(/^#\/?/, '');
   const [path, query = ''] = raw.split('?');
   const parts = path.split('/');
   const tab = TABS.some(([id]) => id === parts[1]) ? (parts[1] as Tab) : 'overview';
   const params = new URLSearchParams(query);
-  return { tab, gid: params.get('gid') ?? '', cid: params.get('cid') ?? '' };
+  return {
+    tab,
+    gid: params.get('gid') ?? '',
+    cid: params.get('cid') ?? '',
+    source_id: params.get('source_id') ?? '',
+    action: params.get('action') ?? '',
+    reason: params.get('reason') ?? '',
+    q: params.get('q') ?? '',
+  };
 }
 
 function broadcastQualityChanged() {
@@ -496,6 +512,92 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
               {busy === 'preview' ? '计算中…' : '预览未来 3 次'}
             </button>
           </Field>
+          <Field label="探测档位" tip="档位越高，耗时与流量越多。">
+            <Select
+              ariaLabel="探测档位"
+              value={asText(draft, 'quality.probe_mode')}
+              compact
+              options={[
+                { value: 'reachability', label: '连通', desc: '只检查能否建立连接。' },
+                { value: 'playlist', label: '清单', desc: '读取清单并请求首个切片。' },
+                { value: 'speed', label: '测速', desc: '下载样本并测量速率。' },
+                { value: 'full', label: '完整', desc: '第一版按测速执行。' },
+              ]}
+              onChange={(next) => update('quality.probe_mode', next)}
+            />
+          </Field>
+          <Field label="校验超时" hint="秒">
+            <input
+              type="number"
+              min={1}
+              value={asNumber(draft, 'quality.timeout_secs')}
+              onChange={(event) =>
+                update('quality.timeout_secs', Number(event.target.value) || 1)
+              }
+            />
+          </Field>
+          <Field label="测速超时" hint="秒">
+            <input
+              type="number"
+              min={1}
+              value={asNumber(draft, 'quality.speed_timeout_secs')}
+              onChange={(event) =>
+                update('quality.speed_timeout_secs', Number(event.target.value) || 1)
+              }
+            />
+          </Field>
+          <Field label="校验并发" hint="1–32">
+            <input
+              type="number"
+              min={1}
+              max={32}
+              value={asNumber(draft, 'quality.concurrency')}
+              onChange={(event) =>
+                update('quality.concurrency', Number(event.target.value) || 1)
+              }
+            />
+          </Field>
+          <Field label="单轮流量预算" hint="MB，0 = 不限制">
+            <input
+              type="number"
+              min={0}
+              value={asNumber(draft, 'quality.budget_mb_per_run')}
+              onChange={(event) =>
+                update('quality.budget_mb_per_run', Number(event.target.value) || 0)
+              }
+            />
+          </Field>
+          <Field label="单轮频道上限" hint="0 = 不限制">
+            <input
+              type="number"
+              min={0}
+              value={asNumber(draft, 'quality.max_channels_per_run')}
+              onChange={(event) =>
+                update('quality.max_channels_per_run', Number(event.target.value) || 0)
+              }
+            />
+          </Field>
+          <Field label="同步门控时限" hint="秒，0 = 不限制">
+            <input
+              type="number"
+              min={0}
+              value={asNumber(draft, 'quality.gate_time_budget_secs')}
+              onChange={(event) =>
+                update('quality.gate_time_budget_secs', Number(event.target.value) || 0)
+              }
+            />
+          </Field>
+          <Field label="测速采样时长" hint="秒">
+            <input
+              type="number"
+              min={0.1}
+              step={0.5}
+              value={asNumber(draft, 'quality.sample_secs')}
+              onChange={(event) =>
+                update('quality.sample_secs', Number(event.target.value) || 0.1)
+              }
+            />
+          </Field>
         </div>
         {previewError ? <div className="hint">{previewError}</div> : null}
         {preview.length > 0 ? (
@@ -644,19 +746,27 @@ function ResultsTab({
   running,
   initialGid,
   initialCid,
+  initialSourceId,
+  initialAction,
+  initialReason,
+  initialQuery,
 }: {
   running: boolean;
   initialGid: string;
   initialCid: string;
+  initialSourceId: string;
+  initialAction: string;
+  initialReason: string;
+  initialQuery: string;
 }) {
   const { node, ok, err } = useToast();
   const [filters, setFilters] = useState({
-    source_id: '',
+    source_id: initialSourceId,
     gid: initialGid,
     cid: initialCid,
-    action: '',
-    reason: '',
-    q: '',
+    action: initialAction,
+    reason: initialReason,
+    q: initialQuery,
   });
   const [limit, setLimit] = useState(100);
   const [offset, setOffset] = useState(0);
@@ -667,9 +777,40 @@ function ResultsTab({
   const [rerun, setRerun] = useState<QualityResult | null>(null);
 
   useEffect(() => {
-    setFilters((prev) => ({ ...prev, gid: initialGid, cid: initialCid }));
+    setFilters({
+      source_id: initialSourceId,
+      gid: initialGid,
+      cid: initialCid,
+      action: initialAction,
+      reason: initialReason,
+      q: initialQuery,
+    });
     setOffset(0);
-  }, [initialGid, initialCid]);
+  }, [
+    initialGid,
+    initialCid,
+    initialSourceId,
+    initialAction,
+    initialReason,
+    initialQuery,
+  ]);
+
+  // 筛选写入地址栏，刷新、复制链接与返回时都能恢复。
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (filters.source_id) params.set('source_id', filters.source_id);
+    if (filters.gid) params.set('gid', filters.gid);
+    if (filters.cid) params.set('cid', filters.cid);
+    if (filters.action) params.set('action', filters.action);
+    if (filters.reason) params.set('reason', filters.reason);
+    if (filters.q.trim()) params.set('q', filters.q.trim());
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      `#/quality/results${query ? `?${query}` : ''}`,
+    );
+  }, [filters]);
 
   useEffect(() => {
     void api<Cfg>('GET', '/config')
@@ -978,6 +1119,8 @@ function ResultsTab({
             </dd>
             <dt>分辨率</dt>
             <dd>{detail.resolution || '—'}</dd>
+            <dt>HTTP 状态</dt>
+            <dd>{detail.http_status ?? '—'}</dd>
             <dt>地址哈希</dt>
             <dd className="mono">{detail.url_hash || '—'}</dd>
           </dl>
@@ -1307,7 +1450,7 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
         >
           {disable.confirm ? (
             <p>
-              将移出 {disable.source.admitted} 个频道。移出后不会自动恢复。
+              将移出 {disable.source.channels} 个频道。移出后不会自动恢复。
             </p>
           ) : (
             <>
@@ -1370,7 +1513,7 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
         >
           {removing.confirm ? (
             <p>
-              将移出 {removing.source.admitted} 个频道。删除后无法恢复源配置，频道不会自动恢复。
+              将移出 {removing.source.channels} 个频道。删除后无法恢复源配置，频道不会自动恢复。
             </p>
           ) : (
             <>
@@ -1421,7 +1564,15 @@ export function QualityPage() {
 
   const changeTab = (next: Tab) => {
     setTab(next);
-    setRoute({ tab: next, gid: '', cid: '' });
+    setRoute({
+      tab: next,
+      gid: '',
+      cid: '',
+      source_id: '',
+      action: '',
+      reason: '',
+      q: '',
+    });
     const target = `#/quality/${next}`;
     if (window.location.hash !== target) {
       window.history.replaceState(null, '', target);
@@ -1519,6 +1670,10 @@ export function QualityPage() {
           running={status?.running === true}
           initialGid={route.gid}
           initialCid={route.cid}
+          initialSourceId={route.source_id}
+          initialAction={route.action}
+          initialReason={route.reason}
+          initialQuery={route.q}
         />
       )}
       {tab === 'sources' && <SourcesTab onChanged={() => void load()} />}

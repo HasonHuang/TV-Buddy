@@ -13,7 +13,8 @@ use std::{
 };
 
 use axum::{
-    extract::{Json, Path, Query, State},    http::{header, StatusCode},
+    extract::{Json, Path, Query, State},
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -179,6 +180,48 @@ async fn sync_playlist(headers: axum::http::HeaderMap) -> Response {
         .unwrap_or("127.0.0.1");
     let body = format!(
         "#EXTM3U\n#EXTINF:-1 group-title=\"门控\",正常频道\nhttp://{host}/gate-live.m3u8\n#EXTINF:-1 group-title=\"门控\",失效频道\nhttp://{host}/gate-missing.m3u8\n"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        body,
+    )
+        .into_response()
+}
+
+/// 伪上游：门控探测会阻塞的源，用于验证抓取期间配置变化。
+async fn slow_gate_source(headers: axum::http::HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    let body = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"慢门控\",慢探频道\nhttp://{host}/slow-probe.m3u8\n"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        body,
+    )
+        .into_response()
+}
+
+/// 伪上游：延迟 500 ms 返回清单，给测试留出改配置的窗口。
+async fn slow_probe() -> Response {
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        LIVE,
+    )
+        .into_response()
+}
+
+/// 伪上游：同一频道改成失效地址，用于 URL 变化移出测试。
+async fn sync_changed_playlist(headers: axum::http::HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    let body = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"门控\",正常频道\nhttp://{host}/gate-missing.m3u8\n"
     );
     (
         [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
@@ -426,6 +469,9 @@ async fn fixture_with_options(
         )
         .route("/sync.m3u8", get(sync_playlist))
         .route("/sync-removed.m3u8", get(sync_removed_playlist))
+        .route("/sync-changed.m3u8", get(sync_changed_playlist))
+        .route("/slow-gate-source.m3u8", get(slow_gate_source))
+        .route("/slow-probe.m3u8", get(slow_probe))
         .route("/*path", get(upstream_file));
     if epg_enabled {
         let body = epg_document();
@@ -6381,6 +6427,44 @@ async fn deleting_last_epg_source_clears_output() {
 ///
 /// 否则重建同 id 频道会命中旧结果，按旧失败时钟立即隐藏。
 #[tokio::test]
+async fn sync_aborts_when_config_changes_during_gate() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "reachability" },
+        "playlist": { "sources": [{
+            "id": "slow", "name": "慢门控源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/slow-gate-source.m3u8"
+        }] }
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let state = fixture.state.clone();
+    let task =
+        tokio::spawn(
+            async move { tv_buddy::subscription::sync_source(&state, "slow", false).await },
+        );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    fixture
+        .state
+        .mutate(|config| {
+            config.quality.enabled = false;
+            Ok(())
+        })
+        .expect("改配置");
+    let result = task.await.expect("同步任务");
+    let error = result.expect_err("抓取后配置变化应让同步放弃本轮");
+    assert!(
+        format!("{error:#}").contains("配置已变更"),
+        "错误应说明配置变化：{error:#}"
+    );
+    assert!(
+        fixture.state.snapshot().groups.iter().all(|group| group
+            .channels
+            .iter()
+            .all(|channel| channel.source_id != "slow")),
+        "配置变化后不得写入成员"
+    );
+}
+
+#[tokio::test]
 async fn sync_gate_admits_only_passing_channels() {
     let extra = r#"{
         "quality": { "enabled": true, "probe_mode": "playlist", "max_channels_per_run": 10 },
@@ -6409,6 +6493,16 @@ async fn sync_gate_admits_only_passing_channels() {
         .expect("门控分组");
     assert_eq!(group.channels.len(), 1);
     assert_eq!(group.channels[0].name, "正常频道");
+
+    let admitted = results
+        .iter()
+        .find(|item| item.action == "admitted" && item.name == "正常频道")
+        .expect("准入结果");
+    assert_eq!(admitted.gid, group.id, "准入结果必须回填分组 id");
+    assert_eq!(
+        admitted.cid, group.channels[0].id,
+        "准入结果必须回填频道 id"
+    );
 
     assert!(
         results
@@ -6457,6 +6551,52 @@ async fn sync_gate_admits_only_passing_channels() {
             .any(|item| item.action == "source_removed" && item.name == "正常频道"),
         "{results:?}"
     );
+}
+
+#[tokio::test]
+async fn gate_url_change_keeps_removed_result_reason() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "playlist", "max_channels_per_run": 10 },
+        "playlist": { "sources": [{
+            "id": "gate", "name": "门控源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/sync.m3u8"
+        }] }
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let _ = tv_buddy::subscription::sync_source(&fixture.state, "gate", false)
+        .await
+        .expect("首次同步");
+    let changed = format!("{}/sync-changed.m3u8", fixture.upstream);
+    fixture
+        .state
+        .mutate(|config| {
+            let source = config
+                .playlist
+                .sources
+                .iter_mut()
+                .find(|source| source.id == "gate")
+                .expect("门控源");
+            source.url = changed;
+            Ok(())
+        })
+        .expect("改源");
+    let _ = tv_buddy::subscription::sync_source(&fixture.state, "gate", false)
+        .await
+        .expect("二次同步");
+    let filter = tv_buddy::quality::store::QualityFilter {
+        source_id: Some("gate".into()),
+        ..Default::default()
+    };
+    let (_, results) = fixture.state.quality_store.list(&filter).expect("结果");
+    let item = results
+        .iter()
+        .find(|item| item.name == "正常频道")
+        .expect("正常频道结果");
+    assert_eq!(
+        item.action, "removed",
+        "URL 变化失败应保留门控移出结果，不能被 source_removed 覆盖"
+    );
+    assert_eq!(item.reason, "unreachable");
 }
 
 #[tokio::test]
@@ -6612,12 +6752,14 @@ async fn disabled_quality_run_is_measure_only() {
         .snapshot()
         .group("manual")
         .is_some_and(|group| group.channels.len() == 1));
-    assert!(fixture
-        .state
-        .quality
-        .run_status()
-        .expect("运行状态")
-        .measure_only);
+    assert!(
+        fixture
+            .state
+            .quality
+            .run_status()
+            .expect("运行状态")
+            .measure_only
+    );
 }
 
 #[tokio::test]
@@ -6703,6 +6845,7 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
             speed_kib: Some(2048),
             width: Some(1920),
             height: Some(1080),
+            http_status: Some(200),
             checked_at: 100,
             ..Default::default()
         })
@@ -6741,6 +6884,7 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
     let item = &results["items"][0];
     assert_eq!(item["speed_mib"], 2.0);
     assert_eq!(item["resolution"], "1920x1080");
+    assert_eq!(item["http_status"], 200);
     assert_eq!(item["source_id"], "q-src");
     assert!(item.get("url").is_none(), "结果不能带完整地址");
     assert_eq!(
@@ -6761,6 +6905,7 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
         .map(|text| serde_json::from_str(&text).expect("解析来源"))
         .unwrap();
     assert_eq!(sources["items"][0]["id"], "q-src");
+    assert_eq!(sources["items"][0]["channels"], 0);
     assert_eq!(sources["items"][0]["gate_enabled"], true);
     assert!(sources["items"][0].get("phase").is_some());
 

@@ -329,7 +329,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     if (!roleReady) return;
     sectionRef.current = active;
     if (active !== section) setSection(active);
-    writeSection(active, true);
+    // 已指向同一分区时保留深链子路径与筛选参数。
+    if (sectionFromHash() !== active) writeSection(active, true);
   }, [active, section, roleReady]);
 
   const query = navQuery.trim().toLowerCase();

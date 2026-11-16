@@ -251,7 +251,7 @@ impl QualityState {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .as_ref()
-            .is_some_and(|state| state.cancelled)
+            .is_some_and(|state| state.cancelled && !state.finished)
     }
 }
 
@@ -307,6 +307,19 @@ mod tests {
         assert!(!state.try_start_run("r2", "manual", 10, false));
         state.finish_run();
         assert!(state.try_start_run("r3", "manual", 10, false));
+    }
+
+    #[test]
+    fn cancelled_flag_stops_after_run_finishes() {
+        let state = QualityState::new();
+        assert!(state.try_start_run("r1", "manual", 1, false));
+        state.cancel_run();
+        assert!(state.is_cancelled());
+        state.finish_run();
+        assert!(
+            !state.is_cancelled(),
+            "已结束任务的取消标志不得影响后续同步"
+        );
     }
 
     #[test]

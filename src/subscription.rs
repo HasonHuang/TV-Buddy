@@ -858,8 +858,8 @@ pub async fn sync_locked(
     force: bool,
 ) -> anyhow::Result<SyncReport> {
     let started = Instant::now();
-    let config = state.snapshot();
-    let Some(source) = config
+    let initial_config = state.snapshot();
+    let Some(initial_source) = initial_config
         .playlist
         .sources
         .iter()
@@ -868,7 +868,7 @@ pub async fn sync_locked(
     else {
         bail!("订阅源不存在");
     };
-    if source.mode != "sync" {
+    if initial_source.mode != "sync" {
         bail!("该源不是托管模式");
     }
 
@@ -878,7 +878,7 @@ pub async fn sync_locked(
         status.last_try = now_secs();
     });
 
-    let text = match fetch(state, &source, &config.playlist).await {
+    let text = match fetch(state, &initial_source, &initial_config.playlist).await {
         Ok(text) => text,
         Err(error) => {
             let message = format!("{error:#}");
@@ -890,6 +890,22 @@ pub async fn sync_locked(
         }
     };
     let entries = m3u::parse(&text);
+    let _admission = state.admission_lock.lock().await;
+    // 抓取期间配置可能变化。持准入锁后取最新快照，重新规划并用它做门控。
+    let config = state.snapshot();
+    let Some(source) = config
+        .playlist
+        .sources
+        .iter()
+        .find(|source| source.id == id)
+        .cloned()
+    else {
+        bail!("源已删除");
+    };
+    if source != initial_source {
+        bail!("源配置已变更，下一轮重试");
+    }
+    let revision = config.revision;
     let plan = plan(&config, &source, &entries);
     let existing = count_source_channels(&config, id);
     let max_channels = if source.max_channels > 0 {
@@ -917,7 +933,6 @@ pub async fn sync_locked(
         });
     }
 
-    let _admission = state.admission_lock.lock().await;
     let gate = filter_plan(state, &config, &source, plan).await;
     let (plan, gate_results, mut gate_stats, gate_cursor, gate_truncated, gate_remaining) =
         match gate {
@@ -977,6 +992,9 @@ pub async fn sync_locked(
     let expected = source.clone();
     let mut applied: Option<ApplyStats> = None;
     let result = state.mutate_admission(&[], |config| {
+        if config.revision != revision {
+            bail!("配置已变更，下一轮重试");
+        }
         let current = config
             .playlist
             .sources
@@ -995,14 +1013,40 @@ pub async fn sync_locked(
             .then(|| source_channel_snapshot(config, id));
         applied = Some(apply(config, &current, &plan));
         let mut results = gate_results;
+        // 新候选在探测时还没有 gid/cid。准入后按源键回填，结果页才能跳转。
+        for result in &mut results {
+            if result.scope != "sync" || (!result.gid.is_empty() && !result.cid.is_empty()) {
+                continue;
+            }
+            let key = canonical_key(&result.source_key);
+            let found = config.groups.iter().find_map(|group| {
+                group
+                    .channels
+                    .iter()
+                    .find(|channel| {
+                        channel.source_id == id && canonical_key(&channel.source_key) == key
+                    })
+                    .map(|channel| (group, channel))
+            });
+            if let Some((group, channel)) = found {
+                result.gid = group.id.clone();
+                result.cid = channel.id.clone();
+            }
+        }
         if let Some(before) = before {
             let after = source_channel_keys(config, id);
             for item in before {
                 if after.contains(&item.key) {
                     continue;
                 }
+                let key = format!("sync:{id}:{}", item.key);
+                if results.iter().any(|result| result.key == key) {
+                    // 门控已经记录了本次移出（例如 URL 变化后 404）。
+                    // 同键覆盖会丢失真实原因与指标。
+                    continue;
+                }
                 results.push(QualityResult {
-                    key: format!("sync:{id}:{}", item.key),
+                    key,
                     scope: "sync".into(),
                     source_id: id.to_string(),
                     source_key: item.key,
@@ -1565,7 +1609,12 @@ fn stable_key(entry: &Entry, original: &str) -> String {
             name.to_lowercase()
         );
     }
-    format!("url:{}", entry.url.trim())
+    format!("url:{}", url_digest(entry.url.trim()))
+}
+
+/// URL 的十六进制摘要。结果与稳定键不保存完整地址。
+fn url_digest(url: &str) -> String {
+    hex::encode(Sha256::digest(url.trim().as_bytes()))
 }
 
 /// 重复键的稳定后缀：URL 前 8 位十六进制摘要。
@@ -1581,10 +1630,15 @@ fn key_suffix(url: &str) -> String {
 /// 旧版本按原样保存 `name:` 键。这里归一后，升级不会误删或重复频道。
 pub(crate) fn canonical_key(key: &str) -> String {
     if key.starts_with("name:") {
-        key.to_lowercase()
-    } else {
-        key.to_string()
+        return key.to_lowercase();
     }
+    if let Some(url) = key.strip_prefix("url:") {
+        if url.contains("://") {
+            // 旧版本把完整地址写进稳定键。归一为摘要，升级后仍能配对。
+            return format!("url:{}", url_digest(url));
+        }
+    }
+    key.to_string()
 }
 
 /// 键族：去掉 `#` 后缀。
@@ -1693,7 +1747,10 @@ fn display_name(entry: &Entry) -> String {
     if !name.is_empty() {
         return name.to_string();
     }
-    trim_opt(entry.tvg_name.as_deref()).unwrap_or_else(|| entry.url.trim().to_string())
+    trim_opt(entry.tvg_name.as_deref()).unwrap_or_else(|| {
+        let digest = url_digest(entry.url.trim());
+        format!("频道-{}", &digest[..8])
+    })
 }
 
 fn trim_opt(value: Option<&str>) -> Option<String> {
@@ -1944,7 +2001,9 @@ mod tests {
             url: "http://up/c.m3u8".into(),
             ..Entry::default()
         };
-        assert_eq!(display_name(&url_only), "http://up/c.m3u8");
+        let name = display_name(&url_only);
+        assert!(name.starts_with("频道-"), "{name}");
+        assert!(!name.contains("http"), "显示名不能带完整地址: {name}");
     }
 
     #[test]
@@ -2504,7 +2563,20 @@ mod tests {
         by_name.tvg_id = None;
         assert_eq!(stable_key(&by_name, "组"), "name:组\u{1f}名字");
         by_name.name.clear();
-        assert_eq!(stable_key(&by_name, "组"), "url:http://up/1");
+        let key = stable_key(&by_name, "组");
+        assert!(key.starts_with("url:"), "{key}");
+        assert!(!key.contains("http"), "结果键不能带完整地址: {key}");
+    }
+
+    #[test]
+    fn canonical_key_hashes_legacy_url_keys() {
+        let legacy = canonical_key("url:http://up/1.m3u8");
+        assert!(!legacy.contains("http"), "{legacy}");
+        let unnamed = Entry {
+            url: "http://up/1.m3u8".into(),
+            ..Entry::default()
+        };
+        assert_eq!(legacy, canonical_key(&stable_key(&unnamed, "组")));
     }
 
     #[test]

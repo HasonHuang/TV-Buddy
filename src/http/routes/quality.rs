@@ -206,6 +206,7 @@ fn result_json(item: &QualityResult) -> Value {
         "delay_ms": item.delay_ms,
         "speed_mib": item.speed_kib.map(|speed| (f64::from(speed) / 1024.0 * 100.0).round() / 100.0),
         "resolution": resolution,
+        "http_status": item.http_status,
         "checked_at": item.checked_at,
         "next_check_at": item.next_check_at,
         "first_fail_at": item.first_fail_at,
@@ -248,6 +249,12 @@ pub async fn sources(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>
                 "id": source.id,
                 "name": source.name,
                 "enabled": source.enabled,
+                "channels": config
+                    .groups
+                    .iter()
+                    .flat_map(|group| group.channels.iter())
+                    .filter(|channel| channel.source_id == source.id)
+                    .count(),
                 "gate_enabled": source.quality.as_ref().and_then(|quality| quality.enabled).unwrap_or(true),
                 "phase": status.gate_phase,
                 "tested": status.gate_tested,
