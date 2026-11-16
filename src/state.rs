@@ -33,8 +33,12 @@ pub(crate) const DEFAULT_USER_AGENT: &str =
 pub struct AppState {
     /// 数据库文件路径（备份恢复时另存旁路文件用）。
     pub db_path: PathBuf,
+    /// 进程内共用的数据库连接。
+    pub conn: crate::db::SharedConn,
     /// 配置仓库（SQLite 单行文档）。
     pub config_store: crate::config::ConfigStore,
+    /// 质量结果仓库。
+    pub quality_store: crate::quality::store::QualityStore,
     /// 当前配置快照。
     pub config: ArcSwap<Config>,
     /// 配置里的频道键 `gid/cid`。统计中间件用它做 O(1) 校验，
@@ -104,6 +108,8 @@ pub struct AppState {
     probe_clients: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
     /// 同一时间只跑一次订阅同步。
     pub sync_lock: Arc<tokio::sync::Mutex<()>>,
+    /// 质量准入与同步门控串行化。
+    pub admission_lock: Arc<tokio::sync::Mutex<()>>,
     /// 已排队或正在执行的手动同步源 id。同一源不重复排队。
     pub sync_pending: Mutex<std::collections::HashSet<String>>,
     /// 最近日志行。
@@ -135,7 +141,8 @@ impl AppState {
         }
         let users = crate::users::UserStore::attach(conn.clone())?;
         let history = crate::metrics_store::Store::new(conn.clone())?;
-        let epg_store = crate::epg_store::Store::attach(conn)?;
+        let quality_store = crate::quality::store::QualityStore::new(conn.clone());
+        let epg_store = crate::epg_store::Store::attach(conn.clone())?;
         let epg = crate::epg::EpgState::load(&cache_dir);
         // 旧配置里的 `[[epg.sources]]` 逐条导入。成功的从配置移除，失败的保留。
         match epg_store.import_config_sources(&config.epg.sources) {
@@ -170,7 +177,9 @@ impl AppState {
         let channel_keys = channel_keys_of(&config);
         Ok(Self {
             db_path,
+            conn,
             config_store,
+            quality_store,
             config: ArcSwap::from_pointee(config),
             channel_keys: ArcSwap::from_pointee(channel_keys),
             sessions: SessionStore::new(ttl),
@@ -209,6 +218,7 @@ impl AppState {
             proxy_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
             probe_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
             sync_lock: Arc::new(tokio::sync::Mutex::new(())),
+            admission_lock: Arc::new(tokio::sync::Mutex::new(())),
             sync_pending: Mutex::new(std::collections::HashSet::new()),
             logs,
             started: Instant::now(),
@@ -438,6 +448,37 @@ impl AppState {
         Ok(())
     }
 
+    /// 改配置并原子写入质量结果。
+    ///
+    /// 闭包在事务内执行。闭包返回的结果与实际成员变更一起提交。
+    /// 调用方负责先拿 [`AppState::admission_lock`]。
+    pub fn mutate_admission<F>(
+        &self,
+        meta: &[(String, String)],
+        change: F,
+    ) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>
+    where
+        F: FnOnce(&mut Config) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>,
+    {
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let tx = conn.transaction()?;
+        let mut config = match self.config_store.load_tx(&tx)? {
+            Some(from_db) => from_db,
+            None => (*self.snapshot()).clone(),
+        };
+        let results = change(&mut config)?;
+        let revision = self.config_store.save_tx(&tx, &config)?;
+        self.quality_store.upsert_many_tx(&tx, &results)?;
+        for (key, value) in meta {
+            self.quality_store.meta_set_tx(&tx, key, value)?;
+        }
+        tx.commit()?;
+        config.revision = revision;
+        self.replace(config);
+        Ok(results)
+    }
+
     pub fn version(&self) -> &'static str {
         crate::VERSION
     }
@@ -461,6 +502,89 @@ fn channel_keys_of(config: &Config) -> HashSet<String> {
         }
     }
     keys
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::model::Group;
+    use crate::quality::store::QualityResult;
+
+    fn test_state() -> (std::sync::Arc<AppState>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tvb-state-{}", uuid::Uuid::new_v4()));
+        let state = AppState::new(
+            dir.join("tvb.db"),
+            Config::default(),
+            std::sync::Arc::new(crate::logging::RingBuffer::default()),
+        )
+        .expect("state");
+        (std::sync::Arc::new(state), dir)
+    }
+
+    #[test]
+    fn mutate_admission_commits_config_and_results() {
+        let (state, dir) = test_state();
+        let item = QualityResult {
+            key: "sync:s:c".into(),
+            action: "admitted".into(),
+            ..QualityResult::default()
+        };
+        let written = state
+            .mutate_admission(&[("last_run_at".into(), "1".into())], |config| {
+                config.groups.push(Group {
+                    id: "g".into(),
+                    ..Group::default()
+                });
+                Ok(vec![item])
+            })
+            .unwrap();
+        assert_eq!(written.len(), 1);
+        assert!(state.snapshot().group("g").is_some());
+        assert!(state.quality_store.get("sync:s:c").unwrap().is_some());
+        assert_eq!(
+            state
+                .quality_store
+                .meta_get("last_run_at")
+                .unwrap()
+                .as_deref(),
+            Some("1")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mutate_admission_rolls_back_on_closure_error() {
+        let (state, dir) = test_state();
+        let error = state
+            .mutate_admission(&[], |config| {
+                config.groups.push(Group {
+                    id: "g".into(),
+                    ..Group::default()
+                });
+                anyhow::bail!("stop");
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("stop"));
+        assert!(state.snapshot().group("g").is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mutate_admission_rolls_back_on_invalid_config() {
+        let (state, dir) = test_state();
+        let error = state
+            .mutate_admission(&[], |config| {
+                config.server.bind = String::new();
+                Ok(vec![QualityResult {
+                    key: "sync:s:c".into(),
+                    ..QualityResult::default()
+                }])
+            })
+            .unwrap_err();
+        assert!(!error.to_string().is_empty());
+        assert!(state.quality_store.get("sync:s:c").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 /// 建立缓存子目录。失败只记日志（后续写缓存会再报错）。
