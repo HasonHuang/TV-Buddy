@@ -9,7 +9,7 @@
 
 - 后端：配置、结果存储、事务提交、同步门控、周期/手动引擎、安全阀、源停用/删除、质量接口。
 - 前端：独立「质量校验」页；规则、结果、来源三个标签；分组页徽章跳转。
-- 手工频道：默认失败保留；`offline_on_fail=true` 时只从订阅隐藏。
+- 手工频道：默认失败保留；`offline_on_fail=true` 时超过宽限后从订阅隐藏。
 - 重启：启动时从结果表水合手工频道状态。
 - 容器验收：正常、慢速、404 三频道；门控准入、周期移出、安全阀、源停用/删除均通过。
 - 低配内存：容器实测低于 128 MB。
@@ -83,9 +83,11 @@
 - 保留 `interval_secs` 字段，避免旧配置解析失败，但新调度不再读取。
 - 新配置默认 `interval_hours=6`。旧配置首次保存后写入新字段。质量控制尚未发布，不做秒到小时的自动换算。
 - `rules.action`、`rules.retain`、`rules.supply` 保留解析，但不再控制准入。
+- `quick_target`、`sort_by`、`defer_during_playback`、`filter_ad` 保留解析，但新引擎不读取。
+- `rules.stale_keep_secs` 只控制手工频道下线宽限。
 - 手工频道失败处理使用现有 `offline_on_fail`：
   - `false` = 保留。
-  - `true` = 下线。
+  - `true` = 超过宽限后下线。宽限读 `stale_keep_secs`，默认 1800 秒；0 表示立即。
 - 同步源门控关闭使用现有 `source.quality.enabled=false`。
 
 ### 3.3 有效规则
@@ -233,7 +235,7 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 2. 把计划频道分为三类：新候选、URL 变化、未变化。
 3. 先处理 URL 变化频道：
    - 按现有频道的分组、频道与源覆盖解析有效规则。
-   - 探测并判定。
+   - 探测并判定。DASH `.mpd` 不做清单或测速，只做 HTTP 连通检查。
    - 合格：保留在计划，更新地址。
    - 不合格：从计划移除。
    - `probe_error`：暂停本轮同步，不应用任何成员变更。源状态标记 `gate_paused=true`。
@@ -250,7 +252,8 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 7. 计算安全阀：
    - `tested` = 本轮完成判定的 URL 变化频道与新候选数。`probe_error` 与未知不计入。
    - `removals` = URL 变化且不合格的频道数。
-   - 条件：`guard_enabled && tested > 0 && removals >= min_remove_count && removals / tested >= max_remove_ratio`。
+   - 数量阈值 = 全部可移出频道都失败且数量达到 3 个时，取 `min_remove_count` 与「源内可移出频道数 × 30%，向上取整」的较小值；否则保持 `min_remove_count`。
+   - 条件：`guard_enabled && tested > 0 && removals >= 数量阈值 && removals / tested >= max_remove_ratio`。
 8. 安全阀触发：返回 `Paused`，不应用任何成员变更。
 9. 未触发：返回过滤后的计划与结果，由 `sync_locked` 原子应用。
 
@@ -313,16 +316,18 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 - 关闭时不触发安全阀；移出照常执行。
 - 触发时不改变成员，包括新候选准入。
 - 结果记录照常写入。
+- 数量阈值按可移出频道数自适应：3 个及以上且全部失败时取 `min_remove_count` 与 30% 的较小值；部分失败仍按原阈值。
 - `quality_meta.guard_tripped_at` 与 `last_run_summary` 记录。
 - 管理员关闭安全阀或调整阈值后重新运行。
 
 ### 5.5 手工频道
 
 - 使用 `offline_on_fail_for(gid, cid)`：
-  - `true`：失败时写入 `QualityState`，订阅渲染下线。
+  - `true`：失败超过 `stale_keep_secs` 后写入 `QualityState`，订阅渲染下线。
   - `false`：失败也保留。
+- 首次失败只记录 `first_fail_at`；宽限内恢复则清除。
+- `stale_keep_secs=0` 时立即下线。
 - 不提供移出。
-- 下线无宽限，判定失败后下一次订阅渲染即生效。
 - 启动时从结果表水合，重启不丢失。
 
 ### 5.6 订阅渲染与优先级
@@ -404,7 +409,7 @@ sync_lock → admission_lock → config.write_lock → SharedConn
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/panel/api/quality/status` | 开关、周期、下次运行、运行状态、统计、安全阀。 |
+| GET | `/panel/api/quality/status` | 开关、周期、下次运行、运行状态、统计、源错误、安全阀。 |
 | GET | `/panel/api/quality/results` | 结果分页与筛选。 |
 | GET | `/panel/api/quality/sources` | 同步源门控统计。 |
 | GET | `/panel/api/quality/effective` | 有效规则与来源层级。参数 `source_id`、`gid`、`cid`。 |

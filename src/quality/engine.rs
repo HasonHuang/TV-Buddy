@@ -106,6 +106,10 @@ pub fn due_targets(
                 if !source.enabled {
                     continue;
                 }
+                // 源门控关闭时，该源不参与周期移出，即使分组或频道覆盖开启规则。
+                if source.quality.as_ref().and_then(|quality| quality.enabled) == Some(false) {
+                    continue;
+                }
             }
             let rules = effective_rules(config, group, channel);
             if !measure_only && !rules.enabled {
@@ -246,7 +250,7 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
                 }
                 let action = if outcome.verdict.ok {
                     "kept"
-                } else if candidate.offline_on_fail {
+                } else if manual_hide_due(candidate, now) {
                     "hidden"
                 } else {
                     "kept"
@@ -335,6 +339,7 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
         enabled: config.quality.guard_enabled,
         max_remove_ratio: config.quality.max_remove_ratio,
         min_remove_count: usize::try_from(config.quality.min_remove_count).unwrap_or(usize::MAX),
+        base_channels: guard_base_channels(&config, &spec.scope),
     };
     let concurrency = usize::try_from(config.quality.concurrency.clamp(1, 32)).unwrap_or(1);
     let budget_bytes = config.quality.budget_mb_per_run.saturating_mul(1024 * 1024);
@@ -523,10 +528,24 @@ fn keep_existing_manual(
         .collect()
 }
 
+fn manual_hide_due(candidate: &Candidate, now: i64) -> bool {
+    if !candidate.offline_on_fail {
+        return false;
+    }
+    if candidate.rules.stale_keep_secs == 0 {
+        return true;
+    }
+    let Some(first_fail) = candidate.previous_first_fail_at else {
+        return false;
+    };
+    let grace = i64::try_from(candidate.rules.stale_keep_secs).unwrap_or(i64::MAX);
+    now.saturating_sub(first_fail) >= grace
+}
+
 fn guard_trip(guard: &Guard, tested: usize, removals: usize) -> bool {
     guard.enabled
         && tested > 0
-        && removals >= guard.min_remove_count
+        && removals >= guard.effective_min_remove_count(removals)
         && removals as f64 / tested as f64 >= guard.max_remove_ratio
 }
 
@@ -548,6 +567,27 @@ fn scope_matches(scope: &RunScope, group: &Group, channel: &Channel) -> bool {
         RunScope::Group(id) => &group.id == id,
         RunScope::Channel(gid, cid) => &group.id == gid && &channel.id == cid,
     }
+}
+
+/// 本轮范围内可移出的同步频道总数，用于小源安全阀阈值。
+fn guard_base_channels(config: &Config, scope: &RunScope) -> usize {
+    config
+        .groups
+        .iter()
+        .filter(|group| group.access != "archived")
+        .filter(|group| group.mode != "passthrough" || config.quality.probe_passthrough)
+        .flat_map(|group| {
+            group
+                .channels
+                .iter()
+                .filter(move |channel| scope_matches(scope, group, channel))
+                .filter(|channel| !channel.source_id.is_empty() && channel.sync_follow)
+                .filter(|channel| {
+                    source_of(config, channel).is_some_and(|source| source.enabled)
+                        && effective_rules(config, group, channel).enabled
+                })
+        })
+        .count()
 }
 
 fn candidate_headers(group: &Group, channel: &Channel) -> Vec<(String, String)> {
@@ -738,6 +778,7 @@ mod tests {
             enabled: true,
             max_remove_ratio: 0.5,
             min_remove_count: 10,
+            base_channels: 0,
         };
         let decision = decide(&outcomes, false, &guard);
         assert!(decision.paused);
@@ -801,6 +842,53 @@ mod tests {
         config.groups[0].channels[0].url = "http://up/live.m3u8".into();
         config.playlist.sources[0].enabled = false;
         assert!(!removal_allowed(&config, &removal), "源停用后不得移出");
+    }
+
+    #[test]
+    fn disabled_source_gate_skips_periodic_checks() {
+        let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
+        let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
+        let mut config = config_with_sync_channel();
+        config.playlist.sources[0].quality = Some(crate::config::model::QualityOverride {
+            enabled: Some(false),
+            ..Default::default()
+        });
+        config.groups[0].quality = Some(crate::config::model::QualityOverride {
+            enabled: Some(true),
+            ..Default::default()
+        });
+        let due =
+            due_targets(&config, &store, &RunScope::All, 100, 0, false, false).expect("到期目标");
+        assert!(due.is_empty(), "源门控关闭后不得周期移出");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn manual_hide_waits_for_grace() {
+        let now = crate::schedule::now_epoch();
+        let mut candidate = candidate("channel:g/c", true, true);
+        candidate.rules.stale_keep_secs = 60;
+        candidate.previous_first_fail_at = Some(now - 30);
+        let outcome = CandidateOutcome {
+            candidate: candidate.clone(),
+            measurement: Measurement::default(),
+            verdict: Verdict {
+                ok: false,
+                reachable: false,
+                reason: Reason::Unreachable,
+            },
+            bytes: 0,
+            duration_ms: 0,
+        };
+        let decision = decide(&[outcome.clone()], false, &Guard::default());
+        assert_eq!(decision.results[0].action, "kept", "宽限内不隐藏");
+        assert_eq!(decision.hidden, 0);
+
+        let mut expired = outcome;
+        expired.candidate.previous_first_fail_at = Some(now - 61);
+        let decision = decide(&[expired], false, &Guard::default());
+        assert_eq!(decision.results[0].action, "hidden", "超过宽限后隐藏");
+        assert_eq!(decision.hidden, 1);
     }
 
     #[test]
@@ -881,6 +969,7 @@ mod tests {
             enabled: true,
             max_remove_ratio: 0.5,
             min_remove_count: 10,
+            base_channels: 0,
         };
         let mut outcomes: Vec<_> = (0..100)
             .map(|i| outcome(&format!("channel:g/c{i}"), true, false, true, Reason::Pass))
@@ -939,6 +1028,7 @@ mod tests {
             enabled: true,
             max_remove_ratio: 0.5,
             min_remove_count: 1,
+            base_channels: 0,
         };
         let decision = decide(&outcomes, false, &guard);
         assert!(decision.removals.is_empty(), "固定频道不得移出");

@@ -127,6 +127,17 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
         .flatten()
         .and_then(|value| value.parse::<i64>().ok())
         .unwrap_or(0);
+    let statuses = state.sources.statuses();
+    let source_errors: Vec<Value> = config
+        .playlist
+        .sources
+        .iter()
+        .filter(|source| source.mode == "sync" && source.enabled)
+        .filter_map(|source| {
+            let error = statuses.get(&source.id)?.error.as_ref()?;
+            Some(json!({ "id": source.id, "name": source.name, "error": error }))
+        })
+        .collect();
     Json(json!({
         "enabled": config.quality.enabled,
         "quality_enabled": config.quality.enabled,
@@ -141,8 +152,10 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
         "counts": {
             "admitted": counts.admitted,
             "removed_7d": counts.removed_7d,
+            "probe_errors_7d": counts.probe_errors_7d,
             "sources": config.playlist.sources.iter().filter(|source| source.mode == "sync").count(),
         },
+        "source_errors": source_errors,
         "guard": {
             "enabled": config.quality.guard_enabled,
             "max_remove_ratio": config.quality.max_remove_ratio,
@@ -257,6 +270,7 @@ pub async fn sources(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>
                     .count(),
                 "gate_enabled": source.quality.as_ref().and_then(|quality| quality.enabled).unwrap_or(true),
                 "phase": status.gate_phase,
+                "error": status.error,
                 "tested": status.gate_tested,
                 "admitted": status.gate_admitted,
                 "rejected": status.gate_rejected,

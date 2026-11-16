@@ -219,8 +219,10 @@ export type QualityStatus = {
   counts: {
     admitted: number;
     removed_7d: number;
+    probe_errors_7d: number;
     sources: number;
   };
+  source_errors: Array<{ id: string; name: string; error: string }>;
   guard: {
     enabled: boolean;
     max_remove_ratio: number;
@@ -237,6 +239,7 @@ export type QualitySource = {
   channels: number;
   gate_enabled: boolean;
   phase: string;
+  error: string | null;
   tested: number;
   admitted: number;
   rejected: number;

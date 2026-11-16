@@ -53,6 +53,7 @@ pub struct QualityFilter {
 pub struct QualityCounts {
     pub admitted: usize,
     pub removed_7d: usize,
+    pub probe_errors_7d: usize,
 }
 
 /// 结果仓库。
@@ -183,9 +184,15 @@ impl QualityStore {
             params![since],
             |row| row.get(0),
         )?;
+        let probe_errors_7d: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM quality_results WHERE reason = 'probe_error' AND checked_at >= ?1",
+            params![since],
+            |row| row.get(0),
+        )?;
         Ok(QualityCounts {
             admitted: usize::try_from(admitted).unwrap_or(usize::MAX),
             removed_7d: usize::try_from(removed_7d).unwrap_or(usize::MAX),
+            probe_errors_7d: usize::try_from(probe_errors_7d).unwrap_or(usize::MAX),
         })
     }
 

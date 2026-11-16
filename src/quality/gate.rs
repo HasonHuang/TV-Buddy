@@ -11,7 +11,7 @@ use crate::{
     quality::{
         admission::{candidate_rules, url_hash_hex, Candidate, CandidateScope},
         probe::{probe, ProbeMode, ProbeOutput},
-        rules::{evaluate, EffectiveRules, Measurement, Reason, Verdict},
+        rules::{effective_rules, evaluate, EffectiveRules, Measurement, Reason, Verdict},
         schedule::{probe_limits, required_probe_mode, run_limit},
         store::QualityResult,
     },
@@ -25,6 +25,8 @@ pub struct Guard {
     pub enabled: bool,
     pub max_remove_ratio: f64,
     pub min_remove_count: usize,
+    /// 本轮可移出的同步频道总数。用于小源自适应阈值。
+    pub base_channels: usize,
 }
 
 impl Default for Guard {
@@ -33,7 +35,19 @@ impl Default for Guard {
             enabled: false,
             max_remove_ratio: 0.5,
             min_remove_count: 10,
+            base_channels: 0,
         }
+    }
+}
+
+impl Guard {
+    /// 数量阈值。小源全部可移出频道都失败时按 30% 降低，但不少于 1。
+    pub(crate) fn effective_min_remove_count(&self, removals: usize) -> usize {
+        if self.base_channels < 3 || removals < self.base_channels {
+            return self.min_remove_count;
+        }
+        let adaptive = self.base_channels.saturating_mul(3).div_ceil(10).max(1);
+        self.min_remove_count.min(adaptive)
     }
 }
 
@@ -316,7 +330,7 @@ pub fn decide(
 fn guard_trips(guard: &Guard, tested: usize, removals: usize) -> bool {
     guard.enabled
         && tested > 0
-        && removals >= guard.min_remove_count
+        && removals >= guard.effective_min_remove_count(removals)
         && removals as f64 / tested as f64 >= guard.max_remove_ratio
 }
 
@@ -482,6 +496,17 @@ pub async fn filter_plan(
         enabled: config.quality.guard_enabled,
         max_remove_ratio: config.quality.max_remove_ratio,
         min_remove_count: usize::try_from(config.quality.min_remove_count).unwrap_or(usize::MAX),
+        base_channels: config
+            .groups
+            .iter()
+            .flat_map(|group| {
+                group
+                    .channels
+                    .iter()
+                    .filter(|channel| channel.source_id == source.id && channel.sync_follow)
+                    .filter(|channel| effective_rules(config, group, channel).enabled)
+            })
+            .count(),
     };
     let started = Instant::now();
     let budget_secs = config.quality.gate_time_budget_secs;
@@ -601,6 +626,34 @@ async fn resolved_probe_url(
     Ok(url.filter(|url| !url.trim().is_empty()))
 }
 
+fn reachability_only_verdict(measurement: &Measurement) -> Verdict {
+    if measurement.probe_error {
+        Verdict {
+            ok: false,
+            reachable: measurement.reachable,
+            reason: Reason::ProbeError,
+        }
+    } else if !measurement.reachable {
+        Verdict {
+            ok: false,
+            reachable: false,
+            reason: Reason::Unreachable,
+        }
+    } else {
+        Verdict {
+            ok: true,
+            reachable: true,
+            reason: Reason::Pass,
+        }
+    }
+}
+
+fn dash_url_change(candidate: &Candidate, config: &Config) -> bool {
+    candidate.is_url_change
+        && crate::quality::probe::is_dash(&candidate.url)
+        && required_probe_mode(config, &candidate.rules) != ProbeMode::Reachability
+}
+
 /// 探测一个候选。`resolve` 时先执行频道的解析脚本。
 pub(crate) async fn probe_candidate(
     state: &Arc<AppState>,
@@ -634,6 +687,7 @@ pub(crate) async fn probe_candidate(
         candidate.url.clone()
     };
 
+    let dash_fallback = dash_url_change(candidate, config);
     let host = url::Url::parse(&probe_url)
         .ok()
         .and_then(|url| url.host_str().map(str::to_string));
@@ -641,7 +695,7 @@ pub(crate) async fn probe_candidate(
     let (url_cached, host_cached) = {
         let memo = memo.lock().unwrap_or_else(|error| error.into_inner());
         let url_cached = memo.get(key).cloned();
-        let host_cached = candidate.rules.host_cache.then(|| {
+        let host_cached = (candidate.rules.host_cache && !dash_fallback).then(|| {
             host.as_deref()
                 .and_then(|host| memo.get_host(host))
                 .filter(|measurement| {
@@ -652,6 +706,11 @@ pub(crate) async fn probe_candidate(
                 .cloned()
         });
         (url_cached, host_cached.flatten())
+    };
+    let probe_mode = if dash_fallback {
+        ProbeMode::Reachability
+    } else {
+        required_probe_mode(config, &candidate.rules)
     };
     let output = match (url_cached, host_cached) {
         (Some(measurement), _) => ProbeOutput {
@@ -679,7 +738,7 @@ pub(crate) async fn probe_candidate(
                 &client,
                 &probe_url,
                 &candidate.headers,
-                required_probe_mode(config, &candidate.rules),
+                probe_mode,
                 candidate.rules.max_resolution_px,
                 &probe_limits(config),
             )
@@ -695,7 +754,11 @@ pub(crate) async fn probe_candidate(
             output
         }
     };
-    let verdict = evaluate(&candidate.rules, &output.measurement);
+    let verdict = if dash_fallback {
+        reachability_only_verdict(&output.measurement)
+    } else {
+        evaluate(&candidate.rules, &output.measurement)
+    };
     CandidateOutcome {
         candidate: candidate.clone(),
         measurement: output.measurement,
@@ -962,6 +1025,7 @@ mod tests {
             enabled: true,
             max_remove_ratio: 0.5,
             min_remove_count: 10,
+            base_channels: 0,
         };
         assert!(
             matches!(
@@ -970,6 +1034,50 @@ mod tests {
             ),
             "探测错误不得稀释安全阀比例"
         );
+    }
+
+    #[test]
+    fn guard_adaptive_min_protects_small_sources() {
+        let guard = Guard {
+            enabled: true,
+            max_remove_ratio: 0.5,
+            min_remove_count: 10,
+            base_channels: 8,
+        };
+        assert!(guard_trips(&guard, 8, 8), "8 个频道全挂应触发安全阀");
+        assert!(!guard_trips(&guard, 8, 4), "部分失败仍按原数量阈值");
+        let tiny = Guard {
+            base_channels: 2,
+            ..guard
+        };
+        assert!(!guard_trips(&tiny, 2, 2), "不足 3 个频道不启用自适应");
+    }
+
+    #[test]
+    fn dash_url_change_uses_reachability() {
+        let mut config = Config::default();
+        config.quality.probe_mode = "speed".into();
+        let mut candidate = candidate("c1", true);
+        candidate.url = "http://up/live.mpd".into();
+        assert!(dash_url_change(&candidate, &config));
+        candidate.is_url_change = false;
+        assert!(!dash_url_change(&candidate, &config), "新候选仍按原档位");
+        let reachable = Measurement {
+            reachable: true,
+            ..Measurement::default()
+        };
+        assert_eq!(reachability_only_verdict(&reachable).reason, Reason::Pass);
+        let down = Measurement {
+            reachable: false,
+            ..Measurement::default()
+        };
+        assert_eq!(reachability_only_verdict(&down).reason, Reason::Unreachable);
+        let error = Measurement {
+            reachable: true,
+            probe_error: true,
+            ..Measurement::default()
+        };
+        assert_eq!(reachability_only_verdict(&error).reason, Reason::ProbeError);
     }
 
     #[test]
@@ -1010,6 +1118,7 @@ mod tests {
                 enabled: true,
                 max_remove_ratio: 0.5,
                 min_remove_count: 10,
+                base_channels: 0,
             },
         );
         match out {
@@ -1130,6 +1239,7 @@ mod tests {
             enabled: true,
             max_remove_ratio: 0.5,
             min_remove_count: 10,
+            base_channels: 0,
         };
         assert!(matches!(
             decide(plan_with(&[]), &targets, &outcomes, &guard),
@@ -1150,6 +1260,7 @@ mod tests {
             enabled: true,
             max_remove_ratio: 0.5,
             min_remove_count: 10,
+            base_channels: 0,
         };
         assert!(matches!(
             decide(plan_with(&[]), &targets, &outcomes, &guard),

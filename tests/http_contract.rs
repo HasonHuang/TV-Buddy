@@ -6970,9 +6970,27 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
     assert_eq!(status["enabled"], true);
     assert_eq!(status["schedule"]["mode"], "interval");
     assert_eq!(status["counts"]["admitted"], 1);
+    assert_eq!(status["counts"]["probe_errors_7d"], 0);
     assert_eq!(status["counts"]["sources"], 1);
+    assert_eq!(status["source_errors"], json!([]));
     assert_eq!(status["guard"]["enabled"], true);
     assert_eq!(status["guard"]["max_remove_ratio"], 0.5);
+
+    fixture.state.sources.update_status("q-src", |row| {
+        row.error = Some("抓取失败".into());
+    });
+    let status: serde_json::Value = fixture
+        .client
+        .get(format!("{}/panel/api/quality/status", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("状态")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析状态"))
+        .unwrap();
+    assert_eq!(status["source_errors"][0]["error"], "抓取失败");
 
     let results: serde_json::Value = fixture
         .client
@@ -7012,6 +7030,7 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
     assert_eq!(sources["items"][0]["id"], "q-src");
     assert_eq!(sources["items"][0]["channels"], 0);
     assert_eq!(sources["items"][0]["gate_enabled"], true);
+    assert_eq!(sources["items"][0]["error"], "抓取失败");
     assert!(sources["items"][0].get("phase").is_some());
 
     let effective: serde_json::Value = fixture

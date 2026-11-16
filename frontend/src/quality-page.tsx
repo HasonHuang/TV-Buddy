@@ -112,6 +112,13 @@ const REASON_LABEL: Record<string, string> = {
   unknown: '未校验',
 };
 
+const PROBE_LABEL: Record<string, string> = {
+  reachability: '连通',
+  playlist: '清单',
+  speed: '测速',
+  full: '测速',
+};
+
 const OVERRIDE_LABEL: Record<string, string> = {
   enabled: '开关',
   min_speed_mib: '最低速率',
@@ -316,6 +323,39 @@ function OverviewTab({
           <div className="hint">共 {status.counts.sources} 个同步源参与门控</div>
         </div>
       </div>
+      {status.guard.tripped || status.source_errors.length > 0 || status.counts.probe_errors_7d > 0 ? (
+        <div className="card">
+          <div className="card-head">
+            <div className="card-head-text">
+              <h2>警告</h2>
+              <span className="muted">按影响排序</span>
+            </div>
+          </div>
+          <ul>
+            {status.guard.tripped ? (
+              <li>
+                <Badge tone="danger">安全阀</Badge> 上一轮移出达到阈值，成员变更已暂停。
+                <span className="hint">
+                  阈值：{(status.guard.max_remove_ratio * 100).toFixed(0)}%，至少{' '}
+                  {status.guard.min_remove_count} 个
+                </span>
+              </li>
+            ) : null}
+            {status.source_errors.map((source) => (
+              <li key={source.id}>
+                <Badge tone="warn">源抓取</Badge> {source.name || source.id}：
+                {source.error}
+              </li>
+            ))}
+            {status.counts.probe_errors_7d > 0 ? (
+              <li>
+                <Badge tone="muted">探测错误</Badge> 近 7 天有{' '}
+                {status.counts.probe_errors_7d} 条探测错误，请检查解析脚本或探测地址。
+              </li>
+            ) : null}
+          </ul>
+        </div>
+      ) : null}
       <div className="card">
         <div className="card-head">
           <div className="card-head-text">
@@ -501,6 +541,20 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
   if (!draft) return <Empty text="正在读取配置…" icon="settings" />;
 
   const scheduleMode = asText(draft, 'quality.schedule') === 'cron' ? 'cron' : 'interval';
+  const configuredProbe = asText(draft, 'quality.probe_mode');
+  const speedRule = asNumber(draft, 'quality.rules.min_speed_mib') > 0;
+  const resolutionRule =
+    asText(draft, 'quality.rules.min_resolution').trim() !== '' ||
+    asText(draft, 'quality.rules.max_resolution').trim() !== '';
+  const actualProbe = speedRule
+    ? 'speed'
+    : resolutionRule && configuredProbe === 'reachability'
+      ? 'playlist'
+      : configuredProbe;
+  const probeHint =
+    actualProbe === configuredProbe
+      ? undefined
+      : `实际档位：${PROBE_LABEL[actualProbe] ?? actualProbe}（规则自动提升）`;
   return (
     <>
       {node}
@@ -563,7 +617,7 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
               {busy === 'preview' ? '计算中…' : '预览未来 3 次'}
             </button>
           </Field>
-          <Field label="探测档位" tip="档位越高，耗时与流量越多。">
+          <Field label="探测档位" tip="档位越高，耗时与流量越多。" hint={probeHint}>
             <Select
               ariaLabel="探测档位"
               value={asText(draft, 'quality.probe_mode')}
@@ -655,6 +709,13 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
               min={0}
               value={asNumber(draft, 'quality.rules.max_delay_ms')}
               onChange={(value) => update('quality.rules.max_delay_ms', value)}
+            />
+          </Field>
+          <Field label="手工下线宽限" hint="秒，0 = 立即下线">
+            <NumberInput
+              min={0}
+              value={asNumber(draft, 'quality.stale_keep_secs')}
+              onChange={(value) => update('quality.stale_keep_secs', value)}
             />
           </Field>
           <Field label="最低分辨率" hint="如 1280x720，留空不限制">
@@ -1303,7 +1364,7 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
                 <th>最近同步 / 阶段</th>
                 <th>准入</th>
                 <th>最近移出</th>
-                <th>失败率</th>
+                <th>最近一轮失败率</th>
                 <th>操作</th>
               </tr>
             </thead>

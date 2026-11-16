@@ -292,7 +292,7 @@ pub fn clean_url(url: &str) -> &str {
     url.split('$').next().unwrap_or(url).trim()
 }
 
-fn is_dash(url: &str) -> bool {
+pub(crate) fn is_dash(url: &str) -> bool {
     let path = url.split(['?', '#']).next().unwrap_or(url);
     path.to_ascii_lowercase().ends_with(".mpd")
 }
