@@ -6672,6 +6672,181 @@ async fn disable_source_can_keep_or_remove_channels() {
 }
 
 #[tokio::test]
+async fn quality_api_returns_status_results_sources_and_effective_rules() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "playlist" },
+        "playlist": { "sources": [{
+            "id": "q-src", "name": "质量源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/sync.m3u8"
+        }] }
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    fixture
+        .state
+        .quality_store
+        .upsert(&tv_buddy::quality::store::QualityResult {
+            key: "sync:q-src:keep".into(),
+            scope: "sync".into(),
+            source_id: "q-src".into(),
+            source_key: "keep".into(),
+            gid: "pg".into(),
+            cid: "c1".into(),
+            name: "通过频道".into(),
+            target_group: "代理组".into(),
+            action: "admitted".into(),
+            reason: "pass".into(),
+            ok: true,
+            delay_ms: Some(120),
+            speed_kib: Some(2048),
+            width: Some(1920),
+            height: Some(1080),
+            checked_at: 100,
+            ..Default::default()
+        })
+        .expect("写结果");
+
+    let status: serde_json::Value = fixture
+        .client
+        .get(format!("{}/panel/api/quality/status", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("状态")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析状态"))
+        .unwrap();
+    assert_eq!(status["enabled"], true);
+    assert_eq!(status["schedule"]["mode"], "interval");
+    assert_eq!(status["counts"]["admitted"], 1);
+    assert_eq!(status["counts"]["sources"], 1);
+    assert_eq!(status["guard"]["enabled"], true);
+    assert_eq!(status["guard"]["max_remove_ratio"], 0.5);
+
+    let results: serde_json::Value = fixture
+        .client
+        .get(format!("{}/panel/api/quality/results", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("结果")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析结果"))
+        .unwrap();
+    assert_eq!(results["total"], 1);
+    let item = &results["items"][0];
+    assert_eq!(item["speed_mib"], 2.0);
+    assert_eq!(item["resolution"], "1920x1080");
+    assert_eq!(item["source_id"], "q-src");
+    assert!(item.get("url").is_none(), "结果不能带完整地址");
+    assert!(item.get("url_hash").is_none(), "结果不能带地址哈希");
+
+    let sources: serde_json::Value = fixture
+        .client
+        .get(format!("{}/panel/api/quality/sources", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("来源")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析来源"))
+        .unwrap();
+    assert_eq!(sources["items"][0]["id"], "q-src");
+    assert_eq!(sources["items"][0]["gate_enabled"], true);
+    assert!(sources["items"][0].get("phase").is_some());
+
+    let effective: serde_json::Value = fixture
+        .client
+        .get(format!(
+            "{}/panel/api/quality/effective?gid=pg&cid=c1",
+            fixture.base
+        ))
+        .header("authorization", auth)
+        .send()
+        .await
+        .expect("有效规则")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析有效规则"))
+        .unwrap();
+    assert_eq!(effective["rules"]["enabled"], true);
+    assert_eq!(effective["source_layer"], "global");
+}
+
+#[tokio::test]
+async fn quality_run_api_reports_measure_only_and_rejects_bad_input() {
+    let extra = r#"{ "quality": { "enabled": false } }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    let preview: serde_json::Value = fixture
+        .client
+        .post(format!(
+            "{}/panel/api/quality/schedule/preview",
+            fixture.base
+        ))
+        .header("authorization", auth.clone())
+        .header("content-type", "application/json")
+        .body(r#"{"mode":"cron","cron":"0 */6 * * *"}"#)
+        .send()
+        .await
+        .expect("调度预览")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析调度预览"))
+        .unwrap();
+    let times = preview["times"].as_array().expect("未来时间");
+    assert_eq!(times.len(), 3);
+    assert!(times[0].as_i64() < times[1].as_i64());
+
+    let bad_cron = fixture
+        .client
+        .post(format!(
+            "{}/panel/api/quality/schedule/preview",
+            fixture.base
+        ))
+        .header("authorization", auth.clone())
+        .header("content-type", "application/json")
+        .body(r#"{"mode":"cron","cron":"bad"}"#)
+        .send()
+        .await
+        .expect("坏 cron");
+    assert_eq!(bad_cron.status(), StatusCode::BAD_REQUEST);
+
+    let started: serde_json::Value = fixture
+        .client
+        .post(format!("{}/panel/api/quality/run", fixture.base))
+        .header("authorization", auth.clone())
+        .header("content-type", "application/json")
+        .body(r#"{"scope":"channel","id":"pg/c1"}"#)
+        .send()
+        .await
+        .expect("手动校验")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析校验响应"))
+        .unwrap();
+    assert_eq!(started["measure_only"], true);
+    assert!(started["run_id"].as_str().is_some_and(|id| !id.is_empty()));
+
+    let empty = fixture
+        .client
+        .post(format!("{}/panel/api/quality/run", fixture.base))
+        .header("authorization", auth)
+        .header("content-type", "application/json")
+        .body(r#"{"scope":"group","id":"missing"}"#)
+        .send()
+        .await
+        .expect("空范围");
+    assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn deleting_channel_and_group_clears_quality_results() {
     use tv_buddy::quality::state::Entry;
 

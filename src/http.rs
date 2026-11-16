@@ -97,6 +97,15 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/health", get(routes::dash::health))
         .route("/panel/api/quality/status", get(routes::quality::status))
         .route("/panel/api/quality/results", get(routes::quality::results))
+        .route("/panel/api/quality/sources", get(routes::quality::sources))
+        .route(
+            "/panel/api/quality/effective",
+            get(routes::quality::effective),
+        )
+        .route(
+            "/panel/api/quality/schedule/preview",
+            post(routes::quality::schedule_preview),
+        )
         .route("/panel/api/quality/run", post(routes::quality::run))
         .route(
             "/panel/api/quality/runs/:run_id",
