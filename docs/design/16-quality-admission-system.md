@@ -1,8 +1,18 @@
 # 16 · 订阅源质量准入系统设计
 
-> 阶段：系统设计。依据 [`14-quality-admission-product.md`](14-quality-admission-product.md) 与 [`15-quality-admission-function.md`](15-quality-admission-function.md)。
-> 本文定义存储、接口、调度、并发与事务。代码实现留到实施计划。
+> 阶段：已实施（2026-11-16）。依据 [`14-quality-admission-product.md`](14-quality-admission-product.md) 与 [`15-quality-admission-function.md`](15-quality-admission-function.md)。
+> 本文定义存储、接口、调度、并发与事务。
 > 基线：`5627921`（P0/P1 已实现，本设计替换其成员语义）。
+> 验收：`scripts/smoke-quality-admission.sh` → `smoke-quality-admission: PASS`。
+
+## 实施状态
+
+- 后端：配置、结果存储、事务提交、同步门控、周期/手动引擎、安全阀、源停用/删除、质量接口。
+- 前端：独立「质量校验」页；规则、结果、来源三个标签；分组页徽章跳转。
+- 手工频道：默认失败保留；`offline_on_fail=true` 时只从订阅隐藏。
+- 重启：启动时从结果表水合手工频道状态。
+- 容器验收：正常、慢速、404 三频道；门控准入、周期移出、安全阀、源停用/删除均通过。
+- 低配内存：容器实测低于 128 MB。
 
 ## 1 总体结构
 
