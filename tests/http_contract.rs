@@ -172,6 +172,38 @@ async fn upstream_translate_v5(
         .into_response()
 }
 
+/// 伪上游：同步门控清单。按请求 Host 拼绝对地址。
+async fn sync_playlist(headers: axum::http::HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    let body = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"门控\",正常频道\nhttp://{host}/gate-live.m3u8\n#EXTINF:-1 group-title=\"门控\",失效频道\nhttp://{host}/gate-missing.m3u8\n"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        body,
+    )
+        .into_response()
+}
+
+/// 伪上游：只保留失效频道，用于源移除测试。
+async fn sync_removed_playlist(headers: axum::http::HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    let body = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"门控\",失效频道\nhttp://{host}/gate-missing.m3u8\n"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        body,
+    )
+        .into_response()
+}
+
 /// 伪上游：按路径返回清单或切片。
 async fn upstream_file(
     Path(path): Path<String>,
@@ -218,6 +250,7 @@ async fn upstream_file(
     }
     let (mime, body): (&str, &[u8]) = match path.as_str() {
         "live.m3u8" => ("application/vnd.apple.mpegurl", LIVE.as_bytes()),
+        "gate-live.m3u8" => ("application/vnd.apple.mpegurl", LIVE.as_bytes()),
         "badseg.m3u8" => ("application/vnd.apple.mpegurl", BADSEG.as_bytes()),
         "master.m3u8" => ("application/vnd.apple.mpegurl", MASTER.as_bytes()),
         "v0/index.m3u8" => ("application/vnd.apple.mpegurl", VARIANT.as_bytes()),
@@ -392,6 +425,8 @@ async fn fixture_with_options(
             "/single/translate",
             axum::routing::post(upstream_translate_single),
         )
+        .route("/sync.m3u8", get(sync_playlist))
+        .route("/sync-removed.m3u8", get(sync_removed_playlist))
         .route("/*path", get(upstream_file));
     if epg_enabled {
         let body = epg_document();
@@ -6346,6 +6381,85 @@ async fn deleting_last_epg_source_clears_output() {
 /// 删除频道或分组后，质量结果必须一起清掉。
 ///
 /// 否则重建同 id 频道会命中旧结果，按旧失败时钟立即隐藏。
+#[tokio::test]
+async fn sync_gate_admits_only_passing_channels() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "playlist", "max_channels_per_run": 10 },
+        "playlist": { "sources": [{
+            "id": "gate",
+            "name": "门控源",
+            "mode": "sync",
+            "enabled": true,
+            "url": "{upstream}/sync.m3u8"
+        }] }
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let report = tv_buddy::subscription::sync_source(&fixture.state, "gate", false)
+        .await
+        .expect("同步");
+    assert!(!report.gate_paused);
+
+    let filter = tv_buddy::quality::store::QualityFilter::default();
+    let (_, results) = fixture.state.quality_store.list(&filter).expect("结果");
+
+    let config = fixture.state.snapshot();
+    let group = config
+        .groups
+        .iter()
+        .find(|group| group.source_id == "gate")
+        .expect("门控分组");
+    assert_eq!(group.channels.len(), 1);
+    assert_eq!(group.channels[0].name, "正常频道");
+
+    assert!(
+        results
+            .iter()
+            .any(|item| item.action == "rejected" && item.reason == "unreachable"),
+        "{results:?}"
+    );
+
+    let checked = results
+        .iter()
+        .find(|item| item.name == "正常频道")
+        .map(|item| item.checked_at)
+        .expect("正常频道结果");
+    let _ = tv_buddy::subscription::sync_source(&fixture.state, "gate", false)
+        .await
+        .expect("第二次同步");
+    let (_, results) = fixture.state.quality_store.list(&filter).expect("结果");
+    let again = results
+        .iter()
+        .find(|item| item.name == "正常频道")
+        .map(|item| item.checked_at)
+        .expect("正常频道结果");
+    assert_eq!(checked, again, "未变化的已准入频道不重复探测");
+
+    let removed_url = format!("{}/sync-removed.m3u8", fixture.upstream);
+    fixture
+        .state
+        .mutate(|config| {
+            let source = config
+                .playlist
+                .sources
+                .iter_mut()
+                .find(|source| source.id == "gate")
+                .expect("门控源");
+            source.url = removed_url;
+            Ok(())
+        })
+        .expect("改源");
+    let _ = tv_buddy::subscription::sync_source(&fixture.state, "gate", false)
+        .await
+        .expect("第三次同步");
+    let (_, results) = fixture.state.quality_store.list(&filter).expect("结果");
+    assert!(
+        results
+            .iter()
+            .any(|item| item.action == "source_removed" && item.name == "正常频道"),
+        "{results:?}"
+    );
+}
+
 #[tokio::test]
 async fn deleting_channel_and_group_clears_quality_results() {
     use tv_buddy::quality::state::Entry;

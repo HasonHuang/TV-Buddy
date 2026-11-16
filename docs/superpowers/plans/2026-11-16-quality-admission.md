@@ -717,13 +717,13 @@ Expected: FAIL。门控未接入。
 
 - [ ] **Step 3: Implement probing and sync integration**
 
-- `RunMemo`：键为 `url_hash`；`host_cache` 时另存 host 键。只保存 `Measurement`，不保存判定。生命周期为一次任务。
+- `RunMemo`：键为 `url_hash`；`host_cache` 时另存 host 键。只保存 `Measurement`，不保存判定。Host 键只在可达且非 `probe_error` 时复用，避免一个 404 污染同 Host 的其他频道。生命周期为一次任务。
 - `gate_expired`：`budget_secs > 0` 且已用时间达到或超过预算。
 - `filter_plan`：
   - 全局或源级 `quality.enabled=false` 时直接返回原计划，统计为 0。
   - 调 `select_targets`。`max_new` 用 `run_limit(budget_mb_per_run, 8.0, max_channels_per_run)`。`kept` 中的候选不探测，直接保留。
   - 先顺序探测 URL 变化频道。探测前从 `quality_store` 填 `previous_first_fail_at`；检查预算；`probe_error` 或超时 → `Paused`，不应用任何成员变更。
-  - 再按 `concurrency` 分块探测新候选。每块前检查预算与取消标志。超时后保留已测结果，未测候选截断，`cursor` 指向最后一个已处理键。
+  - 顺序探测新候选，复用单轮 `RunMemo`。每项前检查预算与取消标志。超时后保留已测结果，未测候选截断，`cursor` 指向最后一个已处理键。
   - 使用计划中的频道 headers（`Value` 字符串或 `{name,value}` 对象解析为 `(String, String)`）与候选代理。候选代理优先级：现有频道/目标分组代理，其次源代理。给 `AppState` 增加 `pub(crate) fn probe_client_for_candidate(&self, proxy: Option<&ProxyCfg>) -> reqwest::Client`，内部调用现有私有 `probe_client`。
 - 调 `decide`。`Apply` 时额外生成 `source_removed` 结果：在 `apply` 前记录现有源频道的 `canonical_key(source_key)`，`apply` 后对比剩余集合；消失的频道写 `source_removed`。按稳定键对比，避免频道移动被误判为删除。`Paused` 时不生成。
 - `sync_locked`：

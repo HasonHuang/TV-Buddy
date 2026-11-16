@@ -18,6 +18,10 @@ use sha2::{Digest, Sha256};
 use crate::{
     config::model::{Channel, Config, Group, PlaylistCfg, PlaylistSource, QualityOverride},
     m3u::{self, Entry},
+    quality::{
+        gate::{filter_plan, GateOutcome},
+        store::QualityResult,
+    },
     state::AppState,
     subs::{self, PreviewSource, SourceStatus},
 };
@@ -132,6 +136,11 @@ pub struct SyncReport {
     pub blocked: bool,
     pub stats: ApplyStats,
     pub shrink_permille: u64,
+    pub gate_paused: bool,
+    pub gate_admitted: usize,
+    pub gate_rejected: usize,
+    pub gate_removed: usize,
+    pub gate_truncated: bool,
 }
 
 /// 由源配置生成预检参数。
@@ -803,6 +812,45 @@ pub async fn fetch_bounded(
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// 记录源频道，供同步后判断哪些频道被上游移除。
+struct SourceChannelSnapshot {
+    key: String,
+    gid: String,
+    cid: String,
+    name: String,
+    target_group: String,
+    url_hash: String,
+}
+
+fn source_channel_snapshot(config: &Config, source_id: &str) -> Vec<SourceChannelSnapshot> {
+    let mut items = Vec::new();
+    for group in &config.groups {
+        for channel in &group.channels {
+            if channel.source_id == source_id && !channel.source_key.is_empty() {
+                items.push(SourceChannelSnapshot {
+                    key: canonical_key(&channel.source_key),
+                    gid: group.id.clone(),
+                    cid: channel.id.clone(),
+                    name: channel.name.clone(),
+                    target_group: group.name.clone(),
+                    url_hash: crate::quality::admission::url_hash_hex(&channel.url),
+                });
+            }
+        }
+    }
+    items
+}
+
+fn source_channel_keys(config: &Config, source_id: &str) -> HashSet<String> {
+    config
+        .groups
+        .iter()
+        .flat_map(|group| group.channels.iter())
+        .filter(|channel| channel.source_id == source_id && !channel.source_key.is_empty())
+        .map(|channel| canonical_key(&channel.source_key))
+        .collect()
+}
+
 /// 同步一个源。调用方应已持有全局同步锁。
 pub async fn sync_locked(
     state: &Arc<AppState>,
@@ -869,9 +917,66 @@ pub async fn sync_locked(
         });
     }
 
+    let _admission = state.admission_lock.lock().await;
+    let gate = filter_plan(state, &config, &source, plan).await;
+    let (plan, gate_results, mut gate_stats, gate_cursor, gate_truncated, gate_remaining) =
+        match gate {
+            GateOutcome::Paused {
+                reason,
+                results,
+                stats,
+            } => {
+                if let Err(error) = state.quality_store.upsert_many(&results) {
+                    let message = format!("写入质量结果失败: {error:#}");
+                    finish_error(state, id, message);
+                    return Err(error);
+                }
+                let now = now_secs();
+                state.sources.update_status(id, |status| {
+                    status.syncing = false;
+                    status.mode = "sync".into();
+                    status.last_try = now;
+                    status.duration_ms = started.elapsed().as_millis() as u64;
+                    status.error = None;
+                    status.gate_phase = "paused".into();
+                    status.gate_tested = stats.tested;
+                    status.gate_admitted = stats.admitted;
+                    status.gate_rejected = stats.rejected;
+                    status.gate_removed = 0;
+                    status.gate_paused = true;
+                    status.gate_truncated = false;
+                    status.gate_remaining = 0;
+                    status.gate_last_at = now;
+                });
+                tracing::warn!(
+                    source = id,
+                    reason,
+                    tested = stats.tested,
+                    "同步门控暂停，成员未变"
+                );
+                return Ok(SyncReport {
+                    blocked: false,
+                    gate_paused: true,
+                    gate_admitted: stats.admitted,
+                    gate_rejected: stats.rejected,
+                    gate_removed: 0,
+                    gate_truncated: false,
+                    ..SyncReport::default()
+                });
+            }
+            GateOutcome::Apply {
+                plan,
+                results,
+                stats,
+                cursor,
+                truncated,
+                remaining,
+            } => (plan, results, stats, cursor, truncated, remaining),
+        };
+
     let expected = source.clone();
     let mut applied: Option<ApplyStats> = None;
-    let result = state.mutate(|config| {
+    let result = state.mutate_admission(&[], |config| {
         let current = config
             .playlist
             .sources
@@ -884,8 +989,38 @@ pub async fn sync_locked(
         if current != expected {
             bail!("源配置已变更，下一轮重试");
         }
+        let before = config
+            .quality
+            .enabled
+            .then(|| source_channel_snapshot(config, id));
         applied = Some(apply(config, &current, &plan));
-        Ok(())
+        let mut results = gate_results;
+        if let Some(before) = before {
+            let after = source_channel_keys(config, id);
+            for item in before {
+                if after.contains(&item.key) {
+                    continue;
+                }
+                results.push(QualityResult {
+                    key: format!("sync:{id}:{}", item.key),
+                    scope: "sync".into(),
+                    source_id: id.to_string(),
+                    source_key: item.key,
+                    gid: item.gid,
+                    cid: item.cid,
+                    name: item.name,
+                    target_group: item.target_group,
+                    url_hash: item.url_hash,
+                    action: "source_removed".into(),
+                    reason: "source_removed".into(),
+                    ok: false,
+                    checked_at: now_secs() as i64,
+                    ..QualityResult::default()
+                });
+                gate_stats.source_removed += 1;
+            }
+        }
+        Ok(results)
     });
     if let Err(error) = result {
         let message = format!("{error:#}");
@@ -916,6 +1051,16 @@ pub async fn sync_locked(
         status.shrink_permille = shrink_permille;
         status.duration_ms = started.elapsed().as_millis() as u64;
         status.error = None;
+        status.gate_phase = "done".into();
+        status.gate_tested = gate_stats.tested;
+        status.gate_admitted = gate_stats.admitted;
+        status.gate_rejected = gate_stats.rejected;
+        status.gate_removed = gate_stats.removed;
+        status.gate_paused = false;
+        status.gate_truncated = gate_truncated;
+        status.gate_cursor = gate_cursor.unwrap_or_default();
+        status.gate_remaining = gate_remaining;
+        status.gate_last_at = now;
         status.next_sync = next_run_at(
             &config.playlist,
             &expected,
@@ -930,12 +1075,21 @@ pub async fn sync_locked(
         updated = stats.updated,
         removed = stats.removed,
         skipped = stats.skipped_removals,
+        gate_tested = gate_stats.tested,
+        gate_admitted = gate_stats.admitted,
+        gate_rejected = gate_stats.rejected,
+        gate_removed = gate_stats.removed,
         "订阅同步完成"
     );
     Ok(SyncReport {
         blocked: false,
         stats,
         shrink_permille,
+        gate_paused: false,
+        gate_admitted: gate_stats.admitted,
+        gate_rejected: gate_stats.rejected,
+        gate_removed: gate_stats.removed,
+        gate_truncated,
     })
 }
 
@@ -1425,7 +1579,7 @@ fn key_suffix(url: &str) -> String {
 /// 匹配用的规范键。`name:` 键忽略大小写；`id:` 已小写；`url:` 保持原样。
 ///
 /// 旧版本按原样保存 `name:` 键。这里归一后，升级不会误删或重复频道。
-fn canonical_key(key: &str) -> String {
+pub(crate) fn canonical_key(key: &str) -> String {
     if key.starts_with("name:") {
         key.to_lowercase()
     } else {

@@ -131,6 +131,17 @@ pub struct SourceStatus {
     pub duration_ms: u64,
     /// 下次计划时间。0 表示不自动。
     pub next_sync: u64,
+    /// 门控阶段：fetching/parsing/gating/applying/done/paused。
+    pub gate_phase: String,
+    pub gate_tested: usize,
+    pub gate_admitted: usize,
+    pub gate_rejected: usize,
+    pub gate_removed: usize,
+    pub gate_paused: bool,
+    pub gate_truncated: bool,
+    pub gate_cursor: String,
+    pub gate_remaining: usize,
+    pub gate_last_at: u64,
     /// 正在同步。不落盘。
     #[serde(skip)]
     pub syncing: bool,

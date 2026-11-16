@@ -1,15 +1,22 @@
 //! 同步门控：目标选择、判定与计划过滤。
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use crate::{
-    config::model::{Config, Group, PlaylistSource, QualityOverride},
+    config::model::{Config, PlaylistSource},
     quality::{
         admission::{candidate_rules, url_hash_hex, Candidate, CandidateScope},
-        rules::{EffectiveRules, Measurement, Reason, Verdict},
+        probe::{probe, ProbeOutput},
+        rules::{evaluate, Measurement, Reason, Verdict},
+        schedule::{probe_limits, probe_mode, run_limit},
         store::QualityResult,
     },
-    subscription::{Plan, PlannedChannel, PlannedGroup},
+    state::AppState,
+    subscription::Plan,
 };
 
 /// 安全阀参数。
@@ -393,10 +400,229 @@ fn header_pairs(headers: &[serde_json::Value]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// 单轮测量缓存。按 URL 哈希去重；可选按 Host 共享。
+#[derive(Debug, Default)]
+pub struct RunMemo {
+    by_url: HashMap<u64, Measurement>,
+    by_host: HashMap<String, Measurement>,
+}
+
+impl RunMemo {
+    pub fn get(&self, url_hash: u64) -> Option<&Measurement> {
+        self.by_url.get(&url_hash)
+    }
+
+    pub fn get_host(&self, host: &str) -> Option<&Measurement> {
+        self.by_host.get(host)
+    }
+
+    pub fn insert(
+        &mut self,
+        url_hash: u64,
+        host: Option<&str>,
+        measurement: Measurement,
+        host_cache: bool,
+    ) {
+        self.by_url
+            .entry(url_hash)
+            .or_insert_with(|| measurement.clone());
+        if host_cache {
+            if let Some(host) = host {
+                self.by_host.entry(host.to_string()).or_insert(measurement);
+            }
+        }
+    }
+}
+
+/// 门控墙钟是否耗尽。0 表示不限制。
+pub fn gate_expired(started: Instant, budget_secs: u64) -> bool {
+    budget_secs > 0 && started.elapsed() >= Duration::from_secs(budget_secs)
+}
+
+/// 探测计划中的新候选与 URL 变化频道，并应用门控判定。
+pub async fn filter_plan(
+    state: &Arc<AppState>,
+    config: &Config,
+    source: &PlaylistSource,
+    plan: Plan,
+) -> GateOutcome {
+    let source_enabled = source
+        .quality
+        .as_ref()
+        .and_then(|quality| quality.enabled)
+        .unwrap_or(true);
+    if !config.quality.enabled || !source_enabled {
+        return GateOutcome::Apply {
+            plan,
+            results: Vec::new(),
+            stats: GateStats::default(),
+            cursor: None,
+            truncated: false,
+            remaining: 0,
+        };
+    }
+
+    let cursor = state
+        .sources
+        .statuses()
+        .get(&source.id)
+        .map(|status| status.gate_cursor.clone())
+        .filter(|cursor| !cursor.is_empty());
+    let max_new = run_limit(
+        config.quality.budget_mb_per_run,
+        8.0,
+        config.quality.max_channels_per_run,
+    );
+    let mut targets = select_targets(config, source, &plan, cursor.as_deref(), max_new);
+    let guard = Guard {
+        enabled: config.quality.guard_enabled,
+        max_remove_ratio: config.quality.max_remove_ratio,
+        min_remove_count: usize::try_from(config.quality.min_remove_count).unwrap_or(usize::MAX),
+    };
+    let started = Instant::now();
+    let budget_secs = config.quality.gate_time_budget_secs;
+    let mut memo = RunMemo::default();
+    let mut outcomes = Vec::new();
+
+    for candidate in &targets.url_changed {
+        if gate_expired(started, budget_secs) {
+            return paused_outcome("budget", &outcomes, &targets);
+        }
+        let mut candidate = candidate.clone();
+        candidate.previous_first_fail_at = previous_first_fail(state, &candidate);
+        let outcome = probe_candidate(state, config, &candidate, &mut memo).await;
+        let probe_error = outcome.measurement.probe_error;
+        outcomes.push(outcome);
+        if probe_error {
+            return decide(plan, &targets, &outcomes, &guard);
+        }
+    }
+
+    let mut processed = 0usize;
+    for candidate in targets.new.clone() {
+        if state.quality.is_cancelled() || gate_expired(started, budget_secs) {
+            break;
+        }
+        let mut candidate = candidate;
+        candidate.previous_first_fail_at = previous_first_fail(state, &candidate);
+        let outcome = probe_candidate(state, config, &candidate, &mut memo).await;
+        outcomes.push(outcome);
+        processed += 1;
+    }
+    if processed < targets.new.len() {
+        targets.truncated = true;
+        targets.remaining = targets.new_all.len().saturating_sub(processed);
+        targets.cursor_after = processed
+            .checked_sub(1)
+            .map(|index| targets.new[index].key.clone());
+        targets.new.truncate(processed);
+    }
+
+    decide(plan, &targets, &outcomes, &guard)
+}
+
+fn previous_first_fail(state: &AppState, candidate: &Candidate) -> Option<i64> {
+    state
+        .quality_store
+        .get(&sync_key(candidate))
+        .ok()
+        .flatten()
+        .and_then(|result| result.first_fail_at)
+}
+
+async fn probe_candidate(
+    state: &Arc<AppState>,
+    config: &Config,
+    candidate: &Candidate,
+    memo: &mut RunMemo,
+) -> CandidateOutcome {
+    let host = url::Url::parse(&candidate.url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string));
+    let key = crate::quality::state::url_hash(&candidate.url);
+    let cached = memo.get(key).cloned().or_else(|| {
+        candidate
+            .rules
+            .host_cache
+            .then(|| {
+                host.as_deref()
+                    .and_then(|host| memo.get_host(host))
+                    .filter(|measurement| measurement.reachable && !measurement.probe_error)
+                    .cloned()
+            })
+            .flatten()
+    });
+    let output = match cached {
+        Some(measurement) => ProbeOutput {
+            measurement,
+            bytes: 0,
+            duration_ms: 0,
+        },
+        None => {
+            let client = state.probe_client_for_candidate(candidate.proxy.as_ref());
+            let output = probe(
+                &client,
+                &candidate.url,
+                &candidate.headers,
+                probe_mode(&config.quality.probe_mode),
+                candidate.rules.max_resolution_px,
+                &probe_limits(config),
+            )
+            .await;
+            memo.insert(
+                key,
+                host.as_deref(),
+                output.measurement.clone(),
+                candidate.rules.host_cache,
+            );
+            output
+        }
+    };
+    let verdict = evaluate(&candidate.rules, &output.measurement);
+    CandidateOutcome {
+        candidate: candidate.clone(),
+        measurement: output.measurement,
+        verdict,
+        bytes: output.bytes,
+        duration_ms: output.duration_ms,
+    }
+}
+
+fn paused_outcome(
+    reason: &str,
+    outcomes: &[CandidateOutcome],
+    targets: &GateTargets,
+) -> GateOutcome {
+    let now = crate::schedule::now_epoch();
+    let results = outcomes
+        .iter()
+        .map(|outcome| {
+            let action = if outcome.verdict.ok {
+                "held"
+            } else {
+                "removal_paused"
+            };
+            result_for(&outcome.candidate, outcome, action, now)
+        })
+        .collect();
+    GateOutcome::Paused {
+        reason: reason.into(),
+        results,
+        stats: stats_for(outcomes, targets),
+    }
+}
+
+fn sync_key(candidate: &Candidate) -> String {
+    format!("sync:{}:{}", candidate.source_id, candidate.source_key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::model::Group;
+    use crate::quality::rules::EffectiveRules;
     use crate::subs::Trace;
+    use crate::subscription::{PlannedChannel, PlannedGroup};
 
     fn source() -> PlaylistSource {
         PlaylistSource {
@@ -525,6 +751,26 @@ mod tests {
             bytes: 0,
             duration_ms: 0,
         }
+    }
+
+    #[test]
+    fn gate_budget_zero_never_expires() {
+        assert!(!gate_expired(Instant::now(), 0));
+    }
+
+    #[test]
+    fn run_memo_dedupes_url_and_host() {
+        let mut memo = RunMemo::default();
+        let measurement = Measurement {
+            reachable: true,
+            ..Measurement::default()
+        };
+        assert!(memo.get(1).is_none());
+        memo.insert(1, None, measurement.clone(), false);
+        assert_eq!(memo.get(1), Some(&measurement));
+        memo.insert(2, Some("example.com"), measurement.clone(), true);
+        assert_eq!(memo.get(2), Some(&measurement));
+        assert_eq!(memo.get_host("example.com"), Some(&measurement));
     }
 
     #[test]

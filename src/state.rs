@@ -317,6 +317,14 @@ impl AppState {
         self.probe_client(Some(proxy))
     }
 
+    /// 质量候选的探测客户端。候选尚未进入配置，按给定代理构造。
+    pub(crate) fn probe_client_for_candidate(
+        &self,
+        proxy: Option<&crate::config::model::ProxyCfg>,
+    ) -> reqwest::Client {
+        self.probe_client(proxy)
+    }
+
     fn probe_client(&self, proxy: Option<&crate::config::model::ProxyCfg>) -> reqwest::Client {
         let key = proxy
             .map(|proxy| {

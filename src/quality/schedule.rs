@@ -70,7 +70,7 @@ pub fn scope_exists(config: &Config, scope: &RunScope) -> bool {
     }
 }
 
-fn probe_mode(value: &str) -> ProbeMode {
+pub(crate) fn probe_mode(value: &str) -> ProbeMode {
     match value {
         "playlist" => ProbeMode::Playlist,
         "speed" | "full" => ProbeMode::Speed,
@@ -78,7 +78,7 @@ fn probe_mode(value: &str) -> ProbeMode {
     }
 }
 
-fn probe_limits(config: &Config) -> ProbeLimits {
+pub(crate) fn probe_limits(config: &Config) -> ProbeLimits {
     ProbeLimits {
         timeout: Duration::from_secs(config.quality.timeout_secs.max(1)),
         speed_timeout: Duration::from_secs(config.quality.speed_timeout_secs.max(1)),
