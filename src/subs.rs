@@ -138,6 +138,8 @@ pub struct SourceStatus {
     pub gate_rejected: usize,
     pub gate_removed: usize,
     pub gate_paused: bool,
+    /// 门控暂停原因：`guard`、`budget`、`probe_error`。
+    pub gate_pause_reason: String,
     pub gate_truncated: bool,
     pub gate_cursor: String,
     pub gate_remaining: usize,

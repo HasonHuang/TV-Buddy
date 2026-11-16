@@ -498,6 +498,35 @@ impl AppState {
     where
         F: FnOnce(&mut Config) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>,
     {
+        self.mutate_admission_with_delete(meta, &[], change)
+    }
+
+    /// 同 [`Self::mutate_admission`]，并在同一事务里删除指定结果键。
+    pub fn mutate_admission_with_delete<F>(
+        &self,
+        meta: &[(String, String)],
+        delete_keys: &[String],
+        change: F,
+    ) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>
+    where
+        F: FnOnce(&mut Config) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>,
+    {
+        let delete_keys = delete_keys.to_vec();
+        self.mutate_admission_full(meta, move |config| Ok((change(config)?, delete_keys)))
+    }
+
+    /// 同 [`Self::mutate_admission`]，闭包同时返回要删除的结果键。
+    pub fn mutate_admission_full<F>(
+        &self,
+        meta: &[(String, String)],
+        change: F,
+    ) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>
+    where
+        F: FnOnce(
+            &mut Config,
+        )
+            -> anyhow::Result<(Vec<crate::quality::store::QualityResult>, Vec<String>)>,
+    {
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let tx = conn.transaction()?;
@@ -505,8 +534,11 @@ impl AppState {
             Some(from_db) => from_db,
             None => (*self.snapshot()).clone(),
         };
-        let results = change(&mut config)?;
+        let (results, delete_keys) = change(&mut config)?;
         let revision = self.config_store.save_tx(&tx, &config)?;
+        for key in &delete_keys {
+            self.quality_store.delete_tx(&tx, key)?;
+        }
         self.quality_store.upsert_many_tx(&tx, &results)?;
         for (key, value) in meta {
             self.quality_store.meta_set_tx(&tx, key, value)?;
@@ -515,6 +547,37 @@ impl AppState {
         config.revision = revision;
         self.replace(config);
         Ok(results)
+    }
+
+    /// 提交质量结果与 meta，不改配置，但与配置写入共用写锁。
+    ///
+    /// 闭包拿最新配置复核结果。源停用/删除与结果提交因此串行。
+    pub fn commit_quality_results<F>(
+        &self,
+        meta: &[(String, String)],
+        mut results: Vec<crate::quality::store::QualityResult>,
+        change: F,
+    ) -> anyhow::Result<Vec<(String, String, crate::quality::state::Entry)>>
+    where
+        F: FnOnce(
+            &Config,
+            &mut Vec<crate::quality::store::QualityResult>,
+        ) -> Vec<(String, String, crate::quality::state::Entry)>,
+    {
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let tx = conn.transaction()?;
+        let config = match self.config_store.load_tx(&tx)? {
+            Some(from_db) => from_db,
+            None => (*self.snapshot()).clone(),
+        };
+        let manual = change(&config, &mut results);
+        self.quality_store.upsert_many_tx(&tx, &results)?;
+        for (key, value) in meta {
+            self.quality_store.meta_set_tx(&tx, key, value)?;
+        }
+        tx.commit()?;
+        Ok(manual)
     }
 
     pub fn version(&self) -> &'static str {

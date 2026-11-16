@@ -68,7 +68,6 @@ pub fn rule_hash(rules: &EffectiveRules) -> String {
         hasher.update(resolution.to_le_bytes());
         hasher.update(speed.to_bits().to_le_bytes());
     }
-    hasher.update([u8::from(rules.supply)]);
     hasher.update([u8::from(rules.host_cache)]);
     hasher.update(rules.stale_keep_secs.to_le_bytes());
     hex::encode(hasher.finalize())

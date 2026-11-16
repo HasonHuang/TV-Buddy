@@ -289,11 +289,11 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
     let config = (*state.snapshot()).clone();
     let measure_only = spec.measure_only || !config.quality.enabled;
     let now = crate::schedule::now_epoch();
-    let limit = crate::quality::schedule::run_limit(
-        config.quality.budget_mb_per_run,
-        8.0,
-        config.quality.max_channels_per_run,
-    );
+    let limit = if config.quality.max_channels_per_run == 0 {
+        usize::MAX
+    } else {
+        usize::try_from(config.quality.max_channels_per_run).unwrap_or(usize::MAX)
+    };
     let targets = due_targets(
         &config,
         &state.quality_store,
@@ -315,16 +315,28 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
         max_remove_ratio: config.quality.max_remove_ratio,
         min_remove_count: usize::try_from(config.quality.min_remove_count).unwrap_or(usize::MAX),
     };
-    let mut memo = RunMemo::default();
+    let concurrency = usize::try_from(config.quality.concurrency.clamp(1, 32)).unwrap_or(1);
+    let budget_bytes = config.quality.budget_mb_per_run.saturating_mul(1024 * 1024);
+    let memo = std::sync::Mutex::new(RunMemo::default());
     let mut outcomes = Vec::new();
     let mut bytes = 0u64;
-    for candidate in targets {
-        if state.quality.is_cancelled() {
+    for chunk in targets.chunks(concurrency) {
+        if state.quality.is_cancelled() || budget_reached(bytes, budget_bytes) {
             break;
         }
-        let outcome = probe_candidate(state, &config, &candidate, &mut memo).await;
-        bytes = bytes.saturating_add(outcome.bytes);
-        outcomes.push(outcome);
+        let memo_ref = &memo;
+        let config_ref = &config;
+        let state_ref = state;
+        let jobs = chunk.iter().cloned().map(|candidate| {
+            let state = state_ref;
+            let config = config_ref;
+            let memo = memo_ref;
+            async move { probe_candidate(state, config, &candidate, memo).await }
+        });
+        for outcome in futures_util::future::join_all(jobs).await {
+            bytes = bytes.saturating_add(outcome.bytes);
+            outcomes.push(outcome);
+        }
         state.quality.update_run(|run| {
             run.tested = outcomes.len();
             run.bytes = bytes;
@@ -376,18 +388,23 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
             .to_string(),
         ),
     ];
-    if paused {
-        meta.push(("guard_tripped_at".to_string(), now.to_string()));
-    }
+    meta.push((
+        "guard_tripped_at".to_string(),
+        if paused {
+            now.to_string()
+        } else {
+            String::new()
+        },
+    ));
 
-    if removals.is_empty() || measure_only {
-        state.quality_store.upsert_many(&results)?;
-        for (key, value) in &meta {
-            state.quality_store.meta_set(key, value)?;
-        }
+    let manual_entries = if removals.is_empty() || measure_only {
+        state.commit_quality_results(&meta, results, |config, results| {
+            revalidate_results(config, results);
+            keep_existing_manual(config, manual_entries.clone())
+        })?
     } else {
+        let mut accepted = Vec::new();
         state.mutate_admission(&meta, |config| {
-            let mut results = results;
             for removal in &removals {
                 if removal_allowed(config, removal) {
                     if let Some(group) = config.group_mut(&removal.gid) {
@@ -401,9 +418,12 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
                     result.reason = "source_changed".into();
                 }
             }
+            revalidate_results(config, &mut results);
+            accepted = keep_existing_manual(config, manual_entries);
             Ok(results)
         })?;
-    }
+        accepted
+    };
     for (gid, cid, entry) in manual_entries {
         state.quality.put(&gid, &cid, entry);
     }
@@ -427,6 +447,59 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
     });
     state.quality.finish_run_id(&spec.run_id);
     Ok(summary)
+}
+
+fn budget_reached(bytes: u64, budget_bytes: u64) -> bool {
+    budget_bytes > 0 && bytes >= budget_bytes.saturating_mul(9) / 10
+}
+
+/// 提交前按最新配置复核。频道已删除、源已停用或地址已变化时不改结果状态。
+///
+/// 移出结果本身会让频道不再存在，因此要保留。否则结果表仍显示旧的
+/// `admitted`，与配置不一致。
+fn revalidate_results(config: &Config, results: &mut Vec<QualityResult>) {
+    results.retain_mut(|result| {
+        let is_removal = matches!(result.action.as_str(), "removed" | "source_removed");
+        let Some(group) = config.group(&result.gid) else {
+            return is_removal;
+        };
+        let Some(channel) = group
+            .channels
+            .iter()
+            .find(|channel| channel.id == result.cid)
+        else {
+            return is_removal;
+        };
+        if result.scope == "manual" {
+            return channel.source_id.is_empty();
+        }
+        let source_ok = config
+            .playlist
+            .sources
+            .iter()
+            .any(|source| source.id == result.source_id && source.enabled);
+        if !source_ok || url_hash_hex(&channel.url) != result.url_hash {
+            result.action = "skipped".into();
+            result.reason = "source_changed".into();
+            result.ok = false;
+        }
+        true
+    });
+}
+
+fn keep_existing_manual(
+    config: &Config,
+    entries: Vec<(String, String, Entry)>,
+) -> Vec<(String, String, Entry)> {
+    entries
+        .into_iter()
+        .filter(|(gid, cid, _)| {
+            config
+                .group(gid)
+                .and_then(|group| group.channels.iter().find(|channel| &channel.id == cid))
+                .is_some_and(|channel| channel.source_id.is_empty())
+        })
+        .collect()
 }
 
 fn guard_trip(guard: &Guard, tested: usize, removals: usize) -> bool {
@@ -754,6 +827,50 @@ mod tests {
         );
         assert_eq!(decision.results[0].action, "kept");
         assert!(decision.manual_entries[0].2.ok());
+    }
+
+    #[test]
+    fn removed_channel_result_is_not_written() {
+        let mut config = config_with_sync_channel();
+        config.groups.clear();
+        let mut results = vec![QualityResult {
+            gid: "g".into(),
+            cid: "c".into(),
+            scope: "sync".into(),
+            source_id: "s1".into(),
+            url_hash: url_hash_hex("http://up/live.m3u8"),
+            action: "admitted".into(),
+            ok: true,
+            ..QualityResult::default()
+        }];
+        revalidate_results(&config, &mut results);
+        assert!(results.is_empty(), "频道已删除时不写 admitted 结果");
+    }
+
+    #[test]
+    fn disabled_source_result_is_marked_skipped() {
+        let mut config = config_with_sync_channel();
+        config.playlist.sources[0].enabled = false;
+        let mut results = vec![QualityResult {
+            gid: "g".into(),
+            cid: "c".into(),
+            scope: "sync".into(),
+            source_id: "s1".into(),
+            url_hash: url_hash_hex("http://up/live.m3u8"),
+            action: "admitted".into(),
+            ok: true,
+            ..QualityResult::default()
+        }];
+        revalidate_results(&config, &mut results);
+        assert_eq!(results[0].action, "skipped");
+        assert_eq!(results[0].reason, "source_changed");
+    }
+
+    #[test]
+    fn budget_reached_at_ninety_percent() {
+        assert!(!budget_reached(0, 0), "0 表示不限制");
+        assert!(!budget_reached(89, 100));
+        assert!(budget_reached(90, 100));
     }
 
     #[test]

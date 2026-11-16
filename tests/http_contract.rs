@@ -6462,6 +6462,10 @@ async fn sync_aborts_when_config_changes_during_gate() {
             .all(|channel| channel.source_id != "slow")),
         "配置变化后不得写入成员"
     );
+    let statuses = fixture.state.sources.statuses();
+    let row = statuses.get("slow").expect("源状态");
+    assert!(!row.syncing, "中止后必须复位同步中状态");
+    assert!(row.error.is_some(), "中止原因要写入源状态");
 }
 
 #[tokio::test]

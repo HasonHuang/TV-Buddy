@@ -1003,7 +1003,7 @@ impl Default for QualityRules {
             supply: false,
             action: "hide".into(),
             retain: false,
-            host_cache: true,
+            host_cache: false,
             extra: Extra::new(),
         }
     }
@@ -2114,6 +2114,7 @@ mod tests {
         assert_eq!(config.quality.stale_keep_secs, 1800);
         assert_eq!(config.quality.rules.action, "hide");
         assert!(!config.quality.rules.retain);
+        assert!(!config.quality.rules.host_cache, "Host 缓存默认关闭");
 
         let mut config = Config::default();
         config.quality.enabled = true;

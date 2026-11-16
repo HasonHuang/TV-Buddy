@@ -133,7 +133,7 @@ impl Default for EffectiveRules {
             max_resolution_px: None,
             resolution_speed_map: BTreeMap::new(),
             supply: false,
-            host_cache: true,
+            host_cache: false,
             stale_keep_secs: 0,
         }
     }
@@ -298,11 +298,6 @@ pub fn evaluate(rules: &EffectiveRules, measurement: &Measurement) -> Verdict {
     }
 
     match reason {
-        Some(_) if rules.supply => Verdict {
-            ok: true,
-            reachable: true,
-            reason: Reason::Supply,
-        },
         Some(reason) => Verdict {
             ok: false,
             reachable: true,
@@ -492,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn supply_bypasses_thresholds_but_not_reachability() {
+    fn supply_does_not_bypass_thresholds() {
         let rules = EffectiveRules {
             enabled: true,
             action: Action::Hide,
@@ -503,7 +498,7 @@ mod tests {
             max_resolution_px: None,
             resolution_speed_map: BTreeMap::new(),
             supply: true,
-            host_cache: true,
+            host_cache: false,
             stale_keep_secs: 1800,
         };
         let slow = Measurement {
@@ -516,18 +511,11 @@ mod tests {
             height: None,
             error: None,
         };
-        assert!(evaluate(&rules, &slow).ok, "supply 保留可连通项");
-        let down = Measurement {
-            reachable: false,
-            probe_error: false,
-            http_status: None,
-            delay_ms: None,
-            speed_mib: None,
-            width: None,
-            height: None,
-            error: Some("x".into()),
-        };
-        assert!(!evaluate(&rules, &down).ok, "supply 不保留不可连通项");
+        assert_eq!(
+            evaluate(&rules, &slow).reason,
+            Reason::SpeedLow,
+            "supply 不再绕过阈值"
+        );
     }
 
     #[test]

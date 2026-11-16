@@ -425,6 +425,20 @@ pub fn next_run_at(config: &Config, last_run: i64, now: i64) -> Option<i64> {
     }
 }
 
+/// 周期任务是否到期。`last_run` 为上次完成时间。
+fn schedule_due(config: &Config, last_run: i64, now: i64) -> bool {
+    match config.quality.schedule.as_str() {
+        "cron" => crate::cron::cron_due(
+            &config.quality.cron,
+            now,
+            config.server.timezone_offset_hours as i64,
+            last_run,
+        ),
+        "interval" => next_run_at(config, last_run, now).is_some_and(|next| now >= next),
+        _ => false,
+    }
+}
+
 /// 清理过期结果。
 pub fn cleanup_quality_results(state: &AppState) -> anyhow::Result<usize> {
     let config = state.snapshot();
@@ -503,7 +517,7 @@ pub fn spawn(state: Arc<AppState>) {
             let due = if last_run <= 0 {
                 now >= startup_due_at
             } else {
-                next_run_at(&config, last_run, now).is_some_and(|next| now >= next)
+                schedule_due(&config, last_run, now)
             };
             if !due || state.quality.run_status().is_some_and(|run| !run.finished) {
                 tokio::time::sleep(Duration::from_secs(30)).await;
@@ -546,6 +560,25 @@ pub fn spawn(state: Arc<AppState>) {
 mod tests {
     use super::*;
     use crate::config::model::{Channel, Config, Group, QualityOverride};
+
+    #[test]
+    fn cron_is_due_after_previous_boundary() {
+        let mut config = Config::default();
+        config.quality.enabled = true;
+        config.quality.schedule = "cron".into();
+        config.quality.cron = "0 * * * *".into();
+        let now = 1_700_000_000;
+        let offset = config.server.timezone_offset_hours as i64;
+        let prev = crate::cron::cron_prev(&config.quality.cron, now, offset).expect("上次触发");
+        assert!(
+            schedule_due(&config, prev.saturating_sub(1), now),
+            "上次运行早于最近触发边界时应到期"
+        );
+        assert!(
+            !schedule_due(&config, prev, now),
+            "本小时已经运行过时不应重复触发"
+        );
+    }
 
     #[test]
     fn next_run_interval_and_cron() {

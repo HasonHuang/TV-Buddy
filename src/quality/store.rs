@@ -195,6 +195,12 @@ impl QualityStore {
         Ok(())
     }
 
+    /// 调用方已持有事务时删除一行。
+    pub fn delete_tx(&self, tx: &Transaction<'_>, key: &str) -> Result<()> {
+        tx.execute("DELETE FROM quality_results WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
         let conn = self.conn.lock().unwrap_or_else(|error| error.into_inner());
         Ok(conn

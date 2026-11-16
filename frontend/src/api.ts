@@ -242,6 +242,7 @@ export type QualitySource = {
   rejected: number;
   removed: number;
   paused: boolean;
+  pause_reason: string;
   truncated: boolean;
   cursor: string;
   remaining: number;

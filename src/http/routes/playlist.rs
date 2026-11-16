@@ -384,6 +384,7 @@ fn clear_gate(status: &mut crate::subs::SourceStatus) {
     status.gate_cursor.clear();
     status.gate_remaining = 0;
     status.gate_paused = false;
+    status.gate_pause_reason.clear();
     status.gate_truncated = false;
 }
 
@@ -409,29 +410,30 @@ pub async fn delete_source(
         return Err(content_exists(content));
     }
     let to_manual = keep.unwrap_or(true);
-    let channels: Vec<(String, String, String, String, String, String)> = snapshot
-        .groups
-        .iter()
-        .flat_map(|group| {
-            group
-                .channels
-                .iter()
-                .filter(|channel| channel.source_id == id)
-                .map(|channel| {
-                    (
-                        group.id.clone(),
-                        group.name.clone(),
-                        channel.id.clone(),
-                        channel.name.clone(),
-                        channel.source_key.clone(),
-                        crate::quality::admission::url_hash_hex(&channel.url),
-                    )
-                })
-        })
-        .collect();
     let mut detached = 0;
     state
-        .mutate(|config| {
+        .mutate_admission_full(&[], |config| {
+            let now = crate::schedule::now_epoch();
+            let channels: Vec<(String, String, String, String, String, String)> = config
+                .groups
+                .iter()
+                .flat_map(|group| {
+                    group
+                        .channels
+                        .iter()
+                        .filter(|channel| channel.source_id == id)
+                        .map(|channel| {
+                            (
+                                group.id.clone(),
+                                group.name.clone(),
+                                channel.id.clone(),
+                                channel.name.clone(),
+                                channel.source_key.clone(),
+                                crate::quality::admission::url_hash_hex(&channel.url),
+                            )
+                        })
+                })
+                .collect();
             config.playlist.sources.retain(|item| item.id != id);
             if content > 0 {
                 detached = if to_manual {
@@ -440,50 +442,48 @@ pub async fn delete_source(
                     subscription::remove_source_content(config, &id)
                 };
             }
-            Ok(())
+            let mut results = Vec::new();
+            let mut delete_keys = Vec::new();
+            for (gid, group_name, cid, name, source_key, url_hash) in channels {
+                let sync_key = format!("sync:{id}:{source_key}");
+                if to_manual {
+                    delete_keys.push(sync_key);
+                    results.push(crate::quality::store::QualityResult {
+                        key: format!("channel:{gid}/{cid}"),
+                        scope: "manual".into(),
+                        gid,
+                        cid,
+                        name,
+                        target_group: group_name,
+                        url_hash,
+                        action: "kept".into(),
+                        reason: "source_removed".into(),
+                        ok: true,
+                        checked_at: now,
+                        ..Default::default()
+                    });
+                } else {
+                    results.push(crate::quality::store::QualityResult {
+                        key: sync_key,
+                        scope: "sync".into(),
+                        source_id: id.clone(),
+                        source_key,
+                        gid,
+                        cid,
+                        name,
+                        target_group: group_name,
+                        url_hash,
+                        action: "source_removed".into(),
+                        reason: "source_removed".into(),
+                        ok: false,
+                        checked_at: now,
+                        ..Default::default()
+                    });
+                }
+            }
+            Ok((results, delete_keys))
         })
         .map_err(map_internal)?;
-    for (gid, group_name, cid, name, source_key, url_hash) in channels {
-        let sync_key = format!("sync:{id}:{source_key}");
-        if to_manual {
-            let _ = state.quality_store.delete(&sync_key);
-            let _ = state
-                .quality_store
-                .upsert(&crate::quality::store::QualityResult {
-                    key: format!("channel:{gid}/{cid}"),
-                    scope: "manual".into(),
-                    gid: gid.clone(),
-                    cid: cid.clone(),
-                    name: name.clone(),
-                    target_group: group_name.clone(),
-                    url_hash: url_hash.clone(),
-                    action: "kept".into(),
-                    reason: "pass".into(),
-                    ok: true,
-                    checked_at: crate::schedule::now_epoch(),
-                    ..Default::default()
-                });
-        } else {
-            let _ = state
-                .quality_store
-                .upsert(&crate::quality::store::QualityResult {
-                    key: sync_key,
-                    scope: "sync".into(),
-                    source_id: id.clone(),
-                    source_key,
-                    gid,
-                    cid,
-                    name,
-                    target_group: group_name,
-                    url_hash,
-                    action: "source_removed".into(),
-                    reason: "source_removed".into(),
-                    ok: false,
-                    checked_at: crate::schedule::now_epoch(),
-                    ..Default::default()
-                });
-        }
-    }
     state
         .sources
         .update_status(&id, |status| clear_gate(status));

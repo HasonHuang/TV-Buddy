@@ -101,14 +101,9 @@ pub fn select_targets(
     let mut new = Vec::new();
     let mut kept = Vec::new();
 
-    for planned in &plan.channels {
-        let existing = config.groups.iter().find_map(|group| {
-            group
-                .channels
-                .iter()
-                .find(|channel| channel.source_id == source.id && channel.source_key == planned.key)
-                .map(|channel| (group, channel))
-        });
+    let paired = crate::subscription::pair_source_channels(config, &source.id, plan);
+    for (planned, existing) in plan.channels.iter().zip(paired.iter()) {
+        let existing = *existing;
         let planned_group = plan
             .groups
             .iter()
@@ -481,7 +476,7 @@ pub async fn filter_plan(
     };
     let started = Instant::now();
     let budget_secs = config.quality.gate_time_budget_secs;
-    let mut memo = RunMemo::default();
+    let memo = std::sync::Mutex::new(RunMemo::default());
     let mut outcomes = Vec::new();
 
     for candidate in &targets.url_changed {
@@ -490,7 +485,7 @@ pub async fn filter_plan(
         }
         let mut candidate = candidate.clone();
         candidate.previous_first_fail_at = previous_first_fail(state, &candidate);
-        let outcome = probe_candidate(state, config, &candidate, &mut memo).await;
+        let outcome = probe_candidate(state, config, &candidate, &memo).await;
         let probe_error = outcome.measurement.probe_error;
         outcomes.push(outcome);
         if probe_error {
@@ -505,13 +500,21 @@ pub async fn filter_plan(
         }
         let mut candidate = candidate;
         candidate.previous_first_fail_at = previous_first_fail(state, &candidate);
-        let outcome = probe_candidate(state, config, &candidate, &mut memo).await;
+        let outcome = probe_candidate(state, config, &candidate, &memo).await;
         outcomes.push(outcome);
         processed += 1;
     }
     if processed < targets.new.len() {
         targets.truncated = true;
-        targets.remaining = targets.new_all.len().saturating_sub(processed);
+        let start = cursor
+            .as_deref()
+            .and_then(|cursor| targets.new_all.iter().position(|key| key.as_str() > cursor))
+            .unwrap_or(0);
+        targets.remaining = targets
+            .new_all
+            .len()
+            .saturating_sub(start)
+            .saturating_sub(processed);
         targets.cursor_after = processed
             .checked_sub(1)
             .map(|index| targets.new[index].key.clone());
@@ -534,28 +537,31 @@ pub(crate) async fn probe_candidate(
     state: &Arc<AppState>,
     config: &Config,
     candidate: &Candidate,
-    memo: &mut RunMemo,
+    memo: &std::sync::Mutex<RunMemo>,
 ) -> CandidateOutcome {
     let host = url::Url::parse(&candidate.url)
         .ok()
         .and_then(|url| url.host_str().map(str::to_string));
     let key = crate::quality::state::url_hash(&candidate.url);
-    let cached = memo.get(key).cloned().or_else(|| {
-        candidate
-            .rules
-            .host_cache
-            .then(|| {
-                host.as_deref()
-                    .and_then(|host| memo.get_host(host))
-                    .filter(|measurement| {
-                        measurement.reachable
-                            && !measurement.probe_error
-                            && measurement.speed_mib.is_some()
-                    })
-                    .cloned()
-            })
-            .flatten()
-    });
+    let cached = {
+        let memo = memo.lock().unwrap_or_else(|error| error.into_inner());
+        memo.get(key).cloned().or_else(|| {
+            candidate
+                .rules
+                .host_cache
+                .then(|| {
+                    host.as_deref()
+                        .and_then(|host| memo.get_host(host))
+                        .filter(|measurement| {
+                            measurement.reachable
+                                && !measurement.probe_error
+                                && measurement.speed_mib.is_some()
+                        })
+                        .cloned()
+                })
+                .flatten()
+        })
+    };
     let output = match cached {
         Some(measurement) => ProbeOutput {
             measurement,
@@ -573,12 +579,14 @@ pub(crate) async fn probe_candidate(
                 &probe_limits(config),
             )
             .await;
-            memo.insert(
-                key,
-                host.as_deref(),
-                output.measurement.clone(),
-                candidate.rules.host_cache,
-            );
+            memo.lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .insert(
+                    key,
+                    host.as_deref(),
+                    output.measurement.clone(),
+                    candidate.rules.host_cache,
+                );
             output
         }
     };
@@ -820,6 +828,19 @@ mod tests {
             &Guard::default(),
         );
         assert!(matches!(out, GateOutcome::Paused { .. }));
+    }
+
+    #[test]
+    fn duplicate_count_change_pairs_existing_channel() {
+        let config = config_with_existing(&["id:same#abcd"]);
+        let mut plan = plan_with(&["id:same"]);
+        plan.channels[0].url = "http://up/new.m3u8".into();
+        let targets = select_targets(&config, &source(), &plan, None, 10);
+        assert!(targets.new.is_empty(), "重复数变化不得当成新候选");
+        assert_eq!(targets.url_changed.len(), 1, "应识别为 URL 变化");
+        assert_eq!(targets.url_changed[0].gid, "g");
+        assert_eq!(targets.url_changed[0].cid, "id:same#abcd");
+        assert!(targets.url_changed[0].is_url_change);
     }
 
     #[test]

@@ -147,7 +147,7 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
             "enabled": config.quality.guard_enabled,
             "max_remove_ratio": config.quality.max_remove_ratio,
             "min_remove_count": config.quality.min_remove_count,
-            "tripped": state.quality_store.meta_get("guard_tripped_at").ok().flatten().is_some(),
+            "tripped": state.quality_store.meta_get("guard_tripped_at").ok().flatten().is_some_and(|value| !value.is_empty()),
         },
     }))
 }
@@ -262,6 +262,7 @@ pub async fn sources(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>
                 "rejected": status.gate_rejected,
                 "removed": status.gate_removed,
                 "paused": status.gate_paused,
+                "pause_reason": status.gate_pause_reason,
                 "truncated": status.gate_truncated,
                 "cursor": status.gate_cursor,
                 "remaining": status.gate_remaining,
@@ -359,7 +360,6 @@ pub async fn cancel(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
 pub async fn preview(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
     let filter = QualityFilter {
-        action: Some("admitted".into()),
         limit: 500,
         ..QualityFilter::default()
     };
@@ -373,13 +373,22 @@ pub async fn preview(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>
         if item.ok || item.reason == "probe_error" {
             continue;
         }
+        if !matches!(item.action.as_str(), "admitted" | "removal_paused") {
+            continue;
+        }
         let Some(group) = config.group(&item.gid) else {
             continue;
         };
         let Some(channel) = group.channels.iter().find(|channel| channel.id == item.cid) else {
             continue;
         };
-        if effective_rules(&config, group, channel).enabled {
+        let source_enabled = config
+            .playlist
+            .sources
+            .iter()
+            .find(|source| source.id == item.source_id)
+            .is_none_or(|source| source.enabled);
+        if source_enabled && effective_rules(&config, group, channel).enabled {
             would_remove.push(result_json(&item));
         }
     }

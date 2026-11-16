@@ -116,6 +116,8 @@ pub struct ApplyStats {
     pub groups_removed: usize,
     pub channels: usize,
     pub groups: usize,
+    /// 同步键迁移：`(旧 source_key, 新 source_key)`。结果行需要跟着迁移。
+    pub migrations: Vec<(String, String)>,
 }
 
 /// 预检差异。只读，不写配置。
@@ -499,7 +501,10 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         };
         let planned = &plan.channels[pidx];
         // 把旧拼写或旧序号迁移到计划键。后续同步按规范键精确匹配。
-        channel.source_key = planned.key.clone();
+        let old_key = std::mem::replace(&mut channel.source_key, planned.key.clone());
+        if old_key != planned.key {
+            stats.migrations.push((old_key, planned.key.clone()));
+        }
         let planned_key = canonical_key(&planned.key);
         existing_keys.insert(planned_key.clone());
         if !channel.sync_follow {
@@ -841,13 +846,17 @@ fn source_channel_snapshot(config: &Config, source_id: &str) -> Vec<SourceChanne
     items
 }
 
-fn source_channel_keys(config: &Config, source_id: &str) -> HashSet<String> {
+fn source_channel_ids(config: &Config, source_id: &str) -> HashSet<(String, String)> {
     config
         .groups
         .iter()
-        .flat_map(|group| group.channels.iter())
-        .filter(|channel| channel.source_id == source_id && !channel.source_key.is_empty())
-        .map(|channel| canonical_key(&channel.source_key))
+        .flat_map(|group| {
+            group
+                .channels
+                .iter()
+                .filter(|channel| channel.source_id == source_id && !channel.source_key.is_empty())
+                .map(|channel| (group.id.clone(), channel.id.clone()))
+        })
         .collect()
 }
 
@@ -900,9 +909,11 @@ pub async fn sync_locked(
         .find(|source| source.id == id)
         .cloned()
     else {
+        finish_error(state, id, "源已删除".into());
         bail!("源已删除");
     };
     if source != initial_source {
+        finish_error(state, id, "源配置已变更，下一轮重试".into());
         bail!("源配置已变更，下一轮重试");
     }
     let revision = config.revision;
@@ -959,10 +970,16 @@ pub async fn sync_locked(
                     status.gate_rejected = stats.rejected;
                     status.gate_removed = 0;
                     status.gate_paused = true;
+                    status.gate_pause_reason = reason.clone();
                     status.gate_truncated = false;
                     status.gate_remaining = 0;
                     status.gate_last_at = now;
                 });
+                if reason == "guard" {
+                    let _ = state
+                        .quality_store
+                        .meta_set("guard_tripped_at", &now.to_string());
+                }
                 tracing::warn!(
                     source = id,
                     reason,
@@ -1034,9 +1051,9 @@ pub async fn sync_locked(
             }
         }
         if let Some(before) = before {
-            let after = source_channel_keys(config, id);
+            let after = source_channel_ids(config, id);
             for item in before {
-                if after.contains(&item.key) {
+                if after.contains(&(item.gid.clone(), item.cid.clone())) {
                     continue;
                 }
                 let key = format!("sync:{id}:{}", item.key);
@@ -1072,6 +1089,43 @@ pub async fn sync_locked(
         return Err(error);
     }
     let stats = applied.unwrap_or_default();
+    // 键迁移后把旧结果行搬到新键，避免结果页出现重复或过期准入。
+    for (old, new) in &stats.migrations {
+        let new_key = format!("sync:{id}:{new}");
+        match state.quality_store.get(&new_key) {
+            Ok(Some(_)) => continue,
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(source = id, %error, "读取新键结果失败");
+                continue;
+            }
+        }
+        for old_candidate in [old.clone(), canonical_key(old)] {
+            let old_key = format!("sync:{id}:{old_candidate}");
+            if old_key == new_key {
+                continue;
+            }
+            match state.quality_store.get(&old_key) {
+                Ok(Some(mut result)) => {
+                    result.key = new_key.clone();
+                    result.source_key = new.clone();
+                    if let Err(error) = state
+                        .quality_store
+                        .upsert(&result)
+                        .and_then(|_| state.quality_store.delete(&old_key))
+                    {
+                        tracing::warn!(source = id, %error, "迁移旧结果失败");
+                    }
+                    break;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(source = id, %error, "读取旧结果失败");
+                    break;
+                }
+            }
+        }
+    }
     let shrink_permille = if existing == 0 {
         0
     } else {
@@ -1101,6 +1155,7 @@ pub async fn sync_locked(
         status.gate_rejected = gate_stats.rejected;
         status.gate_removed = gate_stats.removed;
         status.gate_paused = false;
+        status.gate_pause_reason.clear();
         status.gate_truncated = gate_truncated;
         status.gate_cursor = gate_cursor.unwrap_or_default();
         status.gate_remaining = gate_remaining;
@@ -1725,6 +1780,41 @@ fn pair_channels(existing: &[ExistingRef<'_>], plan: &Plan) -> Vec<Option<usize>
         }
     }
     pairs
+}
+
+/// 给门控与 apply 共用的现有频道配对。
+///
+/// 键族、规范键与名称+URL 的配对逻辑只能有一份。否则重复键变化或旧 key 迁移时，
+/// 门控会把已准入频道当成新候选，apply 却仍按旧频道更新。
+pub(crate) fn pair_source_channels<'a>(
+    config: &'a Config,
+    source_id: &str,
+    plan: &Plan,
+) -> Vec<Option<(&'a Group, &'a Channel)>> {
+    let mut refs: Vec<ExistingRef<'a>> = Vec::new();
+    let mut channels: Vec<(&'a Group, &'a Channel)> = Vec::new();
+    for group in &config.groups {
+        for channel in &group.channels {
+            if channel.source_id != source_id || channel.source_key.is_empty() {
+                continue;
+            }
+            refs.push(ExistingRef {
+                key: &channel.source_key,
+                name: &channel.name,
+                url: &channel.url,
+            });
+            channels.push((group, channel));
+        }
+    }
+    // `pair_channels` 按现有频道槽位索引，值是计划频道下标。
+    // 门控按计划频道遍历，因此要反转为计划下标索引。
+    let mut paired = vec![None; plan.channels.len()];
+    for (slot, pair) in pair_channels(&refs, plan).into_iter().enumerate() {
+        if let Some(plan_index) = pair {
+            paired[plan_index] = Some(channels[slot]);
+        }
+    }
+    paired
 }
 
 fn channel_id_base(entry: &Entry, key: &str) -> String {

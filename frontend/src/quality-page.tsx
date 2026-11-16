@@ -62,6 +62,12 @@ const ACTION_LABEL: Record<string, string> = {
   skipped: '跳过',
 };
 
+const PAUSE_LABEL: Record<string, string> = {
+  guard: '安全阀已暂停',
+  budget: '本轮门控时限用尽',
+  probe_error: '地址变化探测错误，本轮已暂停',
+};
+
 function resultActionText(item: QualityResult): string {
   if (item.reason === 'guard') {
     return item.action === 'rejected' ? '暂停准入' : '暂停移出';
@@ -645,13 +651,6 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
               value={asText(draft, 'quality.rules.max_resolution')}
               onChange={(event) => update('quality.rules.max_resolution', event.target.value)}
               placeholder="3840x2160"
-            />
-          </Field>
-          <Field label="兜底保留" tip="有连通但阈值不合格时仍保留。">
-            <Switch
-              checked={asBool(draft, 'quality.rules.supply')}
-              onChange={(next) => update('quality.rules.supply', next)}
-              label="兜底保留"
             />
           </Field>
           <Field label="Host 缓存" tip="复用同一 Host 的成功测速，减少重复下载。">
@@ -1328,10 +1327,12 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
                       {item.truncated
                         ? `；本轮准入 ${item.admitted}，剩余 ${item.remaining} 个候选下一轮继续`
                         : ''}
-                      {item.paused ? '；安全阀已暂停' : ''}
+                      {item.paused
+                        ? `；${PAUSE_LABEL[item.pause_reason] ?? '本轮已暂停'}`
+                        : ''}
                     </div>
                   </td>
-                  <td>{item.admitted}</td>
+                  <td>{item.channels}</td>
                   <td>{item.removed}</td>
                   <td>
                     {item.tested > 0
@@ -1360,7 +1361,7 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
                           }
                           setDisable({
                             source: item,
-                            keep: remember,
+                            keep: true,
                             remember,
                             confirm: false,
                           });
@@ -1551,6 +1552,7 @@ export function QualityPage() {
   const [status, setStatus] = useState<QualityStatus | null>(null);
   const [busy, setBusy] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmRun, setConfirmRun] = useState(false);
 
   useEffect(() => {
     const onHash = () => {
@@ -1639,7 +1641,10 @@ export function QualityPage() {
         <button className="ghost" onClick={() => void load()} disabled={busy !== ''}>
           刷新
         </button>
-        <button onClick={() => void run()} disabled={busy !== '' || status?.running}>
+        <button
+          onClick={() => setConfirmRun(true)}
+          disabled={busy !== '' || status?.running}
+        >
           {busy === 'run' ? '已排入…' : '立即校验'}
         </button>
       </PageHead>
@@ -1660,7 +1665,7 @@ export function QualityPage() {
         <OverviewTab
           status={status}
           busy={busy !== ''}
-          onRun={() => void run()}
+          onRun={() => setConfirmRun(true)}
           onCancel={() => setConfirmCancel(true)}
         />
       )}
@@ -1677,6 +1682,22 @@ export function QualityPage() {
         />
       )}
       {tab === 'sources' && <SourcesTab onChanged={() => void load()} />}
+      {confirmRun ? (
+        <Confirm
+          title="立即校验全部频道？"
+          text={
+            status?.enabled
+              ? '启用状态下，校验失败的频道会立即移出分组。已移出的频道需要重新同步源才能恢复。'
+              : '质量校验已停用。本次只测量，不改变分组与订阅。'
+          }
+          confirmText="开始校验"
+          onCancel={() => setConfirmRun(false)}
+          onConfirm={() => {
+            setConfirmRun(false);
+            void run();
+          }}
+        />
+      ) : null}
       {confirmCancel ? (
         <div className="modal-overlay" onClick={() => setConfirmCancel(false)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
