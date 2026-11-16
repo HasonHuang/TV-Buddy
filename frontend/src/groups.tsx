@@ -571,7 +571,7 @@ export function GroupsPage() {
     const key = `${gid}/${cid}`;
     setCheckingQuality(key);
     try {
-      await runQuality('channel', key, 'quick', true);
+      await runQuality('channel', key, 'quick');
       ok('已排入质量校验');
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));

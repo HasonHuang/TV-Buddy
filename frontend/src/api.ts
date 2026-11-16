@@ -124,7 +124,7 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** 质量判定原因。与后端 `Reason::as_str` 一致。 */
+/** 质量判定原因。与后端结果记录的 `reason` 一致。 */
 export type QualityReason =
   | 'pass'
   | 'retained'
@@ -135,64 +135,124 @@ export type QualityReason =
   | 'delay_high'
   | 'supply'
   | 'probe_error'
+  | 'source_removed'
+  | 'source_disabled'
+  | 'source_changed'
+  | 'budget'
+  | 'cancelled'
+  | 'guard'
   | 'unknown';
+
+/** 结果动作用途。 */
+export type QualityAction =
+  | 'admitted'
+  | 'rejected'
+  | 'removed'
+  | 'kept'
+  | 'hidden'
+  | 'source_removed';
 
 /** 单频道质量结果。字段来自 `GET /quality/results`。 */
 export type QualityResult = {
+  key: string;
+  scope: 'sync' | 'manual' | string;
+  source_id: string;
+  source_key: string;
   gid: string;
   cid: string;
   name: string;
-  source_id: string;
+  target_group: string;
+  action: QualityAction | string;
+  reason: QualityReason;
+  ok: boolean;
+  delay_ms: number | null;
+  speed_mib: number | null;
+  resolution: string;
   checked_at: number;
   next_check_at: number;
-  last_ok_at: number | null;
   first_fail_at: number | null;
-  ok: boolean;
-  reachable: boolean;
-  reason: QualityReason;
-  delay_ms: number;
-  speed_mib: number;
-  width: number;
-  height: number;
-  resolution: string;
-  consecutive_fails: number;
-  flags: number;
-  hidden: boolean;
-  stale: boolean;
+  rule_hash: string;
+  /** 分组页徽章兼容字段；结果接口不返回时按最新结果推导。 */
+  hidden?: boolean;
+  stale?: boolean;
 };
 
 /** 一次校验任务的进度。 */
 export type QualityRun = {
   run_id: string;
+  trigger: string;
+  phase: string;
   started_at: number;
   total: number;
   tested: number;
   valid: number;
+  admitted: number;
+  removed: number;
+  rejected: number;
+  skipped: number;
   hidden: number;
   bytes: number;
   cancelled: boolean;
   finished: boolean;
+  paused_by_guard: boolean;
+  measure_only: boolean;
   error: string | null;
 };
 
 export type QualityStatus = {
   enabled: boolean;
-  probe_mode: string;
-  interval_secs: number;
+  quality_enabled: boolean;
   running: boolean;
   run: QualityRun | null;
+  schedule: {
+    mode: 'interval' | 'cron' | string;
+    interval_hours: number;
+    cron: string;
+    next_run_at: number;
+  };
+  counts: {
+    admitted: number;
+    removed_7d: number;
+    sources: number;
+  };
+  guard: {
+    enabled: boolean;
+    max_remove_ratio: number;
+    min_remove_count: number;
+    tripped: boolean;
+  };
+};
+
+/** 同步源的门控状态。 */
+export type QualitySource = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  gate_enabled: boolean;
+  phase: string;
+  tested: number;
+  admitted: number;
+  rejected: number;
+  removed: number;
+  paused: boolean;
+  truncated: boolean;
+  cursor: string;
+  remaining: number;
+  last_at: number;
+};
+
+/** 某个频道或全局的有效规则。 */
+export type QualityEffective = {
   rules: {
-    action: string;
-    retain: boolean;
-    supply: boolean;
+    enabled: boolean;
     min_speed_mib: number;
     max_delay_ms: number;
-    min_resolution: string;
-    max_resolution: string;
-    stale_keep_secs: number;
+    min_resolution_px: number | null;
+    max_resolution_px: number | null;
+    supply: boolean;
+    host_cache: boolean;
   };
-  ffprobe: { installed: boolean; required: boolean };
-  entries: number;
+  source_layer: 'channel' | 'group' | 'source' | 'global' | string;
 };
 
 export type QualityScope = 'all' | 'source' | 'group' | 'channel';
@@ -202,16 +262,26 @@ export function fetchQualityStatus(): Promise<QualityStatus> {
   return api<QualityStatus>('GET', '/quality/status');
 }
 
-/** 读取质量结果。可按分组、频道过滤。 */
+/** 读取质量结果。可按来源、分组、频道、动作、原因与关键字过滤。 */
 export function fetchQualityResults(params: {
+  source_id?: string;
   gid?: string;
   cid?: string;
+  action?: string;
+  reason?: string;
+  q?: string;
   limit?: number;
+  offset?: number;
 } = {}): Promise<{ total: number; items: QualityResult[] }> {
   const search = new URLSearchParams();
+  if (params.source_id) search.set('source_id', params.source_id);
   if (params.gid) search.set('gid', params.gid);
   if (params.cid) search.set('cid', params.cid);
+  if (params.action) search.set('action', params.action);
+  if (params.reason) search.set('reason', params.reason);
+  if (params.q) search.set('q', params.q);
   if (params.limit !== undefined) search.set('limit', String(params.limit));
+  if (params.offset !== undefined) search.set('offset', String(params.offset));
   const query = search.toString();
   return api<{ total: number; items: QualityResult[] }>(
     'GET',
@@ -219,17 +289,52 @@ export function fetchQualityResults(params: {
   );
 }
 
+/** 读取同步源门控统计。 */
+export function fetchQualitySources(): Promise<{ items: QualitySource[] }> {
+  return api<{ items: QualitySource[] }>('GET', '/quality/sources');
+}
+
+/** 读取有效规则与来源层级。 */
+export function fetchQualityEffective(params: {
+  source_id?: string;
+  gid?: string;
+  cid?: string;
+} = {}): Promise<QualityEffective> {
+  const search = new URLSearchParams();
+  if (params.source_id) search.set('source_id', params.source_id);
+  if (params.gid) search.set('gid', params.gid);
+  if (params.cid) search.set('cid', params.cid);
+  const query = search.toString();
+  return api<QualityEffective>('GET', `/quality/effective${query ? `?${query}` : ''}`);
+}
+
 /** 发起一次质量校验。`id` 在非 `all` 范围必填；频道用 `gid/cid`。 */
 export function runQuality(
   scope: QualityScope,
   id?: string,
   mode: 'quick' | 'full' = 'quick',
-  force = false,
-): Promise<{ ok: boolean; run_id: string; queued: number }> {
-  return api<{ ok: boolean; run_id: string; queued: number }>('POST', '/quality/run', {
-    scope,
-    ...(id ? { id } : {}),
-    run_mode: mode,
-    force,
-  });
+): Promise<{ ok: boolean; run_id: string; queued: number; measure_only: boolean }> {
+  return api<{ ok: boolean; run_id: string; queued: number; measure_only: boolean }>(
+    'POST',
+    '/quality/run',
+    {
+      scope,
+      ...(id ? { id } : {}),
+      run_mode: mode,
+    },
+  );
+}
+
+/** 取消当前质量任务。 */
+export function cancelQuality(): Promise<{ ok: boolean; running: boolean }> {
+  return api<{ ok: boolean; running: boolean }>('POST', '/quality/cancel');
+}
+
+/** 预览 cron 或按小时周期的未来 3 次运行时间。 */
+export function previewQualitySchedule(input: {
+  mode: 'interval' | 'cron';
+  interval_hours?: number;
+  cron?: string;
+}): Promise<{ times: number[] }> {
+  return api<{ times: number[] }>('POST', '/quality/schedule/preview', input);
 }

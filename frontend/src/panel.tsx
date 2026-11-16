@@ -16,6 +16,7 @@ import { LivestreamPage, SchedulePage } from './schedule';
 import { MySubsPage } from './my';
 import { formatUptime } from './format';
 import { Overview } from './overview';
+import { QualityPage } from './quality-page';
 import './style.css';
 
 /** 侧栏分区；顺序按目标面板。 */
@@ -24,6 +25,7 @@ type SectionId =
   | 'dashboard'
   | 'cache'
   | 'groups'
+  | 'quality'
   | 'settings'
   | 'security'
   | 'users'
@@ -43,6 +45,7 @@ const NAV: { id: SectionId; label: string; icon: IconName; feature?: string; adm
   { id: 'dashboard', label: '概览', icon: 'overview', adminOnly: true },
   { id: 'cache', label: '缓存状态', icon: 'cache', adminOnly: true },
   { id: 'groups', label: '分组管理', icon: 'groups', adminOnly: true },
+  { id: 'quality', label: '质量校验', icon: 'activity', adminOnly: true },
   { id: 'settings', label: '系统设置', icon: 'settings', adminOnly: true },
   { id: 'security', label: '安全管控', icon: 'security', adminOnly: true },
   { feature: 'users', id: 'users', label: '用户与设备', icon: 'users', adminOnly: true },
@@ -418,6 +421,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         )}
         {active === 'cache' && <CachePage />}
         {active === 'groups' && <GroupsPage />}
+        {active === 'quality' && <QualityPage />}
         {active === 'settings' && <SettingsPage onDirtyChange={markSettingsDirty} />}
         {active === 'security' && <SecurityPage />}
         {active === 'users' && <UsersPage />}

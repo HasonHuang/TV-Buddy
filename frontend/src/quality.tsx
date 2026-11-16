@@ -17,6 +17,12 @@ const REASON_LABEL: Record<QualityReason, string> = {
   delay_high: '延迟高',
   supply: '兜底保留',
   probe_error: '探测错误',
+  source_removed: '源已移除',
+  source_disabled: '源已停用',
+  source_changed: '源已变更',
+  budget: '预算跳过',
+  cancelled: '已取消',
+  guard: '安全阀暂停',
   unknown: '未校验',
 };
 
@@ -48,7 +54,8 @@ export function QualityBadges({ result }: { result?: QualityResult }) {
   if (!result) return null;
   const label = result.hidden ? '已隐藏' : REASON_LABEL[result.reason] ?? result.reason;
   const tone = result.hidden ? 'danger' : resultTone(result.reason);
-  const resolution = result.height > 0 ? `${result.height}p` : '';
+  const resolution = result.resolution.split('x')[1] ?? '';
+  const speed = result.speed_mib ?? 0;
   const tip = [
     `最近校验：${checkedText(result.checked_at)}`,
     `原因：${REASON_LABEL[result.reason] ?? result.reason}`,
@@ -59,11 +66,11 @@ export function QualityBadges({ result }: { result?: QualityResult }) {
     .join('；');
   return (
     <>
-      {result.delay_ms > 0 ? <Badge tone="muted">{result.delay_ms}ms</Badge> : null}
-      {result.speed_mib > 0 ? (
-        <Badge tone="muted">{result.speed_mib.toFixed(1)} MiB/s</Badge>
+      {result.delay_ms && result.delay_ms > 0 ? (
+        <Badge tone="muted">{result.delay_ms}ms</Badge>
       ) : null}
-      {resolution !== '' ? <Badge tone="muted">{resolution}</Badge> : null}
+      {speed > 0 ? <Badge tone="muted">{speed.toFixed(1)} MiB/s</Badge> : null}
+      {resolution !== '' ? <Badge tone="muted">{resolution}p</Badge> : null}
       <HoverTip text={tip}>
         <Badge tone={tone}>{label}</Badge>
       </HoverTip>
