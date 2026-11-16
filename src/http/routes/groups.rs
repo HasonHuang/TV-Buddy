@@ -282,9 +282,10 @@ pub async fn detach_group(
 ) -> Result<Json<Value>, ApiError> {
     let mut found = false;
     state
-        .mutate(|config| {
+        .mutate_admission_full(&[], |config| {
+            let delete_keys = subscription::group_result_keys(config, &gid);
             found = subscription::detach_group(config, &gid);
-            Ok(())
+            Ok((Vec::new(), delete_keys))
         })
         .map_err(|err| ApiError::internal(format!("{err:#}")))?;
     if !found {
@@ -302,9 +303,10 @@ pub async fn detach_channel(
 ) -> Result<Json<Value>, ApiError> {
     let mut found = false;
     state
-        .mutate(|config| {
+        .mutate_admission_full(&[], |config| {
+            let delete_keys = subscription::channel_result_keys(config, &gid, &cid);
             found = subscription::detach_channel(config, &gid, &cid);
-            Ok(())
+            Ok((Vec::new(), delete_keys))
         })
         .map_err(|err| ApiError::internal(format!("{err:#}")))?;
     if !found {
@@ -337,7 +339,8 @@ fn import(
     let mut imported = 0usize;
     let mut skipped = 0usize;
     state
-        .mutate(|config| {
+        .mutate_admission_full(&[], |config| {
+            let mut delete_keys = Vec::new();
             for group in &groups {
                 // 同步分组默认跳过。`include_synced=true` 才允许覆盖。
                 if !include_synced && !group.source_id.is_empty() {
@@ -354,6 +357,7 @@ fn import(
                             skipped += 1;
                             continue;
                         }
+                        delete_keys.extend(subscription::group_result_keys(config, &group.id));
                         config.groups[index] = group.clone();
                         imported += 1;
                     }
@@ -364,7 +368,7 @@ fn import(
                     }
                 }
             }
-            Ok(())
+            Ok((Vec::new(), delete_keys))
         })
         .map_err(|err| ApiError::internal(format!("{err:#}")))?;
 

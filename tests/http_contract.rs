@@ -6919,6 +6919,47 @@ async fn disable_source_can_keep_or_remove_channels() {
 }
 
 #[tokio::test]
+async fn detach_channel_clears_quality_result() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let key = "channel:pg/c1";
+    fixture
+        .state
+        .quality_store
+        .upsert(&tv_buddy::quality::store::QualityResult {
+            key: key.into(),
+            scope: "manual".into(),
+            gid: "pg".into(),
+            cid: "c1".into(),
+            action: "hidden".into(),
+            reason: "unreachable".into(),
+            ..Default::default()
+        })
+        .expect("写结果");
+    let response = fixture
+        .client
+        .post(format!(
+            "{}/panel/api/groups/pg/channels/c1/detach",
+            fixture.base
+        ))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("detach");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        fixture
+            .state
+            .quality_store
+            .get(key)
+            .expect("读结果")
+            .is_none(),
+        "转手工后必须清理旧质量结果"
+    );
+}
+
+#[tokio::test]
 async fn quality_api_returns_status_results_sources_and_effective_rules() {
     let extra = r#"{
         "quality": { "enabled": true, "probe_mode": "playlist" },

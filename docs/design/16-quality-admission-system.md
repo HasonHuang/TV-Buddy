@@ -76,7 +76,7 @@
 | `max_remove_ratio` | f64 | `0.5` | 将移出数 / 完成判定数。 |
 | `min_remove_count` | u64 | `10` | 小于该数量不触发。 |
 | `result_retention_days` | u64 | `7` | 0 = 不自动清理。 |
-| `gate_time_budget_secs` | u64 | `300` | 同步门控墙钟上限。0 = 不限制。 |
+| `gate_time_budget_secs` | u64 | `300` | 单轮墙钟上限。同步门控与周期/手动校验共用。0 = 不限制。 |
 
 ### 3.2 迁移
 
@@ -107,7 +107,8 @@
 - `min_remove_count` 范围 1–100000。
 - `result_retention_days` 范围 0–3650。
 - `gate_time_budget_secs` 范围 0–86400。
-- 最低分辨率不得高于最高分辨率。
+- 同一层的分辨率下限不得高于上限。
+- 每个现有频道的有效规则组合后，分辨率下限也不得高于上限。跨层冲突在保存时拒绝。
 
 ## 4 存储
 
@@ -185,6 +186,9 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 - 非 `admitted` 记录超过 `result_retention_days` 删除。
 - `admitted` 记录在频道被移出或源删除时转为对应 `action`，之后按保留期清理。
 - 删除手工频道时删除对应 `channel:<gid>/<cid>` 结果行，避免重建同 id 命中旧结果。
+- 源转手工、分组或频道 detach、覆盖导入、源切离同步时，删除对应 `sync:` / `channel:` 结果行。否则 `admitted` 行永久残留，重启水合还可能恢复旧隐藏状态。
+- 键迁移时，新键已有结果则只删除旧行；旧行不能因 `admitted` 跳过清理而永久保留。
+- 门控暂停结果提交前复核源仍启用、频道仍属于该源；不满足则丢弃，避免覆盖停用/删除写入的结果。
 - 同步源不再提供频道时写 `source_removed`，不静默丢记录。
 - 清理在启动时执行一次，之后每天一次。
 - `result_retention_days=0` 时不自动清理。
@@ -210,8 +214,8 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 
 `RunMemo`：
 
-- `url -> Measurement`，键为 URL、请求头、代理与分辨率上限的指纹。
-- `rules.host_cache=true` 时，另加 host 键。命中后仍逐频道检查可达性，只复用速率与延迟。
+- `url -> Measurement`，键为 URL、探测档位、请求头、代理与分辨率上限的指纹。
+- `rules.host_cache=true` 时，另加 Host 键。键含协议、主机、端口、代理与请求头；命中后仍逐频道检查可达性，只复用速率与延迟。
 - 只保存测量值，不保存判定。不同规则可复用同一测量。
 - 生命周期为一次任务。任务结束即释放。
 - 数量上限为本次目标数。不跨轮复用。
@@ -267,7 +271,8 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 定向规则：
 
 - 同步门控不执行解析脚本。候选频道尚未进入配置。
-- 使用计划中的频道 headers 与源代理。
+- 使用计划 headers，合并目标或现有分组的 headers 与 `user_agent`；代理按频道/分组 > 源。
+- 周期与手动校验使用同一套 headers 与代理回退，避免门控准入后直连复测。
 - 新候选 `probe_error`：不准入。
 - URL 变化 `probe_error`：暂停同步，保留原频道与原地址。
 
@@ -280,6 +285,7 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 - 已准入同步频道。
 - 手工频道按范围包含。
 - 跳过：全局关闭（measure_only 时不跳过探测，但不改成员）、源停用、源门控关闭、归档组。
+- `measure_only` 只写手工频道结果；同步频道保留已有准入行，避免覆盖 `admitted` 计数与下次检查时间。
 - 地址变化被门控暂停且新地址尚未写入时，周期校验不按旧地址重测。
 - 固定频道（`sync_follow=false`）照常探测，但失败只记 `kept`，不移出，也不计入安全阀。
 
@@ -328,7 +334,7 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 - 首次失败只记录 `first_fail_at`；宽限内恢复则清除。
 - `stale_keep_secs=0` 时立即下线。
 - 不提供移出。
-- 启动时从结果表水合，重启不丢失。
+- 启动时只从 `hidden` 结果水合下线状态。`kept` 失败可能是宽限内保留，不得恢复为失败 Entry。
 
 ### 5.6 订阅渲染与优先级
 
@@ -609,4 +615,4 @@ sync_lock → admission_lock → config.write_lock → SharedConn
 | 源停用/删除与运行中任务竞争 | 提交前复核：频道仍存在、`source_id` 未变、URL 哈希未变、源仍启用、源门控仍开启。不满足则跳过移出，记录 `skipped` / `source_changed`。 |
 | 旧 `rules.action`、`retain`、`supply` 字段 | 保留解析，避免旧配置失效；新引擎不读取。规则页只显示新字段，旧字段留在「其余字段」JSON。 |
 | 结果表增长 | 每个稳定键只保留一行。已准入行持续更新；非准入行超过保留期删除。启动时与每天各清理一次。 |
-| 低配环境同步门控耗时 | 保留预算、并发与进度；增加 `gate_time_budget_secs`，默认 300 秒。超时后未判定候选不进入计划，源状态标记截断。 |
+| 低配环境探测耗时 | 保留预算、并发与进度；`gate_time_budget_secs` 同时限制门控与周期/手动校验，默认 300 秒。超时后未处理频道留到下一轮；门控未判定候选不进入计划，源状态标记截断。 |

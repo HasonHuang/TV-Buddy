@@ -1,6 +1,9 @@
 //! 周期与手动准入引擎：探测、判定、移出与结果提交。
 
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 
@@ -121,7 +124,7 @@ pub fn due_targets(
             } else {
                 format!("sync:{}:{}", channel.source_id, channel.source_key)
             };
-            let previous = results.get(&key).ok().flatten();
+            let previous = results.get(&key)?;
             if let Some(previous) = previous.as_ref() {
                 // 地址变化被门控暂停时，新地址还没写入配置。
                 // 此时按旧地址重测会把刚通过的新地址判死，破坏暂停语义。
@@ -154,7 +157,10 @@ pub fn due_targets(
                     url: channel.url.clone(),
                     existing_url: None,
                     headers: candidate_headers(group, channel),
-                    proxy: config.proxy_for(&group.id, &channel.id).cloned(),
+                    proxy: config
+                        .proxy_for(&group.id, &channel.id)
+                        .or_else(|| source.and_then(|source| source.proxy.as_ref()))
+                        .cloned(),
                     rules,
                     url_hash: url_hash_hex(&channel.url),
                     is_url_change: false,
@@ -201,6 +207,9 @@ pub fn removal_allowed(config: &Config, removal: &Removal) -> bool {
     let Some(source) = source_of(config, channel) else {
         return false;
     };
+    if source.quality.as_ref().and_then(|quality| quality.enabled) == Some(false) {
+        return false;
+    }
     source.enabled && effective_rules(config, group, channel).enabled
 }
 
@@ -233,9 +242,12 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
     for outcome in outcomes {
         let candidate = &outcome.candidate;
         if measure_only {
-            decision
-                .results
-                .push(result_for(candidate, outcome, "kept", now));
+            // 同步频道只测量，不写结果。写 kept 会覆盖 admitted 行并改写计数。
+            if candidate.scope == CandidateScope::Manual {
+                decision
+                    .results
+                    .push(result_for(candidate, outcome, "kept", now));
+            }
             decision.kept += 1;
             continue;
         }
@@ -260,11 +272,14 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
                 } else {
                     decision.kept += 1;
                 }
-                decision.manual_entries.push((
-                    candidate.gid.clone(),
-                    candidate.cid.clone(),
-                    entry_for(candidate, outcome, now),
-                ));
+                // 宽限内失败不写 QualityState，否则订阅渲染会立即下线。
+                if action == "hidden" || outcome.verdict.ok {
+                    decision.manual_entries.push((
+                        candidate.gid.clone(),
+                        candidate.cid.clone(),
+                        entry_for(candidate, outcome, now),
+                    ));
+                }
                 decision
                     .results
                     .push(result_for(candidate, outcome, action, now));
@@ -343,11 +358,16 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
     };
     let concurrency = usize::try_from(config.quality.concurrency.clamp(1, 32)).unwrap_or(1);
     let budget_bytes = config.quality.budget_mb_per_run.saturating_mul(1024 * 1024);
+    let time_budget = config.quality.gate_time_budget_secs;
+    let started = Instant::now();
     let memo = std::sync::Mutex::new(RunMemo::default());
     let mut outcomes = Vec::new();
     let mut bytes = 0u64;
     for chunk in targets.chunks(concurrency) {
-        if state.quality.is_cancelled() || budget_reached(bytes, budget_bytes) {
+        if state.quality.is_cancelled()
+            || budget_reached(bytes, budget_bytes)
+            || time_budget_reached(started, time_budget)
+        {
             break;
         }
         let memo_ref = &memo;
@@ -479,6 +499,11 @@ fn budget_reached(bytes: u64, budget_bytes: u64) -> bool {
     budget_bytes > 0 && bytes >= budget_bytes.saturating_mul(9) / 10
 }
 
+/// 单轮墙钟是否耗尽。0 表示不限制。
+fn time_budget_reached(started: Instant, budget_secs: u64) -> bool {
+    budget_secs > 0 && started.elapsed() >= Duration::from_secs(budget_secs)
+}
+
 /// 提交前按最新配置复核。频道已删除、源已停用或地址已变化时不改结果状态。
 ///
 /// 移出结果本身会让频道不再存在，因此要保留。否则结果表仍显示旧的
@@ -583,8 +608,14 @@ fn guard_base_channels(config: &Config, scope: &RunScope) -> usize {
                 .filter(move |channel| scope_matches(scope, group, channel))
                 .filter(|channel| !channel.source_id.is_empty() && channel.sync_follow)
                 .filter(|channel| {
-                    source_of(config, channel).is_some_and(|source| source.enabled)
-                        && effective_rules(config, group, channel).enabled
+                    source_of(config, channel).is_some_and(|source| {
+                        source.enabled
+                            && source
+                                .quality
+                                .as_ref()
+                                .and_then(|quality| quality.enabled)
+                                != Some(false)
+                    }) && effective_rules(config, group, channel).enabled
                 })
         })
         .count()
@@ -607,6 +638,8 @@ fn entry_for(candidate: &Candidate, outcome: &CandidateOutcome, now: i64) -> Ent
         checked_at: now,
         first_fail_at: if ok {
             None
+        } else if outcome.verdict.reason == Reason::ProbeError {
+            candidate.previous_first_fail_at
         } else {
             candidate.previous_first_fail_at.or(Some(now))
         },
@@ -667,6 +700,8 @@ fn result_for(
         next_check_at: now.saturating_add(candidate.interval_secs as i64),
         first_fail_at: if outcome.verdict.ok {
             None
+        } else if outcome.verdict.reason == Reason::ProbeError {
+            candidate.previous_first_fail_at
         } else {
             candidate.previous_first_fail_at.or(Some(now))
         },
@@ -842,6 +877,36 @@ mod tests {
         config.groups[0].channels[0].url = "http://up/live.m3u8".into();
         config.playlist.sources[0].enabled = false;
         assert!(!removal_allowed(&config, &removal), "源停用后不得移出");
+        config.playlist.sources[0].enabled = true;
+        config.playlist.sources[0].quality = Some(crate::config::model::QualityOverride {
+            enabled: Some(false),
+            ..Default::default()
+        });
+        config.groups[0].quality = Some(crate::config::model::QualityOverride {
+            enabled: Some(true),
+            ..Default::default()
+        });
+        assert!(!removal_allowed(&config, &removal), "源门控关闭后不得移出");
+    }
+
+    #[test]
+    fn periodic_probe_uses_source_proxy() {
+        let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
+        let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
+        let mut config = config_with_sync_channel();
+        config.playlist.sources[0].proxy = Some(crate::config::model::ProxyCfg {
+            addr: "127.0.0.1:9".into(),
+            ..Default::default()
+        });
+        let due =
+            due_targets(&config, &store, &RunScope::All, 100, 0, false, false).expect("到期目标");
+        assert_eq!(due.len(), 1);
+        assert_eq!(
+            due[0].proxy.as_ref().map(|proxy| proxy.addr.as_str()),
+            Some("127.0.0.1:9"),
+            "周期探测必须沿用源代理"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -860,6 +925,11 @@ mod tests {
         let due =
             due_targets(&config, &store, &RunScope::All, 100, 0, false, false).expect("到期目标");
         assert!(due.is_empty(), "源门控关闭后不得周期移出");
+        assert_eq!(
+            guard_base_channels(&config, &RunScope::All),
+            0,
+            "源门控关闭的频道不计入安全阀基数"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -883,12 +953,33 @@ mod tests {
         let decision = decide(&[outcome.clone()], false, &Guard::default());
         assert_eq!(decision.results[0].action, "kept", "宽限内不隐藏");
         assert_eq!(decision.hidden, 0);
+        assert!(decision.manual_entries.is_empty(), "宽限内不写失败状态");
 
         let mut expired = outcome;
         expired.candidate.previous_first_fail_at = Some(now - 61);
         let decision = decide(&[expired], false, &Guard::default());
         assert_eq!(decision.results[0].action, "hidden", "超过宽限后隐藏");
         assert_eq!(decision.hidden, 1);
+    }
+
+    #[test]
+    fn probe_error_does_not_start_fail_clock() {
+        let decision = decide(
+            &[outcome(
+                "channel:g/c",
+                true,
+                true,
+                false,
+                Reason::ProbeError,
+            )],
+            false,
+            &Guard::default(),
+        );
+        assert_eq!(decision.results[0].action, "kept");
+        assert_eq!(
+            decision.results[0].first_fail_at, None,
+            "探测错误不得作为失败起点"
+        );
     }
 
     #[test]
@@ -964,6 +1055,15 @@ mod tests {
     }
 
     #[test]
+    fn time_budget_limits_run() {
+        let started = Instant::now();
+        assert!(!time_budget_reached(started, 0), "0 表示不限制");
+        assert!(!time_budget_reached(started, 3600));
+        let expired = Instant::now() - Duration::from_secs(11);
+        assert!(time_budget_reached(expired, 10));
+    }
+
+    #[test]
     fn guard_ignores_manual_and_probe_errors_in_denominator() {
         let guard = Guard {
             enabled: true,
@@ -1012,6 +1112,24 @@ mod tests {
             decide(&outcomes, false, &guard).paused,
             "探测错误不得稀释比例"
         );
+    }
+
+    #[test]
+    fn measure_only_does_not_overwrite_sync_results() {
+        let outcomes = vec![
+            outcome("sync:s1:c", false, false, false, Reason::Unreachable),
+            outcome("channel:g/c", true, true, false, Reason::Unreachable),
+        ];
+        let decision = decide(&outcomes, true, &Guard::default());
+        assert!(
+            decision
+                .results
+                .iter()
+                .all(|result| result.scope == "manual"),
+            "仅测量不得覆盖同步准入结果"
+        );
+        assert_eq!(decision.results.len(), 1);
+        assert!(decision.manual_entries.is_empty(), "仅测量不改手工状态");
     }
 
     #[test]

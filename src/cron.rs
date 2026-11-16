@@ -37,7 +37,10 @@ fn parse_cron_field(text: &str, min: u32, max: u32, sunday_seven: bool) -> Resul
             None => (part, 1),
         };
         let (start, end) = if range == "*" {
-            wildcard = true;
+            // `*/N` 是受限集合，不是通配。否则日/周字段的 OR 规则会忽略步长。
+            if step == 1 {
+                wildcard = true;
+            }
             (min, max)
         } else if let Some((start, end)) = range.split_once('-') {
             (
@@ -187,6 +190,15 @@ mod tests {
         assert!(cron_due("0 * * * *", next, 0, next - 1));
         assert!(!cron_due("0 * * * *", next, 0, next));
         assert!(!cron_due("bad", next, 0, 0), "非法表达式不触发");
+    }
+
+    #[test]
+    fn step_does_not_make_day_or_weekday_wildcard() {
+        let stepped = parse_cron("0 0 */2 * *").expect("cron");
+        assert!(!stepped.day.wildcard, "*/N 是受限集合");
+        assert!(stepped.weekday.wildcard);
+        let wildcard = parse_cron("0 0 * * *").expect("cron");
+        assert!(wildcard.day.wildcard);
     }
 
     #[test]

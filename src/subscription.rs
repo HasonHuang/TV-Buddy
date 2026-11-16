@@ -827,6 +827,97 @@ struct SourceChannelSnapshot {
     url_hash: String,
 }
 
+/// 一个源的全部质量结果键。用于源转手工或删除时清理。
+pub fn source_result_keys(config: &Config, source_id: &str) -> Vec<String> {
+    config
+        .groups
+        .iter()
+        .flat_map(|group| group.channels.iter())
+        .filter(|channel| channel.source_id == source_id)
+        .map(|channel| format!("sync:{source_id}:{}", channel.source_key))
+        .collect()
+}
+
+/// 一个分组内全部频道的质量结果键。用于导入覆盖或转手工时清理。
+pub fn group_result_keys(config: &Config, gid: &str) -> Vec<String> {
+    let Some(group) = config.group(gid) else {
+        return Vec::new();
+    };
+    group
+        .channels
+        .iter()
+        .map(|channel| {
+            if channel.source_id.is_empty() {
+                format!("channel:{gid}/{}", channel.id)
+            } else {
+                format!("sync:{}:{}", channel.source_id, channel.source_key)
+            }
+        })
+        .collect()
+}
+
+/// 单个频道的质量结果键。
+pub fn channel_result_keys(config: &Config, gid: &str, cid: &str) -> Vec<String> {
+    let Some(channel) = config
+        .group(gid)
+        .and_then(|group| group.channels.iter().find(|channel| channel.id == cid))
+    else {
+        return Vec::new();
+    };
+    if channel.source_id.is_empty() {
+        vec![format!("channel:{gid}/{cid}")]
+    } else {
+        vec![format!("sync:{}:{}", channel.source_id, channel.source_key)]
+    }
+}
+
+/// 把旧键结果迁移到新键。新键已有结果时只删除旧行。
+fn migrate_result_key(
+    store: &crate::quality::store::QualityStore,
+    old_key: &str,
+    new_key: &str,
+    new_source_key: &str,
+) -> anyhow::Result<()> {
+    if old_key == new_key {
+        return Ok(());
+    }
+    let new_exists = store.get(new_key)?.is_some();
+    let Some(mut result) = store.get(old_key)? else {
+        return Ok(());
+    };
+    if !new_exists {
+        result.key = new_key.to_string();
+        result.source_key = new_source_key.to_string();
+        store.upsert(&result)?;
+    }
+    store.delete(old_key)?;
+    Ok(())
+}
+
+/// 暂停结果提交前复核：源仍启用，已存在频道仍属于该源。
+fn paused_result_current(config: &Config, result: &QualityResult) -> bool {
+    let Some(source) = config
+        .playlist
+        .sources
+        .iter()
+        .find(|source| source.id == result.source_id)
+    else {
+        return false;
+    };
+    if !source.enabled {
+        return false;
+    }
+    if result.gid.is_empty() || result.cid.is_empty() {
+        return true;
+    }
+    config.group(&result.gid).is_some_and(|group| {
+        group
+            .channels
+            .iter()
+            .any(|channel| channel.id == result.cid && channel.source_id == source.id)
+    })
+}
+
 fn source_channel_snapshot(config: &Config, source_id: &str) -> Vec<SourceChannelSnapshot> {
     let mut items = Vec::new();
     for group in &config.groups {
@@ -969,10 +1060,34 @@ pub async fn sync_locked(
                 results,
                 stats,
             } => {
-                if let Err(error) = state.quality_store.upsert_many(&results) {
+                if let Err(error) = state.commit_quality_results(&[], results, |config, results| {
+                    results.retain(|result| paused_result_current(config, result));
+                    Vec::new()
+                }) {
                     let message = format!("写入质量结果失败: {error:#}");
                     finish_error(state, id, message);
                     return Err(error);
+                }
+                let still_current = state
+                    .snapshot()
+                    .playlist
+                    .sources
+                    .iter()
+                    .any(|source| source.id == id && source.enabled);
+                if !still_current {
+                    // 门控期间源被停用或删除。保留其状态与结果，不覆盖。
+                    state
+                        .sources
+                        .update_status(id, |status| status.syncing = false);
+                    return Ok(SyncReport {
+                        blocked: false,
+                        gate_paused: true,
+                        gate_admitted: stats.admitted,
+                        gate_rejected: stats.rejected,
+                        gate_removed: 0,
+                        gate_truncated: false,
+                        ..SyncReport::default()
+                    });
                 }
                 let now = now_secs();
                 state.sources.update_status(id, |status| {
@@ -1113,37 +1228,10 @@ pub async fn sync_locked(
     // 键迁移后把旧结果行搬到新键，避免结果页出现重复或过期准入。
     for (old, new) in &stats.migrations {
         let new_key = format!("sync:{id}:{new}");
-        match state.quality_store.get(&new_key) {
-            Ok(Some(_)) => continue,
-            Ok(None) => {}
-            Err(error) => {
-                tracing::warn!(source = id, %error, "读取新键结果失败");
-                continue;
-            }
-        }
         for old_candidate in [old.clone(), canonical_key(old)] {
             let old_key = format!("sync:{id}:{old_candidate}");
-            if old_key == new_key {
-                continue;
-            }
-            match state.quality_store.get(&old_key) {
-                Ok(Some(mut result)) => {
-                    result.key = new_key.clone();
-                    result.source_key = new.clone();
-                    if let Err(error) = state
-                        .quality_store
-                        .upsert(&result)
-                        .and_then(|_| state.quality_store.delete(&old_key))
-                    {
-                        tracing::warn!(source = id, %error, "迁移旧结果失败");
-                    }
-                    break;
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    tracing::warn!(source = id, %error, "读取旧结果失败");
-                    break;
-                }
+            if let Err(error) = migrate_result_key(&state.quality_store, &old_key, &new_key, new) {
+                tracing::warn!(source = id, %error, "迁移旧结果失败");
             }
         }
     }
@@ -3056,6 +3144,89 @@ mod tests {
         assert_eq!(config.groups.len(), 1);
         assert_eq!(config.groups[0].name, "资讯");
         assert_eq!(config.groups[0].id, gid, "改名保留分组 id");
+    }
+
+    #[test]
+    fn result_keys_cover_manual_and_sync_channels() {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g".into(),
+            channels: vec![
+                Channel {
+                    id: "m".into(),
+                    ..Channel::default()
+                },
+                Channel {
+                    id: "s".into(),
+                    source_id: "src".into(),
+                    source_key: "key".into(),
+                    ..Channel::default()
+                },
+            ],
+            ..Group::default()
+        });
+        let keys = group_result_keys(&config, "g");
+        assert!(keys.contains(&"channel:g/m".to_string()));
+        assert!(keys.contains(&"sync:src:key".to_string()));
+        assert_eq!(channel_result_keys(&config, "g", "s"), vec!["sync:src:key"]);
+    }
+
+    #[test]
+    fn paused_result_requires_enabled_source_and_channel() {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g".into(),
+            channels: vec![Channel {
+                id: "c".into(),
+                source_id: "s".into(),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        let result = QualityResult {
+            scope: "sync".into(),
+            source_id: "s".into(),
+            source_key: "c".into(),
+            gid: "g".into(),
+            cid: "c".into(),
+            ..QualityResult::default()
+        };
+        assert!(!paused_result_current(&config, &result), "源不存在时不写");
+        config
+            .playlist
+            .sources
+            .push(crate::config::model::PlaylistSource {
+                id: "s".into(),
+                enabled: true,
+                ..Default::default()
+            });
+        assert!(paused_result_current(&config, &result));
+        config.playlist.sources[0].enabled = false;
+        assert!(!paused_result_current(&config, &result), "源停用时不写");
+    }
+
+    #[test]
+    fn result_key_migration_deletes_old_admitted_row() {
+        let dir = std::env::temp_dir().join(format!("tvb-migrate-{}", uuid::Uuid::new_v4()));
+        let store = crate::quality::store::QualityStore::new(
+            crate::db::connect(&dir.join("tvb.db")).expect("db"),
+        );
+        let row = |key: &str| crate::quality::store::QualityResult {
+            key: key.into(),
+            scope: "sync".into(),
+            source_id: "s".into(),
+            source_key: "old".into(),
+            action: "admitted".into(),
+            reason: "pass".into(),
+            ok: true,
+            ..Default::default()
+        };
+        store.upsert(&row("sync:s:old")).expect("旧行");
+        store.upsert(&row("sync:s:new")).expect("新行");
+        migrate_result_key(&store, "sync:s:old", "sync:s:new", "new").expect("迁移");
+        assert!(store.get("sync:s:old").expect("读旧").is_none());
+        assert!(store.get("sync:s:new").expect("读新").is_some());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

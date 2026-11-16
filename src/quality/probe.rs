@@ -534,10 +534,31 @@ pub async fn probe(
     }
 
     if mode == ProbeMode::Playlist {
-        return ProbeOutput {
-            measurement,
-            bytes: total_bytes,
-            duration_ms: started.elapsed().as_millis() as u64,
+        let request = with_headers(client.get(&segments[0]).timeout(limits.speed_timeout), headers);
+        return match request.send().await {
+            Ok(response) if response.status().is_success() => ProbeOutput {
+                measurement,
+                bytes: total_bytes,
+                duration_ms: started.elapsed().as_millis() as u64,
+            },
+            Ok(response) => {
+                measurement.reachable = false;
+                measurement.error = Some(format!("切片 HTTP {}", response.status()));
+                ProbeOutput {
+                    measurement,
+                    bytes: total_bytes,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                }
+            }
+            Err(error) => {
+                measurement.reachable = false;
+                measurement.error = Some(error.to_string());
+                ProbeOutput {
+                    measurement,
+                    bytes: total_bytes,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                }
+            }
         };
     }
 
@@ -811,6 +832,51 @@ high/index.m3u8\n";
         assert!(out.measurement.reachable, "清单本身可读");
         assert!(out.measurement.probe_error, "切片全部失败按探测错误处理");
         assert_eq!(out.measurement.error.as_deref(), Some("切片全部失败"));
+    }
+
+    #[tokio::test]
+    async fn playlist_mode_checks_first_segment() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            for _ in 0..2 {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buf = [0u8; 1024];
+                let read = socket.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..read]);
+                let (status, mime, payload) = if request.starts_with("GET /live.m3u8 ") {
+                    (
+                        "200 OK",
+                        "application/vnd.apple.mpegurl",
+                        "#EXTM3U\n#EXTINF:1,\nseg1.ts\n#EXTINF:1,\nseg2.ts\n",
+                    )
+                } else {
+                    ("404 Not Found", "text/plain", "")
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                    payload.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        let client = reqwest::Client::new();
+        let out = probe(
+            &client,
+            &format!("http://{addr}/live.m3u8"),
+            &[],
+            ProbeMode::Playlist,
+            None,
+            &ProbeLimits::for_test(),
+        )
+        .await;
+        assert!(!out.measurement.reachable, "首个切片不可访问应判不可达");
+        assert!(!out.measurement.probe_error);
     }
 
     #[tokio::test]

@@ -75,6 +75,16 @@ pub fn validate(config: &Config) -> anyhow::Result<()> {
             }
         }
     }
+    for group in &config.groups {
+        for channel in &group.channels {
+            let rules = crate::quality::rules::effective_rules(config, group, channel);
+            if let (Some(min), Some(max)) = (rules.min_resolution_px, rules.max_resolution_px) {
+                if min > max {
+                    bail!("频道 {}/{} 的有效分辨率下限高于上限", group.id, channel.id);
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -543,5 +553,24 @@ mod tests {
         config.quality.rules.min_resolution = "1920x1080".into();
         config.quality.rules.max_resolution = "1280x720".into();
         assert!(validate(&config).is_err());
+
+        let mut config = Config::default();
+        config.quality.rules.max_resolution = "1280x720".into();
+        config.groups.push(Group {
+            id: "g".into(),
+            channels: vec![Channel {
+                id: "c".into(),
+                quality: Some(crate::config::model::QualityOverride {
+                    min_resolution: Some("1920x1080".into()),
+                    ..Default::default()
+                }),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        assert!(
+            validate(&config).is_err(),
+            "跨层组合后 min 大于 max 必须拒绝"
+        );
     }
 }

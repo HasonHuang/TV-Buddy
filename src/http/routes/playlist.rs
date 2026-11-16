@@ -206,7 +206,12 @@ pub async fn update_source(
 
     let mut detached = 0;
     state
-        .mutate(|config| {
+        .mutate_admission_full(&[], |config| {
+            let delete_keys = if leaves_sync {
+                subscription::source_result_keys(config, &id)
+            } else {
+                Vec::new()
+            };
             let Some(slot) = config
                 .playlist
                 .sources
@@ -223,7 +228,7 @@ pub async fn update_source(
                     subscription::detach_source(config, &id)
                 };
             }
-            Ok(())
+            Ok((Vec::new(), delete_keys))
         })
         .map_err(map_internal)?;
     // 切换模式后，旧状态只属于旧模式。清空计数与提醒，避免聚合行显示托管状态。

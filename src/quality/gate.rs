@@ -8,6 +8,7 @@ use std::{
 
 use crate::{
     config::model::{Config, PlaylistSource},
+    http::routes::stream as stream_headers,
     quality::{
         admission::{candidate_rules, url_hash_hex, Candidate, CandidateScope},
         probe::{probe, ProbeMode, ProbeOutput},
@@ -140,6 +141,18 @@ pub fn select_targets(
             .cloned();
         let is_url_change = existing
             .is_some_and(|(_, channel)| url_hash_hex(&channel.url) != url_hash_hex(&planned.url));
+        let header_group = existing.map(|(group, _)| group).or(target);
+        let channel_agent =
+            existing.and_then(|(_, channel)| stream_headers::user_agent(&channel.extra));
+        let headers = match header_group {
+            Some(group) => stream_headers::merge_upstream_headers(
+                &group.headers,
+                stream_headers::user_agent(&group.extra),
+                &planned.headers,
+                channel_agent,
+            ),
+            None => header_pairs(&planned.headers),
+        };
         let candidate = Candidate {
             key: planned.key.clone(),
             scope: CandidateScope::Sync,
@@ -153,7 +166,7 @@ pub fn select_targets(
                 .unwrap_or_default(),
             url: planned.url.clone(),
             existing_url: existing.map(|(_, channel)| channel.url.clone()),
-            headers: header_pairs(&planned.headers),
+            headers,
             proxy,
             rules,
             url_hash: url_hash_hex(&planned.url),
@@ -422,7 +435,7 @@ fn header_pairs(headers: &[serde_json::Value]) -> Vec<(String, String)> {
 #[derive(Debug, Default)]
 pub struct RunMemo {
     by_url: HashMap<u64, Measurement>,
-    by_host: HashMap<String, Measurement>,
+    by_host: HashMap<u64, Measurement>,
 }
 
 impl RunMemo {
@@ -430,14 +443,14 @@ impl RunMemo {
         self.by_url.get(&url_hash)
     }
 
-    pub fn get_host(&self, host: &str) -> Option<&Measurement> {
-        self.by_host.get(host)
+    pub fn get_host(&self, host_key: u64) -> Option<&Measurement> {
+        self.by_host.get(&host_key)
     }
 
     pub fn insert(
         &mut self,
         url_hash: u64,
-        host: Option<&str>,
+        host_key: Option<u64>,
         measurement: Measurement,
         host_cache: bool,
     ) {
@@ -445,8 +458,8 @@ impl RunMemo {
             .entry(url_hash)
             .or_insert_with(|| measurement.clone());
         if host_cache {
-            if let Some(host) = host {
-                self.by_host.entry(host.to_string()).or_insert(measurement);
+            if let Some(host_key) = host_key {
+                self.by_host.entry(host_key).or_insert(measurement);
             }
         }
     }
@@ -567,11 +580,17 @@ fn previous_first_fail(state: &AppState, candidate: &Candidate) -> Option<i64> {
         .and_then(|result| result.first_fail_at)
 }
 
-/// 单轮测量缓存的键。代理、请求头与分辨率上限都会改变测量结果。
-fn memo_fingerprint(url: &str, candidate: &Candidate) -> u64 {
+/// 单轮测量缓存的键。探测档位、代理、请求头与分辨率上限都会改变测量结果。
+fn memo_fingerprint(url: &str, candidate: &Candidate, mode: ProbeMode) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     url.hash(&mut hasher);
+    let rank = match mode {
+        ProbeMode::Reachability => 0u8,
+        ProbeMode::Playlist => 1,
+        ProbeMode::Speed => 2,
+    };
+    rank.hash(&mut hasher);
     candidate.headers.hash(&mut hasher);
     candidate.rules.max_resolution_px.hash(&mut hasher);
     if let Some(proxy) = &candidate.proxy {
@@ -581,6 +600,25 @@ fn memo_fingerprint(url: &str, candidate: &Candidate) -> u64 {
         proxy.pass.hash(&mut hasher);
     }
     hasher.finish()
+}
+
+/// Host 缓存键。同一 origin 但代理或请求头不同时不得共享测速值。
+fn host_cache_key(url: &str, candidate: &Candidate) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let parsed = url::Url::parse(url).ok()?;
+    let host = parsed.host_str()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    parsed.scheme().hash(&mut hasher);
+    host.hash(&mut hasher);
+    parsed.port_or_known_default().hash(&mut hasher);
+    candidate.headers.hash(&mut hasher);
+    if let Some(proxy) = &candidate.proxy {
+        proxy.kind.hash(&mut hasher);
+        proxy.addr.hash(&mut hasher);
+        proxy.user.hash(&mut hasher);
+        proxy.pass.hash(&mut hasher);
+    }
+    Some(hasher.finish())
 }
 
 /// Host 缓存命中时只复用速率与延迟。可达性仍逐频道探测。
@@ -688,29 +726,29 @@ pub(crate) async fn probe_candidate(
     };
 
     let dash_fallback = dash_url_change(candidate, config);
-    let host = url::Url::parse(&probe_url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_string));
-    let key = memo_fingerprint(&probe_url, candidate);
-    let (url_cached, host_cached) = {
-        let memo = memo.lock().unwrap_or_else(|error| error.into_inner());
-        let url_cached = memo.get(key).cloned();
-        let host_cached = (candidate.rules.host_cache && !dash_fallback).then(|| {
-            host.as_deref()
-                .and_then(|host| memo.get_host(host))
-                .filter(|measurement| {
-                    measurement.reachable
-                        && !measurement.probe_error
-                        && measurement.speed_mib.is_some()
-                })
-                .cloned()
-        });
-        (url_cached, host_cached.flatten())
-    };
     let probe_mode = if dash_fallback {
         ProbeMode::Reachability
     } else {
         required_probe_mode(config, &candidate.rules)
+    };
+    let host_key = host_cache_key(&probe_url, candidate);
+    let key = memo_fingerprint(&probe_url, candidate, probe_mode);
+    let (url_cached, host_cached) = {
+        let memo = memo.lock().unwrap_or_else(|error| error.into_inner());
+        let url_cached = memo.get(key).cloned();
+        let host_cached = (candidate.rules.host_cache && !dash_fallback)
+            .then(|| {
+                host_key
+                    .and_then(|key| memo.get_host(key))
+                    .filter(|measurement| {
+                        measurement.reachable
+                            && !measurement.probe_error
+                            && measurement.speed_mib.is_some()
+                    })
+                    .cloned()
+            })
+            .flatten();
+        (url_cached, host_cached)
     };
     let output = match (url_cached, host_cached) {
         (Some(measurement), _) => ProbeOutput {
@@ -747,7 +785,7 @@ pub(crate) async fn probe_candidate(
                 .unwrap_or_else(|error| error.into_inner())
                 .insert(
                     key,
-                    host.as_deref(),
+                    host_key,
                     output.measurement.clone(),
                     candidate.rules.host_cache,
                 );
@@ -940,8 +978,8 @@ mod tests {
         let mut changed = base.clone();
         changed.headers = vec![("X-Test".into(), "a".into())];
         assert_ne!(
-            memo_fingerprint(&base.url, &base),
-            memo_fingerprint(&base.url, &changed),
+            memo_fingerprint(&base.url, &base, ProbeMode::Speed),
+            memo_fingerprint(&base.url, &changed, ProbeMode::Speed),
             "请求头不同不得共享测量"
         );
         changed.headers.clear();
@@ -950,17 +988,38 @@ mod tests {
             ..Default::default()
         });
         assert_ne!(
-            memo_fingerprint(&base.url, &base),
-            memo_fingerprint(&base.url, &changed),
+            memo_fingerprint(&base.url, &base, ProbeMode::Speed),
+            memo_fingerprint(&base.url, &changed, ProbeMode::Speed),
             "代理不同不得共享测量"
         );
         changed.proxy = None;
         changed.rules.max_resolution_px = Some(1280);
         assert_ne!(
-            memo_fingerprint(&base.url, &base),
-            memo_fingerprint(&base.url, &changed),
+            memo_fingerprint(&base.url, &base, ProbeMode::Speed),
+            memo_fingerprint(&base.url, &changed, ProbeMode::Speed),
             "分辨率上限不同不得共享测量"
         );
+        assert_ne!(
+            memo_fingerprint(&base.url, &base, ProbeMode::Reachability),
+            memo_fingerprint(&base.url, &base, ProbeMode::Speed),
+            "探测档位不同不得共享测量"
+        );
+    }
+
+    #[test]
+    fn host_cache_key_separates_proxy_and_headers() {
+        let base = candidate("c1", true);
+        let key = host_cache_key(&base.url, &base);
+        assert!(key.is_some());
+        let mut changed = base.clone();
+        changed.proxy = Some(crate::config::model::ProxyCfg {
+            addr: "127.0.0.1:9".into(),
+            ..Default::default()
+        });
+        assert_ne!(key, host_cache_key(&base.url, &changed));
+        changed.proxy = None;
+        changed.headers = vec![("X-Test".into(), "a".into())];
+        assert_ne!(key, host_cache_key(&base.url, &changed));
     }
 
     #[test]
@@ -990,6 +1049,25 @@ mod tests {
             host_cache_probe_mode(&EffectiveRules::default()),
             ProbeMode::Reachability
         );
+    }
+
+    #[test]
+    fn gate_candidate_merges_group_headers() {
+        let mut config = config_with_existing(&["c1"]);
+        config.groups[0].headers = vec![serde_json::json!("Referer: https://example.test/")];
+        config.groups[0]
+            .extra
+            .insert("user_agent".into(), serde_json::json!("GateUA/1.0"));
+        let mut plan = plan_with(&["c1"]);
+        plan.channels[0].url = "http://up/new.m3u8".into();
+        let targets = select_targets(&config, &source(), &plan, None, 10);
+        let headers = &targets.url_changed[0].headers;
+        assert!(headers
+            .iter()
+            .any(|(name, value)| name == "Referer" && value == "https://example.test/"));
+        assert!(headers
+            .iter()
+            .any(|(name, value)| name.eq_ignore_ascii_case("user-agent") && value == "GateUA/1.0"));
     }
 
     #[test]
@@ -1095,9 +1173,9 @@ mod tests {
         assert!(memo.get(1).is_none());
         memo.insert(1, None, measurement.clone(), false);
         assert_eq!(memo.get(1), Some(&measurement));
-        memo.insert(2, Some("example.com"), measurement.clone(), true);
+        memo.insert(2, Some(7), measurement.clone(), true);
         assert_eq!(memo.get(2), Some(&measurement));
-        assert_eq!(memo.get_host("example.com"), Some(&measurement));
+        assert_eq!(memo.get_host(7), Some(&measurement));
     }
 
     #[test]

@@ -4,7 +4,7 @@
  * 结果页与来源页在后续任务补齐筛选与操作，这里先给出可读视图。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   api,
@@ -667,7 +667,7 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
               onChange={(value) => update('quality.max_channels_per_run', value)}
             />
           </Field>
-          <Field label="同步门控时限" hint="秒，0 = 不限制">
+          <Field label="单轮时限" hint="秒，门控与校验共用；0 = 不限制">
             <NumberInput
               min={0}
               value={asNumber(draft, 'quality.gate_time_budget_secs')}
@@ -844,6 +844,7 @@ function ResultsTab({
   const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
   const [detail, setDetail] = useState<QualityResult | null>(null);
   const [rerun, setRerun] = useState<QualityResult | null>(null);
+  const requestSeq = useRef(0);
 
   useEffect(() => {
     setFilters({
@@ -910,15 +911,18 @@ function ResultsTab({
   }, []);
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     try {
       const body = await fetchQualityResults({
         ...filters,
         limit,
         offset,
       });
-      setData(body);
+      if (seq === requestSeq.current) setData(body);
     } catch (error) {
-      err(error instanceof Error ? error.message : String(error));
+      if (seq === requestSeq.current) {
+        err(error instanceof Error ? error.message : String(error));
+      }
     }
   }, [err, filters, limit, offset]);
 

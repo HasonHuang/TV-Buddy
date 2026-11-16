@@ -483,13 +483,14 @@ pub async fn panel_content(
         .unwrap_or(true);
     let mut count = 0;
     state
-        .mutate(|config| {
+        .mutate_admission_full(&[], |config| {
+            let delete_keys = subscription::source_result_keys(config, &id);
             count = if to_manual {
                 subscription::detach_source(config, &id)
             } else {
                 subscription::remove_source_content(config, &id)
             };
-            Ok(())
+            Ok((Vec::new(), delete_keys))
         })
         .map_err(|error| ApiError::internal(format!("{error:#}")))?;
     tracing::info!(source = %id, channels = count, to_manual, "订阅内容已清理");

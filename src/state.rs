@@ -234,6 +234,11 @@ impl AppState {
     pub fn hydrate_manual_quality(&self) -> anyhow::Result<()> {
         let config = self.snapshot();
         for result in self.quality_store.manual_entries()? {
+            // 只有 hidden 需要恢复下线状态。kept 失败可能是宽限内保留，
+            // 重启后恢复失败 Entry 会绕过宽限。
+            if result.action != "hidden" {
+                continue;
+            }
             let Some(group) = config.group(&result.gid) else {
                 continue;
             };
@@ -724,6 +729,49 @@ mod tests {
             .unwrap();
         state.hydrate_manual_quality().unwrap();
         assert!(state.quality.get("g1", "c1").is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn grace_kept_manual_result_is_not_hydrated() {
+        let dir = std::env::temp_dir().join(format!("tvb-hydrate-{}", uuid::Uuid::new_v4()));
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g1".into(),
+            channels: vec![Channel {
+                id: "c1".into(),
+                url: "http://up/live.m3u8".into(),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        let state = std::sync::Arc::new(
+            AppState::new(
+                dir.join("tvb.db"),
+                config,
+                std::sync::Arc::new(crate::logging::RingBuffer::default()),
+            )
+            .expect("state"),
+        );
+        state
+            .quality_store
+            .upsert(&QualityResult {
+                key: "channel:g1/c1".into(),
+                scope: "manual".into(),
+                action: "kept".into(),
+                reason: "unreachable".into(),
+                gid: "g1".into(),
+                cid: "c1".into(),
+                url_hash: crate::quality::admission::url_hash_hex("http://up/live.m3u8"),
+                checked_at: 1,
+                ..QualityResult::default()
+            })
+            .unwrap();
+        state.hydrate_manual_quality().unwrap();
+        assert!(
+            state.quality.get("g1", "c1").is_none(),
+            "宽限内保留不得恢复为失败状态"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

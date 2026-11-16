@@ -1466,16 +1466,10 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 
 ### 12.3 冒烟脚本
 
-新增 `scripts/smoke-quality.sh`：
+旧 `scripts/smoke-quality.sh` 已由质量准入验收脚本取代：
 
-1. 启动本地样本服务与 TV Buddy。
-2. 登录管理员，启用 `quality`，动作设为 `mark`。
-3. 手动校验全部，确认结果与计数。
-4. 切换动作为 `hide`，确认不合格频道从订阅清单消失。
-5. 恢复样本，确认频道自动回到清单。
-6. 固定保留一个不合格频道，确认它仍显示。
-7. 触发源连续失败，确认自动停用与手动恢复。
-8. 关闭 `quality`，确认订阅清单恢复原状。
+- `scripts/smoke-quality-admission.sh`
+- 场景见 [`15-quality-admission-function.md`](15-quality-admission-function.md) §13。
 
 ## 13 兼容与迁移
 
@@ -1541,5 +1535,5 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 | `frontend/src/playlist.tsx` | 源合格率、源规则、自动停用状态、测试源。 |
 | `frontend/src/system.tsx` | 最近任务与 `ffprobe` 状态。 |
 | `frontend/src/api.ts` | 质量接口类型。 |
-| `scripts/smoke-quality.sh` | 冒烟脚本。 |
+| `scripts/smoke-quality-admission.sh` | 质量准入验收脚本。 |
 | `tests/` | 单元与集成样本。 |
