@@ -22,6 +22,12 @@ impl Action {
     }
 }
 
+impl Default for Action {
+    fn default() -> Self {
+        Self::Hide
+    }
+}
+
 /// 判定原因。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Reason {
@@ -68,6 +74,21 @@ pub struct Measurement {
     pub error: Option<String>,
 }
 
+impl Default for Measurement {
+    fn default() -> Self {
+        Self {
+            reachable: false,
+            probe_error: false,
+            http_status: None,
+            delay_ms: None,
+            speed_mib: None,
+            width: None,
+            height: None,
+            error: None,
+        }
+    }
+}
+
 /// 逐字段继承后的有效规则。
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectiveRules {
@@ -82,6 +103,24 @@ pub struct EffectiveRules {
     pub supply: bool,
     pub host_cache: bool,
     pub stale_keep_secs: u64,
+}
+
+impl Default for EffectiveRules {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            action: Action::Hide,
+            retain: false,
+            min_speed_mib: 0.0,
+            max_delay_ms: 0,
+            min_resolution_px: None,
+            max_resolution_px: None,
+            resolution_speed_map: BTreeMap::new(),
+            supply: false,
+            host_cache: true,
+            stale_keep_secs: 0,
+        }
+    }
 }
 
 /// 一条频道的判定结果。
@@ -158,10 +197,8 @@ pub fn effective_rules(config: &Config, group: &Group, channel: &Channel) -> Eff
             quality.min_speed_mib
         })
         .unwrap_or(rules.min_speed_mib),
-        max_delay_ms: pick(channel_q, group_q, source_q, |quality| {
-            quality.max_delay_ms
-        })
-        .unwrap_or(rules.max_delay_ms),
+        max_delay_ms: pick(channel_q, group_q, source_q, |quality| quality.max_delay_ms)
+            .unwrap_or(rules.max_delay_ms),
         min_resolution_px: pick(channel_q, group_q, source_q, |quality| {
             quality.min_resolution.clone()
         })

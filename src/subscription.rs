@@ -16,7 +16,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    config::model::{Channel, Config, Group, PlaylistCfg, PlaylistSource},
+    config::model::{Channel, Config, Group, PlaylistCfg, PlaylistSource, QualityOverride},
     m3u::{self, Entry},
     state::AppState,
     subs::{self, PreviewSource, SourceStatus},
@@ -26,7 +26,7 @@ use crate::{
 pub const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 /// 计划中的一个分组。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlannedGroup {
     /// 上游原分组名（合并组取第一个上游分组）。
     pub original: String,
@@ -38,6 +38,8 @@ pub struct PlannedGroup {
     /// `merge_into` 指定的已有分组 id；空值表示按源独立建组。
     pub merge_id: String,
     pub count: usize,
+    /// 现有目标分组的质量覆盖。新分组为 `None`。
+    pub quality: Option<QualityOverride>,
 }
 
 /// 计划中的一个频道。
@@ -253,6 +255,7 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
                 name,
                 merge_id,
                 count: 1,
+                quality: None,
             }),
         }
 
@@ -272,12 +275,60 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
         });
     }
 
+    for group in &mut groups {
+        if let Some(index) = find_target_group(&config.groups, source, group) {
+            group.quality = config.groups[index].quality.clone();
+        }
+    }
+
     Plan {
         channels,
         groups,
         duplicates,
         trace: selection.trace,
     }
+}
+
+/// 查找计划分组对应的现有分组。`apply` 与 `plan` 共用同一套匹配。
+pub(crate) fn find_target_group(
+    groups: &[Group],
+    source: &PlaylistSource,
+    planned: &PlannedGroup,
+) -> Option<usize> {
+    let explicit = !planned.merge_id.is_empty();
+    if explicit {
+        let by_id = groups.iter().position(|g| g.id == planned.merge_id);
+        return by_id.or_else(|| {
+            groups.iter().position(|group| {
+                group.origin == "sync"
+                    && group.source_id == source.id
+                    && sync_marker(group, SYNC_TARGET_KEY) == planned.target
+            })
+        });
+    }
+    if planned.target.starts_with("new:") {
+        // 新组身份只认标记。首次同步不复用 source_group 匹配的旧组，
+        // 否则旧频道留在原位，合并后的顺序不再按上游条目。
+        return groups.iter().position(|group| {
+            group.origin == "sync"
+                && group.source_id == source.id
+                && sync_marker(group, SYNC_TARGET_KEY) == planned.target
+        });
+    }
+    // 先按身份标记找，避免旧同名分组抢先命中导致分组 ID 漂移。
+    let by_marker = groups.iter().position(|group| {
+        group.origin == "sync"
+            && group.source_id == source.id
+            && sync_marker(group, SYNC_TARGET_KEY) == planned.target
+    });
+    by_marker.or_else(|| {
+        groups.iter().position(|group| {
+            group.origin == "sync"
+                && group.source_id == source.id
+                && (group.source_group == planned.original
+                    || (group.source_group.is_empty() && group.name == planned.name))
+        })
+    })
 }
 
 /// 应用计划。一次改写 `config.groups`。
@@ -296,43 +347,8 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
             continue;
         }
         let name = planned.name.clone();
-        // 显式并入已有组：先按 id 找。目标被删除后，按身份标记找回
-        // 上次为这个目标建立的同步组，避免每次同步都新建一组。
-        // 不用同名/原分组名回退，避免把频道放进错误的组。
         let explicit = !planned.merge_id.is_empty();
-        let existing = if explicit {
-            let by_id = groups.iter().position(|g| g.id == planned.merge_id);
-            by_id.or_else(|| {
-                groups.iter().position(|group| {
-                    group.origin == "sync"
-                        && group.source_id == source.id
-                        && sync_marker(group, SYNC_TARGET_KEY) == planned.target
-                })
-            })
-        } else if planned.target.starts_with("new:") {
-            // 新组身份只认标记。首次同步不复用 source_group 匹配的旧组，
-            // 否则旧频道留在原位，合并后的顺序不再按上游条目。
-            groups.iter().position(|group| {
-                group.origin == "sync"
-                    && group.source_id == source.id
-                    && sync_marker(group, SYNC_TARGET_KEY) == planned.target
-            })
-        } else {
-            // 先按身份标记找，避免旧同名分组抢先命中导致分组 ID 漂移。
-            let by_marker = groups.iter().position(|group| {
-                group.origin == "sync"
-                    && group.source_id == source.id
-                    && sync_marker(group, SYNC_TARGET_KEY) == planned.target
-            });
-            by_marker.or_else(|| {
-                groups.iter().position(|group| {
-                    group.origin == "sync"
-                        && group.source_id == source.id
-                        && (group.source_group == planned.original
-                            || (group.source_group.is_empty() && group.name == name))
-                })
-            })
-        };
+        let existing = find_target_group(&groups, source, planned);
         let id = match existing {
             Some(idx) => {
                 // 已有组是显式目标。保留名称与全部设置，只更新频道。
@@ -1703,6 +1719,26 @@ mod tests {
         assert_eq!(config.groups[0].origin, "sync");
         assert_eq!(config.groups[0].source_id, "s1");
         assert_eq!(config.groups[0].access, "public");
+    }
+
+    #[test]
+    fn plan_copies_existing_group_quality() {
+        let mut config = config_with_source();
+        let source = source();
+        let entries = urls(&[("c1", "央视", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+        config.groups[0].quality = Some(QualityOverride {
+            min_speed_mib: Some(3.0),
+            ..QualityOverride::default()
+        });
+        let plan = plan(&config, &source, &entries);
+        assert_eq!(
+            plan.groups[0]
+                .quality
+                .as_ref()
+                .and_then(|quality| quality.min_speed_mib),
+            Some(3.0)
+        );
     }
 
     #[test]

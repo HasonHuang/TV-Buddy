@@ -2,6 +2,7 @@
 //!
 //! 设计见 `docs/design/13-availability-and-speedtest.md`。
 
+pub mod admission;
 pub mod probe;
 pub mod rules;
 pub mod store;
