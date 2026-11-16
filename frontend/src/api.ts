@@ -150,7 +150,10 @@ export type QualityAction =
   | 'removed'
   | 'kept'
   | 'hidden'
-  | 'source_removed';
+  | 'source_removed'
+  | 'held'
+  | 'removal_paused'
+  | 'skipped';
 
 /** 单频道质量结果。字段来自 `GET /quality/results`。 */
 export type QualityResult = {

@@ -33,6 +33,9 @@ const ACTION_LABEL: Record<string, string> = {
   kept: '保留',
   hidden: '下线',
   source_removed: '源移除',
+  held: '暂停准入',
+  removal_paused: '暂停移出',
+  skipped: '跳过',
 };
 
 function actionTone(action: string): string {
@@ -43,6 +46,9 @@ function actionTone(action: string): string {
     case 'rejected':
       return 'danger';
     case 'hidden':
+      return 'warn';
+    case 'held':
+    case 'removal_paused':
       return 'warn';
     default:
       return 'muted';

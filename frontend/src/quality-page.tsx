@@ -57,6 +57,9 @@ const ACTION_LABEL: Record<string, string> = {
   kept: '保留',
   hidden: '下线',
   source_removed: '源移除',
+  held: '暂停准入',
+  removal_paused: '暂停移出',
+  skipped: '跳过',
 };
 
 function resultActionText(item: QualityResult): string {
@@ -75,6 +78,9 @@ function resultActionTone(item: QualityResult): string {
     case 'rejected':
       return 'danger';
     case 'hidden':
+      return 'warn';
+    case 'held':
+    case 'removal_paused':
       return 'warn';
     default:
       return 'muted';
@@ -802,6 +808,9 @@ function ResultsTab({
                 { value: 'hidden', label: '已下线' },
                 { value: 'kept', label: '已保留' },
                 { value: 'source_removed', label: '源已移除' },
+                { value: 'held', label: '暂停准入' },
+                { value: 'removal_paused', label: '暂停移出' },
+                { value: 'skipped', label: '跳过' },
               ]}
               onChange={(next) => setFilter('action', next)}
             />
