@@ -339,8 +339,8 @@ pub async fn probe(
         error: None,
     };
 
-    // P1 不解析 DASH。按探测能力缺失处理，不判不可达。
-    if is_dash(url) {
+    // P1 不解析 DASH。连通档只检查 HTTP，仍可判定地址是否在线。
+    if is_dash(url) && mode != ProbeMode::Reachability {
         return ProbeOutput {
             measurement: probe_error("DASH 清单暂不支持", true),
             bytes: 0,
@@ -572,8 +572,8 @@ pub async fn probe(
     }
     total_bytes = total_bytes.saturating_add(sample_bytes);
     if sample_bytes == 0 || sample_time.is_zero() {
-        measurement.reachable = false;
-        measurement.error = Some("切片全部失败".to_string());
+        // 清单可读但所有样本切片都失败：按探测错误处理，不判不可达。
+        measurement = probe_error("切片全部失败", true);
     } else {
         measurement.speed_mib =
             Some(sample_bytes as f64 / sample_time.as_secs_f64() / 1024.0 / 1024.0);
@@ -765,6 +765,69 @@ high/index.m3u8\n";
         .await;
         assert!(out.measurement.probe_error);
         assert!(out.measurement.reachable, "解析能力缺失不算不可达");
+    }
+
+    #[tokio::test]
+    async fn probe_marks_all_failed_segments_as_probe_error() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            for _ in 0..3 {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buf = [0u8; 1024];
+                let read = socket.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..read]);
+                let (status, mime, payload) = if request.starts_with("GET /live.m3u8 ") {
+                    (
+                        "200 OK",
+                        "application/vnd.apple.mpegurl",
+                        "#EXTM3U\n#EXTINF:1,\nseg1.ts\n#EXTINF:1,\nseg2.ts\n#EXTINF:1,\nseg3.ts\n",
+                    )
+                } else {
+                    ("404 Not Found", "text/plain", "")
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                    payload.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        let client = reqwest::Client::new();
+        let out = probe(
+            &client,
+            &format!("http://{addr}/live.m3u8"),
+            &[],
+            ProbeMode::Speed,
+            None,
+            &ProbeLimits::for_test(),
+        )
+        .await;
+        assert!(out.measurement.reachable, "清单本身可读");
+        assert!(out.measurement.probe_error, "切片全部失败按探测错误处理");
+        assert_eq!(out.measurement.error.as_deref(), Some("切片全部失败"));
+    }
+
+    #[tokio::test]
+    async fn probe_reachability_checks_dash_http_status() {
+        let url = serve_once("/live.mpd", "application/dash+xml", "mpd".into(), "200 OK").await;
+        let client = reqwest::Client::new();
+        let out = probe(
+            &client,
+            &url,
+            &[],
+            ProbeMode::Reachability,
+            None,
+            &ProbeLimits::for_test(),
+        )
+        .await;
+        assert!(out.measurement.reachable);
+        assert!(!out.measurement.probe_error);
     }
 
     #[tokio::test]

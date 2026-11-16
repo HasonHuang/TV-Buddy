@@ -846,7 +846,7 @@ fn source_channel_snapshot(config: &Config, source_id: &str) -> Vec<SourceChanne
     items
 }
 
-fn source_channel_ids(config: &Config, source_id: &str) -> HashSet<(String, String)> {
+fn source_channel_keys(config: &Config, source_id: &str) -> HashSet<String> {
     config
         .groups
         .iter()
@@ -855,9 +855,26 @@ fn source_channel_ids(config: &Config, source_id: &str) -> HashSet<(String, Stri
                 .channels
                 .iter()
                 .filter(|channel| channel.source_id == source_id && !channel.source_key.is_empty())
-                .map(|channel| (group.id.clone(), channel.id.clone()))
+                .map(|channel| canonical_key(&channel.source_key))
         })
         .collect()
+}
+
+/// 频道是否仍在源中。键迁移也算保留。
+///
+/// 只比较 `(gid, cid)` 会把移组当成删除；只比较键会把旧键迁移当成删除。
+fn source_channel_survived(
+    key: &str,
+    after: &HashSet<String>,
+    migrations: &[(String, String)],
+) -> bool {
+    let old = canonical_key(key);
+    if after.contains(&old) {
+        return true;
+    }
+    migrations
+        .iter()
+        .any(|(from, to)| canonical_key(from) == old && after.contains(&canonical_key(to)))
 }
 
 /// 同步一个源。调用方应已持有全局同步锁。
@@ -1051,9 +1068,13 @@ pub async fn sync_locked(
             }
         }
         if let Some(before) = before {
-            let after = source_channel_ids(config, id);
+            let after = source_channel_keys(config, id);
+            let migrations = applied
+                .as_ref()
+                .map(|stats| stats.migrations.as_slice())
+                .unwrap_or(&[]);
             for item in before {
-                if after.contains(&(item.gid.clone(), item.cid.clone())) {
+                if source_channel_survived(&item.key, &after, migrations) {
                     continue;
                 }
                 let key = format!("sync:{id}:{}", item.key);
@@ -3035,6 +3056,27 @@ mod tests {
         assert_eq!(config.groups.len(), 1);
         assert_eq!(config.groups[0].name, "资讯");
         assert_eq!(config.groups[0].id, gid, "改名保留分组 id");
+    }
+
+    #[test]
+    fn source_removal_identity_handles_move_and_key_migration() {
+        let after: HashSet<String> = ["id:one".to_string()].into_iter().collect();
+        assert!(
+            source_channel_survived("id:one", &after, &[]),
+            "移组但键不变时仍在源中"
+        );
+        assert!(
+            source_channel_survived(
+                "name:旧名\u{1f}频道",
+                &after,
+                &[("name:旧名\u{1f}频道".into(), "id:one".into())]
+            ),
+            "键迁移后仍算保留"
+        );
+        assert!(
+            !source_channel_survived("id:gone", &after, &[]),
+            "源不再提供该键时算移除"
+        );
     }
 
     #[test]

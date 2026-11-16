@@ -32,6 +32,8 @@ pub struct Candidate {
     pub rules: EffectiveRules,
     pub url_hash: String,
     pub is_url_change: bool,
+    /// 跟随上游字段。固定频道只测量，不移出。
+    pub sync_follow: bool,
     pub offline_on_fail: bool,
     pub interval_secs: u64,
     pub previous_first_fail_at: Option<i64>,

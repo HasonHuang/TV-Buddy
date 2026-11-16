@@ -118,6 +118,15 @@ pub fn due_targets(
                 format!("sync:{}:{}", channel.source_id, channel.source_key)
             };
             let previous = results.get(&key).ok().flatten();
+            if let Some(previous) = previous.as_ref() {
+                // 地址变化被门控暂停时，新地址还没写入配置。
+                // 此时按旧地址重测会把刚通过的新地址判死，破坏暂停语义。
+                if matches!(previous.action.as_str(), "held" | "removal_paused")
+                    && previous.url_hash != url_hash_hex(&channel.url)
+                {
+                    continue;
+                }
+            }
             let next_check_at = previous.as_ref().map_or(0, |result| result.next_check_at);
             if !include_not_due && next_check_at > now {
                 continue;
@@ -145,6 +154,7 @@ pub fn due_targets(
                     rules,
                     url_hash: url_hash_hex(&channel.url),
                     is_url_change: false,
+                    sync_follow: channel.sync_follow,
                     offline_on_fail: config.offline_on_fail_for(&group.id, &channel.id),
                     interval_secs: config.quality.interval_hours.saturating_mul(3_600),
                     previous_first_fail_at: previous
@@ -178,7 +188,10 @@ pub fn removal_allowed(config: &Config, removal: &Removal) -> bool {
     else {
         return false;
     };
-    if channel.source_id.is_empty() || url_hash_hex(&channel.url) != removal.url_hash {
+    if channel.source_id.is_empty()
+        || !channel.sync_follow
+        || url_hash_hex(&channel.url) != removal.url_hash
+    {
         return false;
     }
     let Some(source) = source_of(config, channel) else {
@@ -198,6 +211,7 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
         .iter()
         .filter(|outcome| {
             outcome.candidate.scope == CandidateScope::Sync
+                && outcome.candidate.sync_follow
                 && !outcome.verdict.ok
                 && outcome.verdict.reason != Reason::ProbeError
         })
@@ -206,6 +220,7 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
         .iter()
         .filter(|outcome| {
             outcome.candidate.scope == CandidateScope::Sync
+                && outcome.candidate.sync_follow
                 && !matches!(outcome.verdict.reason, Reason::ProbeError | Reason::Unknown)
         })
         .count();
@@ -257,6 +272,12 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
                     decision
                         .results
                         .push(result_for(candidate, outcome, action, now));
+                } else if !candidate.sync_follow {
+                    // 固定频道保留管理员编辑的字段，不参与移出。
+                    decision.kept += 1;
+                    decision
+                        .results
+                        .push(result_for(candidate, outcome, "kept", now));
                 } else if outcome.verdict.reason == Reason::ProbeError {
                     decision.skipped += 1;
                     decision
@@ -331,7 +352,7 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
             let state = state_ref;
             let config = config_ref;
             let memo = memo_ref;
-            async move { probe_candidate(state, config, &candidate, memo).await }
+            async move { probe_candidate(state, config, &candidate, memo, true).await }
         });
         for outcome in futures_util::future::join_all(jobs).await {
             bytes = bytes.saturating_add(outcome.bytes);
@@ -530,34 +551,13 @@ fn scope_matches(scope: &RunScope, group: &Group, channel: &Channel) -> bool {
 }
 
 fn candidate_headers(group: &Group, channel: &Channel) -> Vec<(String, String)> {
-    let mut headers: Vec<(String, String)> = Vec::new();
-    for value in group.headers.iter().chain(channel.headers.iter()) {
-        let Some((name, value)) = header_pair(value) else {
-            continue;
-        };
-        if let Some(existing) = headers
-            .iter_mut()
-            .find(|(existing, _)| existing.eq_ignore_ascii_case(&name))
-        {
-            existing.0 = name;
-            existing.1 = value;
-        } else {
-            headers.push((name, value));
-        }
-    }
-    headers
-}
-
-fn header_pair(value: &serde_json::Value) -> Option<(String, String)> {
-    if let Some(text) = value.as_str() {
-        let (name, value) = text.split_once(':')?;
-        let name = name.trim();
-        return (!name.is_empty()).then(|| (name.to_string(), value.trim().to_string()));
-    }
-    let table = value.as_object()?;
-    let name = table.get("name")?.as_str()?.trim();
-    let value = table.get("value")?.as_str()?.trim();
-    (!name.is_empty()).then(|| (name.to_string(), value.to_string()))
+    use crate::http::routes::stream::{merge_upstream_headers, user_agent};
+    merge_upstream_headers(
+        &group.headers,
+        user_agent(&group.extra),
+        &channel.headers,
+        user_agent(&channel.extra),
+    )
 }
 
 fn entry_for(candidate: &Candidate, outcome: &CandidateOutcome, now: i64) -> Entry {
@@ -647,6 +647,7 @@ mod tests {
             rules::{Measurement, Verdict},
         },
     };
+    use serde_json::json;
 
     fn candidate(key: &str, manual: bool, offline: bool) -> Candidate {
         Candidate {
@@ -669,6 +670,7 @@ mod tests {
             rules: crate::quality::rules::EffectiveRules::default(),
             url_hash: url_hash_hex("http://up/live.m3u8"),
             is_url_change: false,
+            sync_follow: true,
             offline_on_fail: offline,
             interval_secs: 6 * 3600,
             previous_first_fail_at: None,
@@ -921,6 +923,73 @@ mod tests {
             decide(&outcomes, false, &guard).paused,
             "探测错误不得稀释比例"
         );
+    }
+
+    #[test]
+    fn pinned_sync_channel_is_kept_not_removed() {
+        let mut outcomes = vec![outcome(
+            "sync:s1:c",
+            false,
+            false,
+            false,
+            Reason::Unreachable,
+        )];
+        outcomes[0].candidate.sync_follow = false;
+        let guard = Guard {
+            enabled: true,
+            max_remove_ratio: 0.5,
+            min_remove_count: 1,
+        };
+        let decision = decide(&outcomes, false, &guard);
+        assert!(decision.removals.is_empty(), "固定频道不得移出");
+        assert_eq!(decision.removed, 0);
+        assert_eq!(decision.results[0].action, "kept");
+        assert!(!decision.paused, "固定频道失败不计入安全阀");
+    }
+
+    #[test]
+    fn candidate_headers_include_user_agent() {
+        let mut group = Group::default();
+        group
+            .extra
+            .insert("user_agent".into(), json!("GroupUA/1.0"));
+        group.headers = vec![json!("X-Group: yes")];
+        let mut channel = Channel::default();
+        channel
+            .extra
+            .insert("user_agent".into(), json!("ChannelUA/2.0"));
+        channel.headers = vec![json!("X-Channel: yes")];
+        let headers = candidate_headers(&group, &channel);
+        assert!(headers.iter().any(
+            |(name, value)| name.eq_ignore_ascii_case("user-agent") && value == "ChannelUA/2.0"
+        ));
+        assert!(headers.iter().any(|(name, _)| name == "X-Group"));
+        assert!(headers.iter().any(|(name, _)| name == "X-Channel"));
+    }
+
+    #[test]
+    fn paused_url_change_is_not_probed_on_old_url() {
+        let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
+        let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
+        store
+            .upsert(&QualityResult {
+                key: "sync:s1:c".into(),
+                scope: "sync".into(),
+                source_id: "s1".into(),
+                source_key: "c".into(),
+                gid: "g".into(),
+                cid: "c".into(),
+                url_hash: url_hash_hex("http://up/new.m3u8"),
+                action: "removal_paused".into(),
+                reason: "unreachable".into(),
+                ..QualityResult::default()
+            })
+            .expect("写结果");
+        let config = config_with_sync_channel();
+        let due =
+            due_targets(&config, &store, &RunScope::All, 100, 0, false, false).expect("到期目标");
+        assert!(due.is_empty(), "暂停的新地址尚不应按旧地址重测");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

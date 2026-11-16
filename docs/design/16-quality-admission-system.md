@@ -208,8 +208,8 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 
 `RunMemo`：
 
-- `url -> Measurement`，键为去掉 `$描述` 后的 URL 哈希。
-- `rules.host_cache=true` 时，另加 host 键。
+- `url -> Measurement`，键为 URL、请求头、代理与分辨率上限的指纹。
+- `rules.host_cache=true` 时，另加 host 键。命中后仍逐频道检查可达性，只复用速率与延迟。
 - 只保存测量值，不保存判定。不同规则可复用同一测量。
 - 生命周期为一次任务。任务结束即释放。
 - 数量上限为本次目标数。不跨轮复用。
@@ -222,6 +222,8 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 
 - **新候选**：计划中存在，但配置中按 `source_id + source_key` 找不到。
 - **URL 变化**：配置中已存在，且计划 URL 的哈希与当前不同。
+
+`sync_follow=false` 的固定频道不探测。`apply` 不更新或删除这类频道，门控探测只会产生无法执行的结果，并污染安全阀统计。
 
 已准入且未变化的频道不参与同步门控。它们由周期校验负责移出。这样避免同步与周期重复探测，也避免大源每轮都全量测速。
 
@@ -246,7 +248,7 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 5. 未变化频道原样保留在计划。
 6. 重建 `plan.groups`，删除没有频道的计划分组。
 7. 计算安全阀：
-   - `tested` = 本轮完成判定的 URL 变化频道与新候选数。
+   - `tested` = 本轮完成判定的 URL 变化频道与新候选数。`probe_error` 与未知不计入。
    - `removals` = URL 变化且不合格的频道数。
    - 条件：`guard_enabled && tested > 0 && removals >= min_remove_count && removals / tested >= max_remove_ratio`。
 8. 安全阀触发：返回 `Paused`，不应用任何成员变更。
@@ -275,21 +277,23 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 - 已准入同步频道。
 - 手工频道按范围包含。
 - 跳过：全局关闭（measure_only 时不跳过探测，但不改成员）、源停用、源门控关闭、归档组。
+- 地址变化被门控暂停且新地址尚未写入时，周期校验不按旧地址重测。
+- 固定频道（`sync_follow=false`）照常探测，但失败只记 `kept`，不移出，也不计入安全阀。
 
 步骤：
 
 1. 选目标，按 `next_check_at` 与预算截断。
-2. 探测并判定。
-3. 同步频道不合格：收集为移出候选。
+2. 探测并判定。频道配置了解析脚本时，先执行脚本；脚本失败记 `probe_error`。
+3. 同步频道不合格：收集为移出候选。固定频道除外。
 4. 手工频道不合格：收集为下线候选；合格则清除下线状态。
-5. 安全阀只统计同步频道移出。
+5. 安全阀只统计可移出的同步频道。`probe_error`、未知、固定频道不计入分母或移出数。
 6. 触发安全阀：不执行成员变更。结果动作写 `removal_paused`（失败未移出）或 `held`（合格但未准入）。
 7. 未触发：`mutate_admission` 执行：
    - 从 `config.groups` 删除移出候选。
    - 更新 `quality_results`。
    - 更新手工频道 `QualityState`。
    - 更新 `quality_meta`。
-8. 移出前复核：频道仍存在、URL 哈希未变、源仍启用、源门控仍开启。否则跳过并记录 `skipped` / `source_changed`。
+8. 移出前复核：频道仍存在、URL 哈希未变、源仍启用、源门控仍开启、频道仍跟随上游。否则跳过并记录 `skipped` / `source_changed`。
 
 取消：
 

@@ -188,6 +188,22 @@ async fn sync_playlist(headers: axum::http::HeaderMap) -> Response {
         .into_response()
 }
 
+/// 伪上游：同 Host 正常与失效频道。用于验证 Host 缓存不跳过可达性。
+async fn host_cache_playlist(headers: axum::http::HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    let body = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"缓存\",A正常\nhttp://{host}/gate-live.m3u8\n#EXTINF:-1 group-title=\"缓存\",B失效\nhttp://{host}/gate-missing.m3u8\n"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        body,
+    )
+        .into_response()
+}
+
 /// 伪上游：门控探测会阻塞的源，用于验证抓取期间配置变化。
 async fn slow_gate_source(headers: axum::http::HeaderMap) -> Response {
     let host = headers
@@ -468,6 +484,7 @@ async fn fixture_with_options(
             axum::routing::post(upstream_translate_single),
         )
         .route("/sync.m3u8", get(sync_playlist))
+        .route("/host-cache-source.m3u8", get(host_cache_playlist))
         .route("/sync-removed.m3u8", get(sync_removed_playlist))
         .route("/sync-changed.m3u8", get(sync_changed_playlist))
         .route("/slow-gate-source.m3u8", get(slow_gate_source))
@@ -6555,6 +6572,90 @@ async fn sync_gate_admits_only_passing_channels() {
             .any(|item| item.action == "source_removed" && item.name == "正常频道"),
         "{results:?}"
     );
+}
+
+#[tokio::test]
+async fn host_cache_still_checks_each_url_reachability() {
+    let extra = r#"{
+        "quality": {
+            "enabled": true,
+            "probe_mode": "speed",
+            "max_channels_per_run": 10,
+            "rules": { "host_cache": true }
+        },
+        "playlist": { "sources": [{
+            "id": "cache", "name": "缓存源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/host-cache-source.m3u8"
+        }] }
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let report = tv_buddy::subscription::sync_source(&fixture.state, "cache", false)
+        .await
+        .expect("同步");
+    assert!(!report.gate_paused, "{report:?}");
+    let config = fixture.state.snapshot();
+    let group = config
+        .groups
+        .iter()
+        .find(|group| group.source_id == "cache")
+        .expect("缓存分组");
+    assert_eq!(group.channels.len(), 1, "失效频道不得复用 Host 成功测量");
+    assert_eq!(group.channels[0].name, "A正常");
+    let (_, results) = fixture
+        .state
+        .quality_store
+        .list(&tv_buddy::quality::store::QualityFilter::default())
+        .expect("结果");
+    assert!(
+        results
+            .iter()
+            .any(|item| item.name == "B失效" && item.reason == "unreachable"),
+        "{results:?}"
+    );
+}
+
+#[tokio::test]
+async fn engine_runs_resolver_script_before_probe() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "reachability", "max_channels_per_run": 10 },
+        "groups": [{
+            "id": "rg", "name": "解析组", "mode": "proxy", "access": "open",
+            "channels": [{
+                "id": "c1", "name": "脚本频道", "url": "http://127.0.0.1:9/never",
+                "resolver_script": "probe.py", "resolver_ttl": 60,
+                "offline_on_fail": true
+            }]
+        }]
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let resolvers = fixture.dir.join("cache/resolvers");
+    std::fs::create_dir_all(&resolvers).expect("建脚本目录");
+    std::fs::write(
+        resolvers.join("probe.py"),
+        format!("print('{}/live.m3u8')\n", fixture.upstream),
+    )
+    .expect("写脚本");
+
+    let summary = tv_buddy::quality::engine::run(
+        &fixture.state,
+        tv_buddy::quality::engine::RunSpec {
+            run_id: "q-resolver".into(),
+            trigger: tv_buddy::quality::engine::RunTrigger::Manual,
+            scope: tv_buddy::quality::state::RunScope::All,
+            measure_only: false,
+        },
+    )
+    .await
+    .expect("运行");
+    assert_eq!(summary.hidden, 0, "解析后的地址应判合格");
+    let item = fixture
+        .state
+        .quality_store
+        .get("channel:rg/c1")
+        .expect("结果")
+        .expect("存在");
+    assert_eq!(item.reason, "pass");
+    assert_eq!(item.action, "kept");
 }
 
 #[tokio::test]

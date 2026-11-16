@@ -1828,7 +1828,7 @@ pub(crate) fn channel_headers(state: &AppState, gid: &str, cid: &str) -> Vec<(St
     )
 }
 
-fn user_agent(extra: &crate::config::model::Extra) -> Option<&str> {
+pub(crate) fn user_agent(extra: &crate::config::model::Extra) -> Option<&str> {
     extra
         .get("user_agent")
         .and_then(serde_json::Value::as_str)
@@ -1837,7 +1837,7 @@ fn user_agent(extra: &crate::config::model::Extra) -> Option<&str> {
 }
 
 /// 纯函数形式，便于单测。
-fn merge_upstream_headers(
+pub(crate) fn merge_upstream_headers(
     group_headers: &[serde_json::Value],
     group_agent: Option<&str>,
     channel_headers: &[serde_json::Value],

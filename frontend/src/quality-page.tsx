@@ -214,6 +214,54 @@ function asBool(root: Cfg, path: string): boolean {
   return getPath(root, path) === true;
 }
 
+/** 数字输入。编辑期间保留原始文本，避免 0、空值与小数点被默认值覆盖。 */
+function NumberInput({
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  onChange: (value: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(String(value));
+  }, [focused, value]);
+  const commit = (raw: string) => {
+    const parsed = Number(raw);
+    if (raw.trim() === '' || !Number.isFinite(parsed)) return;
+    let next = parsed;
+    if (min !== undefined && next < min) next = min;
+    if (max !== undefined && next > max) next = max;
+    onChange(next);
+  };
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={text}
+      onFocus={() => setFocused(true)}
+      onChange={(event) => {
+        setText(event.target.value);
+        commit(event.target.value);
+      }}
+      onBlur={() => {
+        setFocused(false);
+        const parsed = Number(text);
+        if (text.trim() === '' || !Number.isFinite(parsed)) setText(String(value));
+      }}
+    />
+  );
+}
+
 function overrideFields(value: unknown): string {
   if (!value || typeof value !== 'object') return '';
   return Object.entries(value as Cfg)
@@ -492,14 +540,11 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
             />
           </Field>
           <Field label="间隔小时" hint="1–8760">
-            <input
-              type="number"
+            <NumberInput
               min={1}
               max={8760}
               value={asNumber(draft, 'quality.interval_hours')}
-              onChange={(event) =>
-                update('quality.interval_hours', Number(event.target.value) || 1)
-              }
+              onChange={(value) => update('quality.interval_hours', value)}
             />
           </Field>
           <Field label="cron 表达式" hint="分 时 日 月 周，按服务器时区">
@@ -533,75 +578,54 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
             />
           </Field>
           <Field label="校验超时" hint="秒">
-            <input
-              type="number"
+            <NumberInput
               min={1}
               value={asNumber(draft, 'quality.timeout_secs')}
-              onChange={(event) =>
-                update('quality.timeout_secs', Number(event.target.value) || 1)
-              }
+              onChange={(value) => update('quality.timeout_secs', value)}
             />
           </Field>
           <Field label="测速超时" hint="秒">
-            <input
-              type="number"
+            <NumberInput
               min={1}
               value={asNumber(draft, 'quality.speed_timeout_secs')}
-              onChange={(event) =>
-                update('quality.speed_timeout_secs', Number(event.target.value) || 1)
-              }
+              onChange={(value) => update('quality.speed_timeout_secs', value)}
             />
           </Field>
           <Field label="校验并发" hint="1–32">
-            <input
-              type="number"
+            <NumberInput
               min={1}
               max={32}
               value={asNumber(draft, 'quality.concurrency')}
-              onChange={(event) =>
-                update('quality.concurrency', Number(event.target.value) || 1)
-              }
+              onChange={(value) => update('quality.concurrency', value)}
             />
           </Field>
           <Field label="单轮流量预算" hint="MB，0 = 不限制">
-            <input
-              type="number"
+            <NumberInput
               min={0}
               value={asNumber(draft, 'quality.budget_mb_per_run')}
-              onChange={(event) =>
-                update('quality.budget_mb_per_run', Number(event.target.value) || 0)
-              }
+              onChange={(value) => update('quality.budget_mb_per_run', value)}
             />
           </Field>
           <Field label="单轮频道上限" hint="0 = 不限制">
-            <input
-              type="number"
+            <NumberInput
               min={0}
               value={asNumber(draft, 'quality.max_channels_per_run')}
-              onChange={(event) =>
-                update('quality.max_channels_per_run', Number(event.target.value) || 0)
-              }
+              onChange={(value) => update('quality.max_channels_per_run', value)}
             />
           </Field>
           <Field label="同步门控时限" hint="秒，0 = 不限制">
-            <input
-              type="number"
+            <NumberInput
               min={0}
               value={asNumber(draft, 'quality.gate_time_budget_secs')}
-              onChange={(event) =>
-                update('quality.gate_time_budget_secs', Number(event.target.value) || 0)
-              }
+              onChange={(value) => update('quality.gate_time_budget_secs', value)}
             />
           </Field>
           <Field label="测速采样时长" hint="秒">
-            <input
-              type="number"
+            <NumberInput
               min={0.1}
               step={0.5}
               value={asNumber(draft, 'quality.sample_secs')}
-              onChange={(event) =>
-                update('quality.sample_secs', Number(event.target.value) || 0.1)
-              }
+              onChange={(value) => update('quality.sample_secs', value)}
             />
           </Field>
         </div>
@@ -619,24 +643,18 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
         </div>
         <div className="fields">
           <Field label="最低速率" hint="MiB/s，0 = 不限制">
-            <input
-              type="number"
+            <NumberInput
               min={0}
               step={0.1}
               value={asNumber(draft, 'quality.rules.min_speed_mib')}
-              onChange={(event) =>
-                update('quality.rules.min_speed_mib', Number(event.target.value) || 0)
-              }
+              onChange={(value) => update('quality.rules.min_speed_mib', value)}
             />
           </Field>
           <Field label="最大延迟" hint="毫秒，0 = 不限制">
-            <input
-              type="number"
+            <NumberInput
               min={0}
               value={asNumber(draft, 'quality.rules.max_delay_ms')}
-              onChange={(event) =>
-                update('quality.rules.max_delay_ms', Number(event.target.value) || 0)
-              }
+              onChange={(value) => update('quality.rules.max_delay_ms', value)}
             />
           </Field>
           <Field label="最低分辨率" hint="如 1280x720，留空不限制">
@@ -678,36 +696,27 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
             />
           </Field>
           <Field label="最大移出比例" hint="0 到 1，如 0.5 表示 50%">
-            <input
-              type="number"
+            <NumberInput
               min={0.01}
               max={1}
               step={0.01}
               value={asNumber(draft, 'quality.max_remove_ratio')}
-              onChange={(event) =>
-                update('quality.max_remove_ratio', Number(event.target.value) || 0.5)
-              }
+              onChange={(value) => update('quality.max_remove_ratio', value)}
             />
           </Field>
           <Field label="最小移出个数" hint="移出数量低于该值不触发">
-            <input
-              type="number"
+            <NumberInput
               min={1}
               value={asNumber(draft, 'quality.min_remove_count')}
-              onChange={(event) =>
-                update('quality.min_remove_count', Number(event.target.value) || 1)
-              }
+              onChange={(value) => update('quality.min_remove_count', value)}
             />
           </Field>
           <Field label="结果保留天数" hint="0 = 不自动清理">
-            <input
-              type="number"
+            <NumberInput
               min={0}
               max={3650}
               value={asNumber(draft, 'quality.result_retention_days')}
-              onChange={(event) =>
-                update('quality.result_retention_days', Number(event.target.value) || 0)
-              }
+              onChange={(value) => update('quality.result_retention_days', value)}
             />
           </Field>
         </div>

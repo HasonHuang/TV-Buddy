@@ -10,9 +10,9 @@ use crate::{
     config::model::{Config, PlaylistSource},
     quality::{
         admission::{candidate_rules, url_hash_hex, Candidate, CandidateScope},
-        probe::{probe, ProbeOutput},
-        rules::{evaluate, Measurement, Reason, Verdict},
-        schedule::{probe_limits, probe_mode, run_limit},
+        probe::{probe, ProbeMode, ProbeOutput},
+        rules::{evaluate, EffectiveRules, Measurement, Reason, Verdict},
+        schedule::{probe_limits, required_probe_mode, run_limit},
         store::QualityResult,
     },
     state::AppState,
@@ -144,6 +144,7 @@ pub fn select_targets(
             rules,
             url_hash: url_hash_hex(&planned.url),
             is_url_change,
+            sync_follow: existing.is_none_or(|(_, channel)| channel.sync_follow),
             offline_on_fail: existing
                 .is_some_and(|(group, channel)| config.offline_on_fail_for(&group.id, &channel.id)),
             interval_secs: config.quality.interval_hours.saturating_mul(3_600),
@@ -151,6 +152,10 @@ pub fn select_targets(
         };
 
         if !candidate.rules.enabled {
+            kept.push(candidate);
+        } else if existing.is_some_and(|(_, channel)| !channel.sync_follow) {
+            // 固定频道不跟随上游字段，apply 不会更新或删除它。
+            // 探测与移出只会产生无法执行的结果，并污染安全阀统计。
             kept.push(candidate);
         } else if is_url_change {
             url_changed.push(candidate);
@@ -230,7 +235,11 @@ pub fn decide(
                 .is_some_and(|outcome| !outcome.verdict.ok)
         })
         .count();
-    if guard_trips(guard, outcomes.len(), removals) {
+    let tested = outcomes
+        .iter()
+        .filter(|outcome| !matches!(outcome.verdict.reason, Reason::ProbeError | Reason::Unknown))
+        .count();
+    if guard_trips(guard, tested, removals) {
         let results = outcomes
             .iter()
             .map(|outcome| {
@@ -485,7 +494,7 @@ pub async fn filter_plan(
         }
         let mut candidate = candidate.clone();
         candidate.previous_first_fail_at = previous_first_fail(state, &candidate);
-        let outcome = probe_candidate(state, config, &candidate, &memo).await;
+        let outcome = probe_candidate(state, config, &candidate, &memo, false).await;
         let probe_error = outcome.measurement.probe_error;
         outcomes.push(outcome);
         if probe_error {
@@ -500,7 +509,7 @@ pub async fn filter_plan(
         }
         let mut candidate = candidate;
         candidate.previous_first_fail_at = previous_first_fail(state, &candidate);
-        let outcome = probe_candidate(state, config, &candidate, &memo).await;
+        let outcome = probe_candidate(state, config, &candidate, &memo, false).await;
         outcomes.push(outcome);
         processed += 1;
     }
@@ -533,48 +542,144 @@ fn previous_first_fail(state: &AppState, candidate: &Candidate) -> Option<i64> {
         .and_then(|result| result.first_fail_at)
 }
 
+/// 单轮测量缓存的键。代理、请求头与分辨率上限都会改变测量结果。
+fn memo_fingerprint(url: &str, candidate: &Candidate) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    url.hash(&mut hasher);
+    candidate.headers.hash(&mut hasher);
+    candidate.rules.max_resolution_px.hash(&mut hasher);
+    if let Some(proxy) = &candidate.proxy {
+        proxy.kind.hash(&mut hasher);
+        proxy.addr.hash(&mut hasher);
+        proxy.user.hash(&mut hasher);
+        proxy.pass.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// Host 缓存命中时只复用速率与延迟。可达性仍逐频道探测。
+fn host_cache_probe_mode(rules: &EffectiveRules) -> ProbeMode {
+    if rules.min_resolution_px.is_some()
+        || rules.max_resolution_px.is_some()
+        || !rules.resolution_speed_map.is_empty()
+    {
+        ProbeMode::Playlist
+    } else {
+        ProbeMode::Reachability
+    }
+}
+
+fn merge_host_measurement(mut current: Measurement, cached: &Measurement) -> Measurement {
+    if current.reachable && !current.probe_error {
+        if current.speed_mib.is_none() {
+            current.speed_mib = cached.speed_mib;
+        }
+        if current.delay_ms.is_none() {
+            current.delay_ms = cached.delay_ms;
+        }
+    }
+    current
+}
+
+async fn resolved_probe_url(
+    state: &Arc<AppState>,
+    config: &Config,
+    candidate: &Candidate,
+) -> anyhow::Result<Option<String>> {
+    let Some(group) = config.group(&candidate.gid) else {
+        return Ok(None);
+    };
+    let Some(channel) = group
+        .channels
+        .iter()
+        .find(|channel| channel.id == candidate.cid)
+    else {
+        return Ok(None);
+    };
+    let url = crate::resolver::resolve(state, &candidate.gid, &candidate.cid, channel).await?;
+    Ok(url.filter(|url| !url.trim().is_empty()))
+}
+
+/// 探测一个候选。`resolve` 时先执行频道的解析脚本。
 pub(crate) async fn probe_candidate(
     state: &Arc<AppState>,
     config: &Config,
     candidate: &Candidate,
     memo: &std::sync::Mutex<RunMemo>,
+    resolve: bool,
 ) -> CandidateOutcome {
-    let host = url::Url::parse(&candidate.url)
+    let probe_url = if resolve {
+        match resolved_probe_url(state, config, candidate).await {
+            Ok(Some(url)) => url,
+            Ok(None) => candidate.url.clone(),
+            Err(error) => {
+                let measurement = Measurement {
+                    reachable: true,
+                    probe_error: true,
+                    error: Some(format!("解析脚本失败: {error:#}")),
+                    ..Measurement::default()
+                };
+                let verdict = evaluate(&candidate.rules, &measurement);
+                return CandidateOutcome {
+                    candidate: candidate.clone(),
+                    measurement,
+                    verdict,
+                    bytes: 0,
+                    duration_ms: 0,
+                };
+            }
+        }
+    } else {
+        candidate.url.clone()
+    };
+
+    let host = url::Url::parse(&probe_url)
         .ok()
         .and_then(|url| url.host_str().map(str::to_string));
-    let key = crate::quality::state::url_hash(&candidate.url);
-    let cached = {
+    let key = memo_fingerprint(&probe_url, candidate);
+    let (url_cached, host_cached) = {
         let memo = memo.lock().unwrap_or_else(|error| error.into_inner());
-        memo.get(key).cloned().or_else(|| {
-            candidate
-                .rules
-                .host_cache
-                .then(|| {
-                    host.as_deref()
-                        .and_then(|host| memo.get_host(host))
-                        .filter(|measurement| {
-                            measurement.reachable
-                                && !measurement.probe_error
-                                && measurement.speed_mib.is_some()
-                        })
-                        .cloned()
+        let url_cached = memo.get(key).cloned();
+        let host_cached = candidate.rules.host_cache.then(|| {
+            host.as_deref()
+                .and_then(|host| memo.get_host(host))
+                .filter(|measurement| {
+                    measurement.reachable
+                        && !measurement.probe_error
+                        && measurement.speed_mib.is_some()
                 })
-                .flatten()
-        })
+                .cloned()
+        });
+        (url_cached, host_cached.flatten())
     };
-    let output = match cached {
-        Some(measurement) => ProbeOutput {
+    let output = match (url_cached, host_cached) {
+        (Some(measurement), _) => ProbeOutput {
             measurement,
             bytes: 0,
             duration_ms: 0,
         },
-        None => {
+        (None, Some(cached)) => {
+            let client = state.probe_client_for_candidate(candidate.proxy.as_ref());
+            let mut output = probe(
+                &client,
+                &probe_url,
+                &candidate.headers,
+                host_cache_probe_mode(&candidate.rules),
+                candidate.rules.max_resolution_px,
+                &probe_limits(config),
+            )
+            .await;
+            output.measurement = merge_host_measurement(output.measurement, &cached);
+            output
+        }
+        (None, None) => {
             let client = state.probe_client_for_candidate(candidate.proxy.as_ref());
             let output = probe(
                 &client,
-                &candidate.url,
+                &probe_url,
                 &candidate.headers,
-                probe_mode(&config.quality.probe_mode),
+                required_probe_mode(config, &candidate.rules),
                 candidate.rules.max_resolution_px,
                 &probe_limits(config),
             )
@@ -736,6 +841,7 @@ mod tests {
             rules: EffectiveRules::default(),
             url_hash: url_hash_hex("http://up/new.m3u8"),
             is_url_change: url_change,
+            sync_follow: true,
             offline_on_fail: false,
             interval_secs: 6 * 3600,
             previous_first_fail_at: None,
@@ -763,6 +869,107 @@ mod tests {
             bytes: 0,
             duration_ms: 0,
         }
+    }
+
+    #[test]
+    fn memo_fingerprint_separates_probe_settings() {
+        let base = candidate("c1", true);
+        let mut changed = base.clone();
+        changed.headers = vec![("X-Test".into(), "a".into())];
+        assert_ne!(
+            memo_fingerprint(&base.url, &base),
+            memo_fingerprint(&base.url, &changed),
+            "请求头不同不得共享测量"
+        );
+        changed.headers.clear();
+        changed.proxy = Some(crate::config::model::ProxyCfg {
+            addr: "127.0.0.1:9".into(),
+            ..Default::default()
+        });
+        assert_ne!(
+            memo_fingerprint(&base.url, &base),
+            memo_fingerprint(&base.url, &changed),
+            "代理不同不得共享测量"
+        );
+        changed.proxy = None;
+        changed.rules.max_resolution_px = Some(1280);
+        assert_ne!(
+            memo_fingerprint(&base.url, &base),
+            memo_fingerprint(&base.url, &changed),
+            "分辨率上限不同不得共享测量"
+        );
+    }
+
+    #[test]
+    fn host_cache_probes_reachability_and_merges_speed() {
+        let cached = Measurement {
+            reachable: true,
+            speed_mib: Some(4.0),
+            delay_ms: Some(20),
+            ..Measurement::default()
+        };
+        let current = Measurement {
+            reachable: true,
+            delay_ms: Some(80),
+            ..Measurement::default()
+        };
+        let merged = merge_host_measurement(current.clone(), &cached);
+        assert_eq!(merged.speed_mib, Some(4.0), "速率可复用 Host 缓存");
+        assert_eq!(merged.delay_ms, Some(80), "延迟用本频道实测值");
+        let failed = Measurement {
+            reachable: false,
+            error: Some("404".into()),
+            ..Measurement::default()
+        };
+        let merged = merge_host_measurement(failed.clone(), &cached);
+        assert_eq!(merged, failed, "不可达时不得套用缓存成功值");
+        assert_eq!(
+            host_cache_probe_mode(&EffectiveRules::default()),
+            ProbeMode::Reachability
+        );
+    }
+
+    #[test]
+    fn pinned_channel_url_change_is_not_targeted() {
+        let mut config = config_with_existing(&["c1"]);
+        config.groups[0].channels[0].sync_follow = false;
+        let mut plan = plan_with(&["c1"]);
+        plan.channels[0].url = "http://up/new.m3u8".into();
+        let targets = select_targets(&config, &source(), &plan, None, 10);
+        assert!(targets.url_changed.is_empty(), "固定频道不探测 URL 变化");
+        assert!(targets.new.is_empty());
+        assert_eq!(targets.kept.len(), 1, "固定频道原样保留");
+    }
+
+    #[test]
+    fn guard_excludes_probe_errors_from_denominator() {
+        let mut targets = GateTargets {
+            url_changed: (0..10)
+                .map(|index| candidate(&format!("c{index}"), true))
+                .collect(),
+            ..Default::default()
+        };
+        targets.new = (0..90)
+            .map(|index| candidate(&format!("n{index}"), false))
+            .collect();
+        let mut outcomes: Vec<_> = (0..10)
+            .map(|index| outcome(&format!("c{index}"), false, Reason::Unreachable, true))
+            .collect();
+        outcomes.extend(
+            (0..90).map(|index| outcome(&format!("n{index}"), false, Reason::ProbeError, false)),
+        );
+        let guard = Guard {
+            enabled: true,
+            max_remove_ratio: 0.5,
+            min_remove_count: 10,
+        };
+        assert!(
+            matches!(
+                decide(plan_with(&[]), &targets, &outcomes, &guard),
+                GateOutcome::Paused { .. }
+            ),
+            "探测错误不得稀释安全阀比例"
+        );
     }
 
     #[test]

@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     probe::{probe, ProbeLimits, ProbeMode},
-    rules::{effective_rules, evaluate, Action, Measurement, Reason},
+    rules::{effective_rules, evaluate, Action, EffectiveRules, Measurement, Reason},
     state::{url_hash, Entry, RunError, RunMode, RunScope, FLAG_OK, FLAG_REACHABLE},
 };
 
@@ -81,6 +81,45 @@ pub(crate) fn probe_mode(value: &str) -> ProbeMode {
         "speed" | "full" => ProbeMode::Speed,
         _ => ProbeMode::Reachability,
     }
+}
+
+fn probe_rank(mode: ProbeMode) -> u8 {
+    match mode {
+        ProbeMode::Reachability => 0,
+        ProbeMode::Playlist => 1,
+        ProbeMode::Speed => 2,
+    }
+}
+
+fn mode_at_least(configured: ProbeMode, required: ProbeMode) -> ProbeMode {
+    if probe_rank(required) > probe_rank(configured) {
+        required
+    } else {
+        configured
+    }
+}
+
+/// 规则需要更深的探测数据时自动提升档位。
+///
+/// 设计见 `docs/design/13-availability-and-speedtest.md` §5.5：
+/// 速率规则至少 `speed`，分辨率与广告规则至少 `playlist`。
+pub(crate) fn required_probe_mode(config: &Config, rules: &EffectiveRules) -> ProbeMode {
+    let mut mode = probe_mode(&config.quality.probe_mode);
+    if config.quality.filter_ad
+        || rules.min_resolution_px.is_some()
+        || rules.max_resolution_px.is_some()
+    {
+        mode = mode_at_least(mode, ProbeMode::Playlist);
+    }
+    if rules.min_speed_mib > 0.0
+        || rules
+            .resolution_speed_map
+            .values()
+            .any(|speed| *speed > 0.0)
+    {
+        mode = mode_at_least(mode, ProbeMode::Speed);
+    }
+    mode
 }
 
 pub(crate) fn probe_limits(config: &Config) -> ProbeLimits {
@@ -577,6 +616,37 @@ mod tests {
         assert!(
             !schedule_due(&config, prev, now),
             "本小时已经运行过时不应重复触发"
+        );
+    }
+
+    #[test]
+    fn required_probe_mode_promotes_for_speed_and_resolution_rules() {
+        let mut config = Config::default();
+        let mut rules = EffectiveRules::default();
+        assert_eq!(
+            required_probe_mode(&config, &rules),
+            ProbeMode::Reachability,
+            "没有阈值时沿用配置档位"
+        );
+        rules.min_speed_mib = 1.0;
+        assert_eq!(
+            required_probe_mode(&config, &rules),
+            ProbeMode::Speed,
+            "速率规则至少测速"
+        );
+        rules.min_speed_mib = 0.0;
+        rules.max_resolution_px = Some(1920 * 1080);
+        assert_eq!(
+            required_probe_mode(&config, &rules),
+            ProbeMode::Playlist,
+            "分辨率规则至少读清单"
+        );
+        config.quality.probe_mode = "playlist".into();
+        rules.resolution_speed_map.insert(1280 * 720, 1.0);
+        assert_eq!(
+            required_probe_mode(&config, &rules),
+            ProbeMode::Speed,
+            "分辨率速率映射至少测速"
         );
     }
 
