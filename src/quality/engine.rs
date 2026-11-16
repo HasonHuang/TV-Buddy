@@ -86,6 +86,7 @@ pub fn due_targets(
     now: i64,
     limit: usize,
     measure_only: bool,
+    include_not_due: bool,
 ) -> Result<Vec<Candidate>> {
     let mut items = Vec::new();
     let mut order = 0usize;
@@ -118,7 +119,7 @@ pub fn due_targets(
             };
             let previous = results.get(&key).ok().flatten();
             let next_check_at = previous.as_ref().map_or(0, |result| result.next_check_at);
-            if next_check_at > now {
+            if !include_not_due && next_check_at > now {
                 continue;
             }
             items.push((
@@ -293,6 +294,7 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
         now,
         limit,
         measure_only,
+        spec.trigger == RunTrigger::Manual,
     )?;
     state.quality.update_run(|run| {
         run.phase = "probing".into();
@@ -745,5 +747,49 @@ mod tests {
         );
         assert_eq!(decision.results[0].action, "kept");
         assert!(decision.manual_entries[0].2.ok());
+    }
+
+    #[test]
+    fn manual_run_includes_not_due_results() {
+        let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
+        let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
+        store
+            .upsert(&QualityResult {
+                key: "sync:s1:c".into(),
+                scope: "sync".into(),
+                source_id: "s1".into(),
+                source_key: "c".into(),
+                gid: "g".into(),
+                cid: "c".into(),
+                url_hash: url_hash_hex("http://up/live.m3u8"),
+                action: "removed".into(),
+                next_check_at: 9_999_999_999,
+                ..QualityResult::default()
+            })
+            .expect("写结果");
+        let config = config_with_sync_channel();
+        let due = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            0,
+            false,
+            false,
+        )
+        .expect("到期目标");
+        assert!(due.is_empty(), "未到期不进入周期校验");
+        let forced = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            0,
+            false,
+            true,
+        )
+        .expect("手动目标");
+        assert_eq!(forced.len(), 1, "手动校验忽略下次检查时间");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
