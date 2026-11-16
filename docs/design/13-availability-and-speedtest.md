@@ -1,5 +1,7 @@
 # 13 · 可用性校验与测速筛选
 
+> 历史参考。同步源成员语义已被 [`14-quality-admission-product.md`](14-quality-admission-product.md) 与 [`16-quality-admission-system.md`](16-quality-admission-system.md) 取代：不合格频道从“隐藏”改为“立即移出”，并取消淘汰池。
+
 > 设计版本 v1.0 ｜ 2026-11-15 ｜ 状态：**方案 B 已选（设计待批准）**
 > 参考实现：iptv-api。核对文件：`utils/speed.py`、`utils/channel_quality.py`、`utils/channel.py`、`utils/frozen.py`、`utils/channel_repository.py`。
 > 上游：[`11-subscription-sync.md`](11-subscription-sync.md)、[`03-http-contract.md`](03-http-contract.md)、[`04-config-and-storage.md`](04-config-and-storage.md)、[`06-low-spec-optimization.md`](06-low-spec-optimization.md)。
