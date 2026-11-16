@@ -156,6 +156,14 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/panel/api/playlist/sources/:id",
             put(routes::playlist::update_source).delete(routes::playlist::delete_source),
         )
+        .route(
+            "/panel/api/playlist/sources/:id/disable",
+            post(routes::playlist::disable_source),
+        )
+        .route(
+            "/panel/api/playlist/sources/:id/enable",
+            post(routes::playlist::enable_source),
+        )
         .route("/panel/api/dash/status", get(routes::dash::status))
         .route(
             "/panel/api/dash/tracks/:gid/:cid",

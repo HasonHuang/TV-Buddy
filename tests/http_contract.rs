@@ -13,8 +13,7 @@ use std::{
 };
 
 use axum::{
-    extract::{Path, Query, State},
-    http::{header, StatusCode},
+    extract::{Json, Path, Query, State},    http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -6619,6 +6618,57 @@ async fn disabled_quality_run_is_measure_only() {
         .run_status()
         .expect("运行状态")
         .measure_only);
+}
+
+#[tokio::test]
+async fn disable_source_can_keep_or_remove_channels() {
+    let extra = r#"{
+        "playlist": { "sources": [{
+            "id": "src-a", "name": "源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/sync.m3u8"
+        }] },
+        "groups": [{
+            "id": "src-group", "name": "源组", "mode": "proxy", "access": "public",
+            "origin": "sync", "source_id": "src-a",
+            "channels": [{
+                "id": "c", "name": "频道", "url": "{upstream}/gate-live.m3u8",
+                "source_id": "src-a", "source_key": "c"
+            }]
+        }]
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let _ = tv_buddy::http::routes::playlist::disable_source(
+        tv_buddy::http::ext::PanelAuth(String::new()),
+        State(fixture.state.clone()),
+        Path("src-a".into()),
+        Json(json!({ "keep_channels": true })),
+    )
+    .await
+    .expect("停用保留");
+    assert_eq!(
+        fixture
+            .state
+            .snapshot()
+            .group("src-group")
+            .expect("组")
+            .channels
+            .len(),
+        1
+    );
+
+    let _ = tv_buddy::http::routes::playlist::disable_source(
+        tv_buddy::http::ext::PanelAuth(String::new()),
+        State(fixture.state.clone()),
+        Path("src-a".into()),
+        Json(json!({ "keep_channels": false })),
+    )
+    .await
+    .expect("停用移出");
+    assert!(fixture
+        .state
+        .snapshot()
+        .group("src-group")
+        .is_none_or(|group| group.channels.is_empty()));
 }
 
 #[tokio::test]
