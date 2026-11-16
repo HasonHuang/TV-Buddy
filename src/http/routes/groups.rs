@@ -124,8 +124,24 @@ pub async fn delete_group(
         .map_err(|err| ApiError::internal(err.to_string()))?;
     state.health.forget_group(&gid);
     state.quality.forget_group(&gid);
+    for channel in &group.channels {
+        forget_quality_results(&state, &gid, channel);
+    }
     tracing::info!(group = %gid, "删除分组");
     Ok(Json(json!({ "ok": true })))
+}
+
+/// 删除频道持久化结果，避免重建同 id 命中旧失败状态。
+fn forget_quality_results(state: &AppState, gid: &str, channel: &Channel) {
+    let _ = state
+        .quality_store
+        .delete(&format!("channel:{gid}/{}", channel.id));
+    if !channel.source_id.is_empty() {
+        let _ = state.quality_store.delete(&format!(
+            "sync:{}:{}",
+            channel.source_id, channel.source_key
+        ));
+    }
 }
 
 /// `GET /panel/api/groups/export`——顶层数组（F-013 §1）。
@@ -253,6 +269,7 @@ pub async fn delete_channel(
         .map_err(|err| ApiError::internal(err.to_string()))?;
     state.health.forget(&gid, &cid);
     state.quality.forget(&gid, &cid);
+    forget_quality_results(&state, &gid, &channel);
     tracing::info!(group = %gid, channel = %cid, "删除频道");
     Ok(Json(json!({ "ok": true })))
 }

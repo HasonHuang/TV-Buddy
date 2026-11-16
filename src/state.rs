@@ -175,7 +175,7 @@ impl AppState {
         let estimate = crate::cache_estimate::Estimator::load_or_default(&cache_dir);
         estimate.set_auto_tune(config.cdn.auto_tune);
         let channel_keys = channel_keys_of(&config);
-        Ok(Self {
+        let state = Self {
             db_path,
             conn,
             config_store,
@@ -223,7 +223,37 @@ impl AppState {
             logs,
             started: Instant::now(),
             write_lock: Mutex::new(()),
-        })
+        };
+        state.hydrate_manual_quality()?;
+        Ok(state)
+    }
+
+    /// 从结果表恢复手工频道的下线状态。重启后订阅渲染不丢失。
+    ///
+    /// 频道已不存在或地址哈希不匹配时跳过。
+    pub fn hydrate_manual_quality(&self) -> anyhow::Result<()> {
+        let config = self.snapshot();
+        for result in self.quality_store.manual_entries()? {
+            let Some(group) = config.group(&result.gid) else {
+                continue;
+            };
+            let Some(channel) = group
+                .channels
+                .iter()
+                .find(|channel| channel.id == result.cid)
+            else {
+                continue;
+            };
+            if result.url_hash != crate::quality::admission::url_hash_hex(&channel.url) {
+                continue;
+            }
+            let entry = crate::quality::state::Entry::from_result(
+                &result,
+                crate::quality::state::url_hash(&channel.url),
+            );
+            self.quality.put(&result.gid, &result.cid, entry);
+        }
+        Ok(())
     }
 
     /// 取当前配置快照。
@@ -515,7 +545,7 @@ fn channel_keys_of(config: &Config) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::model::Group;
+    use crate::config::model::{Channel, Group};
     use crate::quality::store::QualityResult;
 
     fn test_state() -> (std::sync::Arc<AppState>, std::path::PathBuf) {
@@ -591,6 +621,46 @@ mod tests {
             .unwrap_err();
         assert!(!error.to_string().is_empty());
         assert!(state.quality_store.get("sync:s:c").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn manual_entries_hydrate_after_restart() {
+        let dir = std::env::temp_dir().join(format!("tvb-hydrate-{}", uuid::Uuid::new_v4()));
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g1".into(),
+            channels: vec![Channel {
+                id: "c1".into(),
+                url: "http://up/live.m3u8".into(),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        let state = std::sync::Arc::new(
+            AppState::new(
+                dir.join("tvb.db"),
+                config,
+                std::sync::Arc::new(crate::logging::RingBuffer::default()),
+            )
+            .expect("state"),
+        );
+        state
+            .quality_store
+            .upsert(&QualityResult {
+                key: "channel:g1/c1".into(),
+                scope: "manual".into(),
+                action: "hidden".into(),
+                reason: "unreachable".into(),
+                gid: "g1".into(),
+                cid: "c1".into(),
+                url_hash: crate::quality::admission::url_hash_hex("http://up/live.m3u8"),
+                checked_at: 1,
+                ..QualityResult::default()
+            })
+            .unwrap();
+        state.hydrate_manual_quality().unwrap();
+        assert!(state.quality.get("g1", "c1").is_some());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

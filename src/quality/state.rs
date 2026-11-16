@@ -8,6 +8,7 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use crate::quality::rules::Reason;
+use crate::quality::store::QualityResult;
 
 /// 规则判定通过。
 pub const FLAG_OK: u16 = 1;
@@ -42,6 +43,28 @@ impl Entry {
 
     pub fn reachable(&self) -> bool {
         self.flags & FLAG_REACHABLE != 0
+    }
+
+    /// 从持久化结果恢复内存条目。`url_hash` 由当前频道地址计算。
+    pub fn from_result(result: &QualityResult, url_hash: u64) -> Self {
+        Self {
+            url_hash,
+            checked_at: result.checked_at,
+            first_fail_at: result.first_fail_at,
+            last_ok_at: result.ok.then_some(result.checked_at),
+            next_check_at: result.next_check_at,
+            delay_ms: result.delay_ms.unwrap_or(0),
+            speed_kib: result.speed_kib.unwrap_or(0),
+            width: result.width.unwrap_or(0),
+            height: result.height.unwrap_or(0),
+            flags: if result.ok {
+                FLAG_OK | FLAG_REACHABLE
+            } else {
+                0
+            },
+            reason: Reason::parse(&result.reason),
+            consecutive_fails: 0,
+        }
     }
 }
 
@@ -296,6 +319,34 @@ mod tests {
         let run = state.run_status().expect("run");
         assert_eq!(run.run_id, "r2");
         assert!(!run.finished);
+    }
+
+    #[test]
+    fn entry_from_result_marks_hidden_failure() {
+        let result = crate::quality::store::QualityResult {
+            action: "hidden".into(),
+            reason: "unreachable".into(),
+            ok: false,
+            delay_ms: Some(120),
+            speed_kib: Some(2048),
+            width: Some(1920),
+            height: Some(1080),
+            checked_at: 100,
+            first_fail_at: Some(90),
+            next_check_at: 400,
+            ..Default::default()
+        };
+        let entry = Entry::from_result(&result, 7);
+        assert!(!entry.ok());
+        assert_eq!(entry.reason, Reason::Unreachable);
+        assert_eq!(entry.url_hash, 7);
+        assert_eq!(entry.checked_at, 100);
+        assert_eq!(entry.first_fail_at, Some(90));
+        assert_eq!(entry.next_check_at, 400);
+        assert_eq!(entry.delay_ms, 120);
+        assert_eq!(entry.speed_kib, 2048);
+        assert_eq!(entry.width, 1920);
+        assert_eq!(entry.height, 1080);
     }
 
     #[test]

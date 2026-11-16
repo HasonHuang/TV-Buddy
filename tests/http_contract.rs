@@ -6849,14 +6849,52 @@ async fn quality_run_api_reports_measure_only_and_rejects_bad_input() {
 #[tokio::test]
 async fn deleting_channel_and_group_clears_quality_results() {
     use tv_buddy::quality::state::Entry;
+    use tv_buddy::quality::store::QualityResult;
 
     let fixture = fixture().await;
+    fixture
+        .state
+        .mutate(|config| {
+            let channel = config
+                .group_mut("pg")
+                .expect("组")
+                .channels
+                .iter_mut()
+                .find(|channel| channel.id == "c1")
+                .expect("频道");
+            channel.source_id = "s1".into();
+            channel.source_key = "k1".into();
+            Ok(())
+        })
+        .expect("改频道");
     let entry = Entry {
         checked_at: 1,
         ..Entry::default()
     };
     fixture.state.quality.put("pg", "c1", entry.clone());
     fixture.state.quality.put("pm", "c1", entry);
+    fixture
+        .state
+        .quality_store
+        .upsert(&QualityResult {
+            key: "channel:pg/c1".into(),
+            scope: "manual".into(),
+            gid: "pg".into(),
+            cid: "c1".into(),
+            ..QualityResult::default()
+        })
+        .expect("手工结果");
+    fixture
+        .state
+        .quality_store
+        .upsert(&QualityResult {
+            key: "sync:s1:k1".into(),
+            scope: "sync".into(),
+            source_id: "s1".into(),
+            source_key: "k1".into(),
+            ..QualityResult::default()
+        })
+        .expect("同步结果");
 
     let response = tv_buddy::http::routes::groups::delete_channel(
         tv_buddy::http::ext::PanelAuth(String::new()),
@@ -6871,7 +6909,30 @@ async fn deleting_channel_and_group_clears_quality_results() {
         fixture.state.quality.get("pm", "c1").is_some(),
         "其他分组的结果不能误删"
     );
+    assert!(fixture
+        .state
+        .quality_store
+        .get("channel:pg/c1")
+        .expect("查询")
+        .is_none());
+    assert!(fixture
+        .state
+        .quality_store
+        .get("sync:s1:k1")
+        .expect("查询")
+        .is_none());
 
+    fixture
+        .state
+        .quality_store
+        .upsert(&QualityResult {
+            key: "channel:pm/c1".into(),
+            scope: "manual".into(),
+            gid: "pm".into(),
+            cid: "c1".into(),
+            ..QualityResult::default()
+        })
+        .expect("分组结果");
     let response = tv_buddy::http::routes::groups::delete_group(
         tv_buddy::http::ext::PanelAuth(String::new()),
         State(fixture.state.clone()),
@@ -6881,4 +6942,10 @@ async fn deleting_channel_and_group_clears_quality_results() {
     .expect("删除分组");
     let _ = response;
     assert!(fixture.state.quality.get("pm", "c1").is_none());
+    assert!(fixture
+        .state
+        .quality_store
+        .get("channel:pm/c1")
+        .expect("查询")
+        .is_none());
 }

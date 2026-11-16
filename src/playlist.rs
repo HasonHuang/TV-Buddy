@@ -16,7 +16,7 @@ use crate::{
     },
     health::Health,
     quality::{
-        rules::{effective_rules, Action, Reason},
+        rules::{effective_rules, Reason},
         state::{url_hash, QualityState},
     },
     subs::{matches_filter, FilterItem, GroupRules},
@@ -85,18 +85,19 @@ fn push_group(
         if !user.can_see_channel(&group.id, &channel.id) {
             continue;
         }
-        if offline(config, health, group, channel) || quality_hidden(config, quality, group, channel) {
+        if offline(config, health, group, channel) || manual_hidden(config, quality, group, channel) {
             continue;
         }
         push_entry(body, group, channel, base, Some(token));
     }
 }
 
-/// 频道是否因探测失败而不进订阅。
+/// 手工频道是否因质量结果而不进订阅。
 ///
-/// 三个条件同时成立才下线：探测已启用、有效开关为开、最近一次探测失败。
-/// 没有探测记录按在线处理。
-pub(crate) fn quality_hidden(
+/// 同步频道失败时已由准入移出分组，这里只做防御性哈希检查。
+/// 手工频道必须同时满足：质量启用、有效规则启用、`offline_on_fail` 为开、
+/// 结果失败且地址未变。`retain` 与 `action` 不参与判定。
+pub(crate) fn manual_hidden(
     config: &Config,
     quality: Option<&QualityState>,
     group: &Group,
@@ -108,8 +109,13 @@ pub(crate) fn quality_hidden(
     if group.mode == "passthrough" && !config.quality.probe_passthrough {
         return false;
     }
-    let rules = effective_rules(config, group, channel);
-    if !rules.enabled || rules.retain || rules.action != Action::Hide {
+    if !channel.source_id.is_empty() {
+        return false;
+    }
+    if !effective_rules(config, group, channel).enabled {
+        return false;
+    }
+    if !config.offline_on_fail_for(&group.id, &channel.id) {
         return false;
     }
     let Some(entry) = quality.and_then(|quality| quality.get(&group.id, &channel.id)) else {
@@ -118,20 +124,15 @@ pub(crate) fn quality_hidden(
     if entry.url_hash != url_hash(&channel.url) {
         return false;
     }
-    if matches!(
-        entry.reason,
-        Reason::Pass | Reason::Retained | Reason::Supply | Reason::ProbeError | Reason::Unknown
-    ) {
+    if entry.ok() {
         return false;
     }
-    let Some(first_fail_at) = entry.first_fail_at else {
-        return false;
-    };
-    crate::schedule::now_epoch() - first_fail_at >= rules.stale_keep_secs as i64
+    !matches!(entry.reason, Reason::ProbeError | Reason::Unknown)
 }
 
 fn offline(config: &Config, health: Option<&Health>, group: &Group, channel: &Channel) -> bool {
-    if !config.health.enabled {
+    // 质量启用时只读质量结果。两条路径不得同时生效。
+    if config.quality.enabled || !config.health.enabled {
         return false;
     }
     // 与 `Config::offline_on_fail_for` 同序：频道级优先，缺省继承分组级。
@@ -180,7 +181,7 @@ pub fn user_view(
                 continue;
             }
             if offline(config, health, group, channel)
-                || quality_hidden(config, quality, group, channel)
+                || manual_hidden(config, quality, group, channel)
             {
                 continue;
             }
@@ -581,12 +582,12 @@ mod tests {
     }
 
     #[test]
-    fn failed_channel_hides_only_after_grace() {
+    fn manual_keep_stays_visible_after_failure() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.quality.enabled = true;
-        config.quality.rules.action = "hide".into();
+        config.groups[0].offline_on_fail = false;
         let now = crate::schedule::now_epoch();
-        let state = quality_with(Reason::Unreachable, now, Some(now - 1801));
+        let state = quality_with(Reason::Unreachable, now, Some(now - 3600));
         let body = render_user(
             &config,
             &admin(),
@@ -595,9 +596,16 @@ mod tests {
             Some(&Health::new()),
             Some(&state),
         );
-        assert!(!body.contains("C1"), "超过宽限应隐藏: {body}");
+        assert!(body.contains("C1"), "手工频道默认保留: {body}");
+    }
 
-        let state = quality_with(Reason::Unreachable, now, Some(now - 60));
+    #[test]
+    fn manual_hide_requires_offline_on_fail() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.quality.enabled = true;
+        config.groups[0].offline_on_fail = true;
+        let now = crate::schedule::now_epoch();
+        let state = quality_with(Reason::Unreachable, now, Some(now));
         let body = render_user(
             &config,
             &admin(),
@@ -606,13 +614,33 @@ mod tests {
             Some(&Health::new()),
             Some(&state),
         );
-        assert!(body.contains("C1"), "宽限内应可见: {body}");
+        assert!(!body.contains("C1"), "开启下线选项后立即隐藏: {body}");
+    }
+
+    #[test]
+    fn sync_channel_is_not_hidden_by_quality_result() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.quality.enabled = true;
+        config.groups[0].offline_on_fail = true;
+        config.groups[0].channels[0].source_id = "s1".into();
+        let now = crate::schedule::now_epoch();
+        let state = quality_with(Reason::Unreachable, now, Some(now - 3600));
+        let body = render_user(
+            &config,
+            &admin(),
+            "http://host",
+            "tok",
+            Some(&Health::new()),
+            Some(&state),
+        );
+        assert!(body.contains("C1"), "同步频道由准入管理，不按结果隐藏: {body}");
     }
 
     #[test]
     fn probe_error_and_unknown_stay_visible() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.quality.enabled = true;
+        config.groups[0].offline_on_fail = true;
         let now = crate::schedule::now_epoch();
         for reason in [Reason::ProbeError, Reason::Unknown] {
             let state = quality_with(reason, now, None);
@@ -629,42 +657,78 @@ mod tests {
     }
 
     #[test]
-    fn retain_mark_and_passthrough_stay_visible() {
+    fn retain_and_action_do_not_block_manual_hide() {
         let now = crate::schedule::now_epoch();
         let old = Some(now - 3600);
 
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.quality.enabled = true;
+        config.groups[0].offline_on_fail = true;
         config.groups[0].channels[0].quality = Some(crate::config::model::QualityOverride {
             retain: Some(true),
             ..Default::default()
         });
         let state = quality_with(Reason::Unreachable, now, old);
-        let body = render_user(&config, &admin(), "http://host", "tok", Some(&Health::new()), Some(&state));
-        assert!(body.contains("C1"), "retain 不应隐藏: {body}");
+        let body = render_user(
+            &config,
+            &admin(),
+            "http://host",
+            "tok",
+            Some(&Health::new()),
+            Some(&state),
+        );
+        assert!(!body.contains("C1"), "retain 不再阻止手工下线: {body}");
 
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.quality.enabled = true;
+        config.groups[0].offline_on_fail = true;
         config.quality.rules.action = "mark".into();
         let state = quality_with(Reason::Unreachable, now, old);
-        let body = render_user(&config, &admin(), "http://host", "tok", Some(&Health::new()), Some(&state));
-        assert!(body.contains("C1"), "mark 不应隐藏: {body}");
-
-        let mut config = config_with(vec![group("g1", "public", "passthrough")]);
-        config.quality.enabled = true;
-        let state = quality_with(Reason::Unreachable, now, old);
-        let body = render_user(&config, &admin(), "http://host", "tok", Some(&Health::new()), Some(&state));
-        assert!(body.contains("C1"), "passthrough 不应隐藏: {body}");
+        let body = render_user(
+            &config,
+            &admin(),
+            "http://host",
+            "tok",
+            Some(&Health::new()),
+            Some(&state),
+        );
+        assert!(!body.contains("C1"), "action 不再阻止手工下线: {body}");
     }
 
     #[test]
-    fn url_change_hides_old_result() {
+    fn passthrough_without_probe_stays_visible() {
+        let mut config = config_with(vec![group("g1", "public", "passthrough")]);
+        config.quality.enabled = true;
+        config.groups[0].offline_on_fail = true;
+        let now = crate::schedule::now_epoch();
+        let state = quality_with(Reason::Unreachable, now, Some(now - 3600));
+        let body = render_user(
+            &config,
+            &admin(),
+            "http://host",
+            "tok",
+            Some(&Health::new()),
+            Some(&state),
+        );
+        assert!(body.contains("C1"), "未开启透传探测时不隐藏: {body}");
+    }
+
+    #[test]
+    fn url_change_does_not_hide() {
         let mut config = config_with(vec![group("g1", "public", "proxy")]);
         config.quality.enabled = true;
+        config.groups[0].offline_on_fail = true;
         let now = crate::schedule::now_epoch();
         let state = quality_with(Reason::Unreachable, now, Some(now - 3600));
         config.groups[0].channels[0].url = "http://upstream/changed.m3u8".into();
-        let body = render_user(&config, &admin(), "http://host", "tok", Some(&Health::new()), Some(&state));
+        let body = render_user(
+            &config,
+            &admin(),
+            "http://host",
+            "tok",
+            Some(&Health::new()),
+            Some(&state),
+        );
         assert!(body.contains("C1"), "地址变化后旧结果不应隐藏: {body}");
     }
 }
