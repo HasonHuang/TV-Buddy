@@ -610,10 +610,7 @@ fn guard_base_channels(config: &Config, scope: &RunScope) -> usize {
                 .filter(|channel| {
                     source_of(config, channel).is_some_and(|source| {
                         source.enabled
-                            && source
-                                .quality
-                                .as_ref()
-                                .and_then(|quality| quality.enabled)
+                            && source.quality.as_ref().and_then(|quality| quality.enabled)
                                 != Some(false)
                     }) && effective_rules(config, group, channel).enabled
                 })

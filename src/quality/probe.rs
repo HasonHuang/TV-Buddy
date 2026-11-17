@@ -84,9 +84,7 @@ pub fn parse_master(body: &str, base: &str, max_resolution_px: Option<u32>) -> O
         variants
             .iter()
             .filter(|variant| match (variant.width, variant.height) {
-                (Some(width), Some(height)) => {
-                    u32::from(width) * u32::from(height) <= max
-                }
+                (Some(width), Some(height)) => u32::from(width) * u32::from(height) <= max,
                 _ => true,
             })
             .cloned()
@@ -94,7 +92,9 @@ pub fn parse_master(body: &str, base: &str, max_resolution_px: Option<u32>) -> O
     });
 
     let candidates = within.filter(|items| !items.is_empty()).unwrap_or(variants);
-    candidates.into_iter().max_by_key(|variant| variant.bandwidth)
+    candidates
+        .into_iter()
+        .max_by_key(|variant| variant.bandwidth)
 }
 
 fn parse_stream_inf(attrs: &str) -> (u64, Option<u16>, Option<u16>) {
@@ -449,74 +449,69 @@ pub async fn probe(
 
     let body_text = String::from_utf8_lossy(&body);
 
-    let (media_url, media_body, variant_width, variant_height) =
-        if body_text.contains("#EXT-X-STREAM-INF") {
-            let Some(variant) = parse_master(&body_text, final_url.as_str(), max_resolution_px)
-            else {
-                measurement = probe_error("主清单没有可用变体", true);
+    let (media_url, media_body, variant_width, variant_height) = if body_text
+        .contains("#EXT-X-STREAM-INF")
+    {
+        let Some(variant) = parse_master(&body_text, final_url.as_str(), max_resolution_px) else {
+            measurement = probe_error("主清单没有可用变体", true);
+            return ProbeOutput {
+                measurement,
+                bytes: total_bytes,
+                duration_ms: started.elapsed().as_millis() as u64,
+            };
+        };
+        let request = with_headers(
+            client.get(&variant.url).timeout(limits.speed_timeout),
+            headers,
+        );
+        let response = match request.send().await {
+            Ok(response) if response.status().is_success() => response,
+            Ok(response) => {
+                measurement = probe_error(format!("变体 HTTP {}", response.status()), true);
                 return ProbeOutput {
                     measurement,
                     bytes: total_bytes,
                     duration_ms: started.elapsed().as_millis() as u64,
                 };
-            };
-            let request = with_headers(
-                client.get(&variant.url).timeout(limits.speed_timeout),
-                headers,
-            );
-            let response = match request.send().await {
-                Ok(response) if response.status().is_success() => response,
-                Ok(response) => {
-                    measurement = probe_error(format!("变体 HTTP {}", response.status()), true);
-                    return ProbeOutput {
-                        measurement,
-                        bytes: total_bytes,
-                        duration_ms: started.elapsed().as_millis() as u64,
-                    };
-                }
-                Err(error) => {
-                    measurement.reachable = false;
-                    measurement.error = Some(error.to_string());
-                    return ProbeOutput {
-                        measurement,
-                        bytes: total_bytes,
-                        duration_ms: started.elapsed().as_millis() as u64,
-                    };
-                }
-            };
-            let (media, _) = match read_bounded(
-                response,
-                limits.max_playlist_bytes,
-                limits.timeout.as_secs_f64(),
-            )
-            .await
-            {
-                Ok(value) => value,
-                Err(error) => {
-                    measurement.reachable = false;
-                    measurement.error = Some(error);
-                    return ProbeOutput {
-                        measurement,
-                        bytes: total_bytes,
-                        duration_ms: started.elapsed().as_millis() as u64,
-                    };
-                }
-            };
-            total_bytes = total_bytes.saturating_add(media.len() as u64);
-            (
-                variant.url.clone(),
-                String::from_utf8_lossy(&media).to_string(),
-                variant.width,
-                variant.height,
-            )
-        } else {
-            (
-                final_url.to_string(),
-                body_text.to_string(),
-                None,
-                None,
-            )
+            }
+            Err(error) => {
+                measurement.reachable = false;
+                measurement.error = Some(error.to_string());
+                return ProbeOutput {
+                    measurement,
+                    bytes: total_bytes,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                };
+            }
         };
+        let (media, _) = match read_bounded(
+            response,
+            limits.max_playlist_bytes,
+            limits.timeout.as_secs_f64(),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                measurement.reachable = false;
+                measurement.error = Some(error);
+                return ProbeOutput {
+                    measurement,
+                    bytes: total_bytes,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                };
+            }
+        };
+        total_bytes = total_bytes.saturating_add(media.len() as u64);
+        (
+            variant.url.clone(),
+            String::from_utf8_lossy(&media).to_string(),
+            variant.width,
+            variant.height,
+        )
+    } else {
+        (final_url.to_string(), body_text.to_string(), None, None)
+    };
 
     // 变体与切片地址已提取。释放清单正文，降低并发探测的峰值内存。
     drop(body_text);
@@ -534,7 +529,10 @@ pub async fn probe(
     }
 
     if mode == ProbeMode::Playlist {
-        let request = with_headers(client.get(&segments[0]).timeout(limits.speed_timeout), headers);
+        let request = with_headers(
+            client.get(&segments[0]).timeout(limits.speed_timeout),
+            headers,
+        );
         return match request.send().await {
             Ok(response) if response.status().is_success() => ProbeOutput {
                 measurement,
@@ -566,10 +564,7 @@ pub async fn probe(
     let mut sample_time = Duration::ZERO;
     let mut first_delay = None;
     for segment in segments {
-        let request = with_headers(
-            client.get(&segment).timeout(limits.speed_timeout),
-            headers,
-        );
+        let request = with_headers(client.get(&segment).timeout(limits.speed_timeout), headers);
         let segment_started = Instant::now();
         let response = match request.send().await {
             Ok(response) if response.status().is_success() => response,

@@ -93,8 +93,7 @@ pub async fn group_playlist(
 
     let config = state.snapshot();
     let base = base_url(&headers);
-    let Some(body) =
-        playlist::render_user_group(
+    let Some(body) = playlist::render_user_group(
         &config,
         &user,
         &base,
@@ -102,8 +101,7 @@ pub async fn group_playlist(
         Some(&state.health),
         Some(&state.quality),
         &gid,
-    )
-    else {
+    ) else {
         return missing();
     };
     // 文件名只保留安全字符，避免把路径段原样写进响应头。
