@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 质量准入容器验收：同步门控、周期移出、安全阀、源停用/删除。
+# 质量准入容器验收：同步门控、周期移出、安全阀、分辨率速率表、源停用/删除。
 #
 # 依赖：curl、jq、python3、docker（含 compose 子命令）。
 # 容器使用 tests/manual/local/docker-compose.yml，端口 19900；伪源监听 19932。
@@ -11,6 +11,7 @@ B=${B:-http://127.0.0.1:19900}
 MEDIA_PORT=${MEDIA_PORT:-19932}
 M="http://127.0.0.1:$MEDIA_PORT"
 SRC_URL="http://host.docker.internal:$MEDIA_PORT/source.m3u8"
+RES_SRC_URL="http://host.docker.internal:$MEDIA_PORT/resolution-source.m3u8"
 CONTAINER=${CONTAINER:-tvb-local}
 
 for tool in curl jq python3 docker; do
@@ -156,17 +157,27 @@ run_quality() {
   return 1
 }
 
-results_json() {
-  curl -s -H "$AUTH" "$B/panel/api/quality/results?source_id=qsrc&limit=200"
+results_json_for() {
+  curl -s -H "$AUTH" "$B/panel/api/quality/results?source_id=$1&limit=200"
 }
-result_count() {
-  local name=$1 action=$2 reason=${3:-}
-  results_json |
+results_json() {
+  results_json_for qsrc
+}
+result_count_for() {
+  local id=$1 name=$2 action=$3 reason=${4:-}
+  results_json_for "$id" |
     jq --arg n "$name" --arg a "$action" --arg r "$reason" \
       '[.items[] | select(.name == $n and .action == $a and ($r == "" or .reason == $r))] | length'
 }
+result_count() {
+  result_count_for qsrc "$@"
+}
+source_names() {
+  getcfg | jq -r --arg id "$1" \
+    '[(.groups // [])[] | .channels[] | select(.source_id == $id) | .name] | sort | join(",")'
+}
 group_names() {
-  getcfg | jq -r '[(.groups // [])[] | .channels[] | select(.source_id == "qsrc") | .name] | sort | join(",")'
+  source_names qsrc
 }
 all_names() {
   getcfg | jq -r '[(.groups // [])[] | .channels[] | .name] | sort | join(",")'
@@ -174,11 +185,11 @@ all_names() {
 
 # 1) 初始规则：质量开启、门控开启、安全阀开启但阈值高到不会干扰移出测试。
 getcfg >"$WORK/base.json"
-jq --arg url "$SRC_URL" '
+jq --arg url "$SRC_URL" --arg res "$RES_SRC_URL" '
   .quality.enabled = true
   | .quality.schedule = "interval"
   | .quality.interval_hours = 8760
-  | .quality.probe_mode = "speed"
+  | .quality.probe_mode = "playlist"
   | .quality.timeout_secs = 10
   | .quality.speed_timeout_secs = 10
   | .quality.sample_bytes_kb = 4096
@@ -195,6 +206,7 @@ jq --arg url "$SRC_URL" '
   | .quality.rules.max_delay_ms = 0
   | .quality.rules.min_resolution = ""
   | .quality.rules.max_resolution = ""
+  | .quality.rules.resolution_speed_map = {"1280x720": 0.5, "1920x1080": 1000}
   | .quality.rules.supply = false
   | .quality.rules.retain = false
   | .quality.rules.host_cache = false
@@ -206,6 +218,13 @@ jq --arg url "$SRC_URL" '
       "enabled": true,
       "url": $url,
       "group_mode": "keep"
+    }, {
+      "id": "qres",
+      "name": "分辨率源",
+      "mode": "sync",
+      "enabled": true,
+      "url": $res,
+      "group_mode": "keep"
     }]
   | .groups = []
 ' "$WORK/base.json" >"$WORK/init.json"
@@ -216,6 +235,15 @@ request_sync qsrc || true
 check "首次门控只留正常频道" "正常频道" "$(group_names)"
 check "慢速频道被拒绝" "1" "$(result_count 慢速频道 rejected speed_low)"
 check "404 频道被拒绝" "1" "$(result_count 不可达频道 rejected unreachable)"
+
+# 2b) 分辨率速率表：同一快速率下，720p 档通过，1080p 档因阈值被拒绝。
+request_sync qres || true
+check "分辨率档位只留 720p" "720p频道" "$(source_names qres)"
+check "720p 档位准入" "1" "$(result_count_for qres 720p频道 admitted pass)"
+check "1080p 档位拒绝" "1" "$(result_count_for qres 1080p频道 rejected speed_low)"
+CODE=$(curl -s -o "$WORK/delete-res.json" -w '%{http_code}' -X DELETE \
+  "$B/panel/api/playlist/sources/qres?keep_content=0" -H "$AUTH")
+check "分辨率源清理" "200" "$CODE"
 
 # 3) 关闭源门控同步，三个频道直接进入分组。
 getcfg >"$WORK/c.json"

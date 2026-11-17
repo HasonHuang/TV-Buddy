@@ -531,15 +531,19 @@
 | `/slow.m3u8` | 切片每 100 ms 发送 1 KiB，速率低于阈值。 |
 | `/dead.m3u8` | 返回 404。 |
 | `/source.m3u8` | 源清单，包含正常、慢速、不可达三个频道。 |
+| `/resolution-source.m3u8` | 源清单，包含 720p 与 1080p 两个频道。 |
+| `/res-720.m3u8` | 主清单，`RESOLUTION=1280x720`。 |
+| `/res-1080.m3u8` | 主清单，`RESOLUTION=1920x1080`。 |
 | `/control?slow=ok` | 把慢速频道切到正常地址，用于恢复测试。 |
 | `/control?slow=slow` | 切回慢速地址。 |
 
 测试规则：
 
-- `probe_mode=speed`
+- `probe_mode=playlist`
 - `min_speed_mib=1.0`
+- `resolution_speed_map={"1280x720":0.5,"1920x1080":1000}`
 - `sample_secs=2`
-- `sample_segments=2`
+- `sample_segments=1`
 - 安全阀测试时设 `min_remove_count=2`、`max_remove_ratio=0.5`
 - cron 测试使用 `* * * * *`
 
@@ -555,6 +559,7 @@
 8. **源删除**：选择保留为本地，频道 `source_id` 清空。选择随源删除，频道消失，结果记录仍可查。
 9. **部分准入**：把门控时限设为很短，确认已准入频道不减少，剩余新候选在下一轮继续。
 10. **低配**：运行期间容器内存低于 128 MB，服务不重启，健康检查保持 200。
+11. **分辨率速率表**：同步 `/resolution-source.m3u8`。720p 频道按 0.5 MiB/s 档准入；1080p 频道按 1000 MiB/s 档判 `speed_low` 拒绝。两者切片速率相同，证明按分辨率取不同阈值。
 
 ### 13.3 通过标准
 

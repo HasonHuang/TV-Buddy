@@ -6,6 +6,8 @@
 - `/slow.m3u8`：慢速清单，切片每 100 ms 发 1 KiB。
 - `/dead.m3u8`：固定 404。
 - `/source.m3u8`：三频道源清单。
+- `/resolution-source.m3u8`：720p / 1080p 两频道，用于分辨率速率表验收。
+- `/res-720.m3u8`、`/res-1080.m3u8`：带 RESOLUTION 的主清单。
 - `/control?slow=ok|slow`：切换慢速频道地址，用于恢复测试。
 
 容器通过 `host.docker.internal` 访问本机。`--public-base` 必须与容器视角一致。
@@ -28,6 +30,14 @@ def media_playlist(base: str, segment: str) -> bytes:
         "#EXTINF:2,\n"
         f"{base}/{segment}\n"
         "#EXT-X-ENDLIST\n"
+    ).encode()
+
+
+def master_playlist(base: str, width: int, height: int) -> bytes:
+    return (
+        "#EXTM3U\n"
+        f"#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION={width}x{height}\n"
+        f"{base}/ok.m3u8\n"
     ).encode()
 
 
@@ -93,6 +103,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 media_playlist(self.public_base, "slow-seg.ts"),
                 "application/vnd.apple.mpegurl",
             )
+        elif path == "/res-720.m3u8":
+            self.send_body(
+                master_playlist(self.public_base, 1280, 720),
+                "application/vnd.apple.mpegurl",
+            )
+        elif path == "/res-1080.m3u8":
+            self.send_body(
+                master_playlist(self.public_base, 1920, 1080),
+                "application/vnd.apple.mpegurl",
+            )
+        elif path == "/resolution-source.m3u8":
+            body = (
+                "#EXTM3U\n"
+                '#EXTINF:-1 group-title="分辨率",720p频道\n'
+                f"{self.public_base}/res-720.m3u8\n"
+                '#EXTINF:-1 group-title="分辨率",1080p频道\n'
+                f"{self.public_base}/res-1080.m3u8\n"
+            ).encode()
+            self.send_body(body, "application/vnd.apple.mpegurl")
         elif path == "/ok-seg.ts":
             self.send_fast_segment()
         elif path == "/ok2-seg.ts":
