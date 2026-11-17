@@ -117,7 +117,7 @@ sudo sh install.sh --version "$TAG"
 状态：服务已启动
 ```
 
-`--low-spec` 写入 5 个差异键：`cache.segments.per_channel_max=200`、
+`--low-spec` 写入 5 个键：`cache.segments.per_channel_max=200`、
 `cache.prefetch.concurrency=2`、`auth.token_enabled=true`、
 `auth.ip_guard_enabled=true`、`cdn.enabled=true`。
 

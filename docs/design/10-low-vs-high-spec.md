@@ -4,18 +4,27 @@
 
 ## 1. 结论
 
-低配示例 `config-low-spec.json` 与默认值的**真实差异只有 4 项**。
+安装脚本的 `--low-spec` 写入 5 个键。
 
-其余键都显式写出默认值。作用是文档，不是调优。
-
-| 键 | 默认（高配） | 低配示例 | 性质 |
+| 键 | 默认（常规） | 低配 | 作用 |
 | --- | --- | --- | --- |
-| `cache.segments.per_channel_max` | `0`（内置 4096） | `200` | 内存 |
-| `cache.prefetch.concurrency` | `4` | `2` | CPU |
-| `auth.token_enabled` | `false` | `true` | 安全 |
-| `auth.ip_guard_enabled` | `false` | `true` | 安全 |
+| `cache.segments.per_channel_max` | `0`（内置 4096） | `200` | 每频道切片索引条数上限。降低内存占用 |
+| `cache.prefetch.concurrency` | `4` | `2` | 预取并发。降低开播与切台的 CPU 峰值 |
+| `auth.token_enabled` | `true` | `true` | 播放凭证。每台设备只能播放授权频道 |
+| `auth.ip_guard_enabled` | `true` | `true` | IP 限流、播放会话上限与封禁 |
+| `cdn.enabled` | `false` | `true` | 外部 CDN 未生效时，本机补齐缓存头与错误状态 |
 
-`[cdn].enabled` 在低配示例里是 `true`，默认是 `false`。这是**打开功能**，不是减负。
+只有前 2 个键属于减负。
+
+后 2 个鉴权键默认已开启。安装脚本仍显式写入，便于已有数据库补齐。
+
+`cdn.enabled` 也从默认值改变，但它打开功能，不降低负载。
+
+`cache.segments.per_channel_max` 只限制索引条数，不限制磁盘空间。
+`cache.prefetch.concurrency` 控制同时在途的预取请求数。
+两个鉴权键改变访问控制行为，不省资源。
+
+低配示例 `config-low-spec.json` 还显式写出多个默认值。作用只是文档，不是调优。
 
 `[server].low_resource_mode` 低配示例没有设置。它只出现在 `/panel/api/status` 的回显里，
 不改变任何行为（复刻目标行为）。不要把它当调优开关。
@@ -120,29 +129,41 @@
 
 系统会按 §2 的公式自动算三个量。其中两个可以手动覆盖。
 
-低配机器在**安装时**写入低配参数。安装脚本默认询问「是否使用低配参数」。加 `--low-spec` 跳过询问：
+### 5.0 已安装用户切换为低配
+
+用面板。保存后立即替换运行配置，不需要重启。
+
+| 顺序 | 面板路径 | 改为 |
+| --- | --- | --- |
+| 1 | 系统设置 → 缓存与回收 → 切片缓存 → 单频道上限 | `200` |
+| 2 | 系统设置 → 缓存与回收 → 预载配置 → 拉取并发 | `2` |
+| 3 | 系统设置 → 分发与伪装 → CDN 兜底 → 启用 CDN 兜底 | 开启 |
+| 4 | 安全管控 → 访问与链接 → IP 管控 | 开启 |
+| 5 | 安全管控 → 访问与链接 → 播放凭证 | 开启 |
+
+只想省资源时，做前 2 项。
+
+已有数据库保留原值。默认值只影响新建配置。
+
+默认 `auth.max_sessions_per_ip = 1`。同一出口 IP 同时只保留 1 路播放会话。
+多人共用网络时改大。
+
+不要使用「系统设置 → 基础运行 → 服务器 → 低配模式」。它只回显，不改变参数。
+
+新装时，安装脚本默认询问是否使用低配参数。加 `--low-spec` 跳过询问：
 
 ```sh
 sudo ./install.sh --low-spec
 ```
 
-它写入 §1 的 5 个差异键。也可以手工一条条改：
-
-```sh
-tv-buddy config set cache.segments.per_channel_max 200
-tv-buddy config set cache.prefetch.concurrency 2
-```
-
-配置存在 `tv-buddy.db`。改完需要重启服务，或调 `POST /panel/api/reload`。
+脚本写入 5 个键。其中前 2 个用于减负。
 
 ### 5.1 磁盘上限（可直接覆盖）
 
-面板路径：**系统设置 → 切片缓存 → 磁盘上限**。配置键 `cache.gc.max_disk_mb`。
+面板路径：**系统设置 → 缓存与回收 → 磁盘回收 → 占用上限**。
+配置键 `cache.gc.max_disk_mb`。
 
-```bash
-tv-buddy config set cache.gc.max_disk_mb 0      # 0 = 走公式（默认）
-tv-buddy config set cache.gc.max_disk_mb 120    # 非 0 = 直接用这个值，公式不参与
-```
+填 `0` 时走公式。填非 0 时直接使用该值，公式不参与。
 
 代码位置：`src/cache_gc.rs` 的 `effective_cap_mb`。第一行就是
 `if explicit_mb != 0 { return explicit_mb; }`。
@@ -184,18 +205,18 @@ tv-buddy config set cache.gc.max_disk_mb 120    # 非 0 = 直接用这个值，�
 
 | 量 | 面板位置 | 配置键 |
 | --- | --- | --- |
-| 每频道索引条数 | 系统设置 → 切片缓存 | `cache.segments.per_channel_max` |
-| 全局索引条数 | 同上 | `cache.segments.global_max` |
-| 预取并发 | 系统设置 → 预载配置 | `cache.prefetch.concurrency` |
-| GC 单轮扫描上限 | 系统设置 → 切片缓存 | `cache.gc.scan_limit` |
-| 切片最长存活 | 同上 | `cache.gc.max_age_secs` |
+| 每频道索引条数 | 系统设置 → 缓存与回收 → 切片缓存 → 单频道上限 | `cache.segments.per_channel_max` |
+| 全局索引条数 | 系统设置 → 缓存与回收 → 切片缓存 → 全局条目上限 | `cache.segments.global_max` |
+| 预取并发 | 系统设置 → 缓存与回收 → 预载配置 → 拉取并发 | `cache.prefetch.concurrency` |
+| GC 单轮扫描上限 | 系统设置 → 缓存与回收 → 磁盘回收 → 单轮上限 | `cache.gc.scan_limit` |
+| 切片最长存活 | 系统设置 → 缓存与回收 → 磁盘回收 → 超龄删除 | `cache.gc.max_age_secs` |
 
 ### 5.5 常见操作
 
 低配机器强制压到 80 MB：
 
 ```
-系统设置 → 切片缓存 → 磁盘上限 = 80 → 保存
+系统设置 → 缓存与回收 → 磁盘回收 → 占用上限 = 80 → 保存
 ```
 
 查看公式当前算出多少、工作集多大：**缓存状态**页的「CDN 推荐值」卡片。
@@ -205,9 +226,9 @@ tv-buddy config set cache.gc.max_disk_mb 120    # 非 0 = 直接用这个值，�
 
 | 自适应量 | 能否覆盖 | 入口 |
 | --- | --- | --- |
-| 磁盘上限 | 是，直接覆盖 | 系统设置 → 切片缓存 → 磁盘上限 |
+| 磁盘上限 | 是，直接覆盖 | 系统设置 → 缓存与回收 → 磁盘回收 → 占用上限 |
 | 公式参数 | 是 | 同一张卡 |
 | 工作集 | 否 | 无入口，只能间接影响 |
-| 实测 TTL | 否，可用固定值替代 | 系统设置 → CDN 兜底 → 强制 TTL |
-| 每频道索引条数 | 是 | 系统设置 → 切片缓存 |
-| 预取并发 | 是 | 系统设置 → 预载配置 |
+| 实测 TTL | 否，可用固定值替代 | 系统设置 → 分发与伪装 → CDN 兜底 → 强制 TTL |
+| 每频道索引条数 | 是 | 系统设置 → 缓存与回收 → 切片缓存 → 单频道上限 |
+| 预取并发 | 是 | 系统设置 → 缓存与回收 → 预载配置 → 拉取并发 |

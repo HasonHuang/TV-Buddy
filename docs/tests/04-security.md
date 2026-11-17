@@ -60,7 +60,7 @@ curl -sS -H "Authorization: Bearer $T" http://127.0.0.1:9900/panel/api/status \
 
 预期输出本次构建的版本号。取值来自最近的 `v*` 标签，例如 `2026.9`。
 
-默认配置下 `ip_guard_enabled = false`（`src/config/model.rs:733`）。此时限流与会话上限立即返回 `None`（`src/http/routes/stream.rs:1433`、`src/http/routes/stream.rs:1478`）。步骤 3 打开开关。
+默认配置下 `ip_guard_enabled = true`（`src/config/model.rs`）。步骤 2 显式关闭，确认关闭时不限流。步骤 3 再打开开关。
 
 ## 3. 步骤
 
@@ -127,7 +127,7 @@ CIDX="${CID}-missing"
 
 限流与会话判定在频道解析之前执行（`src/http/routes/stream.rs:88`、`src/http/routes/stream.rs:359`）。因此不存在的频道也能触发判定，且不依赖上游。
 
-#### 步骤 2：确认默认关闭时不限流
+#### 步骤 2：确认关闭时不限流
 
 ```bash
 set_auth '{"ip_guard_enabled":false,"token_enabled":false,"whitelist":[]}'

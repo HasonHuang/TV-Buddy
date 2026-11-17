@@ -47,7 +47,7 @@ pub async fn login(
     let ip = client_ip_with_peer(&headers, Some(peer));
     let window = Duration::from_secs(cfg.auth.auth_fail_window_secs.max(1));
     let lock = Duration::from_secs(cfg.auth.auth_fail_lock_secs.max(1));
-    // 升级阶梯只在「IP 管控」打开时启用。默认关闭时锁定时长仍是固定的
+    // 升级阶梯只在「IP 管控」打开时启用。关闭时锁定时长仍是固定的
     // `auth_fail_lock_secs`，与改动前一致。
     let checked = if cfg.auth.ip_guard_enabled {
         state.login_guard.check_escalating(

@@ -1608,7 +1608,7 @@ fn split_entry(file: &str) -> Option<(String, String)> {
 /// 播放入口限流。返回 `Some` 时应直接回给客户端。
 ///
 /// 只计入口请求（换台 / 新建播放），不计切片：切片频率由码率决定，限它等于限画质。
-/// 只在 `[auth].ip_guard_enabled = true` 时生效，默认配置下不改变任何行为。
+/// 只在 `[auth].ip_guard_enabled = true` 时生效，关闭时不改变任何行为。
 fn rate_limit(
     state: &Arc<AppState>,
     config: &Config,
@@ -1651,7 +1651,7 @@ fn rate_limit(
 
 /// 播放会话限制。返回 `Some` 时应直接回给客户端。
 ///
-/// 只在 `[auth].ip_guard_enabled = true` 时生效，默认配置下不改变任何行为。
+/// 只在 `[auth].ip_guard_enabled = true` 时生效，关闭时不改变任何行为。
 /// 白名单地址豁免。超限时跳 `limit_url`。
 fn session_limit(
     state: &Arc<AppState>,

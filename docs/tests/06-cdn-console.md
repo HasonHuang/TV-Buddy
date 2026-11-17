@@ -355,7 +355,7 @@ printf 'MANIFEST=%s\n' "$MANIFEST"
 
 预期：`MANIFEST` 指向 CDN 域名。`PLAY` 为空或为非空 Token。
 
-`[auth].token_enabled` 默认 `false`（`src/config/model.rs:726-756`）。Token 开启且分组不是 `open` 时，入口 URL 必须带 `?token=`（`src/playlist.rs:120-127`）。切片 URL 不带查询串，也不需要 Token。
+`[auth].token_enabled` 默认 `true`（`src/config/model.rs`）。Token 开启且分组不是 `open` 时，入口 URL 必须带 `?token=`（`src/playlist.rs:120-127`）。切片 URL 不带查询串，也不需要 Token。
 
 ### 3.11 验证清单 BYPASS
 

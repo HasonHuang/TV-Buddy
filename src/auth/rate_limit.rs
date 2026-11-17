@@ -15,7 +15,7 @@
 //! - 有效违规数达到 `ban_threshold` 时返回 `Ban`，由调用方封禁
 //!   `ban_duration_secs` 秒。
 //!
-//! 生效条件是 `[auth].ip_guard_enabled = true`。默认配置下本模块不参与。
+//! 生效条件是 `[auth].ip_guard_enabled = true`。关闭时本模块不参与。
 
 use std::{
     collections::HashMap,

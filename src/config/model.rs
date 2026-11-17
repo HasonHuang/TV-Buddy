@@ -739,6 +739,7 @@ impl Default for SubtitleTranslateCfg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AuthCfg {
+    /// 播放凭证。默认开启。
     pub token_enabled: bool,
     pub token_ttl_hours: u64,
     pub token_failure_url: String,
@@ -755,6 +756,7 @@ pub struct AuthCfg {
     ///
     /// 目标开启后已有频道与切片前缀不变（F-010 §4），所以它只影响新导入的频道。
     pub random_id_enabled: bool,
+    /// IP 限流、播放会话上限与封禁。默认开启。
     pub ip_guard_enabled: bool,
     /// 每 IP 并发播放会话上限；`0` = 不限。
     ///
@@ -821,7 +823,7 @@ impl Default for AuthCfg {
             slice_sign_window_secs: 300,
             slice_sign_secret: String::new(),
             random_id_enabled: false,
-            ip_guard_enabled: false,
+            ip_guard_enabled: true,
             max_sessions_per_ip: 1,
             session_ttl_secs: 30,
             limit_url: "https://material.yang-1989.eu.org/v/limit.mp4".into(),
@@ -1428,6 +1430,12 @@ mod tests {
     fn token_check_is_on_by_default() {
         assert!(AuthCfg::default().token_enabled);
         assert!(Config::default().auth.token_enabled);
+    }
+
+    #[test]
+    fn ip_guard_is_on_by_default() {
+        assert!(AuthCfg::default().ip_guard_enabled);
+        assert!(Config::default().auth.ip_guard_enabled);
     }
 
     #[test]

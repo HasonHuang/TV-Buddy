@@ -419,6 +419,8 @@ async fn fixture_with_options(
         "auth": {
             "token_enabled": true,
             "token_failure_url": "http://placeholder.test/Failure.mp4",
+            // 本套件按单 IP 连续请求。显式关闭，避免默认的限流与会话上限干扰断言。
+            "ip_guard_enabled": false,
             // 本套件默认关签名，保持旧断言可读；签名行为由专用用例覆盖。
             "slice_sign_enabled": false
         },
@@ -4072,7 +4074,7 @@ async fn play_session_limit_only_when_guard_enabled() {
     let groups = r#"{"groups":[{"id":"sl","name":"会话组","mode":"proxy","access":"open","channels":[{"id":"a","name":"A","url":"{upstream}/live.m3u8"},{"id":"b","name":"B","url":"{upstream}/live.m3u8"}]}]}"#;
     let limit = "https://material.yang-1989.eu.org/v/limit.mp4";
 
-    // 默认：`ip_guard_enabled = false`，两个频道都能播，没有踢人。
+    // 夹具显式关闭：两个频道都能播，没有踢人。
     let off = fixture_with_extra_and_auth(groups, "").await;
     let a = format!("/sl/a.m3u8?token={}", off.token);
     let b = format!("/sl/b.m3u8?token={}", off.token);

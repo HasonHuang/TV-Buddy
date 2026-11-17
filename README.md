@@ -328,15 +328,14 @@ http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 
 ## 配置
 
-配置存在 `<prefix>/tv-buddy.db`。面板「系统设置」是唯一入口。
-命令行也能改：`tv-buddy config get <键> `、`tv-buddy config set <键> <值>`。
+配置存在 `<prefix>/tv-buddy.db`。面板是唯一入口。
 
 下面的 JSON 是**键名参考**。存进数据库的文档就是这个形状。
 
 ```json
 {
   "server": { "bind": "[::]:9900", "log_level": "info" },
-  "auth": { "token_enabled": false },
+  "auth": { "token_enabled": true, "ip_guard_enabled": true },
   "cache": { "disk_path": "./cache" },
   "groups": [
     {
@@ -352,8 +351,6 @@ http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 }
 ```
 
-整份导入：`tv-buddy config import config.json --force`。
-
 常用可选项：
 
 | 段 | 键 | 说明 |
@@ -366,8 +363,10 @@ http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 | `[epg.translate]` | `enabled`、`mtran_url` | 节目单翻译 |
 | `[[groups]]` | `mode`、`format`、`mpd_keep_seconds` | 分组行为 |
 
-生效方式：面板保存立即生效；`tv-buddy config set` 之后调用 `POST /panel/api/reload` 或重启。
-`[cache].disk_path` 需要重启。EPG 源、绑定与规则已迁入面板与数据库，保存即生效。
+`[auth]` 的播放凭证与 IP 管控默认开启。IP 管控默认 `max_sessions_per_ip = 1`，
+同一出口 IP 同时只保留 1 路播放会话。多人共用网络时改大。
+
+生效方式：面板保存立即生效。`[cache].disk_path` 需要重启。EPG 源、绑定与规则已迁入面板与数据库，保存即生效。
 `[epg]` 的其余键仍需要重启。
 
 ### 翻译服务
@@ -409,8 +408,40 @@ TV Buddy 可在 **1 vCPU / 128 MB 内存 / 1 GB 磁盘** 的实例上运行。�
 
 装的时候脚本会询问是否使用低配参数。也可加 `--low-spec` 跳过询问：`sudo ./install.sh --low-spec`。
 样例：[`docs/design/config-low-spec.json`](docs/design/config-low-spec.json)。
-导入：`tv-buddy config import docs/design/config-low-spec.json --db tv-buddy.db --force`。
 原理与公式：[`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md)。
+
+### 配置键的作用
+
+| 键 | 默认（常规） | 低配 | 作用 |
+| --- | --- | --- | --- |
+| `cache.segments.per_channel_max` | `0`（内置 4096） | `200` | 每频道切片索引条数上限。降低内存占用 |
+| `cache.prefetch.concurrency` | `4` | `2` | 预取并发。降低开播与切台的 CPU 峰值 |
+| `auth.token_enabled` | `true` | `true` | 播放凭证。每台设备只能播放授权频道 |
+| `auth.ip_guard_enabled` | `true` | `true` | IP 限流、播放会话上限与封禁 |
+| `cdn.enabled` | `false` | `true` | 外部 CDN 未生效时，本机补齐缓存头与错误状态 |
+
+只有前 2 项减负。后 3 项改变安全或分发行为。
+
+面板里的「低配模式」只回显，不改变参数。不要把它当作切换开关。
+
+### 已安装用户如何切换
+
+用面板操作。保存后立即生效，不需要重启。
+
+| 顺序 | 面板路径 | 改为 |
+| --- | --- | --- |
+| 1 | 系统设置 → 缓存与回收 → 切片缓存 → 单频道上限 | `200` |
+| 2 | 系统设置 → 缓存与回收 → 预载配置 → 拉取并发 | `2` |
+| 3 | 系统设置 → 分发与伪装 → CDN 兜底 → 启用 CDN 兜底 | 开启 |
+| 4 | 安全管控 → 访问与链接 → IP 管控 | 开启 |
+| 5 | 安全管控 → 访问与链接 → 播放凭证 | 开启 |
+
+只想省资源时，做前 2 项。
+
+已有数据库保留原值。新的默认值只影响新建配置。
+
+默认 `auth.max_sessions_per_ip = 1`。同一出口 IP 同时只保留 1 路播放会话。
+多人共用网络时改大。
 
 ### 两个硬前提
 
@@ -423,8 +454,8 @@ TV Buddy 可在 **1 vCPU / 128 MB 内存 / 1 GB 磁盘** 的实例上运行。�
 
 ### 服务端配置
 
-`--low-spec` 写入的就是这份 JSON。想手工导入，用
-[`docs/design/config-low-spec.json`](docs/design/config-low-spec.json)。
+`--low-spec` 写入 5 个键。下面的 JSON 是完整样例，多数键等于默认值。
+样例见 [`docs/design/config-low-spec.json`](docs/design/config-low-spec.json)。
 
 ```json
 {

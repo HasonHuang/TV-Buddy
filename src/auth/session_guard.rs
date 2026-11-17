@@ -12,7 +12,7 @@
 //!   并把被踢的 `(IP, 频道)` 记进限流表。
 //! - 被踢方在 TTL 内再请求，返回 `Limit`。调用方据此跳 `limit_url`。
 //!
-//! 生效条件是 `[auth].ip_guard_enabled = true`。默认配置下本模块不参与，
+//! 生效条件是 `[auth].ip_guard_enabled = true`。关闭时本模块不参与，
 //! 用户可见行为与未实现时完全一致。
 
 use std::{
