@@ -51,7 +51,14 @@ pub async fn playlist(
 
     let config = state.snapshot();
     let base = base_url(&headers);
-    let local = playlist::render_user(&config, &user, &base, &token, Some(&state.health));
+    let local = playlist::render_user(
+        &config,
+        &user,
+        &base,
+        &token,
+        Some(&state.health),
+        Some(&state.quality),
+    );
     let extra = aggregate_sources(&state, &config, &user).await;
     let body = playlist::compose(local, extra, &config.playlist.merge_position);
     (
@@ -87,7 +94,15 @@ pub async fn group_playlist(
     let config = state.snapshot();
     let base = base_url(&headers);
     let Some(body) =
-        playlist::render_user_group(&config, &user, &base, &token, Some(&state.health), &gid)
+        playlist::render_user_group(
+        &config,
+        &user,
+        &base,
+        &token,
+        Some(&state.health),
+        Some(&state.quality),
+        &gid,
+    )
     else {
         return missing();
     };

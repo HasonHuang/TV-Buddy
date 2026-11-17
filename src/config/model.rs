@@ -31,6 +31,8 @@ pub struct Config {
     pub subtitle: SubtitleCfg,
     pub health: HealthCfg,
     pub stats: StatsCfg,
+    /// `[quality]`——可用性校验与测速筛选。
+    pub quality: QualityCfg,
     /// `[features]`——面板功能入口开关。只影响侧栏入口，不拦截接口。
     pub features: FeaturesCfg,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -894,6 +896,140 @@ impl Default for StatsCfg {
     }
 }
 
+/// `[quality]`——可用性校验与测速筛选。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QualityCfg {
+    pub enabled: bool,
+    /// `reachability` / `playlist` / `speed` / `full`。
+    pub probe_mode: String,
+    /// 0 表示只手动运行。
+    pub interval_secs: u64,
+    /// `interval` 或 `cron`。
+    pub schedule: String,
+    /// 周期小时数。1–8760。
+    pub interval_hours: u64,
+    /// 5 段 cron 表达式。
+    pub cron: String,
+    /// 安全阀开关。
+    pub guard_enabled: bool,
+    /// 将移出数 / 完成判定数。
+    pub max_remove_ratio: f64,
+    /// 小于该数量不触发安全阀。
+    pub min_remove_count: u64,
+    /// 非准入结果保留天数。0 表示不自动清理。
+    pub result_retention_days: u64,
+    /// 同步门控墙钟上限（秒）。0 表示不限制。
+    pub gate_time_budget_secs: u64,
+    pub timeout_secs: u64,
+    pub concurrency: u32,
+    pub speed_timeout_secs: u64,
+    pub sample_bytes_kb: u64,
+    pub sample_secs: f64,
+    pub sample_segments: u32,
+    pub max_playlist_kb: u64,
+    pub budget_mb_per_run: u64,
+    pub max_channels_per_run: u64,
+    pub stale_keep_secs: u64,
+    pub quick_target: u32,
+    pub sort_by: Vec<String>,
+    pub filter_ad: bool,
+    pub probe_passthrough: bool,
+    pub defer_during_playback: bool,
+    pub rules: QualityRules,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Default for QualityCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            probe_mode: "reachability".into(),
+            interval_secs: 900,
+            schedule: "interval".into(),
+            interval_hours: 6,
+            cron: "0 */6 * * *".into(),
+            guard_enabled: true,
+            max_remove_ratio: 0.5,
+            min_remove_count: 10,
+            result_retention_days: 7,
+            gate_time_budget_secs: 300,
+            timeout_secs: 10,
+            concurrency: 2,
+            speed_timeout_secs: 10,
+            sample_bytes_kb: 4096,
+            sample_secs: 2.0,
+            sample_segments: 2,
+            max_playlist_kb: 2048,
+            budget_mb_per_run: 64,
+            max_channels_per_run: 0,
+            stale_keep_secs: 1800,
+            quick_target: 1,
+            sort_by: Vec::new(),
+            filter_ad: false,
+            probe_passthrough: false,
+            defer_during_playback: true,
+            rules: QualityRules::default(),
+            extra: Extra::new(),
+        }
+    }
+}
+
+/// 质量判定阈值与动作。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QualityRules {
+    pub min_speed_mib: f64,
+    pub max_delay_ms: u64,
+    pub min_resolution: String,
+    pub max_resolution: String,
+    pub resolution_speed_map: BTreeMap<String, f64>,
+    pub supply: bool,
+    /// `hide` / `mark` / `off`。
+    pub action: String,
+    pub retain: bool,
+    pub host_cache: bool,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Default for QualityRules {
+    fn default() -> Self {
+        Self {
+            min_speed_mib: 0.0,
+            max_delay_ms: 0,
+            min_resolution: String::new(),
+            max_resolution: String::new(),
+            resolution_speed_map: BTreeMap::new(),
+            supply: false,
+            action: "hide".into(),
+            retain: false,
+            host_cache: false,
+            extra: Extra::new(),
+        }
+    }
+}
+
+/// 源、分组、频道的质量规则覆盖。未写的字段继承上一层。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QualityOverride {
+    pub enabled: Option<bool>,
+    pub min_speed_mib: Option<f64>,
+    pub max_delay_ms: Option<u64>,
+    pub min_resolution: Option<String>,
+    pub max_resolution: Option<String>,
+    pub resolution_speed_map: Option<BTreeMap<String, f64>>,
+    pub supply: Option<bool>,
+    pub action: Option<String>,
+    pub retain: Option<bool>,
+    pub host_cache: Option<bool>,
+    pub stale_keep_secs: Option<u64>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
 /// 上游代理覆盖（分组或频道级）。
 ///
 /// 证据：S-GAP-05、F-010 §3.2。目标字段为
@@ -992,6 +1128,9 @@ pub struct Group {
     ///
     /// 频道级 `offline_on_fail` 优先。默认关闭。
     pub offline_on_fail: bool,
+    /// 分组级质量规则覆盖。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<QualityOverride>,
     /// `manual` 或 `sync`。手工分组不写该键。
     #[serde(skip_serializing_if = "is_manual")]
     pub origin: String,
@@ -1023,6 +1162,7 @@ impl Default for Group {
             proxy: None,
             prefetch: None,
             offline_on_fail: false,
+            quality: None,
             origin: "manual".into(),
             source_id: String::new(),
             source_group: String::new(),
@@ -1049,6 +1189,9 @@ pub struct Channel {
     /// 探测失败下线。缺省继承分组级。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offline_on_fail: Option<bool>,
+    /// 频道级质量规则覆盖。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<QualityOverride>,
     pub selected_tracks: Vec<String>,
     pub dash_mode: String,
     pub livestream: bool,
@@ -1085,6 +1228,7 @@ impl Default for Channel {
             proxy: None,
             prefetch: None,
             offline_on_fail: None,
+            quality: None,
             selected_tracks: Vec::new(),
             dash_mode: "continuous".into(),
             livestream: false,
@@ -1296,6 +1440,9 @@ pub struct PlaylistSource {
     pub merge_into: BTreeMap<String, String>,
     /// 上游分组名 → 新组名。显式合并到新组；同名的新组合并为一组。
     pub merge_new: BTreeMap<String, String>,
+    /// 源级质量规则覆盖。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<QualityOverride>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -1367,6 +1514,7 @@ impl Default for PlaylistSource {
             max_channels: 0,
             merge_into: BTreeMap::new(),
             merge_new: BTreeMap::new(),
+            quality: None,
             extra: Extra::new(),
         }
     }
@@ -1950,5 +2098,69 @@ mod tests {
         assert_eq!(source.max_channels, 0);
         assert!(source.merge_into.is_empty());
         assert!(config.playlist.sync_enabled);
+    }
+
+    #[test]
+    fn quality_admission_defaults_are_bounded() {
+        let quality = QualityCfg::default();
+        assert_eq!(quality.schedule, "interval");
+        assert_eq!(quality.interval_hours, 6);
+        assert_eq!(quality.cron, "0 */6 * * *");
+        assert!(quality.guard_enabled);
+        assert_eq!(quality.max_remove_ratio, 0.5);
+        assert_eq!(quality.min_remove_count, 10);
+        assert_eq!(quality.result_retention_days, 7);
+        assert_eq!(quality.gate_time_budget_secs, 300);
+    }
+
+    #[test]
+    fn quality_defaults_are_disabled_and_bounded() {
+        let config = Config::default();
+        assert!(!config.quality.enabled);
+        assert_eq!(config.quality.probe_mode, "reachability");
+        assert_eq!(config.quality.interval_secs, 900);
+        assert_eq!(config.quality.stale_keep_secs, 1800);
+        assert_eq!(config.quality.rules.action, "hide");
+        assert!(!config.quality.rules.retain);
+        assert!(!config.quality.rules.host_cache, "Host 缓存默认关闭");
+
+        let mut config = Config::default();
+        config.quality.enabled = true;
+        config.quality.rules.min_speed_mib = 1.5;
+        config.groups.push(Group {
+            id: "g".into(),
+            quality: Some(QualityOverride {
+                min_speed_mib: Some(2.0),
+                retain: Some(true),
+                ..QualityOverride::default()
+            }),
+            channels: vec![Channel {
+                id: "c".into(),
+                quality: Some(QualityOverride {
+                    action: Some("mark".into()),
+                    ..QualityOverride::default()
+                }),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        let encoded = serde_json::to_value(&config).expect("序列化");
+        let decoded: Config = serde_json::from_value(encoded).expect("解析");
+        assert!(decoded.quality.enabled);
+        assert_eq!(decoded.quality.rules.min_speed_mib, 1.5);
+        assert_eq!(
+            decoded.groups[0]
+                .quality
+                .as_ref()
+                .and_then(|q| q.min_speed_mib),
+            Some(2.0)
+        );
+        assert_eq!(
+            decoded.groups[0].channels[0]
+                .quality
+                .as_ref()
+                .and_then(|q| q.action.as_deref()),
+            Some("mark")
+        );
     }
 }

@@ -100,7 +100,43 @@ fn init_schema(conn: &Connection) -> Result<()> {
              updated_at_ms BIGINT NOT NULL
          );
          CREATE INDEX IF NOT EXISTS epg_rules_order_idx
-             ON epg_rules (sort_order, id);",
+             ON epg_rules (sort_order, id);
+         CREATE TABLE IF NOT EXISTS quality_results (
+             key TEXT PRIMARY KEY NOT NULL,
+             scope TEXT NOT NULL,
+             source_id TEXT NOT NULL DEFAULT '',
+             source_key TEXT NOT NULL DEFAULT '',
+             gid TEXT NOT NULL DEFAULT '',
+             cid TEXT NOT NULL DEFAULT '',
+             name TEXT NOT NULL DEFAULT '',
+             target_group TEXT NOT NULL DEFAULT '',
+             url_hash TEXT NOT NULL DEFAULT '',
+             action TEXT NOT NULL,
+             reason TEXT NOT NULL,
+             ok INTEGER NOT NULL DEFAULT 0,
+             delay_ms INTEGER,
+             speed_kib INTEGER,
+             width INTEGER,
+             height INTEGER,
+             http_status INTEGER,
+             checked_at INTEGER NOT NULL,
+             next_check_at INTEGER NOT NULL DEFAULT 0,
+             first_fail_at INTEGER,
+             rule_hash TEXT NOT NULL DEFAULT '',
+             run_id TEXT NOT NULL DEFAULT '',
+             updated_at_ms BIGINT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS quality_results_checked_idx
+             ON quality_results (checked_at);
+         CREATE INDEX IF NOT EXISTS quality_results_source_idx
+             ON quality_results (source_id, checked_at);
+         CREATE INDEX IF NOT EXISTS quality_results_action_idx
+             ON quality_results (action, checked_at);
+         CREATE TABLE IF NOT EXISTS quality_meta (
+             key TEXT PRIMARY KEY NOT NULL,
+             value TEXT NOT NULL,
+             updated_at_ms BIGINT NOT NULL
+         );",
     )
     .context("建表失败")?;
     Ok(())

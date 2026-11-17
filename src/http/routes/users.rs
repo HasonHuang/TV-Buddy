@@ -436,7 +436,14 @@ pub async fn me(
     let config = state.snapshot();
     let base = crate::http::ext::base_url(&headers);
     let groups: Vec<Value> =
-        crate::playlist::user_view(&config, &user, &base, &token, Some(&state.health))
+        crate::playlist::user_view(
+            &config,
+            &user,
+            &base,
+            &token,
+            Some(&state.health),
+            Some(&state.quality),
+        )
             .iter()
             .map(|group| {
                 json!({

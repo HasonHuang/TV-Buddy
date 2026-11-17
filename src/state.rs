@@ -33,8 +33,12 @@ pub(crate) const DEFAULT_USER_AGENT: &str =
 pub struct AppState {
     /// 数据库文件路径（备份恢复时另存旁路文件用）。
     pub db_path: PathBuf,
+    /// 进程内共用的数据库连接。
+    pub conn: crate::db::SharedConn,
     /// 配置仓库（SQLite 单行文档）。
     pub config_store: crate::config::ConfigStore,
+    /// 质量结果仓库。
+    pub quality_store: crate::quality::store::QualityStore,
     /// 当前配置快照。
     pub config: ArcSwap<Config>,
     /// 配置里的频道键 `gid/cid`。统计中间件用它做 O(1) 校验，
@@ -78,6 +82,8 @@ pub struct AppState {
     pub watchdog: Watchdog,
     /// 逐频道上游健康探测结果。
     pub health: crate::health::Health,
+    /// 可用性校验结果与运行状态。
+    pub quality: crate::quality::state::QualityState,
     /// 节目单状态。
     pub epg: crate::epg::EpgState,
     /// EPG 源、绑定与关键字规则（SQLite）。
@@ -98,8 +104,12 @@ pub struct AppState {
     pub estimate: crate::cache_estimate::Estimator,
     /// 按代理配置缓存的 HTTP 客户端。
     proxy_clients: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
+    /// 质量探测客户端。重定向上限更小。
+    probe_clients: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
     /// 同一时间只跑一次订阅同步。
     pub sync_lock: Arc<tokio::sync::Mutex<()>>,
+    /// 质量准入与同步门控串行化。
+    pub admission_lock: Arc<tokio::sync::Mutex<()>>,
     /// 已排队或正在执行的手动同步源 id。同一源不重复排队。
     pub sync_pending: Mutex<std::collections::HashSet<String>>,
     /// 最近日志行。
@@ -131,7 +141,8 @@ impl AppState {
         }
         let users = crate::users::UserStore::attach(conn.clone())?;
         let history = crate::metrics_store::Store::new(conn.clone())?;
-        let epg_store = crate::epg_store::Store::attach(conn)?;
+        let quality_store = crate::quality::store::QualityStore::new(conn.clone());
+        let epg_store = crate::epg_store::Store::attach(conn.clone())?;
         let epg = crate::epg::EpgState::load(&cache_dir);
         // 旧配置里的 `[[epg.sources]]` 逐条导入。成功的从配置移除，失败的保留。
         match epg_store.import_config_sources(&config.epg.sources) {
@@ -164,9 +175,11 @@ impl AppState {
         let estimate = crate::cache_estimate::Estimator::load_or_default(&cache_dir);
         estimate.set_auto_tune(config.cdn.auto_tune);
         let channel_keys = channel_keys_of(&config);
-        Ok(Self {
+        let state = Self {
             db_path,
+            conn,
             config_store,
+            quality_store,
             config: ArcSwap::from_pointee(config),
             channel_keys: ArcSwap::from_pointee(channel_keys),
             sessions: SessionStore::new(ttl),
@@ -195,6 +208,7 @@ impl AppState {
             metrics: Arc::new(crate::metrics::Metrics::new()),
             watchdog: Watchdog::new(),
             health: crate::health::Health::new(),
+            quality: crate::quality::state::QualityState::new(),
             ip_guard: crate::auth::IpGuard::new(),
             play_sessions: crate::auth::SessionGuard::new(),
             rate_limiter: crate::auth::RateLimiter::new(),
@@ -202,12 +216,49 @@ impl AppState {
             unban_quota: crate::auth::UnbanQuota::new(),
             estimate,
             proxy_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
+            probe_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
             sync_lock: Arc::new(tokio::sync::Mutex::new(())),
+            admission_lock: Arc::new(tokio::sync::Mutex::new(())),
             sync_pending: Mutex::new(std::collections::HashSet::new()),
             logs,
             started: Instant::now(),
             write_lock: Mutex::new(()),
-        })
+        };
+        state.hydrate_manual_quality()?;
+        Ok(state)
+    }
+
+    /// 从结果表恢复手工频道的下线状态。重启后订阅渲染不丢失。
+    ///
+    /// 频道已不存在或地址哈希不匹配时跳过。
+    pub fn hydrate_manual_quality(&self) -> anyhow::Result<()> {
+        let config = self.snapshot();
+        for result in self.quality_store.manual_entries()? {
+            // 只有 hidden 需要恢复下线状态。kept 失败可能是宽限内保留，
+            // 重启后恢复失败 Entry 会绕过宽限。
+            if result.action != "hidden" {
+                continue;
+            }
+            let Some(group) = config.group(&result.gid) else {
+                continue;
+            };
+            let Some(channel) = group
+                .channels
+                .iter()
+                .find(|channel| channel.id == result.cid)
+            else {
+                continue;
+            };
+            if result.url_hash != crate::quality::admission::url_hash_hex(&channel.url) {
+                continue;
+            }
+            let entry = crate::quality::state::Entry::from_result(
+                &result,
+                crate::quality::state::url_hash(&channel.url),
+            );
+            self.quality.put(&result.gid, &result.cid, entry);
+        }
+        Ok(())
     }
 
     /// 取当前配置快照。
@@ -292,6 +343,79 @@ impl AppState {
         }
     }
 
+    /// 质量探测客户端。重定向上限 5，按代理配置缓存。
+    pub fn probe_client_for(&self, gid: &str, cid: &str) -> reqwest::Client {
+        let config = self.snapshot();
+        let Some(proxy) = config.proxy_for(gid, cid) else {
+            return self.probe_client(None);
+        };
+        self.probe_client(Some(proxy))
+    }
+
+    /// 质量候选的探测客户端。候选尚未进入配置，按给定代理构造。
+    pub(crate) fn probe_client_for_candidate(
+        &self,
+        proxy: Option<&crate::config::model::ProxyCfg>,
+    ) -> reqwest::Client {
+        self.probe_client(proxy)
+    }
+
+    fn probe_client(&self, proxy: Option<&crate::config::model::ProxyCfg>) -> reqwest::Client {
+        let key = proxy
+            .map(|proxy| {
+                format!(
+                    "{}|{}|{}",
+                    proxy.url().unwrap_or_default(),
+                    proxy.username().unwrap_or(""),
+                    proxy.password().unwrap_or("")
+                )
+            })
+            .unwrap_or_else(|| "direct".to_string());
+        {
+            let cache = self
+                .probe_clients
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(client) = cache.get(&key) {
+                return client.clone();
+            }
+        }
+        let mut builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(UPSTREAM_TIMEOUT_SECS))
+            .user_agent(DEFAULT_USER_AGENT)
+            .redirect(reqwest::redirect::Policy::limited(5));
+        if let Some(proxy) = proxy {
+            if let Some(addr) = proxy.url() {
+                let user = proxy.username().unwrap_or("");
+                let pass = proxy.password().unwrap_or("");
+                let built = reqwest::Proxy::all(&addr).and_then(|mut candidate| {
+                    if !user.is_empty() {
+                        candidate = candidate.basic_auth(user, pass);
+                    }
+                    Ok(candidate)
+                });
+                match built {
+                    Ok(candidate) => builder = builder.proxy(candidate),
+                    Err(error) => tracing::warn!(%error, "探测代理创建失败；改用直连"),
+                }
+            }
+        }
+        match builder.build() {
+            Ok(client) => {
+                let mut cache = self
+                    .probe_clients
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                cache.insert(key, client.clone());
+                client
+            }
+            Err(error) => {
+                tracing::warn!(%error, "探测客户端创建失败；改用直连");
+                self.http.clone()
+            }
+        }
+    }
+
     /// 原子替换配置。同时解除全部冷却（S-MODE-17）。
     pub fn replace(&self, config: Config) {
         self.watchdog.clear_all();
@@ -367,6 +491,100 @@ impl AppState {
         Ok(())
     }
 
+    /// 改配置并原子写入质量结果。
+    ///
+    /// 闭包在事务内执行。闭包返回的结果与实际成员变更一起提交。
+    /// 调用方负责先拿 [`AppState::admission_lock`]。
+    pub fn mutate_admission<F>(
+        &self,
+        meta: &[(String, String)],
+        change: F,
+    ) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>
+    where
+        F: FnOnce(&mut Config) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>,
+    {
+        self.mutate_admission_with_delete(meta, &[], change)
+    }
+
+    /// 同 [`Self::mutate_admission`]，并在同一事务里删除指定结果键。
+    pub fn mutate_admission_with_delete<F>(
+        &self,
+        meta: &[(String, String)],
+        delete_keys: &[String],
+        change: F,
+    ) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>
+    where
+        F: FnOnce(&mut Config) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>,
+    {
+        let delete_keys = delete_keys.to_vec();
+        self.mutate_admission_full(meta, move |config| Ok((change(config)?, delete_keys)))
+    }
+
+    /// 同 [`Self::mutate_admission`]，闭包同时返回要删除的结果键。
+    pub fn mutate_admission_full<F>(
+        &self,
+        meta: &[(String, String)],
+        change: F,
+    ) -> anyhow::Result<Vec<crate::quality::store::QualityResult>>
+    where
+        F: FnOnce(
+            &mut Config,
+        )
+            -> anyhow::Result<(Vec<crate::quality::store::QualityResult>, Vec<String>)>,
+    {
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let tx = conn.transaction()?;
+        let mut config = match self.config_store.load_tx(&tx)? {
+            Some(from_db) => from_db,
+            None => (*self.snapshot()).clone(),
+        };
+        let (results, delete_keys) = change(&mut config)?;
+        let revision = self.config_store.save_tx(&tx, &config)?;
+        for key in &delete_keys {
+            self.quality_store.delete_tx(&tx, key)?;
+        }
+        self.quality_store.upsert_many_tx(&tx, &results)?;
+        for (key, value) in meta {
+            self.quality_store.meta_set_tx(&tx, key, value)?;
+        }
+        tx.commit()?;
+        config.revision = revision;
+        self.replace(config);
+        Ok(results)
+    }
+
+    /// 提交质量结果与 meta，不改配置，但与配置写入共用写锁。
+    ///
+    /// 闭包拿最新配置复核结果。源停用/删除与结果提交因此串行。
+    pub fn commit_quality_results<F>(
+        &self,
+        meta: &[(String, String)],
+        mut results: Vec<crate::quality::store::QualityResult>,
+        change: F,
+    ) -> anyhow::Result<Vec<(String, String, crate::quality::state::Entry)>>
+    where
+        F: FnOnce(
+            &Config,
+            &mut Vec<crate::quality::store::QualityResult>,
+        ) -> Vec<(String, String, crate::quality::state::Entry)>,
+    {
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let tx = conn.transaction()?;
+        let config = match self.config_store.load_tx(&tx)? {
+            Some(from_db) => from_db,
+            None => (*self.snapshot()).clone(),
+        };
+        let manual = change(&config, &mut results);
+        self.quality_store.upsert_many_tx(&tx, &results)?;
+        for (key, value) in meta {
+            self.quality_store.meta_set_tx(&tx, key, value)?;
+        }
+        tx.commit()?;
+        Ok(manual)
+    }
+
     pub fn version(&self) -> &'static str {
         crate::VERSION
     }
@@ -390,6 +608,172 @@ fn channel_keys_of(config: &Config) -> HashSet<String> {
         }
     }
     keys
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::model::{Channel, Group};
+    use crate::quality::store::QualityResult;
+
+    fn test_state() -> (std::sync::Arc<AppState>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tvb-state-{}", uuid::Uuid::new_v4()));
+        let state = AppState::new(
+            dir.join("tvb.db"),
+            Config::default(),
+            std::sync::Arc::new(crate::logging::RingBuffer::default()),
+        )
+        .expect("state");
+        (std::sync::Arc::new(state), dir)
+    }
+
+    #[test]
+    fn mutate_admission_commits_config_and_results() {
+        let (state, dir) = test_state();
+        let item = QualityResult {
+            key: "sync:s:c".into(),
+            action: "admitted".into(),
+            ..QualityResult::default()
+        };
+        let written = state
+            .mutate_admission(&[("last_run_at".into(), "1".into())], |config| {
+                config.groups.push(Group {
+                    id: "g".into(),
+                    ..Group::default()
+                });
+                Ok(vec![item])
+            })
+            .unwrap();
+        assert_eq!(written.len(), 1);
+        assert!(state.snapshot().group("g").is_some());
+        assert!(state.quality_store.get("sync:s:c").unwrap().is_some());
+        assert_eq!(
+            state
+                .quality_store
+                .meta_get("last_run_at")
+                .unwrap()
+                .as_deref(),
+            Some("1")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mutate_admission_rolls_back_on_closure_error() {
+        let (state, dir) = test_state();
+        let error = state
+            .mutate_admission(&[], |config| {
+                config.groups.push(Group {
+                    id: "g".into(),
+                    ..Group::default()
+                });
+                anyhow::bail!("stop");
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("stop"));
+        assert!(state.snapshot().group("g").is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mutate_admission_rolls_back_on_invalid_config() {
+        let (state, dir) = test_state();
+        let error = state
+            .mutate_admission(&[], |config| {
+                config.server.bind = String::new();
+                Ok(vec![QualityResult {
+                    key: "sync:s:c".into(),
+                    ..QualityResult::default()
+                }])
+            })
+            .unwrap_err();
+        assert!(!error.to_string().is_empty());
+        assert!(state.quality_store.get("sync:s:c").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn manual_entries_hydrate_after_restart() {
+        let dir = std::env::temp_dir().join(format!("tvb-hydrate-{}", uuid::Uuid::new_v4()));
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g1".into(),
+            channels: vec![Channel {
+                id: "c1".into(),
+                url: "http://up/live.m3u8".into(),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        let state = std::sync::Arc::new(
+            AppState::new(
+                dir.join("tvb.db"),
+                config,
+                std::sync::Arc::new(crate::logging::RingBuffer::default()),
+            )
+            .expect("state"),
+        );
+        state
+            .quality_store
+            .upsert(&QualityResult {
+                key: "channel:g1/c1".into(),
+                scope: "manual".into(),
+                action: "hidden".into(),
+                reason: "unreachable".into(),
+                gid: "g1".into(),
+                cid: "c1".into(),
+                url_hash: crate::quality::admission::url_hash_hex("http://up/live.m3u8"),
+                checked_at: 1,
+                ..QualityResult::default()
+            })
+            .unwrap();
+        state.hydrate_manual_quality().unwrap();
+        assert!(state.quality.get("g1", "c1").is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn grace_kept_manual_result_is_not_hydrated() {
+        let dir = std::env::temp_dir().join(format!("tvb-hydrate-{}", uuid::Uuid::new_v4()));
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g1".into(),
+            channels: vec![Channel {
+                id: "c1".into(),
+                url: "http://up/live.m3u8".into(),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        let state = std::sync::Arc::new(
+            AppState::new(
+                dir.join("tvb.db"),
+                config,
+                std::sync::Arc::new(crate::logging::RingBuffer::default()),
+            )
+            .expect("state"),
+        );
+        state
+            .quality_store
+            .upsert(&QualityResult {
+                key: "channel:g1/c1".into(),
+                scope: "manual".into(),
+                action: "kept".into(),
+                reason: "unreachable".into(),
+                gid: "g1".into(),
+                cid: "c1".into(),
+                url_hash: crate::quality::admission::url_hash_hex("http://up/live.m3u8"),
+                checked_at: 1,
+                ..QualityResult::default()
+            })
+            .unwrap();
+        state.hydrate_manual_quality().unwrap();
+        assert!(
+            state.quality.get("g1", "c1").is_none(),
+            "宽限内保留不得恢复为失败状态"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 /// 建立缓存子目录。失败只记日志（后续写缓存会再报错）。

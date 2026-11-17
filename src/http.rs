@@ -95,6 +95,24 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/panel/api/logout", post(routes::panel::logout))
         .route("/panel/api/status", get(routes::panel::status))
         .route("/panel/api/health", get(routes::dash::health))
+        .route("/panel/api/quality/status", get(routes::quality::status))
+        .route("/panel/api/quality/results", get(routes::quality::results))
+        .route("/panel/api/quality/sources", get(routes::quality::sources))
+        .route(
+            "/panel/api/quality/effective",
+            get(routes::quality::effective),
+        )
+        .route(
+            "/panel/api/quality/schedule/preview",
+            post(routes::quality::schedule_preview),
+        )
+        .route("/panel/api/quality/run", post(routes::quality::run))
+        .route(
+            "/panel/api/quality/runs/:run_id",
+            get(routes::quality::run_status),
+        )
+        .route("/panel/api/quality/cancel", post(routes::quality::cancel))
+        .route("/panel/api/quality/preview", post(routes::quality::preview))
         .route("/panel/api/subs/status", get(routes::subs::panel_status))
         .route("/panel/api/subs/groups", post(routes::subs::panel_groups))
         .route("/panel/api/subs/preview", post(routes::subs::panel_preview))
@@ -146,6 +164,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/panel/api/playlist/sources/:id",
             put(routes::playlist::update_source).delete(routes::playlist::delete_source),
+        )
+        .route(
+            "/panel/api/playlist/sources/:id/disable",
+            post(routes::playlist::disable_source),
+        )
+        .route(
+            "/panel/api/playlist/sources/:id/enable",
+            post(routes::playlist::enable_source),
         )
         .route("/panel/api/dash/status", get(routes::dash::status))
         .route(

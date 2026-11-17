@@ -1918,6 +1918,48 @@ a.compact {
   color: var(--text3);
 }
 
+/* 分组页质量徽章：整组可点击，跳到结果页。 */
+.quality-jump,
+.quality-jump:hover:not(:disabled) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.quality-jump:hover .badge {
+  border-color: var(--accent-line);
+}
+
+/* 规则页：分辨率到最低速率的映射行。 */
+.quality-speed-map {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quality-speed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quality-speed-row input:first-child {
+  width: 132px;
+}
+
+.quality-speed-row input:nth-child(2) {
+  width: 108px;
+}
+
 /* 模式徽章：PROXY / DASH / REMUX 等。 */
 .mode {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

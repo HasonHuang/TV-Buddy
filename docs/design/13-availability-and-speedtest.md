@@ -1,5 +1,7 @@
 # 13 · 可用性校验与测速筛选
 
+> 历史参考。同步源成员语义已被 [`14-quality-admission-product.md`](14-quality-admission-product.md) 与 [`16-quality-admission-system.md`](16-quality-admission-system.md) 取代：不合格频道从“隐藏”改为“立即移出”，并取消淘汰池。
+
 > 设计版本 v1.0 ｜ 2026-11-15 ｜ 状态：**方案 B 已选（设计待批准）**
 > 参考实现：iptv-api。核对文件：`utils/speed.py`、`utils/channel_quality.py`、`utils/channel.py`、`utils/frozen.py`、`utils/channel_repository.py`。
 > 上游：[`11-subscription-sync.md`](11-subscription-sync.md)、[`03-http-contract.md`](03-http-contract.md)、[`04-config-and-storage.md`](04-config-and-storage.md)、[`06-low-spec-optimization.md`](06-low-spec-optimization.md)。
@@ -1464,16 +1466,10 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 
 ### 12.3 冒烟脚本
 
-新增 `scripts/smoke-quality.sh`：
+旧 `scripts/smoke-quality.sh` 已由质量准入验收脚本取代：
 
-1. 启动本地样本服务与 TV Buddy。
-2. 登录管理员，启用 `quality`，动作设为 `mark`。
-3. 手动校验全部，确认结果与计数。
-4. 切换动作为 `hide`，确认不合格频道从订阅清单消失。
-5. 恢复样本，确认频道自动回到清单。
-6. 固定保留一个不合格频道，确认它仍显示。
-7. 触发源连续失败，确认自动停用与手动恢复。
-8. 关闭 `quality`，确认订阅清单恢复原状。
+- `scripts/smoke-quality-admission.sh`
+- 场景见 [`15-quality-admission-function.md`](15-quality-admission-function.md) §13。
 
 ## 13 兼容与迁移
 
@@ -1494,8 +1490,8 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 
 | 阶段 | 内容 | 交付判据 |
 | --- | --- | --- |
-| P0 | 配置模型、校验、有效规则解析、单元测试 | 规则覆盖与三态行为通过测试。默认关闭。 |
-| P1 | 探测器（连通、清单、测速）、内存结果、订阅过滤、状态接口、分组页徽章 | 手动校验可用。不合格频道可隐藏与恢复。 |
+| P0 | 配置模型、校验、有效规则解析、单元测试 | ✅（本计划）规则覆盖与三态行为通过测试。默认关闭。 |
+| P1 | 探测器（连通、清单、测速）、内存结果、订阅过滤、状态接口、分组页徽章 | ✅（本计划）手动校验可用。不合格频道可隐藏与恢复。 |
 | P2 | SQLite 结果与历史、源状态、自动停用、设置页与源抽屉 | 重启保留结果。源失败可停用与恢复。 |
 | P3 | `ffprobe`、广告、去重、固定保留、清理预览、冒烟脚本 | 完整规则可用。文档与冒烟通过。 |
 | P4 | 低配调度、预算、播放繁忙降级、播放失败复测 | 1 vCPU / 128 MB 下可运行。 |
@@ -1539,5 +1535,5 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 | `frontend/src/playlist.tsx` | 源合格率、源规则、自动停用状态、测试源。 |
 | `frontend/src/system.tsx` | 最近任务与 `ffprobe` 状态。 |
 | `frontend/src/api.ts` | 质量接口类型。 |
-| `scripts/smoke-quality.sh` | 冒烟脚本。 |
+| `scripts/smoke-quality-admission.sh` | 质量准入验收脚本。 |
 | `tests/` | 单元与集成样本。 |

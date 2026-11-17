@@ -103,7 +103,7 @@ impl Health {
         self.record(gid, cid, ok, ok.then_some(200), None, Some(1));
     }
 
-    fn record(
+    pub(crate) fn record(
         &self,
         gid: &str,
         cid: &str,
@@ -143,6 +143,11 @@ pub fn spawn(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
             let config = state.snapshot();
+            if config.quality.enabled && config.quality.interval_secs > 0 {
+                drop(config);
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                continue;
+            }
             if !config.health.enabled {
                 drop(config);
                 tokio::time::sleep(Duration::from_secs(30)).await;

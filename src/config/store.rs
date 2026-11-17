@@ -4,7 +4,7 @@
 //! 与用户表同一套文档模式，改动只需一次 UPSERT。
 
 use anyhow::{Context, Result};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use super::model::Config;
 use crate::{
@@ -24,50 +24,26 @@ impl ConfigStore {
 
     /// 读配置。库里没有记录时返回 `None`。
     pub fn load(&self) -> Result<Option<Config>> {
-        let raw: Option<String> = {
-            let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-            conn.query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                params![CONFIG_KEY],
-                |row| row.get(0),
-            )
-            .optional()?
-        };
-        let Some(raw) = raw else {
-            return Ok(None);
-        };
-        let mut config: Config = serde_json::from_str(&raw).context("配置记录解析失败")?;
-        config.normalize();
-        Ok(Some(config))
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        load_conn(&conn)
+    }
+
+    /// 在调用方的事务里读配置。
+    pub fn load_tx(&self, tx: &Transaction<'_>) -> Result<Option<Config>> {
+        load_conn(tx)
     }
 
     /// 写配置。先补空密钥、校验，再整条替换。
     ///
     /// 每次写入自增 `revision`，并返回新值。调用方用它更新内存快照。
     pub fn save(&self, config: &Config) -> Result<u64> {
-        let mut config = config.clone();
-        config.normalize();
-        crate::sign::ensure_secret(&mut config);
-        super::validate(&config)?;
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        let current: Option<Option<i64>> = conn
-            .query_row(
-                "SELECT json_extract(value, '$.revision') FROM settings WHERE key = ?1",
-                params![CONFIG_KEY],
-                |row| row.get(0),
-            )
-            .optional()?;
-        config.revision = current.flatten().unwrap_or(0).max(0) as u64 + 1;
-        let text = serde_json::to_string(&config).context("序列化配置失败")?;
-        conn.execute(
-            "INSERT INTO settings (key, value, updated_at_ms)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(key) DO UPDATE SET
-               value = excluded.value,
-               updated_at_ms = excluded.updated_at_ms",
-            params![CONFIG_KEY, text, now_ms()],
-        )?;
-        Ok(config.revision)
+        save_conn(&conn, config)
+    }
+
+    /// 在调用方的事务里写配置。语义与 [`ConfigStore::save`] 相同。
+    pub fn save_tx(&self, tx: &Transaction<'_>, config: &Config) -> Result<u64> {
+        save_conn(tx, config)
     }
 
     /// 恢复默认配置。用户不受影响。
@@ -76,6 +52,47 @@ impl ConfigStore {
         config.revision = self.save(&config)?;
         Ok(config)
     }
+}
+
+fn load_conn(conn: &Connection) -> Result<Option<Config>> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![CONFIG_KEY],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let mut config: Config = serde_json::from_str(&raw).context("配置记录解析失败")?;
+    config.normalize();
+    Ok(Some(config))
+}
+
+fn save_conn(conn: &Connection, config: &Config) -> Result<u64> {
+    let mut config = config.clone();
+    config.normalize();
+    crate::sign::ensure_secret(&mut config);
+    super::validate(&config)?;
+    let current: Option<Option<i64>> = conn
+        .query_row(
+            "SELECT json_extract(value, '$.revision') FROM settings WHERE key = ?1",
+            params![CONFIG_KEY],
+            |row| row.get(0),
+        )
+        .optional()?;
+    config.revision = current.flatten().unwrap_or(0).max(0) as u64 + 1;
+    let text = serde_json::to_string(&config).context("序列化配置失败")?;
+    conn.execute(
+        "INSERT INTO settings (key, value, updated_at_ms)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at_ms = excluded.updated_at_ms",
+        params![CONFIG_KEY, text, now_ms()],
+    )?;
+    Ok(config.revision)
 }
 
 #[cfg(test)]

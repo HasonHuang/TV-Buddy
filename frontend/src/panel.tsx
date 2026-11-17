@@ -16,6 +16,7 @@ import { LivestreamPage, SchedulePage } from './schedule';
 import { MySubsPage } from './my';
 import { formatUptime } from './format';
 import { Overview } from './overview';
+import { QualityPage } from './quality-page';
 import './style.css';
 
 /** 侧栏分区；顺序按目标面板。 */
@@ -24,6 +25,7 @@ type SectionId =
   | 'dashboard'
   | 'cache'
   | 'groups'
+  | 'quality'
   | 'settings'
   | 'security'
   | 'users'
@@ -43,6 +45,7 @@ const NAV: { id: SectionId; label: string; icon: IconName; feature?: string; adm
   { id: 'dashboard', label: '概览', icon: 'overview', adminOnly: true },
   { id: 'cache', label: '缓存状态', icon: 'cache', adminOnly: true },
   { id: 'groups', label: '分组管理', icon: 'groups', adminOnly: true },
+  { id: 'quality', label: '质量校验', icon: 'activity', adminOnly: true },
   { id: 'settings', label: '系统设置', icon: 'settings', adminOnly: true },
   { id: 'security', label: '安全管控', icon: 'security', adminOnly: true },
   { feature: 'users', id: 'users', label: '用户与设备', icon: 'users', adminOnly: true },
@@ -73,7 +76,8 @@ const SECTION_IDS = new Set<string>(NAV.map((item) => item.id));
  * 切换分区只改片段，刷新不会把请求打到不存在的服务端路径。
  */
 function sectionFromHash(hash = window.location.hash): SectionId | null {
-  const id = hash.replace(/^#\/?/, '');
+  // `#/quality/results?gid=...` 仍属于 `quality` 分区；子路径由页面自己解释。
+  const id = hash.replace(/^#\/?/, '').split('?')[0].split('/')[0];
   return SECTION_IDS.has(id) ? (id as SectionId) : null;
 }
 
@@ -325,7 +329,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     if (!roleReady) return;
     sectionRef.current = active;
     if (active !== section) setSection(active);
-    writeSection(active, true);
+    // 已指向同一分区时保留深链子路径与筛选参数。
+    if (sectionFromHash() !== active) writeSection(active, true);
   }, [active, section, roleReady]);
 
   const query = navQuery.trim().toLowerCase();
@@ -418,6 +423,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         )}
         {active === 'cache' && <CachePage />}
         {active === 'groups' && <GroupsPage />}
+        {active === 'quality' && <QualityPage />}
         {active === 'settings' && <SettingsPage onDirtyChange={markSettingsDirty} />}
         {active === 'security' && <SecurityPage />}
         {active === 'users' && <UsersPage />}

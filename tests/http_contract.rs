@@ -13,7 +13,7 @@ use std::{
 };
 
 use axum::{
-    extract::{Path, Query},
+    extract::{Json, Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
@@ -172,6 +172,96 @@ async fn upstream_translate_v5(
         .into_response()
 }
 
+/// 伪上游：同步门控清单。按请求 Host 拼绝对地址。
+async fn sync_playlist(headers: axum::http::HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    let body = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"门控\",正常频道\nhttp://{host}/gate-live.m3u8\n#EXTINF:-1 group-title=\"门控\",失效频道\nhttp://{host}/gate-missing.m3u8\n"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        body,
+    )
+        .into_response()
+}
+
+/// 伪上游：同 Host 正常与失效频道。用于验证 Host 缓存不跳过可达性。
+async fn host_cache_playlist(headers: axum::http::HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    let body = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"缓存\",A正常\nhttp://{host}/gate-live.m3u8\n#EXTINF:-1 group-title=\"缓存\",B失效\nhttp://{host}/gate-missing.m3u8\n"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        body,
+    )
+        .into_response()
+}
+
+/// 伪上游：门控探测会阻塞的源，用于验证抓取期间配置变化。
+async fn slow_gate_source(headers: axum::http::HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    let body = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"慢门控\",慢探频道\nhttp://{host}/slow-probe.m3u8\n"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        body,
+    )
+        .into_response()
+}
+
+/// 伪上游：延迟 500 ms 返回清单，给测试留出改配置的窗口。
+async fn slow_probe() -> Response {
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        LIVE,
+    )
+        .into_response()
+}
+
+/// 伪上游：同一频道改成失效地址，用于 URL 变化移出测试。
+async fn sync_changed_playlist(headers: axum::http::HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    let body = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"门控\",正常频道\nhttp://{host}/gate-missing.m3u8\n"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        body,
+    )
+        .into_response()
+}
+
+/// 伪上游：只保留失效频道，用于源移除测试。
+async fn sync_removed_playlist(headers: axum::http::HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    let body = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"门控\",失效频道\nhttp://{host}/gate-missing.m3u8\n"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        body,
+    )
+        .into_response()
+}
+
 /// 伪上游：按路径返回清单或切片。
 async fn upstream_file(
     Path(path): Path<String>,
@@ -218,6 +308,7 @@ async fn upstream_file(
     }
     let (mime, body): (&str, &[u8]) = match path.as_str() {
         "live.m3u8" => ("application/vnd.apple.mpegurl", LIVE.as_bytes()),
+        "gate-live.m3u8" => ("application/vnd.apple.mpegurl", LIVE.as_bytes()),
         "badseg.m3u8" => ("application/vnd.apple.mpegurl", BADSEG.as_bytes()),
         "master.m3u8" => ("application/vnd.apple.mpegurl", MASTER.as_bytes()),
         "v0/index.m3u8" => ("application/vnd.apple.mpegurl", VARIANT.as_bytes()),
@@ -392,6 +483,12 @@ async fn fixture_with_options(
             "/single/translate",
             axum::routing::post(upstream_translate_single),
         )
+        .route("/sync.m3u8", get(sync_playlist))
+        .route("/host-cache-source.m3u8", get(host_cache_playlist))
+        .route("/sync-removed.m3u8", get(sync_removed_playlist))
+        .route("/sync-changed.m3u8", get(sync_changed_playlist))
+        .route("/slow-gate-source.m3u8", get(slow_gate_source))
+        .route("/slow-probe.m3u8", get(slow_probe))
         .route("/*path", get(upstream_file));
     if epg_enabled {
         let body = epg_document();
@@ -6343,4 +6440,829 @@ async fn deleting_last_epg_source_clears_output() {
     // 没有源后旧节目单必须失效，不能继续下发。
     let response = fetch(&fixture, &fixture.sub(&fixture.token, "epg.xml")).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// 删除频道或分组后，质量结果必须一起清掉。
+///
+/// 否则重建同 id 频道会命中旧结果，按旧失败时钟立即隐藏。
+#[tokio::test]
+async fn sync_aborts_when_config_changes_during_gate() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "reachability" },
+        "playlist": { "sources": [{
+            "id": "slow", "name": "慢门控源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/slow-gate-source.m3u8"
+        }] }
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let state = fixture.state.clone();
+    let task =
+        tokio::spawn(
+            async move { tv_buddy::subscription::sync_source(&state, "slow", false).await },
+        );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    fixture
+        .state
+        .mutate(|config| {
+            config.quality.enabled = false;
+            Ok(())
+        })
+        .expect("改配置");
+    let result = task.await.expect("同步任务");
+    let error = result.expect_err("抓取后配置变化应让同步放弃本轮");
+    assert!(
+        format!("{error:#}").contains("配置已变更"),
+        "错误应说明配置变化：{error:#}"
+    );
+    assert!(
+        fixture.state.snapshot().groups.iter().all(|group| group
+            .channels
+            .iter()
+            .all(|channel| channel.source_id != "slow")),
+        "配置变化后不得写入成员"
+    );
+    let statuses = fixture.state.sources.statuses();
+    let row = statuses.get("slow").expect("源状态");
+    assert!(!row.syncing, "中止后必须复位同步中状态");
+    assert!(row.error.is_some(), "中止原因要写入源状态");
+}
+
+#[tokio::test]
+async fn sync_gate_admits_only_passing_channels() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "playlist", "max_channels_per_run": 10 },
+        "playlist": { "sources": [{
+            "id": "gate",
+            "name": "门控源",
+            "mode": "sync",
+            "enabled": true,
+            "url": "{upstream}/sync.m3u8"
+        }] }
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let report = tv_buddy::subscription::sync_source(&fixture.state, "gate", false)
+        .await
+        .expect("同步");
+    assert!(!report.gate_paused);
+
+    let filter = tv_buddy::quality::store::QualityFilter::default();
+    let (_, results) = fixture.state.quality_store.list(&filter).expect("结果");
+
+    let config = fixture.state.snapshot();
+    let group = config
+        .groups
+        .iter()
+        .find(|group| group.source_id == "gate")
+        .expect("门控分组");
+    assert_eq!(group.channels.len(), 1);
+    assert_eq!(group.channels[0].name, "正常频道");
+
+    let admitted = results
+        .iter()
+        .find(|item| item.action == "admitted" && item.name == "正常频道")
+        .expect("准入结果");
+    assert_eq!(admitted.gid, group.id, "准入结果必须回填分组 id");
+    assert_eq!(
+        admitted.cid, group.channels[0].id,
+        "准入结果必须回填频道 id"
+    );
+
+    assert!(
+        results
+            .iter()
+            .any(|item| item.action == "rejected" && item.reason == "unreachable"),
+        "{results:?}"
+    );
+
+    let checked = results
+        .iter()
+        .find(|item| item.name == "正常频道")
+        .map(|item| item.checked_at)
+        .expect("正常频道结果");
+    let _ = tv_buddy::subscription::sync_source(&fixture.state, "gate", false)
+        .await
+        .expect("第二次同步");
+    let (_, results) = fixture.state.quality_store.list(&filter).expect("结果");
+    let again = results
+        .iter()
+        .find(|item| item.name == "正常频道")
+        .map(|item| item.checked_at)
+        .expect("正常频道结果");
+    assert_eq!(checked, again, "未变化的已准入频道不重复探测");
+
+    let removed_url = format!("{}/sync-removed.m3u8", fixture.upstream);
+    fixture
+        .state
+        .mutate(|config| {
+            let source = config
+                .playlist
+                .sources
+                .iter_mut()
+                .find(|source| source.id == "gate")
+                .expect("门控源");
+            source.url = removed_url;
+            Ok(())
+        })
+        .expect("改源");
+    let _ = tv_buddy::subscription::sync_source(&fixture.state, "gate", false)
+        .await
+        .expect("第三次同步");
+    let (_, results) = fixture.state.quality_store.list(&filter).expect("结果");
+    assert!(
+        results
+            .iter()
+            .any(|item| item.action == "source_removed" && item.name == "正常频道"),
+        "{results:?}"
+    );
+}
+
+#[tokio::test]
+async fn host_cache_still_checks_each_url_reachability() {
+    let extra = r#"{
+        "quality": {
+            "enabled": true,
+            "probe_mode": "speed",
+            "max_channels_per_run": 10,
+            "rules": { "host_cache": true }
+        },
+        "playlist": { "sources": [{
+            "id": "cache", "name": "缓存源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/host-cache-source.m3u8"
+        }] }
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let report = tv_buddy::subscription::sync_source(&fixture.state, "cache", false)
+        .await
+        .expect("同步");
+    assert!(!report.gate_paused, "{report:?}");
+    let config = fixture.state.snapshot();
+    let group = config
+        .groups
+        .iter()
+        .find(|group| group.source_id == "cache")
+        .expect("缓存分组");
+    assert_eq!(group.channels.len(), 1, "失效频道不得复用 Host 成功测量");
+    assert_eq!(group.channels[0].name, "A正常");
+    let (_, results) = fixture
+        .state
+        .quality_store
+        .list(&tv_buddy::quality::store::QualityFilter::default())
+        .expect("结果");
+    assert!(
+        results
+            .iter()
+            .any(|item| item.name == "B失效" && item.reason == "unreachable"),
+        "{results:?}"
+    );
+}
+
+#[tokio::test]
+async fn engine_runs_resolver_script_before_probe() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "reachability", "max_channels_per_run": 10 },
+        "groups": [{
+            "id": "rg", "name": "解析组", "mode": "proxy", "access": "open",
+            "channels": [{
+                "id": "c1", "name": "脚本频道", "url": "http://127.0.0.1:9/never",
+                "resolver_script": "probe.py", "resolver_ttl": 60,
+                "offline_on_fail": true
+            }]
+        }]
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let resolvers = fixture.dir.join("cache/resolvers");
+    std::fs::create_dir_all(&resolvers).expect("建脚本目录");
+    std::fs::write(
+        resolvers.join("probe.py"),
+        format!("print('{}/live.m3u8')\n", fixture.upstream),
+    )
+    .expect("写脚本");
+
+    let summary = tv_buddy::quality::engine::run(
+        &fixture.state,
+        tv_buddy::quality::engine::RunSpec {
+            run_id: "q-resolver".into(),
+            trigger: tv_buddy::quality::engine::RunTrigger::Manual,
+            scope: tv_buddy::quality::state::RunScope::All,
+            measure_only: false,
+        },
+    )
+    .await
+    .expect("运行");
+    assert_eq!(summary.hidden, 0, "解析后的地址应判合格");
+    let item = fixture
+        .state
+        .quality_store
+        .get("channel:rg/c1")
+        .expect("结果")
+        .expect("存在");
+    assert_eq!(item.reason, "pass");
+    assert_eq!(item.action, "kept");
+}
+
+#[tokio::test]
+async fn gate_url_change_keeps_removed_result_reason() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "playlist", "max_channels_per_run": 10 },
+        "playlist": { "sources": [{
+            "id": "gate", "name": "门控源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/sync.m3u8"
+        }] }
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let _ = tv_buddy::subscription::sync_source(&fixture.state, "gate", false)
+        .await
+        .expect("首次同步");
+    let changed = format!("{}/sync-changed.m3u8", fixture.upstream);
+    fixture
+        .state
+        .mutate(|config| {
+            let source = config
+                .playlist
+                .sources
+                .iter_mut()
+                .find(|source| source.id == "gate")
+                .expect("门控源");
+            source.url = changed;
+            Ok(())
+        })
+        .expect("改源");
+    let _ = tv_buddy::subscription::sync_source(&fixture.state, "gate", false)
+        .await
+        .expect("二次同步");
+    let filter = tv_buddy::quality::store::QualityFilter {
+        source_id: Some("gate".into()),
+        ..Default::default()
+    };
+    let (_, results) = fixture.state.quality_store.list(&filter).expect("结果");
+    let item = results
+        .iter()
+        .find(|item| item.name == "正常频道")
+        .expect("正常频道结果");
+    assert_eq!(
+        item.action, "removed",
+        "URL 变化失败应保留门控移出结果，不能被 source_removed 覆盖"
+    );
+    assert_eq!(item.reason, "unreachable");
+}
+
+#[tokio::test]
+async fn admitted_failure_is_removed_by_engine() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "playlist", "max_channels_per_run": 10 },
+        "playlist": { "sources": [{
+            "id": "src", "name": "源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/noop.m3u8"
+        }] },
+        "groups": [{
+            "id": "removal", "name": "移除组", "mode": "proxy", "access": "public",
+            "origin": "sync", "source_id": "src",
+            "channels": [{
+                "id": "bad", "name": "坏频道", "url": "{upstream}/missing.m3u8",
+                "source_id": "src", "source_key": "bad"
+            }]
+        }]
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    fixture
+        .state
+        .quality_store
+        .upsert(&tv_buddy::quality::store::QualityResult {
+            key: "sync:src:bad".into(),
+            scope: "sync".into(),
+            source_id: "src".into(),
+            source_key: "bad".into(),
+            gid: "removal".into(),
+            cid: "bad".into(),
+            name: "坏频道".into(),
+            target_group: "移除组".into(),
+            action: "admitted".into(),
+            reason: "pass".into(),
+            ok: true,
+            checked_at: 1,
+            ..Default::default()
+        })
+        .expect("写结果");
+    let summary = tv_buddy::quality::engine::run(
+        &fixture.state,
+        tv_buddy::quality::engine::RunSpec {
+            run_id: "q-removal".into(),
+            trigger: tv_buddy::quality::engine::RunTrigger::Manual,
+            scope: tv_buddy::quality::state::RunScope::All,
+            measure_only: false,
+        },
+    )
+    .await
+    .expect("运行");
+    assert_eq!(summary.removed, 1);
+    assert!(fixture
+        .state
+        .snapshot()
+        .group("removal")
+        .is_some_and(|group| group.channels.is_empty()));
+    let item = fixture
+        .state
+        .quality_store
+        .get("sync:src:bad")
+        .expect("结果")
+        .expect("存在");
+    assert_eq!(item.action, "removed");
+}
+
+#[tokio::test]
+async fn probe_error_is_not_removed_by_engine() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "playlist", "max_channels_per_run": 10 },
+        "playlist": { "sources": [{
+            "id": "src", "name": "源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/noop.m3u8"
+        }] },
+        "groups": [{
+            "id": "dash", "name": "DASH 组", "mode": "proxy", "access": "public",
+            "origin": "sync", "source_id": "src",
+            "channels": [{
+                "id": "dash", "name": "DASH 频道", "url": "{upstream}/manifest.mpd",
+                "source_id": "src", "source_key": "dash"
+            }]
+        }]
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    fixture
+        .state
+        .quality_store
+        .upsert(&tv_buddy::quality::store::QualityResult {
+            key: "sync:src:dash".into(),
+            scope: "sync".into(),
+            source_id: "src".into(),
+            source_key: "dash".into(),
+            gid: "dash".into(),
+            cid: "dash".into(),
+            name: "DASH 频道".into(),
+            target_group: "DASH 组".into(),
+            action: "admitted".into(),
+            reason: "pass".into(),
+            ok: true,
+            ..Default::default()
+        })
+        .expect("写结果");
+    let summary = tv_buddy::quality::engine::run(
+        &fixture.state,
+        tv_buddy::quality::engine::RunSpec {
+            run_id: "q-probe-error".into(),
+            trigger: tv_buddy::quality::engine::RunTrigger::Manual,
+            scope: tv_buddy::quality::state::RunScope::All,
+            measure_only: false,
+        },
+    )
+    .await
+    .expect("运行");
+    assert_eq!(summary.removed, 0);
+    assert_eq!(
+        fixture
+            .state
+            .snapshot()
+            .group("dash")
+            .expect("组")
+            .channels
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn disabled_quality_run_is_measure_only() {
+    let extra = r#"{
+        "groups": [{
+            "id": "manual", "name": "手工组", "mode": "proxy", "access": "public",
+            "channels": [{ "id": "c", "name": "频道", "url": "{upstream}/live.m3u8" }]
+        }]
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    assert!(fixture
+        .state
+        .quality
+        .try_start_run("q-measure", "manual", 1, false));
+    let summary = tv_buddy::quality::engine::run(
+        &fixture.state,
+        tv_buddy::quality::engine::RunSpec {
+            run_id: "q-measure".into(),
+            trigger: tv_buddy::quality::engine::RunTrigger::Manual,
+            scope: tv_buddy::quality::state::RunScope::All,
+            measure_only: false,
+        },
+    )
+    .await
+    .expect("运行");
+    assert_eq!(summary.removed, 0);
+    assert!(fixture
+        .state
+        .snapshot()
+        .group("manual")
+        .is_some_and(|group| group.channels.len() == 1));
+    assert!(
+        fixture
+            .state
+            .quality
+            .run_status()
+            .expect("运行状态")
+            .measure_only
+    );
+}
+
+#[tokio::test]
+async fn disable_source_can_keep_or_remove_channels() {
+    let extra = r#"{
+        "playlist": { "sources": [{
+            "id": "src-a", "name": "源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/sync.m3u8"
+        }] },
+        "groups": [{
+            "id": "src-group", "name": "源组", "mode": "proxy", "access": "public",
+            "origin": "sync", "source_id": "src-a",
+            "channels": [{
+                "id": "c", "name": "频道", "url": "{upstream}/gate-live.m3u8",
+                "source_id": "src-a", "source_key": "c"
+            }]
+        }]
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let _ = tv_buddy::http::routes::playlist::disable_source(
+        tv_buddy::http::ext::PanelAuth(String::new()),
+        State(fixture.state.clone()),
+        Path("src-a".into()),
+        Json(json!({ "keep_channels": true })),
+    )
+    .await
+    .expect("停用保留");
+    assert_eq!(
+        fixture
+            .state
+            .snapshot()
+            .group("src-group")
+            .expect("组")
+            .channels
+            .len(),
+        1
+    );
+
+    let _ = tv_buddy::http::routes::playlist::disable_source(
+        tv_buddy::http::ext::PanelAuth(String::new()),
+        State(fixture.state.clone()),
+        Path("src-a".into()),
+        Json(json!({ "keep_channels": false })),
+    )
+    .await
+    .expect("停用移出");
+    assert!(fixture
+        .state
+        .snapshot()
+        .group("src-group")
+        .is_none_or(|group| group.channels.is_empty()));
+}
+
+#[tokio::test]
+async fn detach_channel_clears_quality_result() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let key = "channel:pg/c1";
+    fixture
+        .state
+        .quality_store
+        .upsert(&tv_buddy::quality::store::QualityResult {
+            key: key.into(),
+            scope: "manual".into(),
+            gid: "pg".into(),
+            cid: "c1".into(),
+            action: "hidden".into(),
+            reason: "unreachable".into(),
+            ..Default::default()
+        })
+        .expect("写结果");
+    let response = fixture
+        .client
+        .post(format!(
+            "{}/panel/api/groups/pg/channels/c1/detach",
+            fixture.base
+        ))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("detach");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        fixture
+            .state
+            .quality_store
+            .get(key)
+            .expect("读结果")
+            .is_none(),
+        "转手工后必须清理旧质量结果"
+    );
+}
+
+#[tokio::test]
+async fn quality_api_returns_status_results_sources_and_effective_rules() {
+    let extra = r#"{
+        "quality": { "enabled": true, "probe_mode": "playlist" },
+        "playlist": { "sources": [{
+            "id": "q-src", "name": "质量源", "mode": "sync", "enabled": true,
+            "url": "{upstream}/sync.m3u8"
+        }] }
+    }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    fixture
+        .state
+        .quality_store
+        .upsert(&tv_buddy::quality::store::QualityResult {
+            key: "sync:q-src:keep".into(),
+            scope: "sync".into(),
+            source_id: "q-src".into(),
+            source_key: "keep".into(),
+            gid: "pg".into(),
+            cid: "c1".into(),
+            name: "通过频道".into(),
+            target_group: "代理组".into(),
+            url_hash: tv_buddy::quality::admission::url_hash_hex("http://up/a.m3u8"),
+            action: "admitted".into(),
+            reason: "pass".into(),
+            ok: true,
+            delay_ms: Some(120),
+            speed_kib: Some(2048),
+            width: Some(1920),
+            height: Some(1080),
+            http_status: Some(200),
+            checked_at: 100,
+            ..Default::default()
+        })
+        .expect("写结果");
+
+    let status: serde_json::Value = fixture
+        .client
+        .get(format!("{}/panel/api/quality/status", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("状态")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析状态"))
+        .unwrap();
+    assert_eq!(status["enabled"], true);
+    assert_eq!(status["schedule"]["mode"], "interval");
+    assert_eq!(status["counts"]["admitted"], 1);
+    assert_eq!(status["counts"]["probe_errors_7d"], 0);
+    assert_eq!(status["counts"]["sources"], 1);
+    assert_eq!(status["source_errors"], json!([]));
+    assert_eq!(status["guard"]["enabled"], true);
+    assert_eq!(status["guard"]["max_remove_ratio"], 0.5);
+
+    fixture.state.sources.update_status("q-src", |row| {
+        row.error = Some("抓取失败".into());
+    });
+    let status: serde_json::Value = fixture
+        .client
+        .get(format!("{}/panel/api/quality/status", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("状态")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析状态"))
+        .unwrap();
+    assert_eq!(status["source_errors"][0]["error"], "抓取失败");
+
+    let results: serde_json::Value = fixture
+        .client
+        .get(format!("{}/panel/api/quality/results", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("结果")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析结果"))
+        .unwrap();
+    assert_eq!(results["total"], 1);
+    let item = &results["items"][0];
+    assert_eq!(item["speed_mib"], 2.0);
+    assert_eq!(item["resolution"], "1920x1080");
+    assert_eq!(item["http_status"], 200);
+    assert_eq!(item["source_id"], "q-src");
+    assert!(item.get("url").is_none(), "结果不能带完整地址");
+    assert_eq!(
+        item["url_hash"].as_str().map(str::len),
+        Some(64),
+        "只暴露地址哈希"
+    );
+
+    let sources: serde_json::Value = fixture
+        .client
+        .get(format!("{}/panel/api/quality/sources", fixture.base))
+        .header("authorization", auth.clone())
+        .send()
+        .await
+        .expect("来源")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析来源"))
+        .unwrap();
+    assert_eq!(sources["items"][0]["id"], "q-src");
+    assert_eq!(sources["items"][0]["channels"], 0);
+    assert_eq!(sources["items"][0]["gate_enabled"], true);
+    assert_eq!(sources["items"][0]["error"], "抓取失败");
+    assert!(sources["items"][0].get("phase").is_some());
+
+    let effective: serde_json::Value = fixture
+        .client
+        .get(format!(
+            "{}/panel/api/quality/effective?gid=pg&cid=c1",
+            fixture.base
+        ))
+        .header("authorization", auth)
+        .send()
+        .await
+        .expect("有效规则")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析有效规则"))
+        .unwrap();
+    assert_eq!(effective["rules"]["enabled"], true);
+    assert_eq!(effective["source_layer"], "global");
+}
+
+#[tokio::test]
+async fn quality_run_api_reports_measure_only_and_rejects_bad_input() {
+    let extra = r#"{ "quality": { "enabled": false } }"#;
+    let fixture = fixture_with_extra(extra).await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    let preview: serde_json::Value = fixture
+        .client
+        .post(format!(
+            "{}/panel/api/quality/schedule/preview",
+            fixture.base
+        ))
+        .header("authorization", auth.clone())
+        .header("content-type", "application/json")
+        .body(r#"{"mode":"cron","cron":"0 */6 * * *"}"#)
+        .send()
+        .await
+        .expect("调度预览")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析调度预览"))
+        .unwrap();
+    let times = preview["times"].as_array().expect("未来时间");
+    assert_eq!(times.len(), 3);
+    assert!(times[0].as_i64() < times[1].as_i64());
+
+    let bad_cron = fixture
+        .client
+        .post(format!(
+            "{}/panel/api/quality/schedule/preview",
+            fixture.base
+        ))
+        .header("authorization", auth.clone())
+        .header("content-type", "application/json")
+        .body(r#"{"mode":"cron","cron":"bad"}"#)
+        .send()
+        .await
+        .expect("坏 cron");
+    assert_eq!(bad_cron.status(), StatusCode::BAD_REQUEST);
+
+    let started: serde_json::Value = fixture
+        .client
+        .post(format!("{}/panel/api/quality/run", fixture.base))
+        .header("authorization", auth.clone())
+        .header("content-type", "application/json")
+        .body(r#"{"scope":"channel","id":"pg/c1"}"#)
+        .send()
+        .await
+        .expect("手动校验")
+        .text()
+        .await
+        .map(|text| serde_json::from_str(&text).expect("解析校验响应"))
+        .unwrap();
+    assert_eq!(started["measure_only"], true);
+    assert!(started["run_id"].as_str().is_some_and(|id| !id.is_empty()));
+
+    let empty = fixture
+        .client
+        .post(format!("{}/panel/api/quality/run", fixture.base))
+        .header("authorization", auth)
+        .header("content-type", "application/json")
+        .body(r#"{"scope":"group","id":"missing"}"#)
+        .send()
+        .await
+        .expect("空范围");
+    assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn deleting_channel_and_group_clears_quality_results() {
+    use tv_buddy::quality::state::Entry;
+    use tv_buddy::quality::store::QualityResult;
+
+    let fixture = fixture().await;
+    fixture
+        .state
+        .mutate(|config| {
+            let channel = config
+                .group_mut("pg")
+                .expect("组")
+                .channels
+                .iter_mut()
+                .find(|channel| channel.id == "c1")
+                .expect("频道");
+            channel.source_id = "s1".into();
+            channel.source_key = "k1".into();
+            Ok(())
+        })
+        .expect("改频道");
+    let entry = Entry {
+        checked_at: 1,
+        ..Entry::default()
+    };
+    fixture.state.quality.put("pg", "c1", entry.clone());
+    fixture.state.quality.put("pm", "c1", entry);
+    fixture
+        .state
+        .quality_store
+        .upsert(&QualityResult {
+            key: "channel:pg/c1".into(),
+            scope: "manual".into(),
+            gid: "pg".into(),
+            cid: "c1".into(),
+            ..QualityResult::default()
+        })
+        .expect("手工结果");
+    fixture
+        .state
+        .quality_store
+        .upsert(&QualityResult {
+            key: "sync:s1:k1".into(),
+            scope: "sync".into(),
+            source_id: "s1".into(),
+            source_key: "k1".into(),
+            ..QualityResult::default()
+        })
+        .expect("同步结果");
+
+    let response = tv_buddy::http::routes::groups::delete_channel(
+        tv_buddy::http::ext::PanelAuth(String::new()),
+        State(fixture.state.clone()),
+        Path(("pg".to_string(), "c1".to_string())),
+    )
+    .await
+    .expect("删除频道");
+    let _ = response;
+    assert!(fixture.state.quality.get("pg", "c1").is_none());
+    assert!(
+        fixture.state.quality.get("pm", "c1").is_some(),
+        "其他分组的结果不能误删"
+    );
+    assert!(fixture
+        .state
+        .quality_store
+        .get("channel:pg/c1")
+        .expect("查询")
+        .is_none());
+    assert!(fixture
+        .state
+        .quality_store
+        .get("sync:s1:k1")
+        .expect("查询")
+        .is_none());
+
+    fixture
+        .state
+        .quality_store
+        .upsert(&QualityResult {
+            key: "channel:pm/c1".into(),
+            scope: "manual".into(),
+            gid: "pm".into(),
+            cid: "c1".into(),
+            ..QualityResult::default()
+        })
+        .expect("分组结果");
+    let response = tv_buddy::http::routes::groups::delete_group(
+        tv_buddy::http::ext::PanelAuth(String::new()),
+        State(fixture.state.clone()),
+        Path("pm".to_string()),
+    )
+    .await
+    .expect("删除分组");
+    let _ = response;
+    assert!(fixture.state.quality.get("pm", "c1").is_none());
+    assert!(fixture
+        .state
+        .quality_store
+        .get("channel:pm/c1")
+        .expect("查询")
+        .is_none());
 }

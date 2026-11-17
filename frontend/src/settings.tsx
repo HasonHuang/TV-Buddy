@@ -1457,6 +1457,24 @@ export function SettingsPage({
                     />
                   </div>
                 </Card>
+                <Card
+                  title="可用性校验"
+                  note="质量规则、运行状态与结果已移到独立页面"
+                  wide
+                >
+                  <p className="muted">
+                    质量校验按规则探测频道，并把结果用于同步源准入与手工频道下线。
+                    保存、运行与查看结果都在「质量校验」页完成。
+                  </p>
+                  <button
+                    className="ghost"
+                    onClick={() => {
+                      window.location.hash = '#/quality';
+                    }}
+                  >
+                    打开质量校验
+                  </button>
+                </Card>
                 <div className="span-all">
                 <Card
                   title="字幕设置"

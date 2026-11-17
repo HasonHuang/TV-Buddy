@@ -206,7 +206,12 @@ pub async fn update_source(
 
     let mut detached = 0;
     state
-        .mutate(|config| {
+        .mutate_admission_full(&[], |config| {
+            let delete_keys = if leaves_sync {
+                subscription::source_result_keys(config, &id)
+            } else {
+                Vec::new()
+            };
             let Some(slot) = config
                 .playlist
                 .sources
@@ -223,7 +228,7 @@ pub async fn update_source(
                     subscription::detach_source(config, &id)
                 };
             }
-            Ok(())
+            Ok((Vec::new(), delete_keys))
         })
         .map_err(map_internal)?;
     // 切换模式后，旧状态只属于旧模式。清空计数与提醒，避免聚合行显示托管状态。
@@ -247,6 +252,145 @@ pub async fn update_source(
         "source": source,
         "detached": detached,
     })))
+}
+
+/// `POST /panel/api/playlist/sources/:id/disable`——停用源。
+pub async fn disable_source(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let keep_channels = body
+        .get("keep_channels")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| ApiError::bad_request("keep_channels 必须是布尔值"))?;
+    let snapshot = state.snapshot();
+    if !snapshot
+        .playlist
+        .sources
+        .iter()
+        .any(|source| source.id == id)
+    {
+        return Err(ApiError::not_found("订阅源不存在"));
+    }
+    let removed: Vec<(String, String, String, String, String, String)> = snapshot
+        .groups
+        .iter()
+        .flat_map(|group| {
+            group
+                .channels
+                .iter()
+                .filter(|channel| channel.source_id == id)
+                .map(|channel| {
+                    (
+                        group.id.clone(),
+                        group.name.clone(),
+                        channel.id.clone(),
+                        channel.name.clone(),
+                        channel.source_key.clone(),
+                        crate::quality::admission::url_hash_hex(&channel.url),
+                    )
+                })
+        })
+        .collect();
+    let results: Vec<_> = if keep_channels {
+        Vec::new()
+    } else {
+        removed
+            .iter()
+            .map(|(gid, group_name, cid, name, source_key, url_hash)| {
+                crate::quality::store::QualityResult {
+                    key: format!("sync:{id}:{source_key}"),
+                    scope: "sync".into(),
+                    source_id: id.clone(),
+                    source_key: source_key.clone(),
+                    gid: gid.clone(),
+                    cid: cid.clone(),
+                    name: name.clone(),
+                    target_group: group_name.clone(),
+                    url_hash: url_hash.clone(),
+                    action: "removed".into(),
+                    reason: "source_disabled".into(),
+                    ok: false,
+                    checked_at: crate::schedule::now_epoch(),
+                    ..Default::default()
+                }
+            })
+            .collect()
+    };
+    state
+        .mutate_admission(&[], |config| {
+            let source = config
+                .playlist
+                .sources
+                .iter_mut()
+                .find(|source| source.id == id)
+                .ok_or_else(|| anyhow::anyhow!("订阅源不存在"))?;
+            source.enabled = false;
+            if !keep_channels {
+                subscription::remove_source_content(config, &id);
+            }
+            Ok(results)
+        })
+        .map_err(|error| ApiError::internal(format!("{error:#}")))?;
+    if !keep_channels {
+        for (gid, _, cid, _, _, _) in removed {
+            state.quality.forget(&gid, &cid);
+        }
+    }
+    state
+        .sources
+        .update_status(&id, |status| clear_gate(status));
+    Ok(Json(json!({ "ok": true, "keep_channels": keep_channels })))
+}
+
+/// `POST /panel/api/playlist/sources/:id/enable`——启用源，sync 源会排入同步。
+pub async fn enable_source(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let snapshot = state.snapshot();
+    let source = snapshot
+        .playlist
+        .sources
+        .iter()
+        .find(|source| source.id == id)
+        .cloned()
+        .ok_or_else(|| ApiError::not_found("订阅源不存在"))?;
+    state
+        .mutate(|config| {
+            let source = config
+                .playlist
+                .sources
+                .iter_mut()
+                .find(|source| source.id == id)
+                .ok_or_else(|| anyhow::anyhow!("订阅源不存在"))?;
+            source.enabled = true;
+            Ok(())
+        })
+        .map_err(|error| ApiError::internal(format!("{error:#}")))?;
+    let queued = source.mode == "sync";
+    if queued {
+        let state = state.clone();
+        let id = id.clone();
+        tokio::spawn(async move {
+            if let Err(error) = subscription::sync_source(&state, &id, false).await {
+                tracing::warn!(source = %id, %error, "启用源后同步失败");
+            }
+        });
+    }
+    Ok(Json(json!({ "ok": true, "queued": queued })))
+}
+
+fn clear_gate(status: &mut crate::subs::SourceStatus) {
+    status.gate_phase.clear();
+    status.gate_cursor.clear();
+    status.gate_remaining = 0;
+    status.gate_paused = false;
+    status.gate_pause_reason.clear();
+    status.gate_truncated = false;
 }
 
 /// `DELETE /panel/api/playlist/sources/:id`——删除源。
@@ -273,7 +417,28 @@ pub async fn delete_source(
     let to_manual = keep.unwrap_or(true);
     let mut detached = 0;
     state
-        .mutate(|config| {
+        .mutate_admission_full(&[], |config| {
+            let now = crate::schedule::now_epoch();
+            let channels: Vec<(String, String, String, String, String, String)> = config
+                .groups
+                .iter()
+                .flat_map(|group| {
+                    group
+                        .channels
+                        .iter()
+                        .filter(|channel| channel.source_id == id)
+                        .map(|channel| {
+                            (
+                                group.id.clone(),
+                                group.name.clone(),
+                                channel.id.clone(),
+                                channel.name.clone(),
+                                channel.source_key.clone(),
+                                crate::quality::admission::url_hash_hex(&channel.url),
+                            )
+                        })
+                })
+                .collect();
             config.playlist.sources.retain(|item| item.id != id);
             if content > 0 {
                 detached = if to_manual {
@@ -282,9 +447,51 @@ pub async fn delete_source(
                     subscription::remove_source_content(config, &id)
                 };
             }
-            Ok(())
+            let mut results = Vec::new();
+            let mut delete_keys = Vec::new();
+            for (gid, group_name, cid, name, source_key, url_hash) in channels {
+                let sync_key = format!("sync:{id}:{source_key}");
+                if to_manual {
+                    delete_keys.push(sync_key);
+                    results.push(crate::quality::store::QualityResult {
+                        key: format!("channel:{gid}/{cid}"),
+                        scope: "manual".into(),
+                        gid,
+                        cid,
+                        name,
+                        target_group: group_name,
+                        url_hash,
+                        action: "kept".into(),
+                        reason: "source_removed".into(),
+                        ok: true,
+                        checked_at: now,
+                        ..Default::default()
+                    });
+                } else {
+                    results.push(crate::quality::store::QualityResult {
+                        key: sync_key,
+                        scope: "sync".into(),
+                        source_id: id.clone(),
+                        source_key,
+                        gid,
+                        cid,
+                        name,
+                        target_group: group_name,
+                        url_hash,
+                        action: "source_removed".into(),
+                        reason: "source_removed".into(),
+                        ok: false,
+                        checked_at: now,
+                        ..Default::default()
+                    });
+                }
+            }
+            Ok((results, delete_keys))
         })
         .map_err(map_internal)?;
+    state
+        .sources
+        .update_status(&id, |status| clear_gate(status));
     Ok(Json(json!({
         "ok": true,
         "channels": detached,

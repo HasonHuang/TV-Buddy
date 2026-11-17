@@ -56,7 +56,199 @@ pub fn validate(config: &Config) -> anyhow::Result<()> {
         }
     }
     validate_playlist(&config.playlist)?;
+    validate_quality(&config.quality)?;
+    for source in &config.playlist.sources {
+        if let Some(quality) = &source.quality {
+            validate_quality_override(quality, &format!("源 {} 的 quality", source.id))?;
+        }
+    }
+    for group in &config.groups {
+        if let Some(quality) = &group.quality {
+            validate_quality_override(quality, &format!("分组 {} 的 quality", group.id))?;
+        }
+        for channel in &group.channels {
+            if let Some(quality) = &channel.quality {
+                validate_quality_override(
+                    quality,
+                    &format!("频道 {}/{} 的 quality", group.id, channel.id),
+                )?;
+            }
+        }
+    }
+    for group in &config.groups {
+        for channel in &group.channels {
+            let rules = crate::quality::rules::effective_rules(config, group, channel);
+            if let (Some(min), Some(max)) = (rules.min_resolution_px, rules.max_resolution_px) {
+                if min > max {
+                    bail!("频道 {}/{} 的有效分辨率下限高于上限", group.id, channel.id);
+                }
+            }
+        }
+    }
     Ok(())
+}
+
+fn validate_quality(quality: &crate::config::model::QualityCfg) -> anyhow::Result<()> {
+    if !matches!(
+        quality.probe_mode.as_str(),
+        "reachability" | "playlist" | "speed" | "full"
+    ) {
+        bail!("quality.probe_mode 不支持 {}", quality.probe_mode);
+    }
+    if quality.interval_secs != 0 && quality.interval_secs < 60 {
+        bail!("quality.interval_secs 必须为 0 或至少 60");
+    }
+    if !matches!(quality.schedule.as_str(), "interval" | "cron") {
+        bail!("quality.schedule 只能是 interval 或 cron");
+    }
+    if !(1..=8760).contains(&quality.interval_hours) {
+        bail!("quality.interval_hours 必须在 1–8760 之间");
+    }
+    if crate::cron::parse_cron(&quality.cron).is_err() {
+        bail!("quality.cron 不是有效的 5 段表达式");
+    }
+    if !quality.max_remove_ratio.is_finite()
+        || !(0.0..=1.0).contains(&quality.max_remove_ratio)
+        || quality.max_remove_ratio == 0.0
+    {
+        bail!("quality.max_remove_ratio 必须在 (0,1] 之间");
+    }
+    if !(1..=100_000).contains(&quality.min_remove_count) {
+        bail!("quality.min_remove_count 必须在 1–100000 之间");
+    }
+    if quality.result_retention_days > 3650 {
+        bail!("quality.result_retention_days 不能超过 3650");
+    }
+    if quality.gate_time_budget_secs > 86_400 {
+        bail!("quality.gate_time_budget_secs 不能超过 86400");
+    }
+    if !(1..=32).contains(&quality.concurrency) {
+        bail!("quality.concurrency 必须在 1–32 之间");
+    }
+    if !(1..=120).contains(&quality.timeout_secs) {
+        bail!("quality.timeout_secs 必须在 1–120 之间");
+    }
+    if !(1..=120).contains(&quality.speed_timeout_secs) {
+        bail!("quality.speed_timeout_secs 必须在 1–120 之间");
+    }
+    if !(64..=65_536).contains(&quality.sample_bytes_kb) {
+        bail!("quality.sample_bytes_kb 必须在 64–65536 之间");
+    }
+    if !(0.5..=30.0).contains(&quality.sample_secs) {
+        bail!("quality.sample_secs 必须在 0.5–30 之间");
+    }
+    if !(1..=8).contains(&quality.sample_segments) {
+        bail!("quality.sample_segments 必须在 1–8 之间");
+    }
+    if !(64..=16_384).contains(&quality.max_playlist_kb) {
+        bail!("quality.max_playlist_kb 必须在 64–16384 之间");
+    }
+    if quality.stale_keep_secs > 86_400 {
+        bail!("quality.stale_keep_secs 不能超过 86400");
+    }
+    if !(1..=16).contains(&quality.quick_target) {
+        bail!("quality.quick_target 必须在 1–16 之间");
+    }
+    for item in &quality.sort_by {
+        if !matches!(item.as_str(), "speed" | "delay" | "resolution") {
+            bail!("quality.sort_by 不支持 {item}");
+        }
+    }
+    validate_quality_rules(&quality.rules, "quality.rules")
+}
+
+fn validate_quality_rules(
+    rules: &crate::config::model::QualityRules,
+    label: &str,
+) -> anyhow::Result<()> {
+    if !matches!(rules.action.as_str(), "hide" | "mark" | "off") {
+        bail!("{label}.action 不支持 {}", rules.action);
+    }
+    if !rules.min_speed_mib.is_finite() || rules.min_speed_mib < 0.0 {
+        bail!("{label}.min_speed_mib 必须是非负数");
+    }
+    let min = parse_resolution_px(&rules.min_resolution, label)?;
+    let max = parse_resolution_px(&rules.max_resolution, label)?;
+    if let (Some(min), Some(max)) = (min, max) {
+        if min > max {
+            bail!("{label}.min_resolution 不能大于 max_resolution");
+        }
+    }
+    for (key, value) in &rules.resolution_speed_map {
+        let Some(_) = parse_resolution_px(key, label)? else {
+            bail!("{label}.resolution_speed_map 含空分辨率");
+        };
+        if !value.is_finite() || *value < 0.0 {
+            bail!("{label}.resolution_speed_map 的速率必须是非负数");
+        }
+    }
+    Ok(())
+}
+
+fn validate_quality_override(
+    quality: &crate::config::model::QualityOverride,
+    label: &str,
+) -> anyhow::Result<()> {
+    if let Some(action) = &quality.action {
+        if !matches!(action.as_str(), "hide" | "mark" | "off") {
+            bail!("{label}.action 不支持 {action}");
+        }
+    }
+    if let Some(speed) = quality.min_speed_mib {
+        if !speed.is_finite() || speed < 0.0 {
+            bail!("{label}.min_speed_mib 必须是非负数");
+        }
+    }
+    let min = match &quality.min_resolution {
+        Some(value) => parse_resolution_px(value, label)?,
+        None => None,
+    };
+    let max = match &quality.max_resolution {
+        Some(value) => parse_resolution_px(value, label)?,
+        None => None,
+    };
+    if let (Some(min), Some(max)) = (min, max) {
+        if min > max {
+            bail!("{label}.min_resolution 不能大于 max_resolution");
+        }
+    }
+    if let Some(map) = &quality.resolution_speed_map {
+        for (key, value) in map {
+            let Some(_) = parse_resolution_px(key, label)? else {
+                bail!("{label}.resolution_speed_map 含空分辨率");
+            };
+            if !value.is_finite() || *value < 0.0 {
+                bail!("{label}.resolution_speed_map 的速率必须是非负数");
+            }
+        }
+    }
+    if let Some(secs) = quality.stale_keep_secs {
+        if secs > 86_400 {
+            bail!("{label}.stale_keep_secs 不能超过 86400");
+        }
+    }
+    Ok(())
+}
+
+/// 解析 `宽x高`。空字符串返回 `None`。
+fn parse_resolution_px(value: &str, label: &str) -> anyhow::Result<Option<u64>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let Some((width, height)) = value.split_once('x') else {
+        bail!("{label} 的分辨率必须是 宽x高");
+    };
+    let width: u64 = width
+        .parse()
+        .map_err(|_| anyhow::anyhow!("{label} 的分辨率宽度不合法"))?;
+    let height: u64 = height
+        .parse()
+        .map_err(|_| anyhow::anyhow!("{label} 的分辨率高度不合法"))?;
+    if !(1..=99_999).contains(&width) || !(1..=99_999).contains(&height) {
+        bail!("{label} 的分辨率超出范围");
+    }
+    Ok(Some(width * height))
 }
 
 /// 校验订阅与同步设置。
@@ -317,5 +509,68 @@ mod tests {
         config.playlist.sync_schedule = "daily".into();
         config.playlist.sync_daily_at.clear();
         assert!(validate(&config).is_err());
+    }
+
+    #[test]
+    fn quality_admission_rejects_bad_schedule_and_guard() {
+        let mut config = Config::default();
+        config.quality.interval_hours = 0;
+        assert!(validate(&config).is_err());
+        config.quality.interval_hours = 6;
+        config.quality.schedule = "cron".into();
+        config.quality.cron = "bad".into();
+        assert!(validate(&config).is_err());
+        config.quality.cron = "0 */6 * * *".into();
+        config.quality.max_remove_ratio = 0.0;
+        assert!(validate(&config).is_err());
+        config.quality.max_remove_ratio = 0.5;
+        config.quality.min_remove_count = 0;
+        assert!(validate(&config).is_err());
+        config.quality.min_remove_count = 10;
+        config.quality.gate_time_budget_secs = 86_401;
+        assert!(validate(&config).is_err());
+    }
+
+    #[test]
+    fn quality_rejects_bad_values() {
+        let mut config = Config::default();
+        config.quality.probe_mode = "turbo".into();
+        assert!(validate(&config).is_err());
+
+        let mut config = Config::default();
+        config.quality.interval_secs = 5;
+        assert!(validate(&config).is_err());
+
+        let mut config = Config::default();
+        config.quality.concurrency = 0;
+        assert!(validate(&config).is_err());
+
+        let mut config = Config::default();
+        config.quality.rules.min_resolution = "1080".into();
+        assert!(validate(&config).is_err());
+
+        let mut config = Config::default();
+        config.quality.rules.min_resolution = "1920x1080".into();
+        config.quality.rules.max_resolution = "1280x720".into();
+        assert!(validate(&config).is_err());
+
+        let mut config = Config::default();
+        config.quality.rules.max_resolution = "1280x720".into();
+        config.groups.push(Group {
+            id: "g".into(),
+            channels: vec![Channel {
+                id: "c".into(),
+                quality: Some(crate::config::model::QualityOverride {
+                    min_resolution: Some("1920x1080".into()),
+                    ..Default::default()
+                }),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        assert!(
+            validate(&config).is_err(),
+            "跨层组合后 min 大于 max 必须拒绝"
+        );
     }
 }

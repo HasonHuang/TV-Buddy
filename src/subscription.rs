@@ -16,8 +16,12 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    config::model::{Channel, Config, Group, PlaylistCfg, PlaylistSource},
+    config::model::{Channel, Config, Group, PlaylistCfg, PlaylistSource, QualityOverride},
     m3u::{self, Entry},
+    quality::{
+        gate::{filter_plan, GateOutcome},
+        store::QualityResult,
+    },
     state::AppState,
     subs::{self, PreviewSource, SourceStatus},
 };
@@ -26,7 +30,7 @@ use crate::{
 pub const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 /// 计划中的一个分组。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlannedGroup {
     /// 上游原分组名（合并组取第一个上游分组）。
     pub original: String,
@@ -38,6 +42,8 @@ pub struct PlannedGroup {
     /// `merge_into` 指定的已有分组 id；空值表示按源独立建组。
     pub merge_id: String,
     pub count: usize,
+    /// 现有目标分组的质量覆盖。新分组为 `None`。
+    pub quality: Option<QualityOverride>,
 }
 
 /// 计划中的一个频道。
@@ -56,6 +62,38 @@ pub struct PlannedChannel {
     pub tvg_logo: Option<String>,
     pub headers: Vec<Value>,
     pub dash: bool,
+}
+
+impl Plan {
+    /// 只保留指定稳定键的频道，并重建分组计数。
+    pub fn retain_keys(&self, keep: &HashSet<String>) -> Plan {
+        let channels: Vec<PlannedChannel> = self
+            .channels
+            .iter()
+            .filter(|channel| keep.contains(&channel.key))
+            .cloned()
+            .collect();
+        let groups = self
+            .groups
+            .iter()
+            .filter_map(|group| {
+                let count = channels
+                    .iter()
+                    .filter(|channel| channel.target == group.target)
+                    .count();
+                (count > 0).then(|| PlannedGroup {
+                    count,
+                    ..group.clone()
+                })
+            })
+            .collect();
+        Plan {
+            channels,
+            groups,
+            duplicates: self.duplicates,
+            trace: self.trace.clone(),
+        }
+    }
 }
 
 /// 一次同步的计划。
@@ -78,6 +116,8 @@ pub struct ApplyStats {
     pub groups_removed: usize,
     pub channels: usize,
     pub groups: usize,
+    /// 同步键迁移：`(旧 source_key, 新 source_key)`。结果行需要跟着迁移。
+    pub migrations: Vec<(String, String)>,
 }
 
 /// 预检差异。只读，不写配置。
@@ -98,6 +138,11 @@ pub struct SyncReport {
     pub blocked: bool,
     pub stats: ApplyStats,
     pub shrink_permille: u64,
+    pub gate_paused: bool,
+    pub gate_admitted: usize,
+    pub gate_rejected: usize,
+    pub gate_removed: usize,
+    pub gate_truncated: bool,
 }
 
 /// 由源配置生成预检参数。
@@ -253,6 +298,7 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
                 name,
                 merge_id,
                 count: 1,
+                quality: None,
             }),
         }
 
@@ -272,12 +318,60 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
         });
     }
 
+    for group in &mut groups {
+        if let Some(index) = find_target_group(&config.groups, source, group) {
+            group.quality = config.groups[index].quality.clone();
+        }
+    }
+
     Plan {
         channels,
         groups,
         duplicates,
         trace: selection.trace,
     }
+}
+
+/// 查找计划分组对应的现有分组。`apply` 与 `plan` 共用同一套匹配。
+pub(crate) fn find_target_group(
+    groups: &[Group],
+    source: &PlaylistSource,
+    planned: &PlannedGroup,
+) -> Option<usize> {
+    let explicit = !planned.merge_id.is_empty();
+    if explicit {
+        let by_id = groups.iter().position(|g| g.id == planned.merge_id);
+        return by_id.or_else(|| {
+            groups.iter().position(|group| {
+                group.origin == "sync"
+                    && group.source_id == source.id
+                    && sync_marker(group, SYNC_TARGET_KEY) == planned.target
+            })
+        });
+    }
+    if planned.target.starts_with("new:") {
+        // 新组身份只认标记。首次同步不复用 source_group 匹配的旧组，
+        // 否则旧频道留在原位，合并后的顺序不再按上游条目。
+        return groups.iter().position(|group| {
+            group.origin == "sync"
+                && group.source_id == source.id
+                && sync_marker(group, SYNC_TARGET_KEY) == planned.target
+        });
+    }
+    // 先按身份标记找，避免旧同名分组抢先命中导致分组 ID 漂移。
+    let by_marker = groups.iter().position(|group| {
+        group.origin == "sync"
+            && group.source_id == source.id
+            && sync_marker(group, SYNC_TARGET_KEY) == planned.target
+    });
+    by_marker.or_else(|| {
+        groups.iter().position(|group| {
+            group.origin == "sync"
+                && group.source_id == source.id
+                && (group.source_group == planned.original
+                    || (group.source_group.is_empty() && group.name == planned.name))
+        })
+    })
 }
 
 /// 应用计划。一次改写 `config.groups`。
@@ -296,43 +390,8 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
             continue;
         }
         let name = planned.name.clone();
-        // 显式并入已有组：先按 id 找。目标被删除后，按身份标记找回
-        // 上次为这个目标建立的同步组，避免每次同步都新建一组。
-        // 不用同名/原分组名回退，避免把频道放进错误的组。
         let explicit = !planned.merge_id.is_empty();
-        let existing = if explicit {
-            let by_id = groups.iter().position(|g| g.id == planned.merge_id);
-            by_id.or_else(|| {
-                groups.iter().position(|group| {
-                    group.origin == "sync"
-                        && group.source_id == source.id
-                        && sync_marker(group, SYNC_TARGET_KEY) == planned.target
-                })
-            })
-        } else if planned.target.starts_with("new:") {
-            // 新组身份只认标记。首次同步不复用 source_group 匹配的旧组，
-            // 否则旧频道留在原位，合并后的顺序不再按上游条目。
-            groups.iter().position(|group| {
-                group.origin == "sync"
-                    && group.source_id == source.id
-                    && sync_marker(group, SYNC_TARGET_KEY) == planned.target
-            })
-        } else {
-            // 先按身份标记找，避免旧同名分组抢先命中导致分组 ID 漂移。
-            let by_marker = groups.iter().position(|group| {
-                group.origin == "sync"
-                    && group.source_id == source.id
-                    && sync_marker(group, SYNC_TARGET_KEY) == planned.target
-            });
-            by_marker.or_else(|| {
-                groups.iter().position(|group| {
-                    group.origin == "sync"
-                        && group.source_id == source.id
-                        && (group.source_group == planned.original
-                            || (group.source_group.is_empty() && group.name == name))
-                })
-            })
-        };
+        let existing = find_target_group(&groups, source, planned);
         let id = match existing {
             Some(idx) => {
                 // 已有组是显式目标。保留名称与全部设置，只更新频道。
@@ -442,7 +501,10 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         };
         let planned = &plan.channels[pidx];
         // 把旧拼写或旧序号迁移到计划键。后续同步按规范键精确匹配。
-        channel.source_key = planned.key.clone();
+        let old_key = std::mem::replace(&mut channel.source_key, planned.key.clone());
+        if old_key != planned.key {
+            stats.migrations.push((old_key, planned.key.clone()));
+        }
         let planned_key = canonical_key(&planned.key);
         existing_keys.insert(planned_key.clone());
         if !channel.sync_follow {
@@ -755,6 +817,157 @@ pub async fn fetch_bounded(
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// 记录源频道，供同步后判断哪些频道被上游移除。
+struct SourceChannelSnapshot {
+    key: String,
+    gid: String,
+    cid: String,
+    name: String,
+    target_group: String,
+    url_hash: String,
+}
+
+/// 一个源的全部质量结果键。用于源转手工或删除时清理。
+pub fn source_result_keys(config: &Config, source_id: &str) -> Vec<String> {
+    config
+        .groups
+        .iter()
+        .flat_map(|group| group.channels.iter())
+        .filter(|channel| channel.source_id == source_id)
+        .map(|channel| format!("sync:{source_id}:{}", channel.source_key))
+        .collect()
+}
+
+/// 一个分组内全部频道的质量结果键。用于导入覆盖或转手工时清理。
+pub fn group_result_keys(config: &Config, gid: &str) -> Vec<String> {
+    let Some(group) = config.group(gid) else {
+        return Vec::new();
+    };
+    group
+        .channels
+        .iter()
+        .map(|channel| {
+            if channel.source_id.is_empty() {
+                format!("channel:{gid}/{}", channel.id)
+            } else {
+                format!("sync:{}:{}", channel.source_id, channel.source_key)
+            }
+        })
+        .collect()
+}
+
+/// 单个频道的质量结果键。
+pub fn channel_result_keys(config: &Config, gid: &str, cid: &str) -> Vec<String> {
+    let Some(channel) = config
+        .group(gid)
+        .and_then(|group| group.channels.iter().find(|channel| channel.id == cid))
+    else {
+        return Vec::new();
+    };
+    if channel.source_id.is_empty() {
+        vec![format!("channel:{gid}/{cid}")]
+    } else {
+        vec![format!("sync:{}:{}", channel.source_id, channel.source_key)]
+    }
+}
+
+/// 把旧键结果迁移到新键。新键已有结果时只删除旧行。
+fn migrate_result_key(
+    store: &crate::quality::store::QualityStore,
+    old_key: &str,
+    new_key: &str,
+    new_source_key: &str,
+) -> anyhow::Result<()> {
+    if old_key == new_key {
+        return Ok(());
+    }
+    let new_exists = store.get(new_key)?.is_some();
+    let Some(mut result) = store.get(old_key)? else {
+        return Ok(());
+    };
+    if !new_exists {
+        result.key = new_key.to_string();
+        result.source_key = new_source_key.to_string();
+        store.upsert(&result)?;
+    }
+    store.delete(old_key)?;
+    Ok(())
+}
+
+/// 暂停结果提交前复核：源仍启用，已存在频道仍属于该源。
+fn paused_result_current(config: &Config, result: &QualityResult) -> bool {
+    let Some(source) = config
+        .playlist
+        .sources
+        .iter()
+        .find(|source| source.id == result.source_id)
+    else {
+        return false;
+    };
+    if !source.enabled {
+        return false;
+    }
+    if result.gid.is_empty() || result.cid.is_empty() {
+        return true;
+    }
+    config.group(&result.gid).is_some_and(|group| {
+        group
+            .channels
+            .iter()
+            .any(|channel| channel.id == result.cid && channel.source_id == source.id)
+    })
+}
+
+fn source_channel_snapshot(config: &Config, source_id: &str) -> Vec<SourceChannelSnapshot> {
+    let mut items = Vec::new();
+    for group in &config.groups {
+        for channel in &group.channels {
+            if channel.source_id == source_id && !channel.source_key.is_empty() {
+                items.push(SourceChannelSnapshot {
+                    key: canonical_key(&channel.source_key),
+                    gid: group.id.clone(),
+                    cid: channel.id.clone(),
+                    name: channel.name.clone(),
+                    target_group: group.name.clone(),
+                    url_hash: crate::quality::admission::url_hash_hex(&channel.url),
+                });
+            }
+        }
+    }
+    items
+}
+
+fn source_channel_keys(config: &Config, source_id: &str) -> HashSet<String> {
+    config
+        .groups
+        .iter()
+        .flat_map(|group| {
+            group
+                .channels
+                .iter()
+                .filter(|channel| channel.source_id == source_id && !channel.source_key.is_empty())
+                .map(|channel| canonical_key(&channel.source_key))
+        })
+        .collect()
+}
+
+/// 频道是否仍在源中。键迁移也算保留。
+///
+/// 只比较 `(gid, cid)` 会把移组当成删除；只比较键会把旧键迁移当成删除。
+fn source_channel_survived(
+    key: &str,
+    after: &HashSet<String>,
+    migrations: &[(String, String)],
+) -> bool {
+    let old = canonical_key(key);
+    if after.contains(&old) {
+        return true;
+    }
+    migrations
+        .iter()
+        .any(|(from, to)| canonical_key(from) == old && after.contains(&canonical_key(to)))
+}
+
 /// 同步一个源。调用方应已持有全局同步锁。
 pub async fn sync_locked(
     state: &Arc<AppState>,
@@ -762,8 +975,8 @@ pub async fn sync_locked(
     force: bool,
 ) -> anyhow::Result<SyncReport> {
     let started = Instant::now();
-    let config = state.snapshot();
-    let Some(source) = config
+    let initial_config = state.snapshot();
+    let Some(initial_source) = initial_config
         .playlist
         .sources
         .iter()
@@ -772,7 +985,7 @@ pub async fn sync_locked(
     else {
         bail!("订阅源不存在");
     };
-    if source.mode != "sync" {
+    if initial_source.mode != "sync" {
         bail!("该源不是托管模式");
     }
 
@@ -782,7 +995,7 @@ pub async fn sync_locked(
         status.last_try = now_secs();
     });
 
-    let text = match fetch(state, &source, &config.playlist).await {
+    let text = match fetch(state, &initial_source, &initial_config.playlist).await {
         Ok(text) => text,
         Err(error) => {
             let message = format!("{error:#}");
@@ -794,6 +1007,24 @@ pub async fn sync_locked(
         }
     };
     let entries = m3u::parse(&text);
+    let _admission = state.admission_lock.lock().await;
+    // 抓取期间配置可能变化。持准入锁后取最新快照，重新规划并用它做门控。
+    let config = state.snapshot();
+    let Some(source) = config
+        .playlist
+        .sources
+        .iter()
+        .find(|source| source.id == id)
+        .cloned()
+    else {
+        finish_error(state, id, "源已删除".into());
+        bail!("源已删除");
+    };
+    if source != initial_source {
+        finish_error(state, id, "源配置已变更，下一轮重试".into());
+        bail!("源配置已变更，下一轮重试");
+    }
+    let revision = config.revision;
     let plan = plan(&config, &source, &entries);
     let existing = count_source_channels(&config, id);
     let max_channels = if source.max_channels > 0 {
@@ -821,9 +1052,98 @@ pub async fn sync_locked(
         });
     }
 
+    let gate = filter_plan(state, &config, &source, plan).await;
+    let (plan, gate_results, mut gate_stats, gate_cursor, gate_truncated, gate_remaining) =
+        match gate {
+            GateOutcome::Paused {
+                reason,
+                results,
+                stats,
+            } => {
+                if let Err(error) = state.commit_quality_results(&[], results, |config, results| {
+                    results.retain(|result| paused_result_current(config, result));
+                    Vec::new()
+                }) {
+                    let message = format!("写入质量结果失败: {error:#}");
+                    finish_error(state, id, message);
+                    return Err(error);
+                }
+                let still_current = state
+                    .snapshot()
+                    .playlist
+                    .sources
+                    .iter()
+                    .any(|source| source.id == id && source.enabled);
+                if !still_current {
+                    // 门控期间源被停用或删除。保留其状态与结果，不覆盖。
+                    state
+                        .sources
+                        .update_status(id, |status| status.syncing = false);
+                    return Ok(SyncReport {
+                        blocked: false,
+                        gate_paused: true,
+                        gate_admitted: stats.admitted,
+                        gate_rejected: stats.rejected,
+                        gate_removed: 0,
+                        gate_truncated: false,
+                        ..SyncReport::default()
+                    });
+                }
+                let now = now_secs();
+                state.sources.update_status(id, |status| {
+                    status.syncing = false;
+                    status.mode = "sync".into();
+                    status.last_try = now;
+                    status.duration_ms = started.elapsed().as_millis() as u64;
+                    status.error = None;
+                    status.gate_phase = "paused".into();
+                    status.gate_tested = stats.tested;
+                    status.gate_admitted = stats.admitted;
+                    status.gate_rejected = stats.rejected;
+                    status.gate_removed = 0;
+                    status.gate_paused = true;
+                    status.gate_pause_reason = reason.clone();
+                    status.gate_truncated = false;
+                    status.gate_remaining = 0;
+                    status.gate_last_at = now;
+                });
+                if reason == "guard" {
+                    let _ = state
+                        .quality_store
+                        .meta_set("guard_tripped_at", &now.to_string());
+                }
+                tracing::warn!(
+                    source = id,
+                    reason,
+                    tested = stats.tested,
+                    "同步门控暂停，成员未变"
+                );
+                return Ok(SyncReport {
+                    blocked: false,
+                    gate_paused: true,
+                    gate_admitted: stats.admitted,
+                    gate_rejected: stats.rejected,
+                    gate_removed: 0,
+                    gate_truncated: false,
+                    ..SyncReport::default()
+                });
+            }
+            GateOutcome::Apply {
+                plan,
+                results,
+                stats,
+                cursor,
+                truncated,
+                remaining,
+            } => (plan, results, stats, cursor, truncated, remaining),
+        };
+
     let expected = source.clone();
     let mut applied: Option<ApplyStats> = None;
-    let result = state.mutate(|config| {
+    let result = state.mutate_admission(&[], |config| {
+        if config.revision != revision {
+            bail!("配置已变更，下一轮重试");
+        }
         let current = config
             .playlist
             .sources
@@ -836,8 +1156,68 @@ pub async fn sync_locked(
         if current != expected {
             bail!("源配置已变更，下一轮重试");
         }
+        let before = config
+            .quality
+            .enabled
+            .then(|| source_channel_snapshot(config, id));
         applied = Some(apply(config, &current, &plan));
-        Ok(())
+        let mut results = gate_results;
+        // 新候选在探测时还没有 gid/cid。准入后按源键回填，结果页才能跳转。
+        for result in &mut results {
+            if result.scope != "sync" || (!result.gid.is_empty() && !result.cid.is_empty()) {
+                continue;
+            }
+            let key = canonical_key(&result.source_key);
+            let found = config.groups.iter().find_map(|group| {
+                group
+                    .channels
+                    .iter()
+                    .find(|channel| {
+                        channel.source_id == id && canonical_key(&channel.source_key) == key
+                    })
+                    .map(|channel| (group, channel))
+            });
+            if let Some((group, channel)) = found {
+                result.gid = group.id.clone();
+                result.cid = channel.id.clone();
+            }
+        }
+        if let Some(before) = before {
+            let after = source_channel_keys(config, id);
+            let migrations = applied
+                .as_ref()
+                .map(|stats| stats.migrations.as_slice())
+                .unwrap_or(&[]);
+            for item in before {
+                if source_channel_survived(&item.key, &after, migrations) {
+                    continue;
+                }
+                let key = format!("sync:{id}:{}", item.key);
+                if results.iter().any(|result| result.key == key) {
+                    // 门控已经记录了本次移出（例如 URL 变化后 404）。
+                    // 同键覆盖会丢失真实原因与指标。
+                    continue;
+                }
+                results.push(QualityResult {
+                    key,
+                    scope: "sync".into(),
+                    source_id: id.to_string(),
+                    source_key: item.key,
+                    gid: item.gid,
+                    cid: item.cid,
+                    name: item.name,
+                    target_group: item.target_group,
+                    url_hash: item.url_hash,
+                    action: "source_removed".into(),
+                    reason: "source_removed".into(),
+                    ok: false,
+                    checked_at: now_secs() as i64,
+                    ..QualityResult::default()
+                });
+                gate_stats.source_removed += 1;
+            }
+        }
+        Ok(results)
     });
     if let Err(error) = result {
         let message = format!("{error:#}");
@@ -845,6 +1225,16 @@ pub async fn sync_locked(
         return Err(error);
     }
     let stats = applied.unwrap_or_default();
+    // 键迁移后把旧结果行搬到新键，避免结果页出现重复或过期准入。
+    for (old, new) in &stats.migrations {
+        let new_key = format!("sync:{id}:{new}");
+        for old_candidate in [old.clone(), canonical_key(old)] {
+            let old_key = format!("sync:{id}:{old_candidate}");
+            if let Err(error) = migrate_result_key(&state.quality_store, &old_key, &new_key, new) {
+                tracing::warn!(source = id, %error, "迁移旧结果失败");
+            }
+        }
+    }
     let shrink_permille = if existing == 0 {
         0
     } else {
@@ -868,6 +1258,17 @@ pub async fn sync_locked(
         status.shrink_permille = shrink_permille;
         status.duration_ms = started.elapsed().as_millis() as u64;
         status.error = None;
+        status.gate_phase = "done".into();
+        status.gate_tested = gate_stats.tested;
+        status.gate_admitted = gate_stats.admitted;
+        status.gate_rejected = gate_stats.rejected;
+        status.gate_removed = gate_stats.removed;
+        status.gate_paused = false;
+        status.gate_pause_reason.clear();
+        status.gate_truncated = gate_truncated;
+        status.gate_cursor = gate_cursor.unwrap_or_default();
+        status.gate_remaining = gate_remaining;
+        status.gate_last_at = now;
         status.next_sync = next_run_at(
             &config.playlist,
             &expected,
@@ -882,12 +1283,21 @@ pub async fn sync_locked(
         updated = stats.updated,
         removed = stats.removed,
         skipped = stats.skipped_removals,
+        gate_tested = gate_stats.tested,
+        gate_admitted = gate_stats.admitted,
+        gate_rejected = gate_stats.rejected,
+        gate_removed = gate_stats.removed,
         "订阅同步完成"
     );
     Ok(SyncReport {
         blocked: false,
         stats,
         shrink_permille,
+        gate_paused: false,
+        gate_admitted: gate_stats.admitted,
+        gate_rejected: gate_stats.rejected,
+        gate_removed: gate_stats.removed,
+        gate_truncated,
     })
 }
 
@@ -1363,7 +1773,12 @@ fn stable_key(entry: &Entry, original: &str) -> String {
             name.to_lowercase()
         );
     }
-    format!("url:{}", entry.url.trim())
+    format!("url:{}", url_digest(entry.url.trim()))
+}
+
+/// URL 的十六进制摘要。结果与稳定键不保存完整地址。
+fn url_digest(url: &str) -> String {
+    hex::encode(Sha256::digest(url.trim().as_bytes()))
 }
 
 /// 重复键的稳定后缀：URL 前 8 位十六进制摘要。
@@ -1377,12 +1792,17 @@ fn key_suffix(url: &str) -> String {
 /// 匹配用的规范键。`name:` 键忽略大小写；`id:` 已小写；`url:` 保持原样。
 ///
 /// 旧版本按原样保存 `name:` 键。这里归一后，升级不会误删或重复频道。
-fn canonical_key(key: &str) -> String {
+pub(crate) fn canonical_key(key: &str) -> String {
     if key.starts_with("name:") {
-        key.to_lowercase()
-    } else {
-        key.to_string()
+        return key.to_lowercase();
     }
+    if let Some(url) = key.strip_prefix("url:") {
+        if url.contains("://") {
+            // 旧版本把完整地址写进稳定键。归一为摘要，升级后仍能配对。
+            return format!("url:{}", url_digest(url));
+        }
+    }
+    key.to_string()
 }
 
 /// 键族：去掉 `#` 后缀。
@@ -1471,6 +1891,41 @@ fn pair_channels(existing: &[ExistingRef<'_>], plan: &Plan) -> Vec<Option<usize>
     pairs
 }
 
+/// 给门控与 apply 共用的现有频道配对。
+///
+/// 键族、规范键与名称+URL 的配对逻辑只能有一份。否则重复键变化或旧 key 迁移时，
+/// 门控会把已准入频道当成新候选，apply 却仍按旧频道更新。
+pub(crate) fn pair_source_channels<'a>(
+    config: &'a Config,
+    source_id: &str,
+    plan: &Plan,
+) -> Vec<Option<(&'a Group, &'a Channel)>> {
+    let mut refs: Vec<ExistingRef<'a>> = Vec::new();
+    let mut channels: Vec<(&'a Group, &'a Channel)> = Vec::new();
+    for group in &config.groups {
+        for channel in &group.channels {
+            if channel.source_id != source_id || channel.source_key.is_empty() {
+                continue;
+            }
+            refs.push(ExistingRef {
+                key: &channel.source_key,
+                name: &channel.name,
+                url: &channel.url,
+            });
+            channels.push((group, channel));
+        }
+    }
+    // `pair_channels` 按现有频道槽位索引，值是计划频道下标。
+    // 门控按计划频道遍历，因此要反转为计划下标索引。
+    let mut paired = vec![None; plan.channels.len()];
+    for (slot, pair) in pair_channels(&refs, plan).into_iter().enumerate() {
+        if let Some(plan_index) = pair {
+            paired[plan_index] = Some(channels[slot]);
+        }
+    }
+    paired
+}
+
 fn channel_id_base(entry: &Entry, key: &str) -> String {
     if let Some(id) = trim_opt(entry.tvg_id.as_deref()) {
         if id.len() <= 64
@@ -1491,7 +1946,10 @@ fn display_name(entry: &Entry) -> String {
     if !name.is_empty() {
         return name.to_string();
     }
-    trim_opt(entry.tvg_name.as_deref()).unwrap_or_else(|| entry.url.trim().to_string())
+    trim_opt(entry.tvg_name.as_deref()).unwrap_or_else(|| {
+        let digest = url_digest(entry.url.trim());
+        format!("频道-{}", &digest[..8])
+    })
 }
 
 fn trim_opt(value: Option<&str>) -> Option<String> {
@@ -1706,6 +2164,26 @@ mod tests {
     }
 
     #[test]
+    fn plan_copies_existing_group_quality() {
+        let mut config = config_with_source();
+        let source = source();
+        let entries = urls(&[("c1", "央视", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+        config.groups[0].quality = Some(QualityOverride {
+            min_speed_mib: Some(3.0),
+            ..QualityOverride::default()
+        });
+        let plan = plan(&config, &source, &entries);
+        assert_eq!(
+            plan.groups[0]
+                .quality
+                .as_ref()
+                .and_then(|quality| quality.min_speed_mib),
+            Some(3.0)
+        );
+    }
+
+    #[test]
     fn display_name_keeps_extinf_suffix() {
         let mut item = entry("翡翠台(字幕)", "港台", "a", "http://up/a.m3u8");
         item.tvg_name = Some("翡翠台".into());
@@ -1722,7 +2200,9 @@ mod tests {
             url: "http://up/c.m3u8".into(),
             ..Entry::default()
         };
-        assert_eq!(display_name(&url_only), "http://up/c.m3u8");
+        let name = display_name(&url_only);
+        assert!(name.starts_with("频道-"), "{name}");
+        assert!(!name.contains("http"), "显示名不能带完整地址: {name}");
     }
 
     #[test]
@@ -2282,7 +2762,20 @@ mod tests {
         by_name.tvg_id = None;
         assert_eq!(stable_key(&by_name, "组"), "name:组\u{1f}名字");
         by_name.name.clear();
-        assert_eq!(stable_key(&by_name, "组"), "url:http://up/1");
+        let key = stable_key(&by_name, "组");
+        assert!(key.starts_with("url:"), "{key}");
+        assert!(!key.contains("http"), "结果键不能带完整地址: {key}");
+    }
+
+    #[test]
+    fn canonical_key_hashes_legacy_url_keys() {
+        let legacy = canonical_key("url:http://up/1.m3u8");
+        assert!(!legacy.contains("http"), "{legacy}");
+        let unnamed = Entry {
+            url: "http://up/1.m3u8".into(),
+            ..Entry::default()
+        };
+        assert_eq!(legacy, canonical_key(&stable_key(&unnamed, "组")));
     }
 
     #[test]
@@ -2651,6 +3144,110 @@ mod tests {
         assert_eq!(config.groups.len(), 1);
         assert_eq!(config.groups[0].name, "资讯");
         assert_eq!(config.groups[0].id, gid, "改名保留分组 id");
+    }
+
+    #[test]
+    fn result_keys_cover_manual_and_sync_channels() {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g".into(),
+            channels: vec![
+                Channel {
+                    id: "m".into(),
+                    ..Channel::default()
+                },
+                Channel {
+                    id: "s".into(),
+                    source_id: "src".into(),
+                    source_key: "key".into(),
+                    ..Channel::default()
+                },
+            ],
+            ..Group::default()
+        });
+        let keys = group_result_keys(&config, "g");
+        assert!(keys.contains(&"channel:g/m".to_string()));
+        assert!(keys.contains(&"sync:src:key".to_string()));
+        assert_eq!(channel_result_keys(&config, "g", "s"), vec!["sync:src:key"]);
+    }
+
+    #[test]
+    fn paused_result_requires_enabled_source_and_channel() {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g".into(),
+            channels: vec![Channel {
+                id: "c".into(),
+                source_id: "s".into(),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        let result = QualityResult {
+            scope: "sync".into(),
+            source_id: "s".into(),
+            source_key: "c".into(),
+            gid: "g".into(),
+            cid: "c".into(),
+            ..QualityResult::default()
+        };
+        assert!(!paused_result_current(&config, &result), "源不存在时不写");
+        config
+            .playlist
+            .sources
+            .push(crate::config::model::PlaylistSource {
+                id: "s".into(),
+                enabled: true,
+                ..Default::default()
+            });
+        assert!(paused_result_current(&config, &result));
+        config.playlist.sources[0].enabled = false;
+        assert!(!paused_result_current(&config, &result), "源停用时不写");
+    }
+
+    #[test]
+    fn result_key_migration_deletes_old_admitted_row() {
+        let dir = std::env::temp_dir().join(format!("tvb-migrate-{}", uuid::Uuid::new_v4()));
+        let store = crate::quality::store::QualityStore::new(
+            crate::db::connect(&dir.join("tvb.db")).expect("db"),
+        );
+        let row = |key: &str| crate::quality::store::QualityResult {
+            key: key.into(),
+            scope: "sync".into(),
+            source_id: "s".into(),
+            source_key: "old".into(),
+            action: "admitted".into(),
+            reason: "pass".into(),
+            ok: true,
+            ..Default::default()
+        };
+        store.upsert(&row("sync:s:old")).expect("旧行");
+        store.upsert(&row("sync:s:new")).expect("新行");
+        migrate_result_key(&store, "sync:s:old", "sync:s:new", "new").expect("迁移");
+        assert!(store.get("sync:s:old").expect("读旧").is_none());
+        assert!(store.get("sync:s:new").expect("读新").is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_removal_identity_handles_move_and_key_migration() {
+        let after: HashSet<String> = ["id:one".to_string()].into_iter().collect();
+        assert!(
+            source_channel_survived("id:one", &after, &[]),
+            "移组但键不变时仍在源中"
+        );
+        assert!(
+            source_channel_survived(
+                "name:旧名\u{1f}频道",
+                &after,
+                &[("name:旧名\u{1f}频道".into(), "id:one".into())]
+            ),
+            "键迁移后仍算保留"
+        );
+        assert!(
+            !source_channel_survived("id:gone", &after, &[]),
+            "源不再提供该键时算移除"
+        );
     }
 
     #[test]
