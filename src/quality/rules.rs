@@ -519,6 +519,40 @@ mod tests {
     }
 
     #[test]
+    fn resolution_speed_map_overrides_min_speed() {
+        let mut map = BTreeMap::new();
+        map.insert(1280 * 720, 1.0);
+        map.insert(1920 * 1080, 3.0);
+        let rules = EffectiveRules {
+            enabled: true,
+            min_speed_mib: 0.5,
+            resolution_speed_map: map,
+            ..EffectiveRules::default()
+        };
+        let measurement = |width: u16, height: u16, speed: f64| Measurement {
+            reachable: true,
+            width: Some(width),
+            height: Some(height),
+            speed_mib: Some(speed),
+            ..Measurement::default()
+        };
+        assert_eq!(
+            evaluate(&rules, &measurement(1920, 1080, 2.0)).reason,
+            Reason::SpeedLow,
+            "1080p 要求 3 MiB/s"
+        );
+        assert!(
+            evaluate(&rules, &measurement(1280, 720, 2.0)).ok,
+            "720p 只要求 1 MiB/s"
+        );
+        assert_eq!(
+            evaluate(&rules, &measurement(640, 360, 0.4)).reason,
+            Reason::SpeedLow,
+            "未命中档位时使用最低速率"
+        );
+    }
+
+    #[test]
     fn retain_does_not_bypass_thresholds() {
         let rules = EffectiveRules {
             enabled: true,

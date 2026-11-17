@@ -98,6 +98,8 @@
 - `plan()` 与 `apply()` 共用一个 `find_target_group`，避免两套目标分组匹配。
 - 周期与手动校验使用现有完整继承：频道 > 分组 > 源 > 全局。
 - 解析结果附带 `source_layer`（`global` / `source` / `group` / `channel`），供接口与页面显示。
+- `resolution_speed_map` 覆盖 `min_speed_mib`：取不超过实际分辨率的最高档；无匹配或分辨率未知时用 `min_speed_mib`。
+- 配置了 `resolution_speed_map` 时探测档位至少提升到 `speed`。
 
 ### 3.4 校验
 

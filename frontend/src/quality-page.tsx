@@ -221,6 +221,29 @@ function asBool(root: Cfg, path: string): boolean {
   return getPath(root, path) === true;
 }
 
+type SpeedRow = { resolution: string; speed: string };
+
+function readSpeedRows(root: Cfg): SpeedRow[] {
+  const value = getPath(root, 'quality.rules.resolution_speed_map');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.entries(value as Cfg).map(([resolution, speed]) => ({
+    resolution,
+    speed: speed === null || speed === undefined ? '' : String(speed),
+  }));
+}
+
+function speedRowsToMap(rows: SpeedRow[]): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const row of rows) {
+    const resolution = row.resolution.trim();
+    const speed = Number(row.speed);
+    if (resolution !== '' && Number.isFinite(speed) && speed >= 0) {
+      map[resolution] = speed;
+    }
+  }
+  return map;
+}
+
 /** 数字输入。编辑期间保留原始文本，避免 0、空值与小数点被默认值覆盖。 */
 function NumberInput({
   value,
@@ -444,11 +467,13 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
   const [busy, setBusy] = useState('');
   const [preview, setPreview] = useState<number[]>([]);
   const [previewError, setPreviewError] = useState('');
+  const [speedRows, setSpeedRows] = useState<SpeedRow[]>([]);
 
   const load = useCallback(async () => {
     try {
       const config = await api<Cfg>('GET', '/config');
       setDraft(config);
+      setSpeedRows(readSpeedRows(config));
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     }
@@ -460,6 +485,11 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
 
   const update = (path: string, value: unknown) => {
     setDraft((prev) => (prev ? setPath(prev, path, value) : prev));
+  };
+
+  const commitSpeedRows = (next: SpeedRow[]) => {
+    setSpeedRows(next);
+    update('quality.rules.resolution_speed_map', speedRowsToMap(next));
   };
 
   const previewSchedule = async () => {
@@ -731,6 +761,58 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
               onChange={(event) => update('quality.rules.max_resolution', event.target.value)}
               placeholder="3840x2160"
             />
+          </Field>
+          <Field
+            label="分辨率速率要求"
+            hint="按实际分辨率取不超过它的最高档；未命中时用最低速率；空行不保存"
+          >
+            <div className="quality-speed-map">
+              {speedRows.map((row, index) => (
+                <div className="quality-speed-row" key={index}>
+                  <input
+                    value={row.resolution}
+                    placeholder="1280x720"
+                    onChange={(event) => {
+                      const next = speedRows.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, resolution: event.target.value } : item,
+                      );
+                      commitSpeedRows(next);
+                    }}
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={row.speed}
+                    placeholder="MiB/s"
+                    onChange={(event) => {
+                      const next = speedRows.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, speed: event.target.value } : item,
+                      );
+                      commitSpeedRows(next);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() =>
+                      commitSpeedRows(
+                        speedRows.filter((_row, itemIndex) => itemIndex !== index),
+                      )
+                    }
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => commitSpeedRows([...speedRows, { resolution: '', speed: '1' }])}
+              >
+                添加分辨率
+              </button>
+            </div>
           </Field>
           <Field label="Host 缓存" tip="复用同一 Host 的成功测速，减少重复下载。">
             <Switch

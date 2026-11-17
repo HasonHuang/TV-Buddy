@@ -1939,6 +1939,27 @@ a.compact {
   border-color: var(--accent-line);
 }
 
+/* 规则页：分辨率到最低速率的映射行。 */
+.quality-speed-map {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quality-speed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quality-speed-row input:first-child {
+  width: 132px;
+}
+
+.quality-speed-row input:nth-child(2) {
+  width: 108px;
+}
+
 /* 模式徽章：PROXY / DASH / REMUX 等。 */
 .mode {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
