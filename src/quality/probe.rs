@@ -784,6 +784,8 @@ pub async fn probe(
         sample_bytes = sample_bytes.saturating_add(bytes);
         sample_time = sample_time.saturating_add(elapsed);
     }
+    // 先释放采样缓冲，再释放许可。否则缓冲可能比许可晚一个轮询释放。
+    drop(capture);
     total_bytes = total_bytes.saturating_add(sample_bytes);
     if sample_bytes == 0 || sample_time.is_zero() {
         // 清单可读但所有样本切片都失败：按探测错误处理，不判不可达。
@@ -1362,6 +1364,91 @@ high/index.m3u8\n";
         );
         assert_eq!(out.measurement.width, None);
         assert_eq!(out.measurement.height, None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn probe_skips_capture_when_semaphore_is_held() {
+        let dir = std::env::temp_dir().join(format!("tvb-ffprobe-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("建目录");
+        let marker = dir.join("ran");
+        let body = format!(
+            "#!/bin/sh\necho x >> {}\ncat > /dev/null\nprintf '{{\"streams\":[{{\"codec_type\":\"video\",\"width\":1280,\"height\":720}}]}}'\n",
+            marker.display()
+        );
+        let script = write_script(&dir, body.as_bytes());
+        let limits = ProbeLimits {
+            ffprobe: true,
+            ffprobe_ready: true,
+            ffprobe_path: script,
+            ..ProbeLimits::for_test()
+        };
+        let gates = ProbeGates {
+            probe_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+            ffprobe_counter: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            max_ffprobe_per_run: 0,
+        };
+        let held = gates
+            .probe_semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("许可");
+        let url = serve_hls_segment().await;
+        let out = probe(
+            &reqwest::Client::new(),
+            &url,
+            &[],
+            ProbeMode::Full,
+            None,
+            &limits,
+            &gates,
+        )
+        .await;
+        assert!(out.measurement.width.is_none(), "无许可时不采集");
+        assert!(out.measurement.speed_mib.is_some(), "测速继续");
+        assert!(!marker.exists(), "不得运行 ffprobe");
+        drop(held);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn shared_gates_run_ffprobe_once_when_capped() {
+        let dir = std::env::temp_dir().join(format!("tvb-ffprobe-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("建目录");
+        let marker = dir.join("runs");
+        let body = format!(
+            "#!/bin/sh\necho x >> {}\ncat > /dev/null\nprintf '{{\"streams\":[{{\"codec_type\":\"video\",\"width\":1280,\"height\":720}}]}}'\n",
+            marker.display()
+        );
+        let script = write_script(&dir, body.as_bytes());
+        let limits = ProbeLimits {
+            ffprobe: true,
+            ffprobe_ready: true,
+            ffprobe_path: script,
+            ..ProbeLimits::for_test()
+        };
+        let gates = ProbeGates {
+            probe_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+            ffprobe_counter: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            max_ffprobe_per_run: 1,
+        };
+        let first = serve_hls_segment().await;
+        let second = serve_hls_segment().await;
+        let client = reqwest::Client::new();
+        let _ = probe(&client, &first, &[], ProbeMode::Full, None, &limits, &gates).await;
+        let _ = probe(
+            &client,
+            &second,
+            &[],
+            ProbeMode::Full,
+            None,
+            &limits,
+            &gates,
+        )
+        .await;
+        let runs = std::fs::read_to_string(&marker).unwrap_or_default();
+        assert_eq!(runs.lines().count(), 1, "共享计数器只允许一次 ffprobe");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

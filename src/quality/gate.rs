@@ -1403,5 +1403,16 @@ mod tests {
             true,
             false
         ));
+        assert!(
+            !should_use_host_cache(&candidate, ProbeMode::Full, true, true),
+            "DASH 回退优先"
+        );
+        candidate.rules.host_cache = false;
+        assert!(!should_use_host_cache(
+            &candidate,
+            ProbeMode::Speed,
+            false,
+            false
+        ));
     }
 }
