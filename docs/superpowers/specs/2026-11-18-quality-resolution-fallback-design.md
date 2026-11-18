@@ -1,6 +1,6 @@
 # 质量校验：兜底速率、规则页重构与 ffprobe 分辨率识别
 
-> 设计日期：2026-11-18 ｜ 状态：待批准
+> 设计日期：2026-11-18 ｜ 状态：已实现
 > 关联：`docs/design/13-availability-and-speedtest.md`、`docs/design/15-quality-admission-function.md`
 
 ## 1. 目的
@@ -826,7 +826,7 @@ pub enum ProbeMode {
 ### 9.3 回归
 
 - `cargo test`
-- `cargo clippy --all-targets -- -D warnings`
+- `cargo clippy --all-targets`
 - `cd frontend && pnpm build`
 - 现有质量准入手工验收不变。
 

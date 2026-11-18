@@ -10,6 +10,8 @@
 - 模拟器地址：宿主机 `19930/tcp`。容器经 `host.docker.internal` 访问
 - 夹具服务：`python3 -m http.server 19931 --directory <TS 目录>`、`python3 -m http.server 19932 --directory <fMP4 目录>`
 - 宿主机工具：`ffmpeg 9.0.2`、`ffprobe 9.0.2`（`/opt/homebrew/bin`）
+- 分辨率识别的 ffprobe：容器内系统版本 `ffprobe 6.1.2`。安装命令：`docker exec tvb-qtest apk add --no-cache ffmpeg libva`
+- 面板安装的 ffprobe：`ffprobe 7.0.2-static`。步骤 7 只验证 `-version` 与文件存在。它不参加步骤 4–6。
 
 ## 1. 构建
 
@@ -127,6 +129,7 @@ python3 -m http.server 19932 --directory "$F"
 
 说明：
 
+- 本步使用容器内的系统 `ffprobe 6.1.2`。面板安装的 `7.0.2-static` 尚未安装。
 - TS 主清单没有 `RESOLUTION`。分辨率来自已下载切片。
 - 模拟-0.5 的分辨率未知。阈值取兜底 `0.8`。速率 0.49 判 `speed_low`。
 - 模拟-1.0 的速率 1.00 不低于兜底 `0.8`。判 `pass`。

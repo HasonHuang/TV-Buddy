@@ -40,7 +40,7 @@
 - Docker 运行时是非 root，只有 `/data` 可写。
 - systemd 单元有 `ProtectSystem=strict`，只有 `/opt/tv-buddy` 可写。
 - 单二进制部署。已有依赖 `reqwest`（rustls）、`flate2`、`sha2`，不新增依赖。
-- 低配目标磁盘 1 GB。单个制品约 20–30 MB。两个制品合计约 50–60 MB。
+- 低配目标磁盘 1 GB。单个制品约 19–30 MB。两个制品合计约 38–59 MB。
 - 下载的二进制是 GPLv3 构建。仅在运行时下载与调用，不再分发。界面与文档要标注来源与许可。
 
 ## 已考虑的方案
@@ -118,7 +118,8 @@
   4. 两个制品都下载成功后，用 `flate2` 解压到 `<name>.unpack`。
   5. 设 `0755`，分别运行 `-version`。输出必须包含 `<name> version`。
   6. 两个都成功后，按 `ffprobe`、`ffmpeg` 顺序原子改名为 `tools/<name>`。
-  7. 任一步失败：删除两个制品的临时文件。两个正式文件都不改变。状态置 `failed`。
+  7. 下载、校验或解压阶段失败：删除两个制品的临时文件。两个正式文件都不改变。状态置 `failed`。
+  8. 改名按 `ffprobe`、`ffmpeg` 顺序执行。第二个改名失败时，第一个已启用。状态置 `failed`。已启用的文件保留。
 - 单个制品下载上限 200 MB。超过就中止。
 - 日志写入现有运行日志，包含阶段与错误。
 
@@ -130,7 +131,8 @@
   - ffmpeg 行新增 `path`：实际执行路径或 `null`。
   - ffmpeg 行新增 `managed_installed`：`tools/ffmpeg` 是否存在且可执行。
   - ffmpeg 行新增 `system_installed`：`PATH` 里的 ffmpeg 是否可用。
-  - ffprobe 行新增 `ffprobe_installed`、`ffprobe_version`、`ffprobe_source`、`ffprobe_path`、`ffprobe_managed_installed`。判定规则与 ffmpeg 行相同。
+  - ffprobe 行新增 `ffprobe_installed`、`ffprobe_version`、`ffprobe_source`、`ffprobe_path`。判定规则与 ffmpeg 行相同。
+  - ffprobe 行新增 `ffprobe_managed_installed`：只检查 `tools/ffprobe` 文件是否存在，不检查执行位。ffmpeg 行的 `managed_installed` 要求文件可执行。
   - 新增 `job`：当前或最近一次安装任务的状态；没有任务时为 `null`。
 - `POST /panel/api/tools/ffmpeg/install`：仅管理员。启动任务，立即返回 `{ok, job}`。不支持平台返回 `400`；任务运行中返回 `409`。
 - `POST /panel/api/tools/ffmpeg/remove`：仅管理员。删除 `tools/ffmpeg`、`tools/ffprobe` 并清理两类临时文件。任务运行中返回 `409`。系统版本不受影响。
