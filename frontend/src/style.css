@@ -2017,6 +2017,9 @@ a.compact {
     font-size: 11px;
     color: var(--muted);
   }
+  .quality-speed-table td:not([data-label])::before {
+    display: none;
+  }
 }
 
 /* 模式徽章：PROXY / DASH / REMUX 等。 */

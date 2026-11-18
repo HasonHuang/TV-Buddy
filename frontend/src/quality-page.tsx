@@ -745,7 +745,7 @@ function RulesTab({
               onChange={(value) => update('quality.rules.min_speed_mib', value)}
             />
           </Field>
-          <Field label="兜底速率" hint="无法识别分辨率，或速率表未命中时使用；0 = 用最低速率">
+          <Field label="兜底速率" hint="MiB/s，无法识别分辨率，或速率表未命中时使用；0 = 用最低速率">
             <NumberInput
               min={0}
               step={0.1}
@@ -924,7 +924,7 @@ function RulesTab({
         {status && !status.ffprobe.installed ? (
           <div className="hint">未安装 ffprobe。分辨率识别不可用，规则会使用兜底速率。</div>
         ) : null}
-        {status && !status.ffprobe.enabled ? (
+        {status && status.ffprobe.installed && !status.ffprobe.enabled ? (
           <div className="hint">开启后，完整档会读取切片开头识别分辨率。</div>
         ) : null}
       </div>
