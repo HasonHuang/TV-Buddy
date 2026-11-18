@@ -596,7 +596,7 @@ mod tests {
         assert!(!installer.running());
         let job = installer.job().expect("任务记录");
         assert_eq!(job.phase, "failed");
-        assert!(job.error.as_deref().unwrap_or("").len() > 0);
+        assert!(!job.error.as_deref().unwrap_or("").is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 
