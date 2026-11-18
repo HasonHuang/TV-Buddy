@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+pub mod install;
+
 /// 数据目录：数据库文件所在目录。
 pub fn data_dir(db_path: &Path) -> PathBuf {
     db_path
