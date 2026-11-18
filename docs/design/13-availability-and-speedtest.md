@@ -288,6 +288,8 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
     "timeout_secs": 10,
     "concurrency": 2,
     "probe_concurrency": 1,
+    "ffprobe_timeout_secs": 5,
+    "ffprobe_sample_kb": 512,
     "speed_timeout_secs": 10,
     "sample_bytes_kb": 4096,
     "sample_secs": 2.0,
@@ -310,6 +312,7 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
     "defer_during_playback": true,
     "rules": {
       "min_speed_mib": 0.0,
+      "fallback_speed_mib": 0.0,
       "max_delay_ms": 0,
       "min_resolution": "",
       "max_resolution": "",
@@ -336,7 +339,9 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 | `interval_secs` | u64 | `900` | 周期。下限 60。`0` 表示只手动运行。 |
 | `timeout_secs` | u64 | `10` | 单频道总超时。 |
 | `concurrency` | u32 | `2` | 网络并发。范围 1–32。 |
-| `probe_concurrency` | u32 | `1` | `ffprobe` 并发。范围 1–8。 |
+| `probe_concurrency` | u32 | `1` | `ffprobe` 并发与采集上限。范围 1–4。 |
+| `ffprobe_timeout_secs` | u64 | `5` | 单次 `ffprobe` 进程超时。范围 1–30。 |
+| `ffprobe_sample_kb` | u64 | `512` | 送给 `ffprobe` 的最大字节数。范围 64–2048。 |
 | `speed_timeout_secs` | u64 | `10` | 测速请求超时。 |
 | `sample_bytes_kb` | u64 | `4096` | 单流采样字节上限。 |
 | `sample_secs` | f64 | `2.0` | 单流采样时长上限。 |
@@ -354,7 +359,7 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 | `cleanup_fail_threshold` | u32 | `3` | 清理失效频道所需连续 `unreachable` 次数。 |
 | `sort_by` | array | `[]` | `speed` / `delay` / `resolution`。空值保持配置顺序。 |
 | `filter_ad` | bool | `false` | 识别短循环与广告占位。 |
-| `ffprobe` | bool | `false` | 调用外部 `ffprobe`。关闭时是硬上限。 |
+| `ffprobe` | bool | `false` | 启用分辨率识别。只在 `full` 档、清单无完整分辨率时运行。关闭时是硬上限。 |
 | `probe_passthrough` | bool | `false` | 是否探测 `passthrough` 分组。 |
 | `defer_during_playback` | bool | `true` | 有在线播放时降低并发或延后本轮。 |
 | `rules.*` | object | 见下 | 判定阈值与动作。 |
@@ -364,10 +369,11 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 | 字段 | 类型 | 默认 | 含义 |
 | --- | --- | --- | --- |
 | `min_speed_mib` | f64 | `0.0` | 最低速率。`0` 表示不筛。 |
+| `fallback_speed_mib` | f64 | `0.0` | 分辨率未知，或速率表未命中时的最低速率。`0` 表示使用 `min_speed_mib`。 |
 | `max_delay_ms` | u64 | `0` | 最大首包延迟。`0` 表示不筛。 |
 | `min_resolution` | string | 空 | 最低分辨率，如 `1280x720`。空表示不筛。 |
 | `max_resolution` | string | 空 | 最高分辨率。空表示不筛。 |
-| `resolution_speed_map` | map | `{}` | 分辨率到最低速率的映射。命中时覆盖 `min_speed_mib`。 |
+| `resolution_speed_map` | map | `{}` | 分辨率到最低速率的映射。按像素面积向下取整。未命中时用兜底速率。 |
 | `min_fps` | f64 | `0.0` | 最低帧率。`0` 表示不筛。 |
 | `ip_family` | string | `any` | `any` / `ipv4` / `ipv6`。 |
 | `require_video` | bool | `false` | 必须探测到视频轨道。 |
@@ -422,7 +428,7 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 | 字段 | 适用层级 | 说明 |
 | --- | --- | --- |
 | `enabled` | 源 / 分组 / 频道 | 三态。`false` 表示该范围不校验、不隐藏。 |
-| `min_speed_mib`、`max_delay_ms`、`min_fps` | 源 / 分组 / 频道 | 数值阈值。 |
+| `min_speed_mib`、`fallback_speed_mib`、`max_delay_ms`、`min_fps` | 源 / 分组 / 频道 | 数值阈值。 |
 | `min_resolution`、`max_resolution`、`resolution_speed_map` | 源 / 分组 / 频道 | 分辨率阈值。 |
 | `ip_family`、`require_video`、`require_audio` | 源 / 分组 / 频道 | 轨道与协议要求。 |
 | `supply`、`action`、`retain`、`dedupe`、`keep_candidates`、`host_cache` | 源 / 分组 / 频道 | 行为开关。 |
@@ -487,7 +493,7 @@ effective.enabled =
 | `ip_mismatch` | 协议族不符合要求 | 是 |
 | `ad` | 识别为短循环或广告占位 | 是 |
 | `supply` | 不合格，但作为兜底保留 | 否 |
-| `probe_error` | 探测程序错误、清单解析失败、`ffprobe` 失败 | **否**。按未知处理 |
+| `probe_error` | 探测程序错误、清单解析失败 | **否**。按未知处理 |
 | `unknown` | 没有结果或结果已过期 | 否 |
 
 动作语义：
@@ -503,7 +509,8 @@ effective.enabled =
 - `retain=true` 优先于 `hide`。但结果照常记录。参考实现的白名单完全不测速；本项目保留测速，便于发现源站问题。
 - `supply=true` 时，若同一候选组全部失败，保留一个可连通的最优项，结果记为 `supply`。完全不可连通的项不保留。
 - 分辨率未知时，不因分辨率规则隐藏。与参考实现一致。
-- `probe_error` 不隐藏。连续 3 次 `probe_error` 时，面板标黄，提醒管理员检查解析器或 `ffprobe`。
+- `ffprobe` 失败、超时或输出无法解析时，分辨率保持未知。判定使用兜底速率。不记 `probe_error`。
+- `probe_error` 不隐藏。连续 3 次 `probe_error` 时，面板标黄，提醒管理员检查解析器或探测地址。
 - `probe_error` 不计入连续失败，也不设置 `first_fail_at`。避免解析器缺陷让后续真实失败提前触发下线。
 - `stale_keep_secs` 从**连续失败的第一次失败时间**（`first_fail_at`）开始计算。`unreachable` 与阈值失败都算失败。重复失败不重置起点。成功一次即清零。
   - 默认 `interval_secs=900`、`stale_keep_secs=1800` 时，需要连续两次失败，才会在第二次失败后 900 秒隐藏。
@@ -558,15 +565,15 @@ effective.enabled =
 | `reachability` | 1 次 GET 或 HEAD。读首字节。 | HTTP 状态、延迟、重定向 | 极低 | 默认。等价现有健康探测 |
 | `playlist` | 取清单，校验结构与首个切片可访问 | 清单类型、切片可达、分辨率元数据 | 低 | 需要发现坏清单 |
 | `speed` | 清单 + 采样 2 个切片 | 速率、延迟、分辨率 | 中。消耗带宽 | 需要速率筛选 |
-| `full` | `speed` + `ffprobe` + 广告判定 | 帧率、编码、音轨、广告 | 高。消耗 CPU | 需要画质与广告筛选 |
+| `full` | `speed` + 按需分辨率识别 | 速率、分辨率 | 中高。本地进程解析已下载字节 | 需要识别清单缺少的分辨率 |
 
 档位按 `probe_mode` 选择。规则需要某档数据时，自动提升到该档：
 
-- 设置 `min_speed_mib` 或 `resolution_speed_map` → 至少 `speed`。
+- 设置 `min_speed_mib`、`fallback_speed_mib`（大于 0）或 `resolution_speed_map` → 至少 `speed`。
 - 设置 `filter_ad` → 至少 `playlist`。
 - 设置 `min_fps`、`require_video`、`require_audio` → 至少 `full`。
 
-`ffprobe=false` 是硬上限。它为 `false` 时，即使规则要求 `full`，也不运行 `ffprobe`。相关规则记入 `skipped_rules`，面板显示警告。
+`ffprobe=false` 是硬上限。它为 `false` 时，即使规则要求 `full`，也不运行 `ffprobe`。`probe_mode=full` 按 `speed` 执行。相关规则记入 `skipped_rules`，面板显示警告。
 
 运行模式与探测档位分开：
 
@@ -609,7 +616,7 @@ effective.enabled =
    - 上限内没有变体时，选最高码率变体。结果记 `resolution_high`，不记 `probe_error`。该频道确实超过管理员设定的上限。
    - 未设置上限时，选最高码率变体。
    - 清单没有任何变体时，记 `probe_error`。
-4. 记录分辨率与帧率。后续 `ffprobe` 可覆盖。
+4. 记录清单的 `RESOLUTION`。宽度或高度为空时，`full` 档可用采集字节补充分辨率，见 §5.6。
 
 媒体清单：
 
@@ -621,6 +628,8 @@ effective.enabled =
 6. 延迟 = 各切片首包时间平均值。
 7. 没有切片或全部下载失败 → `probe_error`。
 
+fMP4 限制见 §5.6。
+
 ### 5.4 DASH
 
 1. 识别 `.mpd`、`application/dash+xml` 或正文以 `<MPD` 开头。
@@ -628,7 +637,7 @@ effective.enabled =
 3. 选择码率最高的视频轨道。
 4. 下载初始化段与第一个媒体段，受采样上限约束。
 5. 速率与延迟按下载结果计算。
-6. 解析失败 → `probe_error`。DASH 探测可在第二期交付；第一期的 `speed` 档对 `.mpd` 直接走 `ffprobe` 或记 `probe_error`。
+6. 解析失败 → `probe_error`。DASH 探测未实现。非连通档对 `.mpd` 直接记 `probe_error`。
 
 ### 5.5 连续流与其他协议
 
@@ -640,29 +649,52 @@ effective.enabled =
 
 ### 5.6 `ffprobe`
 
-只在 `probe_mode=full` 或规则要求帧率/轨道时运行。先满足以下条件，再启动进程：
+`ffprobe` 只识别分辨率。它不访问网络。它读取测速阶段已下载的切片字节。这样不受切片扩展名限制，也不重复请求源站。
 
-- `ffprobe=true`。
+运行条件。全部满足时才采集并启动进程：
+
+- 档位是 `full`。
+- `quality.ffprobe=true`。
+- 清单解析后，宽度或高度为空。
 - 已测得速率，且不低于 `ffprobe_min_speed_mib`。没有速率数据时不运行。
-- 达到单轮 `max_ffprobe_per_run` 上限后停止。0 表示不限。
-- 分辨率与帧率已由清单提供，且满足规则时，跳过进程。
+- 单轮 `max_ffprobe_per_run` 未达到。`0` 表示不限。
+- `ffprobe -version` 成功。服务缓存该结果。安装或删除后清空缓存。
+
+采集规则：
+
+- 只对第一个成功响应的采样切片采集。
+- 从切片开头读取，最多 `ffprobe_sample_kb` KiB。
+- 测速的字节计数不变。
+- 需要采集时，先获取 `probe_semaphore` 许可。许可数为 `probe_concurrency`。许可覆盖采集与进程调用。
+- 获取许可失败时，不采集。测速继续。分辨率保持未知。
+- 峰值采集内存不超过 `probe_concurrency × ffprobe_sample_kb`。默认 1 × 512 KiB。最大 8 MiB。
+
+命令。字节只经标准输入传递，不经过 shell：
 
 ```bash
-ffprobe -v error -rw_timeout 10000000 \
-  -headers "<名称>: <值>\r\n" \
-  -show_entries stream=codec_type,codec_name,width,height,r_frame_rate,bit_rate \
-  -show_entries format=duration \
-  -of json "<最终地址>"
+ffprobe -v error -probesize 512K -analyzeduration 1000000 \
+  -select_streams v:0 -show_entries stream=codec_type,width,height \
+  -of json -
 ```
 
 规则：
 
-- 使用独立信号量，并发取 `probe_concurrency`。
-- 超时按 `timeout_secs`。超时后终止子进程。
-- 未安装 `ffprobe` 时只记一次警告。分辨率、帧率回退到清单元数据。不判失败。
-- 解析输出失败 → `probe_error`。不隐藏。
-- 有代理时追加 `-http_proxy`。有请求头时追加 `-headers`。
-- 不记录完整请求头。日志只记数量。
+- 字节以 TS 同步字节 `0x47` 开头，且每 188 字节重复时，加 `-f mpegts`。
+- 其他容器不加 `-f`。由 `ffprobe` 自动识别。
+- 超时按 `ffprobe_timeout_secs`。超时后终止子进程。
+- 标准输出上限 64 KiB。标准错误上限 4 KiB，只写调试日志。
+- 取第一个 `codec_type=video` 且宽高大于 0 的流。
+- 成功时写入宽高。日志记 `source=ffprobe`。
+- 不覆盖清单已有的分辨率。
+
+失败处理：
+
+- 以下情况都保持分辨率未知：未安装、进程失败、超时、输出无法解析、没有视频流、达到单轮上限、许可不可用。
+- 判定使用兜底速率，见 §4.1 `fallback_speed_mib`。
+- 不记 `probe_error`。
+- 不改变可达性、延迟与速率。
+
+fMP4 限制：需要初始化段的 fMP4 HLS 无法用本方法识别。媒体字节缺少 `#EXT-X-MAP` 初始化段。`ffprobe` 解析失败。分辨率保持未知，使用兜底速率。不记 `probe_error`。
 
 ### 5.7 广告与占位识别
 
@@ -716,7 +748,7 @@ delay_ms  = 首字节时间 - 请求开始时间
 | 正文为空 | `unreachable` |
 | 清单格式错误 | `probe_error` |
 | 清单没有切片 | `probe_error` |
-| `ffprobe` 失败或超时 | `probe_error` |
+| `ffprobe` 失败或超时 | 分辨率保持未知。使用兜底速率。不记 `probe_error` |
 | 解析脚本失败 | `probe_error` |
 | 达到阈值但未通过 | 对应阈值原因 |
 | 达到阈值且通过 | `pass` |
@@ -1029,8 +1061,9 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
   },
   "ffprobe": {
     "installed": false,
-    "required": false,
-    "note": "未安装 ffprobe；分辨率回退到清单元数据"
+    "enabled": false,
+    "ready": false,
+    "note": "未安装 ffprobe；分辨率识别不可用"
   }
 }
 ```
@@ -1243,10 +1276,12 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 | `probe_mode` | `reachability` | 与现有健康探测等价。 |
 | `interval_secs` | 900 | 15 分钟。 |
 | `concurrency` | 2 | 128 MB 机器可用。 |
-| `probe_concurrency` | 1 | `ffprobe` 单进程。 |
+| `probe_concurrency` | 1 | `ffprobe` 并发与采集上限。 |
 | `ffprobe` | false | 需要画质筛选时再开。 |
 | `max_ffprobe_per_run` | 32 | 低配限制单轮进程数。`0` 表示不限。 |
 | `ffprobe_min_speed_mib` | 0.5 | 速率低于此值不启动进程。 |
+| `ffprobe_timeout_secs` | 5 | 单次进程超时。范围 1–30。 |
+| `ffprobe_sample_kb` | 512 | 送给 `ffprobe` 的字节上限。范围 64–2048。 |
 | `sample_segments` | 1 | 低配只采样 1 个切片。 |
 | `history_mode` | `changes` | 只在状态变化时写历史。 |
 | `budget_mb_per_run` | 64 | 限制单轮下载。 |
@@ -1275,6 +1310,7 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 | 2 万频道健康条目 | 约 2–4 MB | 现有 `Health` 结构。 |
 | 单轮播放清单缓冲 | 最多 `concurrency × max_playlist_kb`，默认约 4 MB | 解析后立即释放。 |
 | 测速缓冲 | 不整段缓存。边读边计数，峰值约 `concurrency × 64 KB` | 禁止把 4 MiB 样本放进内存。 |
+| 分辨率采集缓冲 | 不超过 `probe_concurrency × ffprobe_sample_kb` | 默认 512 KiB。最大 8 MiB。 |
 | `ffprobe` 输出 | 小于 64 KB/次 | 只读 JSON 摘要。 |
 
 约束：
@@ -1290,13 +1326,13 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 | HTTP 读取与哈希 | 低 | 只计算一次 `url_hash`。 |
 | M3U8/MPD 解析 | 低 | 单清单上限 2 MiB。避免逐切片正则。广告关键字用 `contains`。 |
 | 判定 | 极低 | 纯内存比较。 |
-| `ffprobe` | 高。单进程约 20–50 MB RSS | 默认关闭。只在速率达标后运行。并发默认 1。单轮次数可限。超时杀进程。 |
+| `ffprobe` | 高。单进程约 20–50 MB RSS | 默认关闭。只在速率达标后运行。并发默认 1。单轮次数可限。超时杀进程。字节经标准输入传递，不访问网络。 |
 | SQLite 写入 | 中 | 批量事务。只写变更行。`history_mode=changes` 时不重复写。 |
 
 `ffprobe` 的额外门槛：
 
 - `ffprobe_min_speed_mib` 默认 `0.0`。启用测速筛选时建议设为最低速率，例如 `0.5`。
-- 分辨率已从清单取得且满足规则时，不启动进程。
+- 清单已有完整分辨率时，不启动进程。
 - 达到 `max_ffprobe_per_run` 后停止启动新进程。已完成的结果保留。
 
 #### 10.4.3 带宽
@@ -1308,7 +1344,7 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 | `reachability` | 1 次 | 几 KB 到 64 KB | 只读首字节或状态。 |
 | `playlist` | 2–3 次 | 约 50–300 KB | 清单 + 首个切片探测。 |
 | `speed` | 2–5 次 | 约 1–8 MB | 默认 2 个切片，每片上限 4 MiB。 |
-| `full` | `speed` + `ffprobe` | 约 2–12 MB | `ffprobe` 可能再读一段媒体。 |
+| `full` | 同 `speed` | 约 1–8 MB | 分辨率识别复用已下载字节，不增加请求。 |
 
 单轮预算：
 
@@ -1452,9 +1488,10 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 | 损坏的 m3u8 | `probe_error`，不隐藏。 |
 | 短循环广告清单 | `ad`。 |
 | 无清单的连续流 | 按采样测速。 |
-| `ffprobe` 缺失 | 仍可判定，分辨率取清单元数据。 |
+| `ffprobe` 缺失 | 仍可判定，分辨率保持未知，使用兜底速率。 |
 | `ffprobe` 关闭且规则要求帧率 | 规则记入 `skipped_rules`，结果不隐藏。 |
-| `ffprobe` 可用 | 补全帧率与编码。 |
+| `ffprobe` 可用 | 补全分辨率。不识别帧率与编码。 |
+| fMP4 切片无初始化段 | 分辨率保持未知，使用兜底速率，不记 `probe_error`。 |
 | 同 Host 两个频道，其中第二个 404 | 只复用测量值，第二个仍为 `unreachable`。 |
 | 预算耗尽 | 停止后续任务，已完成结果保留。 |
 | `ffprobe` 门槛 | 速率低于 `ffprobe_min_speed_mib` 时不启动进程。 |
