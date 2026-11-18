@@ -131,6 +131,18 @@ fn validate_quality(quality: &crate::config::model::QualityCfg) -> anyhow::Resul
     if !(1..=120).contains(&quality.speed_timeout_secs) {
         bail!("quality.speed_timeout_secs 必须在 1–120 之间");
     }
+    if !(1..=30).contains(&quality.ffprobe_timeout_secs) {
+        bail!("quality.ffprobe_timeout_secs 必须在 1–30 之间");
+    }
+    if !(1..=4).contains(&quality.probe_concurrency) {
+        bail!("quality.probe_concurrency 必须在 1–4 之间");
+    }
+    if !(64..=2048).contains(&quality.ffprobe_sample_kb) {
+        bail!("quality.ffprobe_sample_kb 必须在 64–2048 之间");
+    }
+    if !quality.ffprobe_min_speed_mib.is_finite() || quality.ffprobe_min_speed_mib < 0.0 {
+        bail!("quality.ffprobe_min_speed_mib 必须是非负数");
+    }
     if !(64..=65_536).contains(&quality.sample_bytes_kb) {
         bail!("quality.sample_bytes_kb 必须在 64–65536 之间");
     }
@@ -167,6 +179,9 @@ fn validate_quality_rules(
     if !rules.min_speed_mib.is_finite() || rules.min_speed_mib < 0.0 {
         bail!("{label}.min_speed_mib 必须是非负数");
     }
+    if !rules.fallback_speed_mib.is_finite() || rules.fallback_speed_mib < 0.0 {
+        bail!("{label}.fallback_speed_mib 必须是非负数");
+    }
     let min = parse_resolution_px(&rules.min_resolution, label)?;
     let max = parse_resolution_px(&rules.max_resolution, label)?;
     if let (Some(min), Some(max)) = (min, max) {
@@ -197,6 +212,11 @@ fn validate_quality_override(
     if let Some(speed) = quality.min_speed_mib {
         if !speed.is_finite() || speed < 0.0 {
             bail!("{label}.min_speed_mib 必须是非负数");
+        }
+    }
+    if let Some(speed) = quality.fallback_speed_mib {
+        if !speed.is_finite() || speed < 0.0 {
+            bail!("{label}.fallback_speed_mib 必须是非负数");
         }
     }
     let min = match &quality.min_resolution {
@@ -528,6 +548,22 @@ mod tests {
         assert!(validate(&config).is_err());
         config.quality.min_remove_count = 10;
         config.quality.gate_time_budget_secs = 86_401;
+        assert!(validate(&config).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_quality_ffprobe_fields() {
+        let mut config = Config::default();
+        config.quality.probe_concurrency = 0;
+        assert!(validate(&config).is_err());
+        config.quality.probe_concurrency = 1;
+        config.quality.ffprobe_sample_kb = 4096;
+        assert!(validate(&config).is_err());
+        config.quality.ffprobe_sample_kb = 512;
+        config.quality.ffprobe_timeout_secs = 0;
+        assert!(validate(&config).is_err());
+        config.quality.ffprobe_timeout_secs = 5;
+        config.quality.rules.fallback_speed_mib = -0.1;
         assert!(validate(&config).is_err());
     }
 

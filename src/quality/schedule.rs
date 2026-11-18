@@ -82,6 +82,9 @@ pub(crate) fn required_probe_mode(config: &Config, rules: &EffectiveRules) -> Pr
     {
         mode = mode_at_least(mode, ProbeMode::Speed);
     }
+    if rules.fallback_speed_mib > 0.0 {
+        mode = mode_at_least(mode, ProbeMode::Speed);
+    }
     mode
 }
 
@@ -314,6 +317,20 @@ mod tests {
             required_probe_mode(&config, &rules),
             ProbeMode::Speed,
             "分辨率速率映射至少测速"
+        );
+    }
+
+    #[test]
+    fn fallback_speed_promotes_probe_mode() {
+        let config = Config::default();
+        let rules = EffectiveRules {
+            fallback_speed_mib: 0.8,
+            ..Default::default()
+        };
+        assert_eq!(
+            required_probe_mode(&config, &rules),
+            ProbeMode::Speed,
+            "只设置兜底速率也必须测速"
         );
     }
 

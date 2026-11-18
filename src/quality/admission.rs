@@ -106,6 +106,7 @@ pub fn source_layer(config: &Config, group: &Group, channel: &Channel) -> &'stat
 fn has_override(value: &QualityOverride) -> bool {
     value.enabled.is_some()
         || value.min_speed_mib.is_some()
+        || value.fallback_speed_mib.is_some()
         || value.max_delay_ms.is_some()
         || value.min_resolution.is_some()
         || value.max_resolution.is_some()
@@ -173,6 +174,15 @@ mod tests {
         };
         let rules = candidate_rules(&config, &source, None, Some(&target));
         assert_eq!(rules.min_speed_mib, 3.0);
+    }
+
+    #[test]
+    fn fallback_override_counts_as_override() {
+        let value = QualityOverride {
+            fallback_speed_mib: Some(0.8),
+            ..Default::default()
+        };
+        assert!(has_override(&value));
     }
 
     #[test]

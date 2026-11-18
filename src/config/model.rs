@@ -924,6 +924,18 @@ pub struct QualityCfg {
     pub timeout_secs: u64,
     pub concurrency: u32,
     pub speed_timeout_secs: u64,
+    /// 启用 ffprobe 分辨率识别。
+    pub ffprobe: bool,
+    /// 单次 ffprobe 进程超时（秒）。1–30。
+    pub ffprobe_timeout_secs: u64,
+    /// ffprobe 并发与采集上限。1–4。
+    pub probe_concurrency: u32,
+    /// 单轮 ffprobe 上限。0 表示不限。
+    pub max_ffprobe_per_run: u64,
+    /// 达到该速率才运行 ffprobe。
+    pub ffprobe_min_speed_mib: f64,
+    /// 送给 ffprobe 的最大字节数（KB）。64–2048。
+    pub ffprobe_sample_kb: u64,
     pub sample_bytes_kb: u64,
     pub sample_secs: f64,
     pub sample_segments: u32,
@@ -958,6 +970,12 @@ impl Default for QualityCfg {
             timeout_secs: 10,
             concurrency: 2,
             speed_timeout_secs: 10,
+            ffprobe: false,
+            ffprobe_timeout_secs: 5,
+            probe_concurrency: 1,
+            max_ffprobe_per_run: 0,
+            ffprobe_min_speed_mib: 0.0,
+            ffprobe_sample_kb: 512,
             sample_bytes_kb: 4096,
             sample_secs: 2.0,
             sample_segments: 2,
@@ -981,6 +999,8 @@ impl Default for QualityCfg {
 #[serde(default)]
 pub struct QualityRules {
     pub min_speed_mib: f64,
+    /// 分辨率未知或映射未命中时的速率。0 表示使用 `min_speed_mib`。
+    pub fallback_speed_mib: f64,
     pub max_delay_ms: u64,
     pub min_resolution: String,
     pub max_resolution: String,
@@ -998,6 +1018,7 @@ impl Default for QualityRules {
     fn default() -> Self {
         Self {
             min_speed_mib: 0.0,
+            fallback_speed_mib: 0.0,
             max_delay_ms: 0,
             min_resolution: String::new(),
             max_resolution: String::new(),
@@ -1017,6 +1038,7 @@ impl Default for QualityRules {
 pub struct QualityOverride {
     pub enabled: Option<bool>,
     pub min_speed_mib: Option<f64>,
+    pub fallback_speed_mib: Option<f64>,
     pub max_delay_ms: Option<u64>,
     pub min_resolution: Option<String>,
     pub max_resolution: Option<String>,

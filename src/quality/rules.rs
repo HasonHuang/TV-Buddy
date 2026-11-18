@@ -112,6 +112,8 @@ pub struct EffectiveRules {
     pub action: Action,
     pub retain: bool,
     pub min_speed_mib: f64,
+    /// 分辨率未知或映射未命中时的速率。0 表示使用 `min_speed_mib`。
+    pub fallback_speed_mib: f64,
     pub max_delay_ms: u64,
     pub min_resolution_px: Option<u32>,
     pub max_resolution_px: Option<u32>,
@@ -128,6 +130,7 @@ impl Default for EffectiveRules {
             action: Action::Hide,
             retain: false,
             min_speed_mib: 0.0,
+            fallback_speed_mib: 0.0,
             max_delay_ms: 0,
             min_resolution_px: None,
             max_resolution_px: None,
@@ -213,6 +216,10 @@ pub fn effective_rules(config: &Config, group: &Group, channel: &Channel) -> Eff
             quality.min_speed_mib
         })
         .unwrap_or(rules.min_speed_mib),
+        fallback_speed_mib: pick(channel_q, group_q, source_q, |quality| {
+            quality.fallback_speed_mib
+        })
+        .unwrap_or(rules.fallback_speed_mib),
         max_delay_ms: pick(channel_q, group_q, source_q, |quality| quality.max_delay_ms)
             .unwrap_or(rules.max_delay_ms),
         min_resolution_px: pick(channel_q, group_q, source_q, |quality| {
@@ -269,18 +276,23 @@ pub fn evaluate(rules: &EffectiveRules, measurement: &Measurement) -> Verdict {
     }
 
     if reason.is_none() {
+        let fallback = if rules.fallback_speed_mib > 0.0 {
+            rules.fallback_speed_mib
+        } else {
+            rules.min_speed_mib
+        };
         let threshold = match (measurement.width, measurement.height) {
             (Some(width), Some(height)) => {
-                let px = width as u32 * height as u32;
+                let px = u32::from(width) * u32::from(height);
                 rules
                     .resolution_speed_map
                     .iter()
                     .rev()
                     .find(|(key, _)| **key <= px)
                     .map(|(_, speed)| *speed)
-                    .unwrap_or(rules.min_speed_mib)
+                    .unwrap_or(fallback)
             }
-            _ => rules.min_speed_mib,
+            _ => fallback,
         };
         if threshold > 0.0 && measurement.speed_mib.unwrap_or(0.0) < threshold {
             reason = Some(Reason::SpeedLow);
@@ -421,6 +433,7 @@ mod tests {
             action: Action::Hide,
             retain: false,
             min_speed_mib: 1.0,
+            fallback_speed_mib: 0.0,
             max_delay_ms: 3000,
             min_resolution_px: Some(1280 * 720),
             max_resolution_px: Some(1920 * 1080),
@@ -493,6 +506,7 @@ mod tests {
             action: Action::Hide,
             retain: false,
             min_speed_mib: 1.0,
+            fallback_speed_mib: 0.0,
             max_delay_ms: 0,
             min_resolution_px: None,
             max_resolution_px: None,
@@ -553,12 +567,82 @@ mod tests {
     }
 
     #[test]
+    fn fallback_speed_applies_when_resolution_unknown() {
+        let rules = EffectiveRules {
+            min_speed_mib: 1.0,
+            fallback_speed_mib: 0.8,
+            ..Default::default()
+        };
+        let measurement = Measurement {
+            reachable: true,
+            speed_mib: Some(0.9),
+            width: None,
+            height: None,
+            ..Default::default()
+        };
+        assert!(evaluate(&rules, &measurement).ok);
+    }
+
+    #[test]
+    fn fallback_speed_applies_when_map_has_no_match() {
+        let mut rules = EffectiveRules {
+            min_speed_mib: 1.0,
+            fallback_speed_mib: 0.8,
+            ..Default::default()
+        };
+        rules.resolution_speed_map.insert(1280 * 720, 0.5);
+        let measurement = Measurement {
+            reachable: true,
+            speed_mib: Some(0.9),
+            width: Some(1920),
+            height: Some(1080),
+            ..Default::default()
+        };
+        assert!(evaluate(&rules, &measurement).ok);
+    }
+
+    #[test]
+    fn fallback_zero_uses_min_speed() {
+        let rules = EffectiveRules {
+            min_speed_mib: 1.0,
+            fallback_speed_mib: 0.0,
+            ..Default::default()
+        };
+        let measurement = Measurement {
+            reachable: true,
+            speed_mib: Some(0.9),
+            width: None,
+            height: None,
+            ..Default::default()
+        };
+        assert_eq!(evaluate(&rules, &measurement).reason, Reason::SpeedLow);
+    }
+
+    #[test]
+    fn fallback_does_not_bypass_known_resolution_limits() {
+        let rules = EffectiveRules {
+            fallback_speed_mib: 2.0,
+            min_resolution_px: Some(1920 * 1080),
+            ..Default::default()
+        };
+        let measurement = Measurement {
+            reachable: true,
+            speed_mib: Some(3.0),
+            width: Some(1280),
+            height: Some(720),
+            ..Default::default()
+        };
+        assert_eq!(evaluate(&rules, &measurement).reason, Reason::ResolutionLow);
+    }
+
+    #[test]
     fn retain_does_not_bypass_thresholds() {
         let rules = EffectiveRules {
             enabled: true,
             action: Action::Hide,
             retain: true,
             min_speed_mib: 1.0,
+            fallback_speed_mib: 0.0,
             max_delay_ms: 0,
             min_resolution_px: None,
             max_resolution_px: None,
