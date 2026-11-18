@@ -379,6 +379,71 @@ mod tests {
     }
 
     #[test]
+    fn fallback_speed_inherits_channel_then_group_then_source_then_global() {
+        let mut config = Config::default();
+        config.quality.rules.fallback_speed_mib = 0.1;
+        config.playlist.sources.push(PlaylistSource {
+            id: "src-a".into(),
+            quality: Some(QualityOverride {
+                fallback_speed_mib: Some(0.2),
+                ..QualityOverride::default()
+            }),
+            ..PlaylistSource::default()
+        });
+        let mut group = Group {
+            id: "g".into(),
+            quality: Some(QualityOverride {
+                fallback_speed_mib: Some(0.4),
+                ..QualityOverride::default()
+            }),
+            ..Group::default()
+        };
+        group.channels.push(Channel {
+            id: "c".into(),
+            source_id: "src-a".into(),
+            quality: Some(QualityOverride {
+                fallback_speed_mib: Some(0.8),
+                ..QualityOverride::default()
+            }),
+            ..Channel::default()
+        });
+        config.groups.push(group);
+        let g = &config.groups[0];
+        let c = &g.channels[0];
+        assert_eq!(
+            effective_rules(&config, g, c).fallback_speed_mib,
+            0.8,
+            "频道层最高"
+        );
+
+        let mut c2 = c.clone();
+        c2.quality = None;
+        assert_eq!(
+            effective_rules(&config, g, &c2).fallback_speed_mib,
+            0.4,
+            "频道未写时用分组层"
+        );
+
+        let mut g2 = g.clone();
+        g2.quality = None;
+        let mut c3 = g2.channels[0].clone();
+        c3.quality = None;
+        assert_eq!(
+            effective_rules(&config, &g2, &c3).fallback_speed_mib,
+            0.2,
+            "分组与频道都未写时用来源层"
+        );
+
+        let mut c4 = c3.clone();
+        c4.source_id.clear();
+        assert_eq!(
+            effective_rules(&config, &g2, &c4).fallback_speed_mib,
+            0.1,
+            "来源不匹配时用全局"
+        );
+    }
+
+    #[test]
     fn source_rules_only_apply_to_matching_source_id() {
         let mut config = base();
         config.quality.rules.min_speed_mib = 0.5;
@@ -590,7 +655,7 @@ mod tests {
             fallback_speed_mib: 0.8,
             ..Default::default()
         };
-        rules.resolution_speed_map.insert(1280 * 720, 0.5);
+        rules.resolution_speed_map.insert(2560 * 1440, 0.5);
         let measurement = Measurement {
             reachable: true,
             speed_mib: Some(0.9),
@@ -598,7 +663,13 @@ mod tests {
             height: Some(1080),
             ..Default::default()
         };
-        assert!(evaluate(&rules, &measurement).ok);
+        assert!(evaluate(&rules, &measurement).ok, "表无 <= px 的档时用兜底");
+        rules.fallback_speed_mib = 0.0;
+        assert_eq!(
+            evaluate(&rules, &measurement).reason,
+            Reason::SpeedLow,
+            "兜底为 0 时回退到 min_speed，证明上一条不是旧行为"
+        );
     }
 
     #[test]

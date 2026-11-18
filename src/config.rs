@@ -565,6 +565,9 @@ mod tests {
         config.quality.ffprobe_timeout_secs = 5;
         config.quality.rules.fallback_speed_mib = -0.1;
         assert!(validate(&config).is_err());
+        config.quality.rules.fallback_speed_mib = 0.0;
+        config.quality.ffprobe_min_speed_mib = -0.1;
+        assert!(validate(&config).is_err());
     }
 
     #[test]
