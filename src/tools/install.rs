@@ -17,20 +17,29 @@ pub const PHASE_DOWNLOADING: &str = "downloading";
 pub const PHASE_VERIFYING: &str = "verifying";
 pub const PHASE_INSTALLING: &str = "installing";
 
-const PART: &str = ".ffmpeg.part";
-const UNPACK: &str = ".ffmpeg.unpack";
-const DEST: &str = "ffmpeg";
 const MAX_BYTES: u64 = 200 * 1024 * 1024;
+
+/// 面板安装并维护的二进制名。
+const MANAGED: [&str; 2] = ["ffprobe", "ffmpeg"];
 
 #[derive(Debug, Clone)]
 pub struct Artifact {
+    pub name: String,
     pub file: String,
     pub bytes: u64,
     pub sha256: String,
 }
 
-/// 当前平台对应的固定制品。
-pub fn artifact_for(os: &str, arch: &str) -> Option<Artifact> {
+fn part_path(tools: &Path, name: &str) -> PathBuf {
+    tools.join(format!(".{name}.part"))
+}
+
+fn unpack_path(tools: &Path, name: &str) -> PathBuf {
+    tools.join(format!(".{name}.unpack"))
+}
+
+/// 现有 ffmpeg 制品表。只增加 `name` 字段。
+fn ffmpeg_artifact_for(os: &str, arch: &str) -> Option<Artifact> {
     let (file, bytes, sha256) = match (os, arch) {
         ("linux", "x86_64") => (
             "ffmpeg-linux-x64.gz",
@@ -55,10 +64,50 @@ pub fn artifact_for(os: &str, arch: &str) -> Option<Artifact> {
         _ => return None,
     };
     Some(Artifact {
+        name: "ffmpeg".into(),
         file: file.into(),
         bytes,
         sha256: sha256.into(),
     })
+}
+
+fn ffprobe_artifact_for(os: &str, arch: &str) -> Option<Artifact> {
+    let (file, bytes, sha256) = match (os, arch) {
+        ("linux", "x86_64") => (
+            "ffprobe-linux-x64.gz",
+            29_276_839,
+            "25d9b6ccb05e3d9de9e04e31e2506d8dd7f9f0418981965ac6df12e8d3afd067",
+        ),
+        ("linux", "aarch64") => (
+            "ffprobe-linux-arm64.gz",
+            25_493_573,
+            "2ab6aba60ee84412dff9188720703376cb4e7aaf7e0b5e43aa8249f2acae5bf8",
+        ),
+        ("macos", "x86_64") => (
+            "ffprobe-darwin-x64.gz",
+            25_239_438,
+            "d4da574d6e2e197bd259b47d69cf262df9e312af24ad960444f6d806d3d4c186",
+        ),
+        ("macos", "aarch64") => (
+            "ffprobe-darwin-arm64.gz",
+            19_207_077,
+            "d986a8ec7b030899fe66a8a288ed809a3543338705a3ce178cfb85869c5d80be",
+        ),
+        _ => return None,
+    };
+    Some(Artifact {
+        name: "ffprobe".into(),
+        file: file.into(),
+        bytes,
+        sha256: sha256.into(),
+    })
+}
+
+pub fn artifacts_for(os: &str, arch: &str) -> Option<Vec<Artifact>> {
+    Some(vec![
+        ffprobe_artifact_for(os, arch)?,
+        ffmpeg_artifact_for(os, arch)?,
+    ])
 }
 
 /// 下载前缀。环境变量 `TV_BUDDY_FFMPEG_BASE_URL` 可指向镜像。
@@ -85,26 +134,29 @@ fn ensure_allowed(url: &url::Url) -> Result<()> {
     }
 }
 
-/// 删除面板安装的 ffmpeg 与临时文件。返回是否删除了正式文件。
+/// 删除面板安装的 ffmpeg、ffprobe 与临时文件。返回是否删除了正式文件。
 pub fn remove_managed(data_dir: &Path) -> Result<bool> {
     let tools = crate::tools::dir(data_dir);
-    let dest = tools.join(DEST);
-    let existed = dest.is_file();
-    if existed {
-        std::fs::remove_file(&dest).with_context(|| format!("删除 {}", dest.display()))?;
+    let mut existed = false;
+    for name in MANAGED {
+        let dest = tools.join(name);
+        if dest.is_file() {
+            std::fs::remove_file(&dest).with_context(|| format!("删除 {}", dest.display()))?;
+            existed = true;
+        }
+        let _ = std::fs::remove_file(part_path(&tools, name));
+        let _ = std::fs::remove_file(unpack_path(&tools, name));
     }
-    let _ = std::fs::remove_file(tools.join(PART));
-    let _ = std::fs::remove_file(tools.join(UNPACK));
     Ok(existed)
 }
 
-/// 下载、校验并启用 ffmpeg。
+/// 下载、校验并启用 ffmpeg 与 ffprobe。
 ///
-/// `progress` 收到阶段名、已下载字节与总字节（源未给 `Content-Length` 时为 `None`）。
+/// `progress` 收到阶段名、累计已下载字节与总字节（总数为制品大小之和）。
 pub(crate) async fn install(
     client: &reqwest::Client,
     base_url: &str,
-    artifact: &Artifact,
+    artifacts: &[Artifact],
     data_dir: &Path,
     progress: &(dyn Fn(&str, u64, Option<u64>) + Send + Sync),
 ) -> Result<()> {
@@ -112,15 +164,18 @@ pub(crate) async fn install(
     tokio::fs::create_dir_all(&tools)
         .await
         .context("建工具目录失败")?;
-    let part = tools.join(PART);
-    let unpack = tools.join(UNPACK);
-    let _ = tokio::fs::remove_file(&part).await;
-    let _ = tokio::fs::remove_file(&unpack).await;
+    for artifact in artifacts {
+        let _ = tokio::fs::remove_file(part_path(&tools, &artifact.name)).await;
+        let _ = tokio::fs::remove_file(unpack_path(&tools, &artifact.name)).await;
+    }
+    let total = artifacts.iter().map(|artifact| artifact.bytes).sum();
 
-    let result = install_inner(client, base_url, artifact, &tools, progress).await;
+    let result = install_inner(client, base_url, artifacts, &tools, total, progress).await;
     if result.is_err() {
-        let _ = tokio::fs::remove_file(&part).await;
-        let _ = tokio::fs::remove_file(&unpack).await;
+        for artifact in artifacts {
+            let _ = tokio::fs::remove_file(part_path(&tools, &artifact.name)).await;
+            let _ = tokio::fs::remove_file(unpack_path(&tools, &artifact.name)).await;
+        }
     }
     result
 }
@@ -128,8 +183,53 @@ pub(crate) async fn install(
 async fn install_inner(
     client: &reqwest::Client,
     base_url: &str,
+    artifacts: &[Artifact],
+    tools: &Path,
+    total: u64,
+    progress: &(dyn Fn(&str, u64, Option<u64>) + Send + Sync),
+) -> Result<()> {
+    let mut downloaded = 0u64;
+    for artifact in artifacts {
+        download_artifact(
+            client,
+            base_url,
+            artifact,
+            tools,
+            &mut downloaded,
+            total,
+            progress,
+        )
+        .await?;
+    }
+
+    for artifact in artifacts {
+        unpack_artifact(artifact, tools).await?;
+    }
+
+    progress(PHASE_INSTALLING, downloaded, Some(total));
+    for artifact in artifacts {
+        verify_artifact(artifact, tools).await?;
+    }
+
+    for artifact in artifacts {
+        tokio::fs::rename(
+            unpack_path(tools, &artifact.name),
+            tools.join(&artifact.name),
+        )
+        .await
+        .with_context(|| format!("启用 {} 失败", artifact.name))?;
+        let _ = tokio::fs::remove_file(part_path(tools, &artifact.name)).await;
+    }
+    Ok(())
+}
+
+async fn download_artifact(
+    client: &reqwest::Client,
+    base_url: &str,
     artifact: &Artifact,
     tools: &Path,
+    downloaded: &mut u64,
+    total: u64,
     progress: &(dyn Fn(&str, u64, Option<u64>) + Send + Sync),
 ) -> Result<()> {
     let url = url::Url::parse(&format!(
@@ -149,36 +249,38 @@ async fn install_inner(
         .context("下载源返回错误状态")?;
     ensure_allowed(response.url())?;
 
-    let total = response.content_length();
-    let part = tools.join(PART);
-    let unpack = tools.join(UNPACK);
+    let part = part_path(tools, &artifact.name);
     let mut file = tokio::fs::File::create(&part)
         .await
         .context("建临时文件失败")?;
     let mut hasher = Sha256::new();
-    let mut downloaded = 0u64;
+    let mut current = 0u64;
     while let Some(chunk) = response.chunk().await.context("读取下载正文失败")? {
-        downloaded += chunk.len() as u64;
-        if downloaded > MAX_BYTES {
+        current += chunk.len() as u64;
+        if current > MAX_BYTES {
             bail!("下载超过 200 MB");
         }
+        *downloaded += chunk.len() as u64;
         hasher.update(&chunk);
         file.write_all(&chunk).await.context("写临时文件失败")?;
-        progress(PHASE_DOWNLOADING, downloaded, total);
+        progress(PHASE_DOWNLOADING, *downloaded, Some(total));
     }
     file.flush().await.context("写临时文件失败")?;
     drop(file);
 
-    if downloaded != artifact.bytes {
-        bail!("下载大小不符：{} != {}", downloaded, artifact.bytes);
+    if current != artifact.bytes {
+        bail!("下载大小不符：{} != {}", current, artifact.bytes);
     }
     if hex::encode(hasher.finalize()) != artifact.sha256 {
         bail!("SHA-256 校验失败");
     }
-    progress(PHASE_VERIFYING, downloaded, total);
+    progress(PHASE_VERIFYING, *downloaded, Some(total));
+    Ok(())
+}
 
-    let source = part.clone();
-    let target = unpack.clone();
+async fn unpack_artifact(artifact: &Artifact, tools: &Path) -> Result<()> {
+    let source = part_path(tools, &artifact.name);
+    let target = unpack_path(tools, &artifact.name);
     tokio::task::spawn_blocking(move || -> Result<()> {
         let input = std::fs::File::open(&source).context("打开临时文件失败")?;
         let decoder = flate2::read::GzDecoder::new(std::io::BufReader::new(input));
@@ -193,26 +295,27 @@ async fn install_inner(
     .await
     .context("解压任务失败")??;
 
-    tokio::fs::set_permissions(&unpack, std::fs::Permissions::from_mode(0o755))
-        .await
-        .context("设置权限失败")?;
-    progress(PHASE_INSTALLING, downloaded, total);
+    tokio::fs::set_permissions(
+        unpack_path(tools, &artifact.name),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .await
+    .context("设置权限失败")?;
+    Ok(())
+}
 
+async fn verify_artifact(artifact: &Artifact, tools: &Path) -> Result<()> {
+    let unpack = unpack_path(tools, &artifact.name);
     let output = tokio::process::Command::new(&unpack)
         .arg("-version")
         .output()
         .await
-        .context("执行下载的 ffmpeg 失败")?;
+        .with_context(|| format!("执行下载的 {} 失败", artifact.name))?;
     if !output.status.success()
-        || !String::from_utf8_lossy(&output.stdout).contains("ffmpeg version")
+        || !String::from_utf8_lossy(&output.stdout).contains(&format!("{} version", artifact.name))
     {
-        bail!("下载的二进制不是可用的 ffmpeg");
+        bail!("下载的二进制不是可用的 {}", artifact.name);
     }
-
-    tokio::fs::rename(&unpack, tools.join(DEST))
-        .await
-        .context("启用 ffmpeg 失败")?;
-    let _ = tokio::fs::remove_file(&part).await;
     Ok(())
 }
 
@@ -280,7 +383,7 @@ pub struct Installer {
     base_url: std::sync::RwLock<String>,
     client: reqwest::Client,
     #[cfg(test)]
-    pub(crate) artifact: Option<Artifact>,
+    pub(crate) artifacts: Option<Vec<Artifact>>,
 }
 
 impl Default for Installer {
@@ -303,7 +406,7 @@ impl Installer {
             base_url: std::sync::RwLock::new(base_url()),
             client,
             #[cfg(test)]
-            artifact: None,
+            artifacts: None,
         }
     }
 
@@ -374,7 +477,7 @@ impl Installer {
         {
             return Err(StartError::Busy);
         }
-        let Some(artifact) = self.selected_artifact() else {
+        let Some(artifacts) = self.selected_artifacts() else {
             self.running
                 .store(false, std::sync::atomic::Ordering::SeqCst);
             return Err(StartError::Unsupported(format!(
@@ -391,9 +494,9 @@ impl Installer {
         tracing::info!(
             os = std::env::consts::OS,
             arch = std::env::consts::ARCH,
-            file = %artifact.file,
+            count = artifacts.len(),
             base = %base,
-            "开始安装 ffmpeg"
+            "开始安装 ffmpeg 与 ffprobe"
         );
         let snapshot = {
             let mut job = self.job.lock().unwrap_or_else(|error| error.into_inner());
@@ -412,7 +515,7 @@ impl Installer {
             let outcome = install(
                 &installer.client,
                 &base,
-                &artifact,
+                &artifacts,
                 &data_dir,
                 &|phase, downloaded, total| installer.update(phase, downloaded, total),
             )
@@ -422,12 +525,12 @@ impl Installer {
         Ok(snapshot)
     }
 
-    fn selected_artifact(&self) -> Option<Artifact> {
+    fn selected_artifacts(&self) -> Option<Vec<Artifact>> {
         #[cfg(test)]
-        if let Some(artifact) = &self.artifact {
-            return Some(artifact.clone());
+        if let Some(artifacts) = &self.artifacts {
+            return Some(artifacts.clone());
         }
-        artifact_for(std::env::consts::OS, std::env::consts::ARCH)
+        artifacts_for(std::env::consts::OS, std::env::consts::ARCH)
     }
 
     fn update(&self, phase: &str, downloaded: u64, total: Option<u64>) {
@@ -478,19 +581,20 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    fn fixture_artifact() -> (Artifact, Vec<u8>) {
+    fn fixture_artifact(name: &str, version: &str) -> (Artifact, Vec<u8>) {
         use flate2::{write::GzEncoder, Compression};
         use sha2::{Digest, Sha256};
         use std::io::Write;
 
-        let script = b"#!/bin/sh\necho \"ffmpeg version test\"\n";
+        let script = format!("#!/bin/sh\necho \"{name} version {version}\"\n");
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(script).expect("压缩");
+        encoder.write_all(script.as_bytes()).expect("压缩");
         let gz = encoder.finish().expect("压缩结束");
         let sha256 = hex::encode(Sha256::digest(&gz));
         (
             Artifact {
-                file: "ffmpeg-test.gz".into(),
+                name: name.into(),
+                file: format!("{name}-test.gz"),
                 bytes: gz.len() as u64,
                 sha256,
             },
@@ -498,14 +602,32 @@ mod tests {
         )
     }
 
-    async fn serve(bytes: Vec<u8>) -> String {
-        let app = axum::Router::new().route(
-            "/ffmpeg-test.gz",
-            axum::routing::get(move || {
-                let bytes = bytes.clone();
-                async move { bytes }
-            }),
-        );
+    fn fixture_pair() -> Vec<(Artifact, Vec<u8>)> {
+        vec![
+            fixture_artifact("ffmpeg", "test"),
+            fixture_artifact("ffprobe", "test"),
+        ]
+    }
+
+    fn only_artifacts(fixtures: &[(Artifact, Vec<u8>)]) -> Vec<Artifact> {
+        fixtures
+            .iter()
+            .map(|(artifact, _)| artifact.clone())
+            .collect()
+    }
+
+    async fn serve(items: Vec<(String, Vec<u8>)>) -> String {
+        let mut app = axum::Router::new();
+        for (file, bytes) in items {
+            let path = format!("/{file}");
+            app = app.route(
+                &path,
+                axum::routing::get(move || {
+                    let bytes = bytes.clone();
+                    async move { bytes }
+                }),
+            );
+        }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("绑定端口");
@@ -514,6 +636,16 @@ mod tests {
             let _ = axum::serve(listener, app).await;
         });
         format!("http://{addr}")
+    }
+
+    async fn serve_fixtures(fixtures: &[(Artifact, Vec<u8>)]) -> String {
+        serve(
+            fixtures
+                .iter()
+                .map(|(artifact, bytes)| (artifact.file.clone(), bytes.clone()))
+                .collect(),
+        )
+        .await
     }
 
     fn temp_dir() -> PathBuf {
@@ -541,91 +673,131 @@ mod tests {
     }
 
     #[test]
-    fn artifact_table_covers_four_platforms() {
-        assert_eq!(
-            artifact_for("linux", "x86_64").expect("linux amd64").file,
-            "ffmpeg-linux-x64.gz"
-        );
-        assert_eq!(
-            artifact_for("linux", "aarch64").expect("linux arm64").file,
-            "ffmpeg-linux-arm64.gz"
-        );
-        assert_eq!(
-            artifact_for("macos", "x86_64").expect("macos amd64").file,
-            "ffmpeg-darwin-x64.gz"
-        );
-        assert_eq!(
-            artifact_for("macos", "aarch64").expect("macos arm64").file,
-            "ffmpeg-darwin-arm64.gz"
-        );
-        assert!(artifact_for("windows", "x86_64").is_none());
+    fn artifact_table_includes_ffprobe_for_all_platforms() {
+        for (os, arch) in [
+            ("linux", "x86_64"),
+            ("linux", "aarch64"),
+            ("macos", "x86_64"),
+            ("macos", "aarch64"),
+        ] {
+            let items = artifacts_for(os, arch).expect("平台");
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[0].name, "ffprobe");
+            assert_eq!(items[1].name, "ffmpeg");
+        }
+        assert!(artifacts_for("windows", "x86_64").is_none());
+    }
+
+    #[test]
+    fn remove_managed_removes_both_binaries() {
+        let dir = temp_dir();
+        let tools = crate::tools::dir(&dir);
+        std::fs::create_dir_all(&tools).expect("建 tools");
+        std::fs::write(tools.join("ffmpeg"), b"ffmpeg").expect("写 ffmpeg");
+        std::fs::write(tools.join("ffprobe"), b"ffprobe").expect("写 ffprobe");
+        assert!(remove_managed(&dir).expect("删除"));
+        assert!(!tools.join("ffmpeg").exists());
+        assert!(!tools.join("ffprobe").exists());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn install_places_verified_binary() {
-        let (artifact, gz) = fixture_artifact();
-        let base = serve(gz).await;
+        let fixtures = fixture_pair();
+        let base = serve_fixtures(&fixtures).await;
         let dir = temp_dir();
         let client = reqwest::Client::new();
 
-        install(&client, &base, &artifact, &dir, &|_, _, _| {})
-            .await
-            .expect("安装");
+        install(
+            &client,
+            &base,
+            &only_artifacts(&fixtures),
+            &dir,
+            &|_, _, _| {},
+        )
+        .await
+        .expect("安装");
 
-        let dest = crate::tools::dir(&dir).join("ffmpeg");
-        assert!(crate::tools::is_executable(&dest));
-        assert!(!crate::tools::dir(&dir).join(".ffmpeg.part").exists());
-        assert!(!crate::tools::dir(&dir).join(".ffmpeg.unpack").exists());
+        let tools = crate::tools::dir(&dir);
+        for name in ["ffmpeg", "ffprobe"] {
+            assert!(
+                crate::tools::is_executable(&tools.join(name)),
+                "{name} 必须可用"
+            );
+            assert!(!tools.join(format!(".{name}.part")).exists());
+            assert!(!tools.join(format!(".{name}.unpack")).exists());
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn install_rejects_hash_mismatch() {
-        let (mut artifact, gz) = fixture_artifact();
-        artifact.sha256 = "0".repeat(64);
-        let base = serve(gz).await;
+        let mut fixtures = fixture_pair();
+        fixtures[1].0.sha256 = "0".repeat(64);
+        let base = serve_fixtures(&fixtures).await;
         let dir = temp_dir();
         let client = reqwest::Client::new();
 
-        let error = install(&client, &base, &artifact, &dir, &|_, _, _| {})
-            .await
-            .expect_err("哈希必须失败");
+        let error = install(
+            &client,
+            &base,
+            &only_artifacts(&fixtures),
+            &dir,
+            &|_, _, _| {},
+        )
+        .await
+        .expect_err("哈希必须失败");
         assert!(format!("{error:#}").contains("SHA-256"));
-        assert!(!crate::tools::dir(&dir).join("ffmpeg").exists());
-        assert!(!crate::tools::dir(&dir).join(".ffmpeg.part").exists());
-        assert!(!crate::tools::dir(&dir).join(".ffmpeg.unpack").exists());
+        let tools = crate::tools::dir(&dir);
+        for name in ["ffmpeg", "ffprobe"] {
+            assert!(!tools.join(name).exists());
+            assert!(!tools.join(format!(".{name}.part")).exists());
+            assert!(!tools.join(format!(".{name}.unpack")).exists());
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn install_rejects_size_mismatch() {
-        let (mut artifact, gz) = fixture_artifact();
-        artifact.bytes += 1;
-        let base = serve(gz).await;
+        let mut fixtures = fixture_pair();
+        fixtures[0].0.bytes += 1;
+        let base = serve_fixtures(&fixtures).await;
         let dir = temp_dir();
         let client = reqwest::Client::new();
 
-        let error = install(&client, &base, &artifact, &dir, &|_, _, _| {})
-            .await
-            .expect_err("大小必须失败");
+        let error = install(
+            &client,
+            &base,
+            &only_artifacts(&fixtures),
+            &dir,
+            &|_, _, _| {},
+        )
+        .await
+        .expect_err("大小必须失败");
         assert!(format!("{error:#}").contains("大小"));
+        let tools = crate::tools::dir(&dir);
+        for name in ["ffmpeg", "ffprobe"] {
+            assert!(!tools.join(format!(".{name}.part")).exists());
+            assert!(!tools.join(format!(".{name}.unpack")).exists());
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn failed_install_keeps_old_binary() {
-        let (mut artifact, gz) = fixture_artifact();
-        artifact.sha256 = "0".repeat(64);
-        let base = serve(gz).await;
+        let mut fixtures = fixture_pair();
+        fixtures[0].0.sha256 = "0".repeat(64);
+        let base = serve_fixtures(&fixtures).await;
         let dir = temp_dir();
         let tools = crate::tools::dir(&dir);
         std::fs::create_dir_all(&tools).expect("建 tools");
-        std::fs::write(tools.join("ffmpeg"), b"old").expect("写旧文件");
+        std::fs::write(tools.join("ffmpeg"), b"old").expect("写旧 ffmpeg");
+        std::fs::write(tools.join("ffprobe"), b"old").expect("写旧 ffprobe");
 
         install(
             &reqwest::Client::new(),
             &base,
-            &artifact,
+            &only_artifacts(&fixtures),
             &dir,
             &|_, _, _| {},
         )
@@ -633,6 +805,10 @@ mod tests {
         .expect_err("必须失败");
         assert_eq!(
             std::fs::read(tools.join("ffmpeg")).expect("读旧文件"),
+            b"old"
+        );
+        assert_eq!(
+            std::fs::read(tools.join("ffprobe")).expect("读旧文件"),
             b"old"
         );
         let _ = std::fs::remove_dir_all(dir);
@@ -664,30 +840,34 @@ mod tests {
 
     #[tokio::test]
     async fn finished_job_reports_done() {
-        let (artifact, gz) = fixture_artifact();
-        let base = serve(gz).await;
+        let fixtures = fixture_pair();
+        let base = serve_fixtures(&fixtures).await;
         let dir = temp_dir();
         let mut installer = Arc::new(Installer::new());
-        Arc::get_mut(&mut installer).expect("独占").artifact = Some(artifact);
+        Arc::get_mut(&mut installer).expect("独占").artifacts = Some(only_artifacts(&fixtures));
         installer.set_base_url(base);
 
         installer.start(dir.clone()).expect("启动");
         let job = wait_job(&installer, "done").await;
         assert!(job.error.is_none());
-        assert!(crate::tools::is_executable(
-            &crate::tools::dir(&dir).join("ffmpeg")
-        ));
+        let tools = crate::tools::dir(&dir);
+        for name in ["ffmpeg", "ffprobe"] {
+            assert!(
+                crate::tools::is_executable(&tools.join(name)),
+                "{name} 必须可用"
+            );
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn failed_job_reports_error() {
-        let (mut artifact, gz) = fixture_artifact();
-        artifact.sha256 = "0".repeat(64);
-        let base = serve(gz).await;
+        let mut fixtures = fixture_pair();
+        fixtures[1].0.sha256 = "0".repeat(64);
+        let base = serve_fixtures(&fixtures).await;
         let dir = temp_dir();
         let mut installer = Arc::new(Installer::new());
-        Arc::get_mut(&mut installer).expect("独占").artifact = Some(artifact);
+        Arc::get_mut(&mut installer).expect("独占").artifacts = Some(only_artifacts(&fixtures));
         installer.set_base_url(base);
 
         installer.start(dir.clone()).expect("启动");
@@ -709,52 +889,64 @@ mod tests {
     async fn install_rejects_decompression_error_and_cleans_temp() {
         use sha2::{Digest, Sha256};
 
+        let (ffmpeg, gz) = fixture_artifact("ffmpeg", "test");
         let bytes = b"not-gzip".to_vec();
-        let artifact = Artifact {
-            file: "ffmpeg-test.gz".into(),
+        let ffprobe = Artifact {
+            name: "ffprobe".into(),
+            file: "ffprobe-test.gz".into(),
             bytes: bytes.len() as u64,
             sha256: hex::encode(Sha256::digest(&bytes)),
         };
-        let base = serve(bytes).await;
+        let base = serve(vec![
+            (ffmpeg.file.clone(), gz),
+            (ffprobe.file.clone(), bytes),
+        ])
+        .await;
         let dir = temp_dir();
 
         let error = install(
             &reqwest::Client::new(),
             &base,
-            &artifact,
+            &[ffmpeg, ffprobe],
             &dir,
             &|_, _, _| {},
         )
         .await
         .expect_err("必须失败");
         assert!(format!("{error:#}").contains("解压"));
-        assert!(!crate::tools::dir(&dir).join("ffmpeg").exists());
-        assert!(!crate::tools::dir(&dir).join(".ffmpeg.part").exists());
-        assert!(!crate::tools::dir(&dir).join(".ffmpeg.unpack").exists());
+        let tools = crate::tools::dir(&dir);
+        for name in ["ffmpeg", "ffprobe"] {
+            assert!(!tools.join(name).exists());
+            assert!(!tools.join(format!(".{name}.part")).exists());
+            assert!(!tools.join(format!(".{name}.unpack")).exists());
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn reinstall_replaces_existing_binary() {
-        let (artifact, gz) = fixture_artifact();
-        let base = serve(gz).await;
+        let fixtures = fixture_pair();
+        let base = serve_fixtures(&fixtures).await;
         let dir = temp_dir();
         let tools = crate::tools::dir(&dir);
         std::fs::create_dir_all(&tools).expect("建 tools");
-        let dest = tools.join("ffmpeg");
-        std::fs::write(&dest, b"old").expect("写旧文件");
+        std::fs::write(tools.join("ffmpeg"), b"old").expect("写旧 ffmpeg");
+        std::fs::write(tools.join("ffprobe"), b"old").expect("写旧 ffprobe");
 
         install(
             &reqwest::Client::new(),
             &base,
-            &artifact,
+            &only_artifacts(&fixtures),
             &dir,
             &|_, _, _| {},
         )
         .await
         .expect("重装");
-        assert_ne!(std::fs::read(&dest).expect("读文件"), b"old");
-        assert!(crate::tools::is_executable(&dest));
+        for name in ["ffmpeg", "ffprobe"] {
+            let dest = tools.join(name);
+            assert_ne!(std::fs::read(&dest).expect("读文件"), b"old");
+            assert!(crate::tools::is_executable(&dest));
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 

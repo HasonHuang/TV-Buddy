@@ -272,6 +272,32 @@ pub async fn ffmpeg_status(
         None
     };
     let path = installed.then(|| resolved.display().to_string());
+
+    let ffprobe_managed_file = crate::tools::managed_file(&data_dir, "ffprobe");
+    let ffprobe_managed_version = match &ffprobe_managed_file {
+        Some(path) => probe_version(path).await,
+        None => None,
+    };
+    let ffprobe_system_version = probe_version(FsPath::new("ffprobe")).await;
+    let ffprobe_resolved = state.ffprobe();
+    let ffprobe_installed = if ffprobe_managed_file.is_some() {
+        ffprobe_managed_version.is_some()
+    } else {
+        ffprobe_system_version.is_some()
+    };
+    let ffprobe_version = if ffprobe_managed_file.is_some() {
+        ffprobe_managed_version
+    } else {
+        ffprobe_system_version.clone()
+    };
+    let ffprobe_source = if ffprobe_managed_file.is_some() {
+        Some("managed")
+    } else if ffprobe_system_version.is_some() {
+        Some("system")
+    } else {
+        None
+    };
+
     Json(json!({
         "installed": installed,
         "version": version,
@@ -279,6 +305,11 @@ pub async fn ffmpeg_status(
         "path": path,
         "managed_installed": managed.is_some(),
         "system_installed": system_version.is_some(),
+        "ffprobe_installed": ffprobe_installed,
+        "ffprobe_version": ffprobe_version,
+        "ffprobe_source": ffprobe_source,
+        "ffprobe_path": ffprobe_resolved.display().to_string(),
+        "ffprobe_managed_installed": ffprobe_managed_file.is_some(),
         "job": state.ffmpeg_install.job(),
         "remux_ready": true,
         "note": if installed {
@@ -306,6 +337,18 @@ pub async fn ffmpeg_install(
                 ApiError::bad_request(format!("不支持此平台：{platform}"))
             }
         })?;
+    let watch = state.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Some(job) = watch.ffmpeg_install.job() {
+                if job.phase == "done" || job.phase == "failed" {
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        watch.invalidate_ffprobe_ready().await;
+    });
     Ok(Json(json!({ "ok": true, "job": job })))
 }
 
@@ -326,6 +369,7 @@ pub async fn ffmpeg_remove(
                 ApiError::internal(format!("删除 ffmpeg 失败: {message}"))
             }
         })?;
+    state.invalidate_ffprobe_ready().await;
     Ok(Json(json!({ "ok": true, "removed": removed })))
 }
 

@@ -22,8 +22,19 @@ type FfmpegStatus = {
   path: string | null;
   managed_installed: boolean;
   system_installed: boolean;
+  ffprobe_installed: boolean;
+  ffprobe_version: string | null;
+  ffprobe_source: 'managed' | 'system' | null;
+  ffprobe_path: string;
+  ffprobe_managed_installed: boolean;
   job: FfmpegJob | null;
 };
+
+function sourceLabel(source: 'managed' | 'system' | null | undefined): string {
+  if (source === 'managed') return '面板安装';
+  if (source === 'system') return '系统';
+  return '未知';
+}
 
 const PHASE_LABEL: Record<string, string> = {
   downloading: '下载中',
@@ -109,9 +120,9 @@ export function FfmpegCard({ state }: { state: ReturnType<typeof useFfmpeg> }) {
 
   return (
     <div className="card">
-      <div className="section-title">ffmpeg</div>
+      <div className="section-title">ffmpeg / ffprobe</div>
       <dl>
-        <dt>状态</dt>
+        <dt>ffmpeg</dt>
         <dd>
           {status?.installed ? (
             <Badge tone="ok">已安装</Badge>
@@ -121,31 +132,45 @@ export function FfmpegCard({ state }: { state: ReturnType<typeof useFfmpeg> }) {
           {status?.version ? (
             <span className="muted mono version"> {status.version}</span>
           ) : null}
+          <span className="muted"> · 来源：{sourceLabel(status?.source)}</span>
         </dd>
-        {status?.installed ? (
+        <dt>ffprobe</dt>
+        <dd>
+          {status?.ffprobe_installed ? (
+            <Badge tone="ok">已安装</Badge>
+          ) : (
+            <Badge tone="warn">未安装</Badge>
+          )}
+          {status?.ffprobe_version ? (
+            <span className="muted mono version"> {status.ffprobe_version}</span>
+          ) : null}
+          <span className="muted"> · 来源：{sourceLabel(status?.ffprobe_source)}</span>
+        </dd>
+        {status?.installed && status.path ? (
           <>
-            <dt>来源</dt>
-            <dd>
-              {status.source === 'managed'
-                ? '面板安装'
-                : status.source === 'system'
-                  ? '系统'
-                  : '未知'}
-            </dd>
-            <dt>路径</dt>
+            <dt>ffmpeg 路径</dt>
             <dd>
               <code>{status.path}</code>
             </dd>
           </>
         ) : null}
+        {status?.ffprobe_installed ? (
+          <>
+            <dt>ffprobe 路径</dt>
+            <dd>
+              <code>{status.ffprobe_path}</code>
+            </dd>
+          </>
+        ) : null}
       </dl>
 
-      {!status?.installed ? (
+      {!status?.installed || !status?.ffprobe_installed ? (
         <p className="muted">
-          未安装时 DASH 录制只能保留 TS，素材转换不可用；remux 不受影响。
+          未安装时 DASH 录制只能保留 TS，素材转换与质量探测不可用；remux 不受影响。
         </p>
       ) : null}
-      {status?.source === 'managed' && !status.installed ? (
+      {(status?.source === 'managed' && !status.installed) ||
+      (status?.ffprobe_source === 'managed' && !status.ffprobe_installed) ? (
         <div className="msg err">面板安装的版本不可用，请重新安装或删除。</div>
       ) : null}
       {error ? <div className="msg err">{error}</div> : null}
@@ -159,16 +184,19 @@ export function FfmpegCard({ state }: { state: ReturnType<typeof useFfmpeg> }) {
 
       {admin ? (
         <div className="row">
-          {!status?.installed ? (
+          {!status?.installed || !status?.ffprobe_installed ? (
             <button disabled={busy || active} onClick={() => void install()}>
-              {job?.phase === 'failed' ? '重试' : '安装 ffmpeg'}
+              {job?.phase === 'failed' ? '重试' : '安装 ffmpeg / ffprobe'}
             </button>
           ) : (
             <button className="ghost" disabled={busy || active} onClick={() => void install()}>
               重新安装
             </button>
           )}
-          {status?.managed_installed || status?.source === 'managed' ? (
+          {status?.managed_installed ||
+          status?.source === 'managed' ||
+          status?.ffprobe_managed_installed ||
+          status?.ffprobe_source === 'managed' ? (
             <button
               className="danger"
               disabled={busy || active}
@@ -184,8 +212,8 @@ export function FfmpegCard({ state }: { state: ReturnType<typeof useFfmpeg> }) {
 
       {confirming ? (
         <Confirm
-          title="删除面板安装的 ffmpeg？"
-          text="只删除数据目录里的版本。系统安装的 ffmpeg 不受影响。"
+          title="删除面板安装的 ffmpeg / ffprobe？"
+          text="只删除数据目录里的 ffmpeg 与 ffprobe。系统安装的版本不受影响。"
           busy={busy}
           onCancel={() => setConfirming(false)}
           onConfirm={() => {
