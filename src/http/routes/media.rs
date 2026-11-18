@@ -126,6 +126,40 @@ async fn probe_version(path: &FsPath) -> Option<String> {
         .map(str::to_string)
 }
 
+/// 探测一个二进制的面板版本与系统版本。
+///
+/// `managed_file` 由调用方按自己的规则解析。返回
+/// `(可用, 版本, 来源, 系统可用)`。
+async fn binary_status(
+    managed_file: Option<&FsPath>,
+    system_binary: &str,
+) -> (bool, Option<String>, Option<&'static str>, bool) {
+    let managed_version = match managed_file {
+        Some(path) => probe_version(path).await,
+        None => None,
+    };
+    let system_version = probe_version(FsPath::new(system_binary)).await;
+    let managed = managed_file.is_some();
+    let installed = if managed {
+        managed_version.is_some()
+    } else {
+        system_version.is_some()
+    };
+    let version = if managed {
+        managed_version
+    } else {
+        system_version.clone()
+    };
+    let source = if managed {
+        Some("managed")
+    } else if system_version.is_some() {
+        Some("system")
+    } else {
+        None
+    };
+    (installed, version, source, system_version.is_some())
+}
+
 async fn ffmpeg_probe(state: &AppState) -> Option<PathBuf> {
     let path = state.ffmpeg();
     probe_version(&path).await.map(|_| path)
@@ -248,55 +282,15 @@ pub async fn ffmpeg_status(
     let data_dir = state.data_dir();
     let managed = crate::tools::managed_path(&data_dir, "ffmpeg");
     let managed_file = crate::tools::managed_file(&data_dir, "ffmpeg");
-    let managed_version = match &managed_file {
-        Some(path) => probe_version(path).await,
-        None => None,
-    };
-    let system_version = probe_version(FsPath::new("ffmpeg")).await;
+    let (installed, version, source, system_installed) =
+        binary_status(managed_file.as_deref(), "ffmpeg").await;
     let resolved = state.ffmpeg();
-    let installed = if managed_file.is_some() {
-        managed_version.is_some()
-    } else {
-        system_version.is_some()
-    };
-    let version = if managed_file.is_some() {
-        managed_version
-    } else {
-        system_version.clone()
-    };
-    let source = if managed_file.is_some() {
-        Some("managed")
-    } else if system_version.is_some() {
-        Some("system")
-    } else {
-        None
-    };
     let path = installed.then(|| resolved.display().to_string());
 
     let ffprobe_managed_file = crate::tools::managed_file(&data_dir, "ffprobe");
-    let ffprobe_managed_version = match &ffprobe_managed_file {
-        Some(path) => probe_version(path).await,
-        None => None,
-    };
-    let ffprobe_system_version = probe_version(FsPath::new("ffprobe")).await;
+    let (ffprobe_installed, ffprobe_version, ffprobe_source, _) =
+        binary_status(ffprobe_managed_file.as_deref(), "ffprobe").await;
     let ffprobe_resolved = state.ffprobe();
-    let ffprobe_installed = if ffprobe_managed_file.is_some() {
-        ffprobe_managed_version.is_some()
-    } else {
-        ffprobe_system_version.is_some()
-    };
-    let ffprobe_version = if ffprobe_managed_file.is_some() {
-        ffprobe_managed_version
-    } else {
-        ffprobe_system_version.clone()
-    };
-    let ffprobe_source = if ffprobe_managed_file.is_some() {
-        Some("managed")
-    } else if ffprobe_system_version.is_some() {
-        Some("system")
-    } else {
-        None
-    };
 
     Json(json!({
         "installed": installed,
@@ -304,7 +298,7 @@ pub async fn ffmpeg_status(
         "source": source,
         "path": path,
         "managed_installed": managed.is_some(),
-        "system_installed": system_version.is_some(),
+        "system_installed": system_installed,
         "ffprobe_installed": ffprobe_installed,
         "ffprobe_version": ffprobe_version,
         "ffprobe_source": ffprobe_source,

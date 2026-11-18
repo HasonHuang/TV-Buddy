@@ -731,6 +731,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn install_reports_combined_progress() {
+        let fixtures = fixture_pair();
+        let artifacts = only_artifacts(&fixtures);
+        let expected: u64 = artifacts.iter().map(|artifact| artifact.bytes).sum();
+        let base = serve_fixtures(&fixtures).await;
+        let dir = temp_dir();
+        let calls = std::sync::Mutex::new(Vec::new());
+
+        install(
+            &reqwest::Client::new(),
+            &base,
+            &artifacts,
+            &dir,
+            &|phase, downloaded, total| {
+                calls
+                    .lock()
+                    .expect("锁")
+                    .push((phase.to_string(), downloaded, total));
+            },
+        )
+        .await
+        .expect("安装");
+
+        let calls = calls.into_inner().expect("取记录");
+        assert!(!calls.is_empty());
+        let mut last = 0;
+        for (phase, downloaded, total) in &calls {
+            assert_eq!(*total, Some(expected), "阶段 {phase} 的总数");
+            assert!(*downloaded >= last, "阶段 {phase} 的下载量不得减少");
+            last = *downloaded;
+        }
+        assert_eq!(last, expected);
+        let phases: std::collections::HashSet<&str> =
+            calls.iter().map(|(phase, _, _)| phase.as_str()).collect();
+        for phase in [PHASE_DOWNLOADING, PHASE_VERIFYING, PHASE_INSTALLING] {
+            assert!(phases.contains(phase), "缺少阶段 {phase}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn install_rejects_hash_mismatch() {
         let mut fixtures = fixture_pair();
         fixtures[1].0.sha256 = "0".repeat(64);

@@ -7494,6 +7494,72 @@ async fn ffmpeg_status_reports_non_executable_managed_file() {
 }
 
 #[tokio::test]
+async fn ffprobe_status_reports_managed_version() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let tools = fixture.dir.join("tools");
+    std::fs::create_dir_all(&tools).expect("建 tools");
+    let path = tools.join("ffprobe");
+    std::fs::write(&path, b"#!/bin/sh\necho \"ffprobe version 6.1.1-test\"\n").expect("写文件");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("设权限");
+
+    let body: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+            .header("authorization", format!("Bearer {session}"))
+            .send()
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("正文"),
+    )
+    .expect("JSON");
+    assert_eq!(body["ffprobe_installed"], true);
+    assert_eq!(body["ffprobe_version"], "ffprobe version 6.1.1-test");
+    assert_eq!(body["ffprobe_source"], "managed");
+    assert!(body["ffprobe_path"]
+        .as_str()
+        .expect("路径")
+        .ends_with("ffprobe"));
+    assert_eq!(body["ffprobe_managed_installed"], true);
+}
+
+#[tokio::test]
+async fn ffprobe_status_reports_non_executable_managed_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let tools = fixture.dir.join("tools");
+    std::fs::create_dir_all(&tools).expect("建 tools");
+    let path = tools.join("ffprobe");
+    std::fs::write(&path, b"#!/bin/sh\n").expect("写文件");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("设权限");
+
+    let body: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+            .header("authorization", format!("Bearer {session}"))
+            .send()
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("正文"),
+    )
+    .expect("JSON");
+    assert_eq!(body["ffprobe_installed"], false);
+    assert!(body["ffprobe_version"].is_null());
+    assert_eq!(body["ffprobe_source"], "managed");
+    assert_eq!(body["ffprobe_managed_installed"], true);
+}
+
+#[tokio::test]
 async fn ffmpeg_remove_requires_admin() {
     let fixture = fixture().await;
     let session: String = serde_json::from_str::<serde_json::Value>(
