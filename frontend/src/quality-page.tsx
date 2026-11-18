@@ -116,12 +116,13 @@ const PROBE_LABEL: Record<string, string> = {
   reachability: '连通',
   playlist: '清单',
   speed: '测速',
-  full: '测速',
+  full: '完整',
 };
 
 const OVERRIDE_LABEL: Record<string, string> = {
   enabled: '开关',
   min_speed_mib: '最低速率',
+  fallback_speed_mib: '兜底速率',
   max_delay_ms: '最大延迟',
   min_resolution: '最低分辨率',
   max_resolution: '最高分辨率',
@@ -461,7 +462,13 @@ function OverviewTab({
 }
 
 /** 规则标签。 */
-function RulesTab({ onSaved }: { onSaved: () => void }) {
+function RulesTab({
+  status,
+  onSaved,
+}: {
+  status: QualityStatus | null;
+  onSaved: () => void;
+}) {
   const { node, ok, err } = useToast();
   const [draft, setDraft] = useState<Cfg | null>(null);
   const [busy, setBusy] = useState('');
@@ -572,6 +579,7 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
 
   const scheduleMode = asText(draft, 'quality.schedule') === 'cron' ? 'cron' : 'interval';
   const configuredProbe = asText(draft, 'quality.probe_mode');
+  const ffprobeEnabled = asBool(draft, 'quality.ffprobe');
   const speedRule = asNumber(draft, 'quality.rules.min_speed_mib') > 0;
   const resolutionRule =
     asText(draft, 'quality.rules.min_resolution').trim() !== '' ||
@@ -582,9 +590,11 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
       ? 'playlist'
       : configuredProbe;
   const probeHint =
-    actualProbe === configuredProbe
-      ? undefined
-      : `实际档位：${PROBE_LABEL[actualProbe] ?? actualProbe}（规则自动提升）`;
+    configuredProbe === 'full' && !ffprobeEnabled
+      ? '实际档位：测速（ffprobe 未启用）'
+      : actualProbe === configuredProbe
+        ? undefined
+        : `实际档位：${PROBE_LABEL[actualProbe] ?? actualProbe}（规则自动提升）`;
   return (
     <>
       {node}
@@ -656,7 +666,7 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
                 { value: 'reachability', label: '连通', desc: '只检查能否建立连接。' },
                 { value: 'playlist', label: '清单', desc: '读取清单并请求首个切片。' },
                 { value: 'speed', label: '测速', desc: '下载样本并测量速率。' },
-                { value: 'full', label: '完整', desc: '第一版按测速执行。' },
+                { value: 'full', label: '完整', desc: '测速，并按需识别分辨率。' },
               ]}
               onChange={(next) => update('quality.probe_mode', next)}
             />
@@ -718,20 +728,29 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
           <div className="hint">未来运行：{preview.map(timeText).join('；')}</div>
         ) : null}
       </div>
-      <div className="card">
+      <div className="card quality-rules-card">
         <div className="card-head">
           <div className="card-head-text">
             <h2>判定阈值</h2>
             <span className="muted">频道、分组、来源的覆盖优先于这里的全局值</span>
           </div>
         </div>
-        <div className="fields">
+        <div className="quality-rules-grid">
+          <h3 className="quality-section-title">速率与延迟</h3>
           <Field label="最低速率" hint="MiB/s，0 = 不限制">
             <NumberInput
               min={0}
               step={0.1}
               value={asNumber(draft, 'quality.rules.min_speed_mib')}
               onChange={(value) => update('quality.rules.min_speed_mib', value)}
+            />
+          </Field>
+          <Field label="兜底速率" hint="无法识别分辨率，或速率表未命中时使用；0 = 用最低速率">
+            <NumberInput
+              min={0}
+              step={0.1}
+              value={asNumber(draft, 'quality.rules.fallback_speed_mib')}
+              onChange={(value) => update('quality.rules.fallback_speed_mib', value)}
             />
           </Field>
           <Field label="最大延迟" hint="毫秒，0 = 不限制">
@@ -741,13 +760,7 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
               onChange={(value) => update('quality.rules.max_delay_ms', value)}
             />
           </Field>
-          <Field label="手工下线宽限" hint="秒，0 = 立即下线">
-            <NumberInput
-              min={0}
-              value={asNumber(draft, 'quality.stale_keep_secs')}
-              onChange={(value) => update('quality.stale_keep_secs', value)}
-            />
-          </Field>
+          <h3 className="quality-section-title">分辨率</h3>
           <Field label="最低分辨率" hint="如 1280x720，留空不限制">
             <input
               value={asText(draft, 'quality.rules.min_resolution')}
@@ -762,58 +775,6 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
               placeholder="3840x2160"
             />
           </Field>
-          <Field
-            label="分辨率速率要求"
-            hint="按实际分辨率取不超过它的最高档；未命中时用最低速率；空行不保存"
-          >
-            <div className="quality-speed-map">
-              {speedRows.map((row, index) => (
-                <div className="quality-speed-row" key={index}>
-                  <input
-                    value={row.resolution}
-                    placeholder="1280x720"
-                    onChange={(event) => {
-                      const next = speedRows.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, resolution: event.target.value } : item,
-                      );
-                      commitSpeedRows(next);
-                    }}
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.1}
-                    value={row.speed}
-                    placeholder="MiB/s"
-                    onChange={(event) => {
-                      const next = speedRows.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, speed: event.target.value } : item,
-                      );
-                      commitSpeedRows(next);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() =>
-                      commitSpeedRows(
-                        speedRows.filter((_row, itemIndex) => itemIndex !== index),
-                      )
-                    }
-                  >
-                    删除
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => commitSpeedRows([...speedRows, { resolution: '', speed: '1' }])}
-              >
-                添加分辨率
-              </button>
-            </div>
-          </Field>
           <Field label="Host 缓存" tip="复用同一 Host 的成功测速，减少重复下载。">
             <Switch
               checked={asBool(draft, 'quality.rules.host_cache')}
@@ -821,7 +782,151 @@ function RulesTab({ onSaved }: { onSaved: () => void }) {
               label="Host 缓存"
             />
           </Field>
+          <Field
+            label="分辨率速率要求"
+            hint="按实际分辨率取不超过它的最高档；未命中时用兜底速率；空行不保存"
+            className="quality-field-wide"
+          >
+            <table className="quality-speed-table">
+              <thead>
+                <tr>
+                  <th>分辨率</th>
+                  <th>最低速率 (MiB/s)</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {speedRows.map((row, index) => (
+                  <tr key={index}>
+                    <td data-label="分辨率">
+                      <input
+                        aria-label={`第 ${index + 1} 行分辨率`}
+                        value={row.resolution}
+                        placeholder="1280x720"
+                        onChange={(event) => {
+                          const next = speedRows.map((item, itemIndex) =>
+                            itemIndex === index
+                              ? { ...item, resolution: event.target.value }
+                              : item,
+                          );
+                          commitSpeedRows(next);
+                        }}
+                      />
+                    </td>
+                    <td data-label="最低速率 (MiB/s)">
+                      <input
+                        aria-label={`第 ${index + 1} 行最低速率`}
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={row.speed}
+                        placeholder="MiB/s"
+                        onChange={(event) => {
+                          const next = speedRows.map((item, itemIndex) =>
+                            itemIndex === index
+                              ? { ...item, speed: event.target.value }
+                              : item,
+                          );
+                          commitSpeedRows(next);
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() =>
+                          commitSpeedRows(
+                            speedRows.filter((_row, itemIndex) => itemIndex !== index),
+                          )
+                        }
+                      >
+                        删除
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => commitSpeedRows([...speedRows, { resolution: '', speed: '1' }])}
+            >
+              添加分辨率
+            </button>
+          </Field>
+          <h3 className="quality-section-title">其他</h3>
+          <Field label="手工下线宽限" hint="秒，0 = 立即下线">
+            <NumberInput
+              min={0}
+              value={asNumber(draft, 'quality.stale_keep_secs')}
+              onChange={(value) => update('quality.stale_keep_secs', value)}
+            />
+          </Field>
         </div>
+      </div>
+      <div className="card">
+        <div className="card-head">
+          <div className="card-head-text">
+            <h2>分辨率探测</h2>
+            <span className="muted">完整档读取切片开头，用 ffprobe 识别分辨率</span>
+          </div>
+        </div>
+        <div className="fields">
+          <Field label="启用分辨率识别" tip="只在完整档生效。未安装 ffprobe 时使用兜底速率。">
+            <Switch
+              checked={asBool(draft, 'quality.ffprobe')}
+              onChange={(next) => update('quality.ffprobe', next)}
+              label="启用分辨率识别"
+            />
+          </Field>
+          <Field label="单次超时" hint="秒，1–30">
+            <NumberInput
+              min={1}
+              max={30}
+              value={asNumber(draft, 'quality.ffprobe_timeout_secs')}
+              onChange={(value) => update('quality.ffprobe_timeout_secs', value)}
+            />
+          </Field>
+          <Field label="并发" hint="1–4">
+            <NumberInput
+              min={1}
+              max={4}
+              value={asNumber(draft, 'quality.probe_concurrency')}
+              onChange={(value) => update('quality.probe_concurrency', value)}
+            />
+          </Field>
+          <Field label="单轮上限" hint="0 = 不限制">
+            <NumberInput
+              min={0}
+              value={asNumber(draft, 'quality.max_ffprobe_per_run')}
+              onChange={(value) => update('quality.max_ffprobe_per_run', value)}
+            />
+          </Field>
+          <Field label="最低测速门槛" hint="MiB/s，0 = 不限制">
+            <NumberInput
+              min={0}
+              step={0.1}
+              value={asNumber(draft, 'quality.ffprobe_min_speed_mib')}
+              onChange={(value) => update('quality.ffprobe_min_speed_mib', value)}
+            />
+          </Field>
+          <Field label="采样大小" hint="KiB，读取切片开头。64–2048">
+            <NumberInput
+              min={64}
+              max={2048}
+              value={asNumber(draft, 'quality.ffprobe_sample_kb')}
+              onChange={(value) => update('quality.ffprobe_sample_kb', value)}
+            />
+          </Field>
+        </div>
+        {status && !status.ffprobe.installed ? (
+          <div className="hint">未安装 ffprobe。分辨率识别不可用，规则会使用兜底速率。</div>
+        ) : null}
+        {status && !status.ffprobe.enabled ? (
+          <div className="hint">开启后，完整档会读取切片开头识别分辨率。</div>
+        ) : null}
       </div>
       <div className="card">
         <div className="card-head">
@@ -1825,7 +1930,7 @@ export function QualityPage() {
           onCancel={() => setConfirmCancel(true)}
         />
       )}
-      {tab === 'rules' && <RulesTab onSaved={() => void load()} />}
+      {tab === 'rules' && <RulesTab status={status} onSaved={() => void load()} />}
       {tab === 'results' && (
         <ResultsTab
           running={status?.running === true}

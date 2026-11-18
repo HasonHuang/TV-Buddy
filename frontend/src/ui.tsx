@@ -375,15 +375,17 @@ export function Field({
   label,
   hint,
   tip,
+  className,
   children,
 }: {
   label: string;
   hint?: string;
   tip?: string;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="field">
+    <div className={`field ${className ?? ''}`}>
       <label>
         {label}
         {tip ? <Tip text={tip} /> : null}

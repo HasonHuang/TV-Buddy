@@ -229,6 +229,12 @@ export type QualityStatus = {
     min_remove_count: number;
     tripped: boolean;
   };
+  ffprobe: {
+    installed: boolean;
+    enabled: boolean;
+    ready: boolean;
+    note: string;
+  };
 };
 
 /** 同步源的门控状态。 */
@@ -257,6 +263,7 @@ export type QualityEffective = {
   rules: {
     enabled: boolean;
     min_speed_mib: number;
+    fallback_speed_mib: number;
     max_delay_ms: number;
     min_resolution_px: number | null;
     max_resolution_px: number | null;

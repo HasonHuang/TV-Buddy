@@ -1939,25 +1939,84 @@ a.compact {
   border-color: var(--accent-line);
 }
 
-/* 规则页：分辨率到最低速率的映射行。 */
-.quality-speed-map {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* 规则页：按卡片自身宽度分列，不跟随视口。 */
+.quality-rules-card {
+  container-type: inline-size;
 }
 
-.quality-speed-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.quality-rules-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px 16px;
 }
 
-.quality-speed-row input:first-child {
-  width: 132px;
+@container (min-width: 640px) {
+  .quality-rules-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
-.quality-speed-row input:nth-child(2) {
-  width: 108px;
+@container (min-width: 1000px) {
+  .quality-rules-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.quality-field-wide {
+  grid-column: 1 / -1;
+}
+
+.quality-section-title {
+  grid-column: 1 / -1;
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.quality-speed-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.quality-speed-table th,
+.quality-speed-table td {
+  padding: 6px 8px 6px 0;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.quality-speed-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.quality-speed-table input {
+  width: 100%;
+  min-width: 0;
+}
+
+@container (max-width: 560px) {
+  .quality-speed-table thead {
+    display: none;
+  }
+  .quality-speed-table tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .quality-speed-table td {
+    padding: 0;
+  }
+  .quality-speed-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 3px;
+    font-size: 11px;
+    color: var(--muted);
+  }
 }
 
 /* 模式徽章：PROXY / DASH / REMUX 等。 */
