@@ -75,7 +75,7 @@ impl ProbeSignature {
         Self {
             probe_mode: config.quality.probe_mode.clone(),
             ffprobe: config.quality.ffprobe,
-            ffprobe_ready,
+            ffprobe_ready: config.quality.ffprobe && ffprobe_ready,
             ffprobe_sample_kb: config.quality.ffprobe_sample_kb,
             ffprobe_min_speed_mib_bits: config.quality.ffprobe_min_speed_mib.to_bits(),
             sample_segments: config.quality.sample_segments,
@@ -255,10 +255,23 @@ mod tests {
 
     #[test]
     fn rule_hash_changes_when_ffprobe_ready_changes() {
-        let config = Config::default();
+        let mut config = Config::default();
+        config.quality.ffprobe = true;
         let a = ProbeSignature::from_config(&config, false);
         let b = ProbeSignature::from_config(&config, true);
         assert_ne!(
+            rule_hash(&EffectiveRules::default(), &a),
+            rule_hash(&EffectiveRules::default(), &b)
+        );
+    }
+
+    #[test]
+    fn rule_hash_ignores_readiness_when_ffprobe_disabled() {
+        let config = Config::default();
+        assert!(!config.quality.ffprobe);
+        let a = ProbeSignature::from_config(&config, false);
+        let b = ProbeSignature::from_config(&config, true);
+        assert_eq!(
             rule_hash(&EffectiveRules::default(), &a),
             rule_hash(&EffectiveRules::default(), &b)
         );

@@ -1392,4 +1392,97 @@ mod tests {
         assert_eq!(due.len(), 1, "手动运行忽略到期与哈希");
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn empty_rule_hash_is_stale_once() {
+        let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
+        let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
+        store
+            .upsert(&QualityResult {
+                key: "sync:s1:c".into(),
+                scope: "sync".into(),
+                source_id: "s1".into(),
+                source_key: "c".into(),
+                gid: "g".into(),
+                cid: "c".into(),
+                url_hash: url_hash_hex("http://up/live.m3u8"),
+                action: "admitted".into(),
+                next_check_at: 9_999_999_999,
+                rule_hash: String::new(),
+                ..QualityResult::default()
+            })
+            .expect("写结果");
+        let config = config_with_sync_channel();
+        let probe = ProbeSignature::from_config(&config, false);
+        let due = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            0,
+            false,
+            false,
+            &probe,
+        )
+        .expect("到期目标");
+        assert_eq!(due.len(), 1, "空哈希必须到期一次");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn max_channels_per_run_leaves_remainder_due() {
+        let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
+        let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
+        let mut config = config_with_sync_channel();
+        config.groups[0].channels.push(Channel {
+            id: "c2".into(),
+            url: "http://up/live2.m3u8".into(),
+            source_id: "s1".into(),
+            source_key: "c2".into(),
+            ..Channel::default()
+        });
+        let probe = ProbeSignature::from_config(&config, false);
+        let first = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            1,
+            false,
+            false,
+            &probe,
+        )
+        .expect("第一轮");
+        assert_eq!(first.len(), 1, "单轮上限截断");
+        let rules = effective_rules(&config, &config.groups[0], &config.groups[0].channels[0]);
+        store
+            .upsert(&QualityResult {
+                key: "sync:s1:c".into(),
+                scope: "sync".into(),
+                source_id: "s1".into(),
+                source_key: "c".into(),
+                gid: "g".into(),
+                cid: "c".into(),
+                url_hash: url_hash_hex("http://up/live.m3u8"),
+                action: "admitted".into(),
+                next_check_at: 9_999_999_999,
+                rule_hash: rule_hash(&rules, &probe),
+                ..QualityResult::default()
+            })
+            .expect("写结果");
+        let second = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            1,
+            false,
+            false,
+            &probe,
+        )
+        .expect("第二轮");
+        assert_eq!(second.len(), 1, "剩余频道下一轮仍到期");
+        assert_eq!(second[0].cid, "c2");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
