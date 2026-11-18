@@ -472,7 +472,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | 节目指南 | `GET /panel/api/epg/status`、`POST /panel/api/epg/refresh`；链接到 `/epg` 浏览页 | ✅ |
 | 运行日志 | `GET /panel/api/logs?limit=`（5 秒轮询） | ✅ |
 | 备份恢复 | `GET /panel/api/backup`、`POST /panel/api/restore`（浏览器内下载/上传） | ✅ |
-| 素材 | `/panel/api/{assets,subtitle}/*`、`/panel/api/assets/ffmpeg-status` | ✅ |
+| 素材 | `/panel/api/{assets,subtitle}/*`、`/panel/api/assets/ffmpeg-status`、`/panel/api/tools/ffmpeg/{install,remove}` | ✅ |
 | 录制与回看 | `/panel/api/schedule*`、`/panel/api/livestream*`、`GET /panel/api/dash-timeshift/status` | ✅ |
 | 订阅聚合 | `GET/PUT /panel/api/playlist`（源、过滤、缓存与合并位置）；条目追加到 `/sub/<令牌>/playlist.m3u` | ✅ |
 | 系统状态 | `GET /panel/api/health`、`/assets/ffmpeg-status`、`/resolver/scripts`、`/dash-timeshift/status` | ✅ |
@@ -491,7 +491,9 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | `POST` | `/panel/api/assets/remove` | `{"file"}` 或 `{"url"}`；按 URL 删除时同时清 `[assets].map` 与本地目录 |
 | `GET` | `/panel/api/assets/raw/<file>` | 面板内下载（`private, max-age=0`） |
 | `GET` | `/assets/*path` | 公开读取 `<cache>/assets/` 下的 HLS 清单与切片 |
-| `GET` | `/panel/api/assets/ffmpeg-status` | `{"installed","version","remux_ready","note"}`；每次实时执行 `ffmpeg -version` |
+| `GET` | `/panel/api/assets/ffmpeg-status` | `{"installed","version","source","path","managed_installed","system_installed","job","remux_ready","note"}`；`source` ∈ `managed/system/null`；`job` 为当前或最近一次安装任务 |
+| `POST` | `/panel/api/tools/ffmpeg/install` | 仅管理员；启动单实例安装任务，立即返回 `{ok,job}`；不支持平台 `400`；任务运行中 `409` |
+| `POST` | `/panel/api/tools/ffmpeg/remove` | 仅管理员；删除 `<数据库目录>/tools/ffmpeg` 与临时文件；任务运行中 `409`；系统版本不受影响 |
 | `GET` | `/panel/api/subtitle/list`、`…/upload`、`…/remove`、`…/raw/<file>` | 与视频同形；扩展名 `srt/ass/ssa/vtt` |
 | `GET` | `/panel/api/subtitle/translate/status` | `{enabled,engine,url,source,targets,translation_first,formats,converts_ass,cached}` |
 | `POST` | `/panel/api/subtitle/translate` | `{"file","target"}`：翻译 SRT/VTT/ASS/SSA，返回 `{ok,file,target,format,cached,lines?,bytes,download}`；ASS/SSA 转 VTT 后翻译；未启用/无地址/非 UTF-8 → `400` |
@@ -513,6 +515,9 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | ASS/SSA | 读 `[Events]` 的 `Format:` 与 `Dialogue:`；去 `{\…}` 标签，`\N` 转换行；输出 WebVTT |
 | 字幕译法 | 每个正文行单独翻译并按 `batch`/`mtran_batch` 分批（默认 40）；按 `translation_first` 输出「原文 + 译文」或「译文 + 原文」 |
 | 字幕缓存 | `<cache>/subtitles/.translate/<sha256(file,target,order,format)[..32]>.<ext>`；ASS/SSA 输出 `.vtt`；命中不发请求；`clear` 清空 |
+| ffmpeg 安装位置 | `<数据库目录>/tools/ffmpeg`。权限 `0755`。备份不包含该目录 |
+| ffmpeg 解析顺序 | 面板版本 → 系统 `PATH`。面板版本存在但损坏时不回退；状态接口报告 `installed=false` |
+| ffmpeg 安装限制 | 仅管理员。固定 SHA-256。只允许 `https`；回环地址允许 `http` 供测试。单实例任务 |
 
 ### 6.10 多 VPS 分享（P1 已实现）
 

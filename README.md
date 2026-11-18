@@ -109,6 +109,12 @@ Linux 版本是静态链接的 musl 二进制。macOS 版本是系统原生二�
 | systemd 或 OpenRC | Linux 开机自启（安装脚本自动选择） |
 | Python 3 | EPG 脚本源（默认命令名 `python3`） |
 
+面板可以安装 ffmpeg。打开「系统状态」或「视频素材」页，点「安装 ffmpeg」。
+安装到数据库目录的 `tools/ffmpeg`，不需要 root。
+面板安装的版本优先于系统 `PATH`。删除后回退系统版本。
+下载源是 `eugeneware/ffmpeg-static` 的静态构建，GPLv3。
+镜像可用 `TV_BUDDY_FFMPEG_BASE_URL` 覆盖。
+
 ### macOS arm64
 
 发布包只含二进制和运行说明，不含 `install.sh`。`install.sh` 只支持 Linux。
@@ -234,7 +240,7 @@ docker run -d --name tv-buddy \
 | 运行用户 | `tvbuddy`，UID/GID `10001` |
 | 健康检查 | `GET http://127.0.0.1:9900/health` |
 | 版本号 | `--build-arg TV_BUDDY_VERSION=<版本>`，默认 `dev` |
-| ffmpeg | 默认不装。需要 DASH 录制或素材转换时加 `--build-arg WITH_FFMPEG=1` |
+| ffmpeg | 默认不装。需要 DASH 录制或素材转换时加 `--build-arg WITH_FFMPEG=1`，或在面板安装 |
 
 首次启动后读取初始口令：
 
@@ -762,6 +768,7 @@ ls scripts/smoke-*.sh
 | `GET` | `/panel/api/assets/list` | 视频素材列表 |
 | `POST` | `/panel/api/assets/{upload,remove}` | 上传 / 删除视频素材 |
 | `GET` | `/panel/api/assets/ffmpeg-status` | ffmpeg 检测 |
+| `POST` | `/panel/api/tools/ffmpeg/{install,remove}` | 安装 / 删除面板 ffmpeg（管理员） |
 | `GET`/`POST` | `/panel/api/subtitle/*` | 字幕列表、上传、删除、下载 |
 | `GET`/`POST` | `/panel/api/resolver/{scripts,script,remove}` | 解析脚本管理 |
 | `GET` | `/api/share/pull?key=` | 多 VPS 同步载荷 |

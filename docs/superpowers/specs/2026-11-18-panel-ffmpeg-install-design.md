@@ -79,7 +79,7 @@
 ### 安装源
 
 - 默认仓库：`https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1`。
-- 上游是 johnvansickle 静态构建（ffmpeg 7.0.2），可在 Alpine/musl 运行，GPLv3。
+- Linux 构建来自 johnvansickle（ffmpeg 7.0.2），可在 Alpine/musl 运行。macOS 构建版本以发布资产为准（实测 6.0）。许可为 GPLv3。
 - 代码内固定每个平台的文件名、压缩大小与 SHA-256：
 
 | 平台 | 文件 | 压缩字节 | SHA-256（.gz） |

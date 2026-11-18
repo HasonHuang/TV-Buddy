@@ -4,7 +4,7 @@
 > 规范见 [`docs/spec/`](docs/spec/)。发现见 [`docs/findings/`](docs/findings/)。设计见 [`docs/design/`](docs/design/)。
 > 目标版本：**IPTV Proxy v0.8.2**（上游提交 `d302316fb8`）。
 > 写作风格：ASD-STE100 简化技术写作。一句一个意思。主动语态。用简单现在时。
-> 最后更新：2026-11-15。
+> 最后更新：2026-11-18。
 
 ---
 
@@ -772,6 +772,16 @@ OpenRC 单元已补 `directory="/opt/tv-buddy"`，`scripts/build-release.sh` 加
 - 配置：`auth.slice_sign_enabled`、`auth.slice_sign_window_secs`、
   `auth.slice_sign_secret`。密钥留空时保存配置自动生成。
 - 面板「访问控制 → 切片签名」可改密钥与窗口。
+
+---
+
+## 5.4 面板安装 ffmpeg（v2026.50）
+
+- 面板下载静态 ffmpeg 到 `<数据库目录>/tools/ffmpeg`，校验固定 SHA-256 后原子启用。
+- 解析顺序：面板版本 → 系统 `PATH`。删除面板版本后回退系统版本。
+- 仅管理员。Docker 非 root 可用。下载源可用 `TV_BUDDY_FFMPEG_BASE_URL` 换镜像。
+- 质量门（2026-11-18）：`cargo fmt --check` 通过；`cargo test --offline --all-targets` 679 项通过（550 单元 + 3 main + 126 契约）；`cargo clippy --offline --all-targets` 0 error；`pnpm build` 通过。
+- macOS 本机验收：真实下载 19,246,198 字节，状态为 `source=managed`；素材转换成功；删除后回退 `system`。DASH 录制未跑（需要 DASH 源）。
 
 ---
 
