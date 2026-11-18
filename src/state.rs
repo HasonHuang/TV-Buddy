@@ -74,6 +74,8 @@ pub struct AppState {
     pub modes: AddressCache,
     /// 缓存根目录（`[cache].disk_path`）。
     pub cache_dir: PathBuf,
+    /// 面板 ffmpeg 安装任务。
+    pub ffmpeg_install: Arc<crate::tools::install::Installer>,
     /// 运行指标。
     pub stats: Stats,
     /// 出网字节、在线观众与资源占用。
@@ -204,6 +206,7 @@ impl AppState {
             epg_store,
             history,
             cache_dir,
+            ffmpeg_install: Arc::new(crate::tools::install::Installer::new()),
             stats: Stats::default(),
             metrics: Arc::new(crate::metrics::Metrics::new()),
             watchdog: Watchdog::new(),

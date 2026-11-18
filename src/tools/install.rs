@@ -1,6 +1,11 @@
 //! ffmpeg 安装：固定制品、下载、校验与原子启用。
 
-use std::{io::Read, os::unix::fs::PermissionsExt, path::Path};
+use std::{
+    io::Read,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
@@ -211,10 +216,206 @@ async fn install_inner(
     Ok(())
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct JobSnapshot {
+    pub phase: String,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+    pub error: Option<String>,
+    pub started_at: u64,
+    pub finished_at: Option<u64>,
+}
+
+impl Default for JobSnapshot {
+    fn default() -> Self {
+        Self {
+            phase: "idle".into(),
+            downloaded: 0,
+            total: None,
+            error: None,
+            started_at: 0,
+            finished_at: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartError {
+    Busy,
+    Unsupported(String),
+}
+
+impl std::fmt::Display for StartError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Busy => formatter.write_str("安装任务正在进行"),
+            Self::Unsupported(platform) => write!(formatter, "不支持此平台：{platform}"),
+        }
+    }
+}
+
+impl std::error::Error for StartError {}
+
+/// 单实例安装任务。
+pub struct Installer {
+    job: std::sync::Mutex<JobSnapshot>,
+    running: std::sync::atomic::AtomicBool,
+    base_url: std::sync::RwLock<String>,
+    client: reqwest::Client,
+    #[cfg(test)]
+    pub(crate) artifact: Option<Artifact>,
+}
+
+impl Default for Installer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Installer {
+    pub fn new() -> Self {
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .read_timeout(std::time::Duration::from_secs(60))
+            .user_agent(crate::state::DEFAULT_USER_AGENT)
+            .build()
+            .unwrap_or_default();
+        Self {
+            job: std::sync::Mutex::new(JobSnapshot::default()),
+            running: std::sync::atomic::AtomicBool::new(false),
+            base_url: std::sync::RwLock::new(base_url()),
+            client,
+            #[cfg(test)]
+            artifact: None,
+        }
+    }
+
+    /// 覆盖下载前缀。测试与镜像使用。
+    pub fn set_base_url(&self, base: impl Into<String>) {
+        let mut guard = self
+            .base_url
+            .write()
+            .unwrap_or_else(|error| error.into_inner());
+        *guard = base.into();
+    }
+
+    /// 最近一次任务；`idle` 时返回 `None`。
+    pub fn job(&self) -> Option<JobSnapshot> {
+        let job = self
+            .job
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        (job.phase != "idle").then_some(job)
+    }
+
+    pub fn running(&self) -> bool {
+        self.running.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// 启动安装任务。立即返回初始快照。
+    pub fn start(self: &Arc<Self>, data_dir: PathBuf) -> Result<JobSnapshot, StartError> {
+        if self
+            .running
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            return Err(StartError::Busy);
+        }
+        let Some(artifact) = self.selected_artifact() else {
+            self.running
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            return Err(StartError::Unsupported(format!(
+                "{}/{}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            )));
+        };
+        let base = self
+            .base_url
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let snapshot = {
+            let mut job = self.job.lock().unwrap_or_else(|error| error.into_inner());
+            *job = JobSnapshot {
+                phase: PHASE_DOWNLOADING.into(),
+                downloaded: 0,
+                total: None,
+                error: None,
+                started_at: now_secs(),
+                finished_at: None,
+            };
+            job.clone()
+        };
+        let installer = Arc::clone(self);
+        tokio::spawn(async move {
+            let outcome = install(
+                &installer.client,
+                &base,
+                &artifact,
+                &data_dir,
+                &|phase, downloaded, total| installer.update(phase, downloaded, total),
+            )
+            .await;
+            installer.finish(outcome);
+        });
+        Ok(snapshot)
+    }
+
+    fn selected_artifact(&self) -> Option<Artifact> {
+        #[cfg(test)]
+        if let Some(artifact) = &self.artifact {
+            return Some(artifact.clone());
+        }
+        artifact_for(std::env::consts::OS, std::env::consts::ARCH)
+    }
+
+    fn update(&self, phase: &str, downloaded: u64, total: Option<u64>) {
+        let mut job = self.job.lock().unwrap_or_else(|error| error.into_inner());
+        job.phase = phase.into();
+        job.downloaded = downloaded;
+        if total.is_some() {
+            job.total = total;
+        }
+    }
+
+    fn finish(&self, outcome: anyhow::Result<()>) {
+        {
+            let mut job = self.job.lock().unwrap_or_else(|error| error.into_inner());
+            job.finished_at = Some(now_secs());
+            match outcome {
+                Ok(()) => {
+                    job.phase = "done".into();
+                    job.error = None;
+                }
+                Err(error) => {
+                    job.phase = "failed".into();
+                    job.error = Some(format!("{error:#}"));
+                }
+            }
+        }
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::sync::Arc;
     fn fixture_artifact() -> (Artifact, Vec<u8>) {
         use flate2::{write::GzEncoder, Compression};
         use sha2::{Digest, Sha256};
@@ -257,6 +458,24 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tv-buddy-install-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("建临时目录");
         dir
+    }
+
+    async fn serve_with_delay(bytes: Vec<u8>, delay_ms: u64) -> String {
+        let app = axum::Router::new().fallback(move || {
+            let bytes = bytes.clone();
+            async move {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                bytes
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("绑定端口");
+        let addr = listener.local_addr().expect("取端口");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}")
     }
 
     #[test]
@@ -355,5 +574,77 @@ mod tests {
             b"old"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn start_rejects_second_job() {
+        let installer = Arc::new(Installer::new());
+        let base = serve_with_delay(b"not-gzip".to_vec(), 1000).await;
+        installer.set_base_url(base);
+        let dir = temp_dir();
+
+        installer.start(dir.clone()).expect("第一个任务");
+        assert!(matches!(
+            installer.start(dir.clone()),
+            Err(StartError::Busy)
+        ));
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while installer.running() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(!installer.running());
+        let job = installer.job().expect("任务记录");
+        assert_eq!(job.phase, "failed");
+        assert!(job.error.as_deref().unwrap_or("").len() > 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn finished_job_reports_done() {
+        let (artifact, gz) = fixture_artifact();
+        let base = serve(gz).await;
+        let dir = temp_dir();
+        let mut installer = Arc::new(Installer::new());
+        Arc::get_mut(&mut installer).expect("独占").artifact = Some(artifact);
+        installer.set_base_url(base);
+
+        installer.start(dir.clone()).expect("启动");
+        let job = wait_job(&installer, "done").await;
+        assert!(job.error.is_none());
+        assert!(crate::tools::is_executable(
+            &crate::tools::dir(&dir).join("ffmpeg")
+        ));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn failed_job_reports_error() {
+        let (mut artifact, gz) = fixture_artifact();
+        artifact.sha256 = "0".repeat(64);
+        let base = serve(gz).await;
+        let dir = temp_dir();
+        let mut installer = Arc::new(Installer::new());
+        Arc::get_mut(&mut installer).expect("独占").artifact = Some(artifact);
+        installer.set_base_url(base);
+
+        installer.start(dir.clone()).expect("启动");
+        let job = wait_job(&installer, "failed").await;
+        assert!(job.error.as_deref().unwrap_or("").contains("SHA-256"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    async fn wait_job(installer: &Arc<Installer>, phase: &str) -> JobSnapshot {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(job) = installer.job() {
+                if job.phase == phase {
+                    return job;
+                }
+                assert_ne!(job.phase, "failed", "任务失败：{:?}", job.error);
+            }
+            assert!(std::time::Instant::now() < deadline, "等待超时：{phase}");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
     }
 }
