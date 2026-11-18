@@ -1,6 +1,6 @@
 //! 质量校验调度：周期、预算与手动入口。
 
-use std::{sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use crate::{config::model::Config, state::AppState};
 
@@ -44,7 +44,8 @@ pub fn scope_exists(config: &Config, scope: &RunScope) -> bool {
 pub(crate) fn probe_mode(value: &str) -> ProbeMode {
     match value {
         "playlist" => ProbeMode::Playlist,
-        "speed" | "full" => ProbeMode::Speed,
+        "speed" => ProbeMode::Speed,
+        "full" => ProbeMode::Full,
         _ => ProbeMode::Reachability,
     }
 }
@@ -54,6 +55,7 @@ fn probe_rank(mode: ProbeMode) -> u8 {
         ProbeMode::Reachability => 0,
         ProbeMode::Playlist => 1,
         ProbeMode::Speed => 2,
+        ProbeMode::Full => 3,
     }
 }
 
@@ -88,7 +90,11 @@ pub(crate) fn required_probe_mode(config: &Config, rules: &EffectiveRules) -> Pr
     mode
 }
 
-pub(crate) fn probe_limits(config: &Config) -> ProbeLimits {
+pub(crate) fn probe_limits(
+    config: &Config,
+    ffprobe_path: PathBuf,
+    ffprobe_ready: bool,
+) -> ProbeLimits {
     ProbeLimits {
         timeout: Duration::from_secs(config.quality.timeout_secs.max(1)),
         speed_timeout: Duration::from_secs(config.quality.speed_timeout_secs.max(1)),
@@ -96,6 +102,12 @@ pub(crate) fn probe_limits(config: &Config) -> ProbeLimits {
         max_sample_bytes: config.quality.sample_bytes_kb.saturating_mul(1024),
         max_sample_secs: config.quality.sample_secs,
         sample_segments: config.quality.sample_segments as usize,
+        ffprobe: config.quality.ffprobe,
+        ffprobe_ready,
+        ffprobe_path,
+        ffprobe_timeout: Duration::from_secs(config.quality.ffprobe_timeout_secs),
+        ffprobe_sample_bytes: (config.quality.ffprobe_sample_kb as usize).saturating_mul(1024),
+        ffprobe_min_speed_mib: config.quality.ffprobe_min_speed_mib,
     }
 }
 
@@ -331,6 +343,27 @@ mod tests {
             required_probe_mode(&config, &rules),
             ProbeMode::Speed,
             "只设置兜底速率也必须测速"
+        );
+    }
+
+    #[test]
+    fn full_probe_mode_stays_full() {
+        let mut config = Config::default();
+        config.quality.probe_mode = "full".into();
+        assert_eq!(probe_mode("full"), ProbeMode::Full);
+        assert_eq!(
+            required_probe_mode(&config, &EffectiveRules::default()),
+            ProbeMode::Full,
+            "配置 full 时沿用 full"
+        );
+        let rules = EffectiveRules {
+            fallback_speed_mib: 0.8,
+            ..Default::default()
+        };
+        assert_eq!(
+            required_probe_mode(&config, &rules),
+            ProbeMode::Full,
+            "兜底速率不得降低 full 档"
         );
     }
 

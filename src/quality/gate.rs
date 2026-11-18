@@ -11,7 +11,7 @@ use crate::{
     http::routes::stream as stream_headers,
     quality::{
         admission::{candidate_rules, url_hash_hex, Candidate, CandidateScope, ProbeSignature},
-        probe::{probe, ProbeMode, ProbeOutput},
+        probe::{probe, ProbeGates, ProbeMode, ProbeOutput},
         rules::{effective_rules, evaluate, EffectiveRules, Measurement, Reason, Verdict},
         schedule::{probe_limits, required_probe_mode, run_limit},
         store::QualityResult,
@@ -593,6 +593,7 @@ fn memo_fingerprint(url: &str, candidate: &Candidate, mode: ProbeMode) -> u64 {
         ProbeMode::Reachability => 0u8,
         ProbeMode::Playlist => 1,
         ProbeMode::Speed => 2,
+        ProbeMode::Full => 3,
     };
     rank.hash(&mut hasher);
     candidate.headers.hash(&mut hasher);
@@ -768,7 +769,8 @@ pub(crate) async fn probe_candidate(
                 &candidate.headers,
                 host_cache_probe_mode(&candidate.rules),
                 candidate.rules.max_resolution_px,
-                &probe_limits(config),
+                &probe_limits(config, state.ffprobe(), state.ffprobe_ready().await),
+                &ProbeGates::unlimited(),
             )
             .await;
             output.measurement = merge_host_measurement(output.measurement, &cached);
@@ -782,7 +784,8 @@ pub(crate) async fn probe_candidate(
                 &candidate.headers,
                 probe_mode,
                 candidate.rules.max_resolution_px,
-                &probe_limits(config),
+                &probe_limits(config, state.ffprobe(), state.ffprobe_ready().await),
+                &ProbeGates::unlimited(),
             )
             .await;
             memo.lock()
