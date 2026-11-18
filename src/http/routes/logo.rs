@@ -404,6 +404,8 @@ pub async fn animate(
     let default_quality = extra_u64(&config, "quality", 80).clamp(1, 100) as u8;
     let report = crate::logo_anim::animate(
         &config.cache.disk_path,
+        &state.ffmpeg(),
+        &state.ffprobe(),
         file,
         effect,
         quality,

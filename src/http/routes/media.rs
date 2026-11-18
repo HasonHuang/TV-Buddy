@@ -67,14 +67,14 @@ pub async fn list(
             "local_path": local,
         }));
     }
-    let ffmpeg = ffmpeg_probe().await;
+    let ffmpeg = ffmpeg_probe(&state).await;
     Ok(Json(json!({
         "kind": kind.dir_name(),
         "count": entries.len(),
         "files": entries,
         "items": items,
         "ffmpeg_installed": ffmpeg.is_some(),
-        "ffmpeg_path": ffmpeg,
+        "ffmpeg_path": ffmpeg.as_ref().map(|path| path.display().to_string()),
         "orphans": [],
     })))
 }
@@ -108,13 +108,24 @@ fn asset_urls(config: &crate::config::Config) -> Vec<String> {
     urls
 }
 
-async fn ffmpeg_probe() -> Option<String> {
-    let output = tokio::process::Command::new("ffmpeg")
+async fn probe_version(path: &FsPath) -> Option<String> {
+    let output = tokio::process::Command::new(path)
         .arg("-version")
         .output()
         .await
         .ok()?;
-    output.status.success().then(|| "ffmpeg".to_string())
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::to_string)
+}
+
+async fn ffmpeg_probe(state: &AppState) -> Option<PathBuf> {
+    let path = state.ffmpeg();
+    probe_version(&path).await.map(|_| path)
 }
 
 /// `POST /panel/api/{assets,subtitles}/upload`——`{"items":[{"name","ext","data"}]}`。
@@ -667,7 +678,7 @@ pub async fn convert(
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(ApiError::bad_request("url 必须是 http(s) 地址"));
     }
-    if ffmpeg_probe().await.is_none() {
+    if ffmpeg_probe(&state).await.is_none() {
         return Err(ApiError::internal("未检测到 ffmpeg"));
     }
     let config = state.snapshot();
@@ -703,13 +714,14 @@ pub async fn convert(
 
     let playlist = root.join("index.m3u8");
     let segments = root.join("seg_%05d.ts");
-    let mut output = run_ffmpeg(&input, &playlist, &segments, true).await;
+    let ffmpeg = state.ffmpeg();
+    let mut output = run_ffmpeg(&input, &playlist, &segments, true, &ffmpeg).await;
     if output
         .as_ref()
         .map(|out| !out.status.success())
         .unwrap_or(true)
     {
-        output = run_ffmpeg(&input, &playlist, &segments, false).await;
+        output = run_ffmpeg(&input, &playlist, &segments, false, &ffmpeg).await;
     }
     let _ = tokio::fs::remove_file(&input).await;
     let output =
@@ -802,8 +814,9 @@ async fn run_ffmpeg(
     playlist: &FsPath,
     segments: &FsPath,
     copy: bool,
+    ffmpeg: &FsPath,
 ) -> std::io::Result<std::process::Output> {
-    let mut command = tokio::process::Command::new("ffmpeg");
+    let mut command = tokio::process::Command::new(ffmpeg);
     command.arg("-y").arg("-i").arg(input);
     if copy {
         command.args(["-c", "copy"]);

@@ -442,7 +442,7 @@ async fn record(state: Arc<AppState>, task: Task, end: i64, stop: Arc<AtomicBool
     let mut format = "ts".to_string();
     if task.format.eq_ignore_ascii_case("mkv") {
         let mkv = dir.join(format!("{stem}.mkv"));
-        let status = tokio::process::Command::new("ffmpeg")
+        let status = tokio::process::Command::new(state.ffmpeg())
             .args(["-y", "-loglevel", "error", "-i"])
             .arg(&ts)
             .args(["-map", "0", "-c", "copy"])
@@ -508,7 +508,7 @@ async fn record_dash(
     if !presentation.is_live {
         return fail(state, task, "录制区间内无可用切片");
     }
-    let probe = tokio::process::Command::new("ffmpeg")
+    let probe = tokio::process::Command::new(state.ffmpeg())
         .arg("-version")
         .output()
         .await;
@@ -636,7 +636,7 @@ async fn record_dash(
     let stamp = now_epoch();
     let stem = format!("{stem_base}_{stamp}");
     let output = dir.join(format!("{stem}.mkv"));
-    let mut command = tokio::process::Command::new("ffmpeg");
+    let mut command = tokio::process::Command::new(state.ffmpeg());
     command.kill_on_drop(true);
     command.args(["-y", "-loglevel", "error", "-i"]).arg(&video);
     if let Some(audio) = &audio {

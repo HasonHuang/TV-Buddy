@@ -261,6 +261,23 @@ impl AppState {
         Ok(())
     }
 
+    /// 数据目录：数据库文件所在目录。面板安装的外部工具放在这里。
+    pub fn data_dir(&self) -> PathBuf {
+        crate::tools::data_dir(&self.db_path)
+    }
+
+    pub fn tools_dir(&self) -> PathBuf {
+        crate::tools::dir(&self.data_dir())
+    }
+
+    pub fn ffmpeg(&self) -> PathBuf {
+        crate::tools::ffmpeg(&self.data_dir())
+    }
+
+    pub fn ffprobe(&self) -> PathBuf {
+        crate::tools::ffprobe(&self.data_dir())
+    }
+
     /// 取当前配置快照。
     pub fn snapshot(&self) -> Arc<Config> {
         self.config.load_full()

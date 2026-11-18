@@ -36,8 +36,11 @@ pub struct Report {
 ///
 /// `frame_ms` 与 `quality` 保留在接口中，目标 v0.8.2 的动效编码固定为
 /// 80/1500 毫秒且无损，不读取这两个值。
+#[allow(clippy::too_many_arguments)]
 pub fn animate(
     cache_dir: &str,
+    ffmpeg: &Path,
+    ffprobe: &Path,
     file: &str,
     effect: &str,
     quality: &str,
@@ -74,7 +77,7 @@ pub fn animate(
     let _ = quality;
 
     let max_size = max_size.clamp(16, 2048);
-    let source = decode(&path)?;
+    let source = decode(&path, ffmpeg, ffprobe)?;
     let (width, height) = scaled_size(source.width, source.height, max_size);
     let source = if width == source.width && height == source.height {
         source
@@ -128,7 +131,7 @@ fn scaled_size(width: u32, height: u32, max_size: u32) -> (u32, u32) {
     )
 }
 
-fn decode(path: &Path) -> Result<Image> {
+fn decode(path: &Path, ffmpeg: &Path, ffprobe: &Path) -> Result<Image> {
     let data = fs::read(path).with_context(|| format!("读 {}", path.display()))?;
     if data.starts_with(b"\x89PNG\r\n\x1a\n") {
         return decode_png(&data);
@@ -136,7 +139,7 @@ fn decode(path: &Path) -> Result<Image> {
     if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP") {
         return decode_webp(&data);
     }
-    decode_ffmpeg(path)
+    decode_ffmpeg(path, ffmpeg, ffprobe)
 }
 
 fn decode_png(data: &[u8]) -> Result<Image> {
@@ -209,9 +212,9 @@ fn decode_webp(data: &[u8]) -> Result<Image> {
     })
 }
 
-fn decode_ffmpeg(path: &Path) -> Result<Image> {
-    let (width, height) = probe_ffmpeg(path)?;
-    let output = Command::new("ffmpeg")
+fn decode_ffmpeg(path: &Path, ffmpeg: &Path, ffprobe: &Path) -> Result<Image> {
+    let (width, height) = probe_ffmpeg(path, ffprobe)?;
+    let output = Command::new(ffmpeg)
         .args(["-v", "error", "-i"])
         .arg(path)
         .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "-"])
@@ -234,8 +237,8 @@ fn decode_ffmpeg(path: &Path) -> Result<Image> {
     })
 }
 
-fn probe_ffmpeg(path: &Path) -> Result<(u32, u32)> {
-    let output = Command::new("ffprobe")
+fn probe_ffmpeg(path: &Path, ffprobe: &Path) -> Result<(u32, u32)> {
+    let output = Command::new(ffprobe)
         .args([
             "-v",
             "error",
