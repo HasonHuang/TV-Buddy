@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from './api';
+import { FfmpegCard, useFfmpeg } from './ffmpeg';
 import { formatUptime } from './format';
 import { Icon } from './icons';
 import { ScriptManagerCard } from './scripts';
@@ -56,7 +57,6 @@ const PROBE_PAGE_SIZE = 10;
 
 export function SystemPage({ embedded = false }: { embedded?: boolean }) {
   const [health, setHealth] = useState<Health | null>(null);
-  const [ffmpeg, setFfmpeg] = useState<{ installed: boolean; version: string | null } | null>(null);
   const [timeshift, setTimeshift] = useState<Timeshift | null>(null);
   const [dash, setDash] = useState<DashSession[]>([]);
   const [scanUrl, setScanUrl] = useState('');
@@ -65,17 +65,16 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
   );
   const [probePage, setProbePage] = useState(0);
   const { node, ok, err } = useToast();
+  const ffmpeg = useFfmpeg();
 
   const load = useCallback(async () => {
     try {
-      const [nextHealth, nextFfmpeg, nextTimeshift, nextDash] = await Promise.all([
+      const [nextHealth, nextTimeshift, nextDash] = await Promise.all([
         api<Health>('GET', '/health'),
-        api<{ installed: boolean; version: string | null }>('GET', '/assets/ffmpeg-status'),
         api<Timeshift>('GET', '/dash-timeshift/status'),
         api<DashSession[]>('GET', '/dash/status').catch(() => []),
       ]);
       setHealth(nextHealth);
-      setFfmpeg(nextFfmpeg);
       setTimeshift(nextTimeshift);
       setDash(Array.isArray(nextDash) ? nextDash : []);
     } catch (error) {
@@ -178,19 +177,6 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
             <dd>
               <code>{location.origin}/health</code>
             </dd>
-            <dt>ffmpeg</dt>
-            <dd>
-              {ffmpeg?.installed ? (
-                <>
-                  <Badge tone="ok">已安装</Badge>
-                  {ffmpeg.version ? (
-                    <span className="muted mono version"> {ffmpeg.version}</span>
-                  ) : null}
-                </>
-              ) : (
-                <Badge tone="warn">未安装（录制只能保留 TS）</Badge>
-              )}
-            </dd>
             <dt>回看缓冲</dt>
             <dd>
               {timeshift?.enabled ? (
@@ -206,6 +192,8 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
           <p className="muted">加载中…</p>
         )}
       </div>
+
+      <FfmpegCard state={ffmpeg} />
 
       <ScriptManagerCard kind="resolver" />
 

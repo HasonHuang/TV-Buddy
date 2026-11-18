@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
+import { FfmpegCard, useFfmpeg } from './ffmpeg';
 import { formatBytes } from './format';
 import { Badge, Confirm, Empty, PageHead, Select, Tip } from './ui';
 
@@ -532,31 +533,15 @@ function CandidatesCard({ ready }: { ready: boolean }) {
 
 /** 素材页：视频、字幕与 ffmpeg 状态。 */
 export function AssetsPage() {
-  const [ffmpeg, setFfmpeg] = useState<{ installed: boolean; version: string | null } | null>(null);
-
-  useEffect(() => {
-    void api<{ installed: boolean; version: string | null }>('GET', '/assets/ffmpeg-status')
-      .then(setFfmpeg)
-      .catch(() => setFfmpeg(null));
-  }, []);
+  const ffmpeg = useFfmpeg();
 
   return (
     <>
       <PageHead icon="assets" title="视频素材" sub="上传、转换与引用本地视频与字幕" />
-      <div className="card">
-        <div className="section-title">运行环境</div>
-        <dl>
-          <dt>ffmpeg</dt>
-          <dd>
-            {ffmpeg?.installed
-              ? `已安装（${ffmpeg.version ?? '版本未知'}）`
-              : '未安装（录制无法转 MKV；remux 不受影响）'}
-          </dd>
-        </dl>
-      </div>
-      <CandidatesCard ready={Boolean(ffmpeg?.installed)} />
-      <Library kind="assets" accept="video/*" ffmpegReady={Boolean(ffmpeg?.installed)} />
-      <ConvertCard ready={Boolean(ffmpeg?.installed)} />
+      <FfmpegCard state={ffmpeg} />
+      <CandidatesCard ready={Boolean(ffmpeg.status?.installed)} />
+      <Library kind="assets" accept="video/*" ffmpegReady={Boolean(ffmpeg.status?.installed)} />
+      <ConvertCard ready={Boolean(ffmpeg.status?.installed)} />
       <Library kind="subtitle" accept=".srt,.ass,.ssa,.vtt" ffmpegReady={true} />
     </>
   );

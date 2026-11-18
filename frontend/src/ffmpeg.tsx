@@ -1,0 +1,195 @@
+/** ffmpeg 状态与面板安装。 */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { api, getRole } from './api';
+import { formatBytes } from './format';
+import { Badge, Confirm } from './ui';
+
+type FfmpegJob = {
+  phase: string;
+  downloaded: number;
+  total: number | null;
+  error: string | null;
+  started_at: number;
+  finished_at: number | null;
+};
+
+type FfmpegStatus = {
+  installed: boolean;
+  version: string | null;
+  source: 'managed' | 'system' | null;
+  path: string | null;
+  managed_installed: boolean;
+  system_installed: boolean;
+  job: FfmpegJob | null;
+};
+
+const PHASE_LABEL: Record<string, string> = {
+  downloading: '下载中',
+  verifying: '校验中',
+  installing: '启用中',
+  done: '完成',
+  failed: '失败',
+};
+
+const ACTIVE = new Set(['downloading', 'verifying', 'installing']);
+
+/** 读取 ffmpeg 状态，并在安装任务运行期间每秒刷新。 */
+export function useFfmpeg() {
+  const [status, setStatus] = useState<FfmpegStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const mounted = useRef(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await api<FfmpegStatus>('GET', '/assets/ffmpeg-status');
+      if (mounted.current) {
+        setStatus(next);
+        setError('');
+      }
+    } catch (err) {
+      if (mounted.current) setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    void refresh();
+    return () => {
+      mounted.current = false;
+    };
+  }, [refresh]);
+
+  const active = status?.job ? ACTIVE.has(status.job.phase) : false;
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setTimeout(() => {
+      void refresh();
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [active, status, refresh]);
+
+  const run = useCallback(
+    async (path: string) => {
+      setBusy(true);
+      setError('');
+      try {
+        await api('POST', path);
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh],
+  );
+
+  const install = useCallback(() => run('/tools/ffmpeg/install'), [run]);
+  const remove = useCallback(() => run('/tools/ffmpeg/remove'), [run]);
+
+  return { status, busy, error, install, remove, refresh };
+}
+
+/** ffmpeg 状态卡：来源、版本、安装与删除。 */
+export function FfmpegCard({ state }: { state: ReturnType<typeof useFfmpeg> }) {
+  const { status, busy, error, install, remove } = state;
+  const [confirming, setConfirming] = useState(false);
+  const admin = getRole() === 'admin';
+  const job = status?.job ?? null;
+  const active = job ? ACTIVE.has(job.phase) : false;
+  const progress =
+    job && job.total ? Math.min(100, Math.round((job.downloaded / job.total) * 100)) : null;
+
+  return (
+    <div className="card">
+      <div className="section-title">ffmpeg</div>
+      <dl>
+        <dt>状态</dt>
+        <dd>
+          {status?.installed ? (
+            <Badge tone="ok">已安装</Badge>
+          ) : (
+            <Badge tone="warn">未安装</Badge>
+          )}
+          {status?.version ? (
+            <span className="muted mono version"> {status.version}</span>
+          ) : null}
+        </dd>
+        {status?.installed ? (
+          <>
+            <dt>来源</dt>
+            <dd>
+              {status.source === 'managed'
+                ? '面板安装'
+                : status.source === 'system'
+                  ? '系统'
+                  : '未知'}
+            </dd>
+            <dt>路径</dt>
+            <dd>
+              <code>{status.path}</code>
+            </dd>
+          </>
+        ) : null}
+      </dl>
+
+      {!status?.installed ? (
+        <p className="muted">
+          未安装时 DASH 录制只能保留 TS，素材转换不可用；remux 不受影响。
+        </p>
+      ) : null}
+      {status?.managed_installed && !status.installed ? (
+        <div className="msg err">面板安装的版本不可用，请重新安装或删除。</div>
+      ) : null}
+      {error ? <div className="msg err">{error}</div> : null}
+      {job && active ? (
+        <p className="muted">
+          {PHASE_LABEL[job.phase] ?? job.phase} · {formatBytes(job.downloaded)}
+          {progress !== null ? `（${progress}%）` : ''}
+        </p>
+      ) : null}
+      {job?.phase === 'failed' ? <div className="msg err">{job.error ?? '安装失败'}</div> : null}
+
+      {admin ? (
+        <div className="row">
+          {!status?.installed ? (
+            <button disabled={busy || active} onClick={() => void install()}>
+              {job?.phase === 'failed' ? '重试' : '安装 ffmpeg'}
+            </button>
+          ) : (
+            <button className="ghost" disabled={busy || active} onClick={() => void install()}>
+              重新安装
+            </button>
+          )}
+          {status?.managed_installed || status?.source === 'managed' ? (
+            <button
+              className="danger"
+              disabled={busy || active}
+              onClick={() => setConfirming(true)}
+            >
+              删除面板版本
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      <p className="muted">来源：eugeneware/ffmpeg-static（GPLv3）</p>
+
+      {confirming ? (
+        <Confirm
+          title="删除面板安装的 ffmpeg？"
+          text="只删除数据目录里的版本。系统安装的 ffmpeg 不受影响。"
+          busy={busy}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false);
+            void remove();
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
