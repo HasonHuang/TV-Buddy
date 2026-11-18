@@ -20,7 +20,10 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     assets::{self, Kind},
-    http::{error::ApiError, ext::PanelAuth},
+    http::{
+        error::ApiError,
+        ext::{PanelAuth, PanelUser},
+    },
     state::AppState,
     subtitle, translate,
 };
@@ -237,32 +240,88 @@ pub async fn raw(
     Ok(response)
 }
 
-/// `GET /panel/api/assets/ffmpeg-status`——检测外部 `ffmpeg`。
-pub async fn ffmpeg_status(PanelAuth(_): PanelAuth) -> Json<Value> {
-    let output = std::process::Command::new("ffmpeg")
-        .arg("-version")
-        .output()
-        .ok();
-    let installed = output
-        .as_ref()
-        .map(|out| out.status.success())
-        .unwrap_or(false);
-    let version = output
-        .filter(|out| out.status.success())
-        .map(|out| {
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .to_string()
-        })
-        .filter(|line| !line.is_empty());
+/// `GET /panel/api/assets/ffmpeg-status`——检测 ffmpeg 来源与安装任务。
+pub async fn ffmpeg_status(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    let data_dir = state.data_dir();
+    let managed = crate::tools::managed_path(&data_dir, "ffmpeg");
+    let managed_version = match &managed {
+        Some(path) => probe_version(path).await,
+        None => None,
+    };
+    let system_version = probe_version(FsPath::new("ffmpeg")).await;
+    let resolved = state.ffmpeg();
+    let installed = if managed.is_some() {
+        managed_version.is_some()
+    } else {
+        system_version.is_some()
+    };
+    let version = if managed.is_some() {
+        managed_version
+    } else {
+        system_version.clone()
+    };
+    let source = if managed.is_some() {
+        Some("managed")
+    } else if system_version.is_some() {
+        Some("system")
+    } else {
+        None
+    };
+    let path = installed.then(|| resolved.display().to_string());
     Json(json!({
         "installed": installed,
         "version": version,
-        "remux_ready": installed,
-        "note": if installed { "可转封装" } else { "未安装 ffmpeg；remux/dash 保持 503 预热" },
+        "source": source,
+        "path": path,
+        "managed_installed": managed.is_some(),
+        "system_installed": system_version.is_some(),
+        "job": state.ffmpeg_install.job(),
+        "remux_ready": true,
+        "note": if installed {
+            "可转封装"
+        } else {
+            "未安装 ffmpeg；DASH 录制转 MKV 与素材转换不可用；remux 不受影响"
+        },
     }))
+}
+
+/// `POST /panel/api/tools/ffmpeg/install`——管理员下载并启用 ffmpeg。
+pub async fn ffmpeg_install(
+    actor: PanelUser,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, ApiError> {
+    if !actor.is_admin {
+        return Err(ApiError::Forbidden("需要管理员权限".into()));
+    }
+    let job = state
+        .ffmpeg_install
+        .start(state.data_dir())
+        .map_err(|error| match error {
+            crate::tools::install::StartError::Busy => ApiError::conflict("安装任务正在进行"),
+            crate::tools::install::StartError::Unsupported(platform) => {
+                ApiError::bad_request(format!("不支持此平台：{platform}"))
+            }
+        })?;
+    Ok(Json(json!({ "ok": true, "job": job })))
+}
+
+/// `POST /panel/api/tools/ffmpeg/remove`——管理员删除面板安装的 ffmpeg。
+pub async fn ffmpeg_remove(
+    actor: PanelUser,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, ApiError> {
+    if !actor.is_admin {
+        return Err(ApiError::Forbidden("需要管理员权限".into()));
+    }
+    if state.ffmpeg_install.running() {
+        return Err(ApiError::conflict("安装任务正在进行"));
+    }
+    let removed = crate::tools::install::remove_managed(&state.data_dir())
+        .map_err(|error| ApiError::internal(format!("删除 ffmpeg 失败: {error:#}")))?;
+    Ok(Json(json!({ "ok": true, "removed": removed })))
 }
 
 /// `GET /panel/api/resolver/scripts`。

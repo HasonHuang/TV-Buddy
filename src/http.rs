@@ -221,6 +221,14 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/panel/api/assets/ffmpeg-status",
             get(routes::media::ffmpeg_status),
         )
+        .route(
+            "/panel/api/tools/ffmpeg/install",
+            post(routes::media::ffmpeg_install),
+        )
+        .route(
+            "/panel/api/tools/ffmpeg/remove",
+            post(routes::media::ffmpeg_remove),
+        )
         .route("/panel/api/assets/list", get(routes::media::list))
         .route("/panel/api/assets/convert", post(routes::media::convert))
         .route(

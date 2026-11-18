@@ -7266,3 +7266,198 @@ async fn deleting_channel_and_group_clears_quality_results() {
         .expect("查询")
         .is_none());
 }
+
+#[tokio::test]
+async fn ffmpeg_status_reports_source_and_job() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let body: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+            .header("authorization", format!("Bearer {session}"))
+            .send()
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("正文"),
+    )
+    .expect("JSON");
+    assert!(body["installed"].is_boolean());
+    assert!(body["managed_installed"].is_boolean());
+    assert!(body["system_installed"].is_boolean());
+    assert!(body["source"].is_null() || body["source"].is_string());
+    assert!(body["path"].is_null() || body["path"].is_string());
+    assert!(body["job"].is_null() || body["job"].is_object());
+    assert_eq!(body["remux_ready"], true);
+}
+
+#[tokio::test]
+async fn ffmpeg_install_requires_admin() {
+    let fixture = fixture().await;
+    let login = |path: &'static str, body: &'static str| {
+        fixture
+            .client
+            .post(format!("{}{path}", fixture.base))
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+    };
+    let session: String = serde_json::from_str::<serde_json::Value>(
+        &login(
+            "/panel/api/login",
+            r#"{"username":"viewer","password":"viewer"}"#,
+        )
+        .await
+        .expect("登录")
+        .text()
+        .await
+        .expect("正文"),
+    )
+    .expect("JSON")["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/tools/ffmpeg/install", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn ffmpeg_remove_deletes_managed_binary() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let tools = fixture.dir.join("tools");
+    std::fs::create_dir_all(&tools).expect("建 tools");
+    std::fs::write(tools.join("ffmpeg"), b"#!/bin/sh\n").expect("写文件");
+    std::fs::write(tools.join(".ffmpeg.part"), b"part").expect("写临时文件");
+    std::fs::write(tools.join(".ffmpeg.unpack"), b"unpack").expect("写临时文件");
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/tools/ffmpeg/remove", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!tools.join("ffmpeg").exists());
+    assert!(!tools.join(".ffmpeg.part").exists());
+    assert!(!tools.join(".ffmpeg.unpack").exists());
+}
+
+#[tokio::test]
+async fn ffmpeg_install_job_fails_on_unreachable_source() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    fixture
+        .state
+        .ffmpeg_install
+        .set_base_url("http://127.0.0.1:1");
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/tools/ffmpeg/install", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let body: serde_json::Value = serde_json::from_str(
+            &fixture
+                .client
+                .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+                .header("authorization", format!("Bearer {session}"))
+                .send()
+                .await
+                .expect("请求")
+                .text()
+                .await
+                .expect("正文"),
+        )
+        .expect("JSON");
+        if body["job"]["phase"] == "failed" {
+            assert!(!body["job"]["error"].as_str().unwrap_or("").is_empty());
+            break;
+        }
+        assert!(Instant::now() < deadline, "任务未失败");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!fixture.dir.join("tools/ffmpeg").exists());
+}
+
+#[tokio::test]
+async fn ffmpeg_install_rejects_second_job() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("绑定端口");
+    let addr = listener.local_addr().expect("取端口");
+    tokio::spawn(async move {
+        let app = axum::Router::new().fallback(|| async {
+            tokio::time::sleep(Duration::from_millis(1000)).await;
+            b"not-gzip".to_vec()
+        });
+        let _ = axum::serve(listener, app).await;
+    });
+    fixture
+        .state
+        .ffmpeg_install
+        .set_base_url(format!("http://{addr}"));
+
+    let post = || {
+        fixture
+            .client
+            .post(format!("{}/panel/api/tools/ffmpeg/install", fixture.base))
+            .header("authorization", format!("Bearer {session}"))
+            .send()
+    };
+    assert_eq!(post().await.expect("第一次").status(), StatusCode::OK);
+    assert_eq!(post().await.expect("第二次").status(), StatusCode::CONFLICT);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while fixture.state.ffmpeg_install.running() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!fixture.state.ffmpeg_install.running());
+}
+
+#[tokio::test]
+async fn ffmpeg_status_does_not_fall_back_from_broken_managed_binary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let tools = fixture.dir.join("tools");
+    std::fs::create_dir_all(&tools).expect("建 tools");
+    let broken = tools.join("ffmpeg");
+    std::fs::write(&broken, b"#!/bin/sh\nexit 1\n").expect("写文件");
+    std::fs::set_permissions(&broken, std::fs::Permissions::from_mode(0o755)).expect("设权限");
+
+    let body: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+            .header("authorization", format!("Bearer {session}"))
+            .send()
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("正文"),
+    )
+    .expect("JSON");
+    assert_eq!(body["managed_installed"], true);
+    assert_eq!(body["installed"], false);
+    assert_eq!(body["source"], "managed");
+    assert!(body["path"].is_null());
+}
