@@ -32,12 +32,20 @@ pub fn managed_path(data_dir: &Path, name: &str) -> Option<PathBuf> {
     is_executable(&path).then_some(path)
 }
 
+/// 面板安装的二进制；只要文件存在就返回，不检查执行位。
+///
+/// 解析用它。文件存在但不可执行时不回退系统版本，让调用方报告明确错误。
+pub fn managed_file(data_dir: &Path, name: &str) -> Option<PathBuf> {
+    let path = dir(data_dir).join(name);
+    path.is_file().then_some(path)
+}
+
 pub fn ffmpeg(data_dir: &Path) -> PathBuf {
-    managed_path(data_dir, "ffmpeg").unwrap_or_else(|| PathBuf::from("ffmpeg"))
+    managed_file(data_dir, "ffmpeg").unwrap_or_else(|| PathBuf::from("ffmpeg"))
 }
 
 pub fn ffprobe(data_dir: &Path) -> PathBuf {
-    managed_path(data_dir, "ffprobe").unwrap_or_else(|| PathBuf::from("ffprobe"))
+    managed_file(data_dir, "ffprobe").unwrap_or_else(|| PathBuf::from("ffprobe"))
 }
 
 #[cfg(test)]
@@ -70,15 +78,21 @@ mod tests {
     }
 
     #[test]
-    fn missing_or_non_executable_falls_back_to_path() {
+    fn missing_falls_back_to_path() {
         let dir = temp_dir();
         assert_eq!(super::ffmpeg(&dir), PathBuf::from("ffmpeg"));
+        let _ = fs::remove_dir_all(dir);
+    }
 
+    #[test]
+    fn non_executable_managed_file_is_still_used() {
+        let dir = temp_dir();
         fs::create_dir_all(super::dir(&dir)).expect("建 tools");
         let managed = super::dir(&dir).join("ffmpeg");
         fs::write(&managed, b"#!/bin/sh\n").expect("写文件");
         fs::set_permissions(&managed, fs::Permissions::from_mode(0o644)).expect("设权限");
-        assert_eq!(super::ffmpeg(&dir), PathBuf::from("ffmpeg"));
+        assert_eq!(super::ffmpeg(&dir), managed);
+        assert_eq!(super::ffprobe(&dir), PathBuf::from("ffprobe"));
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -780,7 +780,8 @@ OpenRC 单元已补 `directory="/opt/tv-buddy"`，`scripts/build-release.sh` 加
 - 面板下载静态 ffmpeg 到 `<数据库目录>/tools/ffmpeg`，校验固定 SHA-256 后原子启用。
 - 解析顺序：面板版本 → 系统 `PATH`。删除面板版本后回退系统版本。
 - 仅管理员。Docker 非 root 可用。下载源可用 `TV_BUDDY_FFMPEG_BASE_URL` 换镜像。
-- 质量门（2026-11-18）：`cargo fmt --check` 通过；`cargo test --offline --all-targets` 679 项通过（550 单元 + 3 main + 126 契约）；`cargo clippy --offline --all-targets` 0 error；`pnpm build` 通过。
+- 质量门（2026-11-18）：`cargo fmt --check` 通过；`cargo test --offline --all-targets` 687 项通过（555 单元 + 3 main + 129 契约）；`cargo clippy --offline --all-targets` 0 error；`pnpm build` 通过。
+- 审查修复：不可执行的面板文件不再回退系统版本；安装轮询抗单次请求失败；删除与安装共用原子占位；补安装日志与 URL/解压/重装/删除权限测试。
 - macOS 本机验收：真实下载 19,246,198 字节，状态为 `source=managed`；素材转换成功；删除后回退 `system`。DASH 录制未跑（需要 DASH 源）。
 
 ---

@@ -256,6 +256,23 @@ impl std::fmt::Display for StartError {
 
 impl std::error::Error for StartError {}
 
+#[derive(Debug)]
+pub enum RemoveError {
+    Busy,
+    Failed(String),
+}
+
+impl std::fmt::Display for RemoveError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Busy => formatter.write_str("安装任务正在进行"),
+            Self::Failed(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for RemoveError {}
+
 /// 单实例安装任务。
 pub struct Installer {
     job: std::sync::Mutex<JobSnapshot>,
@@ -313,6 +330,36 @@ impl Installer {
         self.running.load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    /// 删除面板安装的 ffmpeg。与安装共用同一个占位，避免 TOCTOU。
+    pub fn remove(&self, data_dir: &Path) -> Result<bool, RemoveError> {
+        if self
+            .running
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            return Err(RemoveError::Busy);
+        }
+        let result = remove_managed(data_dir);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        match result {
+            Ok(removed) => {
+                tracing::info!(removed, "删除面板 ffmpeg");
+                Ok(removed)
+            }
+            Err(error) => {
+                let message = format!("{error:#}");
+                tracing::warn!(error = %message, "删除面板 ffmpeg 失败");
+                Err(RemoveError::Failed(message))
+            }
+        }
+    }
+
     /// 启动安装任务。立即返回初始快照。
     pub fn start(self: &Arc<Self>, data_dir: PathBuf) -> Result<JobSnapshot, StartError> {
         if self
@@ -341,6 +388,13 @@ impl Installer {
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .clone();
+        tracing::info!(
+            os = std::env::consts::OS,
+            arch = std::env::consts::ARCH,
+            file = %artifact.file,
+            base = %base,
+            "开始安装 ffmpeg"
+        );
         let snapshot = {
             let mut job = self.job.lock().unwrap_or_else(|error| error.into_inner());
             *job = JobSnapshot {
@@ -378,10 +432,15 @@ impl Installer {
 
     fn update(&self, phase: &str, downloaded: u64, total: Option<u64>) {
         let mut job = self.job.lock().unwrap_or_else(|error| error.into_inner());
+        let changed = job.phase != phase;
         job.phase = phase.into();
         job.downloaded = downloaded;
         if total.is_some() {
             job.total = total;
+        }
+        drop(job);
+        if changed {
+            tracing::info!(phase, downloaded, total = ?total, "ffmpeg 安装阶段");
         }
     }
 
@@ -391,12 +450,15 @@ impl Installer {
             job.finished_at = Some(now_secs());
             match outcome {
                 Ok(()) => {
+                    tracing::info!("ffmpeg 安装完成");
                     job.phase = "done".into();
                     job.error = None;
                 }
                 Err(error) => {
+                    let message = format!("{error:#}");
+                    tracing::warn!(error = %message, "ffmpeg 安装失败");
                     job.phase = "failed".into();
-                    job.error = Some(format!("{error:#}"));
+                    job.error = Some(message);
                 }
             }
         }
@@ -631,6 +693,87 @@ mod tests {
         installer.start(dir.clone()).expect("启动");
         let job = wait_job(&installer, "failed").await;
         assert!(job.error.as_deref().unwrap_or("").contains("SHA-256"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn url_rules_allow_https_and_loopback_http() {
+        assert!(ensure_allowed(&url::Url::parse("https://example.com/x").expect("url")).is_ok());
+        assert!(ensure_allowed(&url::Url::parse("http://127.0.0.1/x").expect("url")).is_ok());
+        assert!(ensure_allowed(&url::Url::parse("http://localhost/x").expect("url")).is_ok());
+        assert!(ensure_allowed(&url::Url::parse("http://example.com/x").expect("url")).is_err());
+        assert!(ensure_allowed(&url::Url::parse("ftp://example.com/x").expect("url")).is_err());
+    }
+
+    #[tokio::test]
+    async fn install_rejects_decompression_error_and_cleans_temp() {
+        use sha2::{Digest, Sha256};
+
+        let bytes = b"not-gzip".to_vec();
+        let artifact = Artifact {
+            file: "ffmpeg-test.gz".into(),
+            bytes: bytes.len() as u64,
+            sha256: hex::encode(Sha256::digest(&bytes)),
+        };
+        let base = serve(bytes).await;
+        let dir = temp_dir();
+
+        let error = install(
+            &reqwest::Client::new(),
+            &base,
+            &artifact,
+            &dir,
+            &|_, _, _| {},
+        )
+        .await
+        .expect_err("必须失败");
+        assert!(format!("{error:#}").contains("解压"));
+        assert!(!crate::tools::dir(&dir).join("ffmpeg").exists());
+        assert!(!crate::tools::dir(&dir).join(".ffmpeg.part").exists());
+        assert!(!crate::tools::dir(&dir).join(".ffmpeg.unpack").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn reinstall_replaces_existing_binary() {
+        let (artifact, gz) = fixture_artifact();
+        let base = serve(gz).await;
+        let dir = temp_dir();
+        let tools = crate::tools::dir(&dir);
+        std::fs::create_dir_all(&tools).expect("建 tools");
+        let dest = tools.join("ffmpeg");
+        std::fs::write(&dest, b"old").expect("写旧文件");
+
+        install(
+            &reqwest::Client::new(),
+            &base,
+            &artifact,
+            &dir,
+            &|_, _, _| {},
+        )
+        .await
+        .expect("重装");
+        assert_ne!(std::fs::read(&dest).expect("读文件"), b"old");
+        assert!(crate::tools::is_executable(&dest));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn remove_is_busy_while_installing() {
+        let installer = Arc::new(Installer::new());
+        let base = serve_with_delay(b"not-gzip".to_vec(), 1000).await;
+        installer.set_base_url(base);
+        let dir = temp_dir();
+
+        installer.start(dir.clone()).expect("启动");
+        assert!(matches!(installer.remove(&dir), Err(RemoveError::Busy)));
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while installer.running() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(!installer.running());
+        installer.remove(&dir).expect("删除");
         let _ = std::fs::remove_dir_all(dir);
     }
 

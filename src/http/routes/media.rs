@@ -247,23 +247,24 @@ pub async fn ffmpeg_status(
 ) -> Json<Value> {
     let data_dir = state.data_dir();
     let managed = crate::tools::managed_path(&data_dir, "ffmpeg");
-    let managed_version = match &managed {
+    let managed_file = crate::tools::managed_file(&data_dir, "ffmpeg");
+    let managed_version = match &managed_file {
         Some(path) => probe_version(path).await,
         None => None,
     };
     let system_version = probe_version(FsPath::new("ffmpeg")).await;
     let resolved = state.ffmpeg();
-    let installed = if managed.is_some() {
+    let installed = if managed_file.is_some() {
         managed_version.is_some()
     } else {
         system_version.is_some()
     };
-    let version = if managed.is_some() {
+    let version = if managed_file.is_some() {
         managed_version
     } else {
         system_version.clone()
     };
-    let source = if managed.is_some() {
+    let source = if managed_file.is_some() {
         Some("managed")
     } else if system_version.is_some() {
         Some("system")
@@ -316,11 +317,15 @@ pub async fn ffmpeg_remove(
     if !actor.is_admin {
         return Err(ApiError::Forbidden("需要管理员权限".into()));
     }
-    if state.ffmpeg_install.running() {
-        return Err(ApiError::conflict("安装任务正在进行"));
-    }
-    let removed = crate::tools::install::remove_managed(&state.data_dir())
-        .map_err(|error| ApiError::internal(format!("删除 ffmpeg 失败: {error:#}")))?;
+    let removed = state
+        .ffmpeg_install
+        .remove(&state.data_dir())
+        .map_err(|error| match error {
+            crate::tools::install::RemoveError::Busy => ApiError::conflict("安装任务正在进行"),
+            crate::tools::install::RemoveError::Failed(message) => {
+                ApiError::internal(format!("删除 ffmpeg 失败: {message}"))
+            }
+        })?;
     Ok(Json(json!({ "ok": true, "removed": removed })))
 }
 

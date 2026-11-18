@@ -54,11 +54,11 @@
 - 面板安装的二进制：`<数据目录>/tools/ffmpeg`。权限 `0755`。
 - 临时文件：`<数据目录>/tools/.ffmpeg.part`。安装成功后再原子改名。
 - 解析顺序：
-  1. 面板安装的 `tools/ffmpeg` 存在且可执行 → 用它。
-  2. 否则用 `PATH` 里的 `ffmpeg`。
+  1. 面板安装的 `tools/ffmpeg` 存在 → 用它。文件存在但不可执行时也不回退。
+  2. 不存在时用 `PATH` 里的 `ffmpeg`。
 - `ffprobe` 用同一规则：`tools/ffprobe` → `PATH`。本特性不写 `tools/ffprobe`。
-- 解析只检查文件存在与可执行位，不每次执行 `-version`。功能探测由状态接口做。
-- 面板版本存在但损坏时不静默回退。状态页报告错误，管理员可重新安装或删除。
+- 解析只检查文件是否存在。功能探测由状态接口做。
+- 面板版本存在但损坏时不静默回退。状态页报告 `installed=false`、`source=managed`，管理员可重新安装或删除。
 
 ### 代码结构
 
@@ -114,7 +114,7 @@
 
 - `GET /panel/api/assets/ffmpeg-status`（现有，扩展）：
   - 保留 `installed`、`version`、`remux_ready`、`note`。
-  - 新增 `source`：`managed` / `system` / `null`。
+  - 新增 `source`：`managed` / `system` / `null`。以 `tools/ffmpeg` 是否存在为准。
   - 新增 `path`：实际执行路径或 `null`。
   - 新增 `managed_installed`：`tools/ffmpeg` 是否存在且可执行。
   - 新增 `system_installed`：`PATH` 里的 ffmpeg 是否可用。

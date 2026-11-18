@@ -40,6 +40,7 @@ export function useFfmpeg() {
   const [status, setStatus] = useState<FfmpegStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [watching, setWatching] = useState(false);
   const mounted = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -48,6 +49,7 @@ export function useFfmpeg() {
       if (mounted.current) {
         setStatus(next);
         setError('');
+        if (!next.job || !ACTIVE.has(next.job.phase)) setWatching(false);
       }
     } catch (err) {
       if (mounted.current) setError(err instanceof Error ? err.message : String(err));
@@ -64,22 +66,24 @@ export function useFfmpeg() {
 
   const active = status?.job ? ACTIVE.has(status.job.phase) : false;
   useEffect(() => {
-    if (!active) return;
-    const timer = window.setTimeout(() => {
+    if (!watching && !active) return;
+    const timer = window.setInterval(() => {
       void refresh();
     }, 1000);
-    return () => window.clearTimeout(timer);
-  }, [active, status, refresh]);
+    return () => window.clearInterval(timer);
+  }, [watching, active, refresh]);
 
   const run = useCallback(
-    async (path: string) => {
+    async (path: string, watch = false) => {
       setBusy(true);
       setError('');
+      if (watch) setWatching(true);
       try {
         await api('POST', path);
         await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
+        if (watch) setWatching(false);
       } finally {
         setBusy(false);
       }
@@ -87,7 +91,7 @@ export function useFfmpeg() {
     [refresh],
   );
 
-  const install = useCallback(() => run('/tools/ffmpeg/install'), [run]);
+  const install = useCallback(() => run('/tools/ffmpeg/install', true), [run]);
   const remove = useCallback(() => run('/tools/ffmpeg/remove'), [run]);
 
   return { status, busy, error, install, remove, refresh };
@@ -141,7 +145,7 @@ export function FfmpegCard({ state }: { state: ReturnType<typeof useFfmpeg> }) {
           未安装时 DASH 录制只能保留 TS，素材转换不可用；remux 不受影响。
         </p>
       ) : null}
-      {status?.managed_installed && !status.installed ? (
+      {status?.source === 'managed' && !status.installed ? (
         <div className="msg err">面板安装的版本不可用，请重新安装或删除。</div>
       ) : null}
       {error ? <div className="msg err">{error}</div> : null}
