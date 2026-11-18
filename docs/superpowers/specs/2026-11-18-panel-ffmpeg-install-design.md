@@ -30,7 +30,7 @@
 
 - 不能覆盖或删除系统安装的 ffmpeg 与 ffprobe。
 - 不能在哈希校验失败时启用下载结果。
-- 不能在只成功一个制品时启用任一制品。
+- 不能在下载、校验或解压阶段只成功一个制品时启用任一制品。改名阶段不同：第二个改名失败时，第一个已启用的文件保留。
 - 不能把用户输入拼进 shell 命令。
 - 不能在 HTTP 请求内同步下载几十 MB 文件。
 - 不能把二进制放进缓存目录，避免缓存回收误删。
@@ -131,7 +131,7 @@
   - ffmpeg 行新增 `path`：实际执行路径或 `null`。
   - ffmpeg 行新增 `managed_installed`：`tools/ffmpeg` 是否存在且可执行。
   - ffmpeg 行新增 `system_installed`：`PATH` 里的 ffmpeg 是否可用。
-  - ffprobe 行新增 `ffprobe_installed`、`ffprobe_version`、`ffprobe_source`、`ffprobe_path`。判定规则与 ffmpeg 行相同。
+  - ffprobe 行新增 `ffprobe_installed`、`ffprobe_version`、`ffprobe_source`、`ffprobe_path`。判定规则与 ffmpeg 行相同。差异：`ffprobe_path` 始终是字符串（回退到 `PATH` 中的命令名）；ffmpeg 的 `path` 在未安装时为 `null`。
   - ffprobe 行新增 `ffprobe_managed_installed`：只检查 `tools/ffprobe` 文件是否存在，不检查执行位。ffmpeg 行的 `managed_installed` 要求文件可执行。
   - 新增 `job`：当前或最近一次安装任务的状态；没有任务时为 `null`。
 - `POST /panel/api/tools/ffmpeg/install`：仅管理员。启动任务，立即返回 `{ok, job}`。不支持平台返回 `400`；任务运行中返回 `409`。
@@ -169,7 +169,7 @@
   - 版本前缀：`ffprobe version` 与 `ffmpeg version` 分别校验。
   - 删除：删除 `tools/ffmpeg` 与 `tools/ffprobe`；系统路径不受影响。
   - 删除时清理两个制品的 `.part` 与 `.unpack`。
-  - 第二个制品失败时，第一个制品不启用。
+  - 第二个制品下载、校验或解压失败时，第一个制品不启用。
   - 安装进度总量等于两个制品大小之和。
 - 集成：
   - 本地 HTTP 服务提供两份测试用压缩二进制与固定哈希，注入安装源，走完整任务状态机。

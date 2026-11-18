@@ -1053,6 +1053,7 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
   "next_run_at": 1793501020,
   "rules": {
     "min_speed_mib": 1.0,
+    "fallback_speed_mib": 0.5,
     "max_delay_ms": 3000,
     "min_resolution": "1280x720",
     "max_resolution": "3840x2160",
@@ -1459,7 +1460,7 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 | 模块 | 用例 |
 | --- | --- |
 | 规则解析 | 频道 > 分组 > 源 > 全局的逐字段覆盖。三态 `enabled`。 |
-| 判定 | 每个 `reason` 的边界。分辨率未知放行。`max_resolution` 包含上限。`resolution_speed_map` 覆盖 `min_speed_mib`。 |
+| 判定 | 每个 `reason` 的边界。分辨率未知放行。`max_resolution` 包含上限。`resolution_speed_map` 覆盖 `min_speed_mib`；未命中时用兜底速率。 |
 | 动作 | `hide` / `mark` / `off` / `retain` / `supply` / 固定保留。 |
 | 宽限 | `first_fail_at` 固定。重复失败不重置。超过 `stale_keep_secs` 隐藏。成功后清零并恢复。 |
 | 退避 | 连续失败后的 `next_check_at`。成功清零。 |

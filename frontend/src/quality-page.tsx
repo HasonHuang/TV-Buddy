@@ -580,15 +580,24 @@ function RulesTab({
   const scheduleMode = asText(draft, 'quality.schedule') === 'cron' ? 'cron' : 'interval';
   const configuredProbe = asText(draft, 'quality.probe_mode');
   const ffprobeEnabled = asBool(draft, 'quality.ffprobe');
-  const speedRule = asNumber(draft, 'quality.rules.min_speed_mib') > 0;
+  const speedRule =
+    asNumber(draft, 'quality.rules.min_speed_mib') > 0 ||
+    asNumber(draft, 'quality.rules.fallback_speed_mib') > 0 ||
+    speedRows.some((row) => Number(row.speed) > 0);
   const resolutionRule =
     asText(draft, 'quality.rules.min_resolution').trim() !== '' ||
     asText(draft, 'quality.rules.max_resolution').trim() !== '';
-  const actualProbe = speedRule
-    ? 'speed'
-    : resolutionRule && configuredProbe === 'reachability'
-      ? 'playlist'
-      : configuredProbe;
+  // 对齐后端 `required_probe_mode`：完整档不因规则降级，只在 ffprobe 关闭时降为测速。
+  const actualProbe =
+    configuredProbe === 'full'
+      ? ffprobeEnabled
+        ? 'full'
+        : 'speed'
+      : speedRule
+        ? 'speed'
+        : resolutionRule && configuredProbe === 'reachability'
+          ? 'playlist'
+          : configuredProbe;
   const probeHint =
     configuredProbe === 'full' && !ffprobeEnabled
       ? '实际档位：测速（ffprobe 未启用）'

@@ -166,7 +166,11 @@ export function FfmpegCard({ state }: { state: ReturnType<typeof useFfmpeg> }) {
 
       {!status?.installed || !status?.ffprobe_installed ? (
         <p className="muted">
-          未安装时 DASH 录制只能保留 TS，素材转换与质量探测不可用；remux 不受影响。
+          {!status?.installed && !status?.ffprobe_installed
+            ? 'ffmpeg 与 ffprobe 都未安装：DASH 录制只能保留 TS，素材转换与分辨率识别不可用；remux 不受影响。'
+            : !status?.installed
+              ? 'ffmpeg 未安装：DASH 录制只能保留 TS，素材转换不可用；分辨率识别仍可用；remux 不受影响。'
+              : 'ffprobe 未安装：分辨率识别不可用；素材转换与 remux 不受影响。'}
         </p>
       ) : null}
       {(status?.source === 'managed' && !status.installed) ||

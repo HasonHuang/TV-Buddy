@@ -306,15 +306,20 @@ pub async fn ffmpeg_status(
         "ffprobe_managed_installed": ffprobe_managed_file.is_some(),
         "job": state.ffmpeg_install.job(),
         "remux_ready": true,
-        "note": if installed {
-            "可转封装"
-        } else {
-            "未安装 ffmpeg；DASH 录制转 MKV 与素材转换不可用；remux 不受影响"
+        "note": match (installed, ffprobe_installed) {
+            (true, true) => "可转封装；分辨率识别可用",
+            (true, false) => "未安装 ffprobe；分辨率识别不可用；remux 不受影响",
+            (false, true) => {
+                "未安装 ffmpeg；DASH 录制转 MKV 与素材转换不可用；分辨率识别可用；remux 不受影响"
+            }
+            (false, false) => {
+                "未安装 ffmpeg / ffprobe；DASH 录制转 MKV、素材转换与分辨率识别不可用；remux 不受影响"
+            }
         },
     }))
 }
 
-/// `POST /panel/api/tools/ffmpeg/install`——管理员下载并启用 ffmpeg。
+/// `POST /panel/api/tools/ffmpeg/install`——管理员下载并启用 ffmpeg / ffprobe。
 pub async fn ffmpeg_install(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -346,7 +351,7 @@ pub async fn ffmpeg_install(
     Ok(Json(json!({ "ok": true, "job": job })))
 }
 
-/// `POST /panel/api/tools/ffmpeg/remove`——管理员删除面板安装的 ffmpeg。
+/// `POST /panel/api/tools/ffmpeg/remove`——管理员删除面板安装的 ffmpeg / ffprobe。
 pub async fn ffmpeg_remove(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -360,7 +365,7 @@ pub async fn ffmpeg_remove(
         .map_err(|error| match error {
             crate::tools::install::RemoveError::Busy => ApiError::conflict("安装任务正在进行"),
             crate::tools::install::RemoveError::Failed(message) => {
-                ApiError::internal(format!("删除 ffmpeg 失败: {message}"))
+                ApiError::internal(format!("删除 ffmpeg / ffprobe 失败: {message}"))
             }
         })?;
     state.invalidate_ffprobe_ready().await;

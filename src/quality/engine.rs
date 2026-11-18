@@ -140,7 +140,7 @@ pub fn due_targets(
             let current_hash = rule_hash(&rules, probe);
             let next_due = previous
                 .as_ref()
-                .map_or(true, |result| result.next_check_at <= now);
+                .is_none_or(|result| result.next_check_at <= now);
             let stale_hash = previous.as_ref().is_some_and(|result| {
                 result.rule_hash.is_empty() || result.rule_hash != current_hash
             });

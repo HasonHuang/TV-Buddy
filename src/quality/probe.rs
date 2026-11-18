@@ -370,7 +370,7 @@ fn parse_ffprobe_json(stdout: &[u8]) -> Option<(u16, u16)> {
         let width = stream.get("width")?.as_u64()?;
         let height = stream.get("height")?.as_u64()?;
         (width > 0 && height > 0 && width <= u16::MAX as u64 && height <= u16::MAX as u64)
-            .then(|| (width as u16, height as u16))
+            .then_some((width as u16, height as u16))
     })
 }
 
@@ -497,6 +497,7 @@ pub async fn probe(
     let url = clean_url(url);
     let mut total_bytes = 0u64;
     let effective_mode = if mode == ProbeMode::Full && !limits.ffprobe {
+        tracing::debug!(source = "unknown", "ffprobe 未启用，完整档按测速执行");
         ProbeMode::Speed
     } else {
         mode
@@ -740,15 +741,33 @@ pub async fn probe(
     let mut capture: Option<Vec<u8>> = None;
     let mut captured: Option<Vec<u8>> = None;
     let geometry_unknown = measurement.width.is_none() || measurement.height.is_none();
-    if effective_mode == ProbeMode::Full
-        && limits.ffprobe
-        && limits.ffprobe_ready
-        && geometry_unknown
-        && reserve_ffprobe_attempt(&gates.ffprobe_counter, gates.max_ffprobe_per_run)
-    {
-        if let Ok(permit) = gates.probe_semaphore.clone().try_acquire_owned() {
-            capture_permit = Some(permit);
-            capture = Some(Vec::with_capacity(limits.ffprobe_sample_bytes));
+    if effective_mode == ProbeMode::Full && limits.ffprobe && geometry_unknown {
+        if !limits.ffprobe_ready {
+            tracing::debug!(
+                source = "unknown",
+                reason = "ffprobe 未就绪",
+                "跳过分辨率识别"
+            );
+        } else if !reserve_ffprobe_attempt(&gates.ffprobe_counter, gates.max_ffprobe_per_run) {
+            tracing::debug!(
+                source = "unknown",
+                reason = "单轮上限达到",
+                "跳过分辨率识别"
+            );
+        } else {
+            match gates.probe_semaphore.clone().try_acquire_owned() {
+                Ok(permit) => {
+                    capture_permit = Some(permit);
+                    capture = Some(Vec::with_capacity(limits.ffprobe_sample_bytes));
+                }
+                Err(_) => {
+                    tracing::debug!(
+                        source = "unknown",
+                        reason = "并发许可不可用",
+                        "跳过分辨率识别"
+                    );
+                }
+            }
         }
     }
     for segment in segments {
