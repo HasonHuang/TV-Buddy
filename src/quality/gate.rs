@@ -503,6 +503,13 @@ pub async fn filter_plan(
         .filter(|cursor| !cursor.is_empty());
     // 整轮只检测一次 ffprobe 可用性。
     let probe = ProbeSignature::from_config(config, state.ffprobe_ready().await);
+    let gates = ProbeGates {
+        probe_semaphore: Arc::new(tokio::sync::Semaphore::new(
+            config.quality.probe_concurrency as usize,
+        )),
+        ffprobe_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        max_ffprobe_per_run: config.quality.max_ffprobe_per_run,
+    };
     let max_new = run_limit(
         config.quality.budget_mb_per_run,
         8.0,
@@ -536,7 +543,7 @@ pub async fn filter_plan(
         }
         let mut candidate = candidate.clone();
         candidate.previous_first_fail_at = previous_first_fail(state, &candidate);
-        let outcome = probe_candidate(state, config, &candidate, &memo, false).await;
+        let outcome = probe_candidate(state, config, &candidate, &memo, false, &gates).await;
         let probe_error = outcome.measurement.probe_error;
         outcomes.push(outcome);
         if probe_error {
@@ -551,7 +558,7 @@ pub async fn filter_plan(
         }
         let mut candidate = candidate;
         candidate.previous_first_fail_at = previous_first_fail(state, &candidate);
-        let outcome = probe_candidate(state, config, &candidate, &memo, false).await;
+        let outcome = probe_candidate(state, config, &candidate, &memo, false, &gates).await;
         outcomes.push(outcome);
         processed += 1;
     }
@@ -624,6 +631,16 @@ fn host_cache_key(url: &str, candidate: &Candidate) -> Option<u64> {
         proxy.pass.hash(&mut hasher);
     }
     Some(hasher.finish())
+}
+
+/// Full 档启用 ffprobe 时，Host 缓存会跳过逐频道分辨率识别，因此必须停用。
+fn should_use_host_cache(
+    candidate: &Candidate,
+    mode: ProbeMode,
+    ffprobe: bool,
+    dash_fallback: bool,
+) -> bool {
+    candidate.rules.host_cache && !dash_fallback && !(mode == ProbeMode::Full && ffprobe)
 }
 
 /// Host 缓存命中时只复用速率与延迟。可达性仍逐频道探测。
@@ -704,6 +721,7 @@ pub(crate) async fn probe_candidate(
     candidate: &Candidate,
     memo: &std::sync::Mutex<RunMemo>,
     resolve: bool,
+    gates: &ProbeGates,
 ) -> CandidateOutcome {
     let probe_url = if resolve {
         match resolved_probe_url(state, config, candidate).await {
@@ -741,18 +759,19 @@ pub(crate) async fn probe_candidate(
     let (url_cached, host_cached) = {
         let memo = memo.lock().unwrap_or_else(|error| error.into_inner());
         let url_cached = memo.get(key).cloned();
-        let host_cached = (candidate.rules.host_cache && !dash_fallback)
-            .then(|| {
-                host_key
-                    .and_then(|key| memo.get_host(key))
-                    .filter(|measurement| {
-                        measurement.reachable
-                            && !measurement.probe_error
-                            && measurement.speed_mib.is_some()
-                    })
-                    .cloned()
-            })
-            .flatten();
+        let host_cached =
+            should_use_host_cache(candidate, probe_mode, config.quality.ffprobe, dash_fallback)
+                .then(|| {
+                    host_key
+                        .and_then(|key| memo.get_host(key))
+                        .filter(|measurement| {
+                            measurement.reachable
+                                && !measurement.probe_error
+                                && measurement.speed_mib.is_some()
+                        })
+                        .cloned()
+                })
+                .flatten();
         (url_cached, host_cached)
     };
     let output = match (url_cached, host_cached) {
@@ -770,7 +789,7 @@ pub(crate) async fn probe_candidate(
                 host_cache_probe_mode(&candidate.rules),
                 candidate.rules.max_resolution_px,
                 &probe_limits(config, state.ffprobe(), state.ffprobe_ready().await),
-                &ProbeGates::unlimited(),
+                gates,
             )
             .await;
             output.measurement = merge_host_measurement(output.measurement, &cached);
@@ -785,7 +804,7 @@ pub(crate) async fn probe_candidate(
                 probe_mode,
                 candidate.rules.max_resolution_px,
                 &probe_limits(config, state.ffprobe(), state.ffprobe_ready().await),
-                &ProbeGates::unlimited(),
+                gates,
             )
             .await;
             memo.lock()
@@ -1359,6 +1378,30 @@ mod tests {
         assert!(matches!(
             decide(plan_with(&[]), &targets, &outcomes, &guard, &probe()),
             GateOutcome::Apply { .. }
+        ));
+    }
+
+    #[test]
+    fn full_ffprobe_skips_host_cache() {
+        let mut candidate = candidate("sync:s1:c", false);
+        candidate.rules.host_cache = true;
+        assert!(!should_use_host_cache(
+            &candidate,
+            ProbeMode::Full,
+            true,
+            false
+        ));
+        assert!(should_use_host_cache(
+            &candidate,
+            ProbeMode::Full,
+            false,
+            false
+        ));
+        assert!(should_use_host_cache(
+            &candidate,
+            ProbeMode::Speed,
+            true,
+            false
         ));
     }
 }

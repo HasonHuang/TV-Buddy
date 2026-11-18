@@ -12,6 +12,7 @@ use crate::{
     quality::{
         admission::{rule_hash, url_hash_hex, Candidate, CandidateScope, ProbeSignature},
         gate::{probe_candidate, CandidateOutcome, Guard, RunMemo},
+        probe::ProbeGates,
         rules::{effective_rules, Reason},
         state::{Entry, RunScope, FLAG_OK, FLAG_REACHABLE},
         store::{QualityResult, QualityStore},
@@ -353,6 +354,13 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
     };
     // 整轮只检测一次 ffprobe 可用性。
     let probe = ProbeSignature::from_config(&config, state.ffprobe_ready().await);
+    let gates = ProbeGates {
+        probe_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+            config.quality.probe_concurrency as usize,
+        )),
+        ffprobe_counter: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        max_ffprobe_per_run: config.quality.max_ffprobe_per_run,
+    };
     let targets = due_targets(
         &config,
         &state.quality_store,
@@ -393,11 +401,13 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
         let memo_ref = &memo;
         let config_ref = &config;
         let state_ref = state;
+        let gates_ref = &gates;
         let jobs = chunk.iter().cloned().map(|candidate| {
             let state = state_ref;
             let config = config_ref;
             let memo = memo_ref;
-            async move { probe_candidate(state, config, &candidate, memo, true).await }
+            let gates = gates_ref;
+            async move { probe_candidate(state, config, &candidate, memo, true, gates).await }
         });
         for outcome in futures_util::future::join_all(jobs).await {
             bytes = bytes.saturating_add(outcome.bytes);
