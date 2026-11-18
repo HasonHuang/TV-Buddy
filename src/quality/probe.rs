@@ -388,6 +388,27 @@ fn reserve_ffprobe_attempt(counter: &std::sync::atomic::AtomicU64, max: u64) -> 
     true
 }
 
+/// 读取管道。只保留上限内的字节，其余继续读取并丢弃，避免子进程阻塞。
+async fn drain_capped<R>(mut reader: R, cap: usize) -> Result<Vec<u8>, String>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+    let mut retained = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let read = match reader.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(error) => return Err(error.to_string()),
+        };
+        let room = cap.saturating_sub(retained.len());
+        let take = read.min(room);
+        retained.extend_from_slice(&chunk[..take]);
+    }
+    Ok(retained)
+}
+
 /// 用采集的切片字节运行 ffprobe，识别分辨率。字节只经标准输入传递。
 async fn detect_resolution(
     path: &std::path::Path,
@@ -396,6 +417,9 @@ async fn detect_resolution(
 ) -> Result<(u16, u16), String> {
     use std::process::Stdio;
     use tokio::io::AsyncWriteExt;
+
+    const STDOUT_CAP: usize = 64 * 1024;
+    const STDERR_CAP: usize = 4 * 1024;
 
     let mut command = tokio::process::Command::new(path);
     command.arg("-v").arg("error");
@@ -424,28 +448,39 @@ async fn detect_resolution(
         .stdin
         .take()
         .ok_or_else(|| "ffprobe 标准输入不可用".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "ffprobe 标准输出不可用".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "ffprobe 标准错误不可用".to_string())?;
 
-    // 超时覆盖写入与等待。子进程不读标准输入时，写入不会永久阻塞。
-    let output = tokio::time::timeout(timeout, async move {
-        stdin
-            .write_all(bytes)
-            .await
-            .map_err(|error| error.to_string())?;
-        drop(stdin);
-        child
-            .wait_with_output()
-            .await
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|_| "ffprobe 超时".to_string())??;
+    // 超时覆盖写入、两条管道的读取与等待。子进程不读标准输入时，写入不会永久阻塞。
+    let interaction = async move {
+        let (stdout, stderr, _) = tokio::try_join!(
+            drain_capped(stdout, STDOUT_CAP),
+            drain_capped(stderr, STDERR_CAP),
+            async {
+                let _ = stdin.write_all(bytes).await;
+                drop(stdin);
+                Ok::<(), String>(())
+            }
+        )?;
+        let status = child.wait().await.map_err(|error| error.to_string())?;
+        Ok::<_, String>((status, stdout, stderr))
+    };
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let summary: String = stderr.trim().chars().take(4096).collect();
-        return Err(format!("ffprobe 失败: {summary}"));
+    let (status, stdout, stderr) = tokio::time::timeout(timeout, interaction)
+        .await
+        .map_err(|_| "ffprobe 超时".to_string())??;
+
+    if !status.success() {
+        let summary = String::from_utf8_lossy(&stderr);
+        return Err(format!("ffprobe 失败: {}", summary.trim()));
     }
-    parse_ffprobe_json(&output.stdout).ok_or_else(|| "ffprobe 无视频流".to_string())
+    parse_ffprobe_json(&stdout).ok_or_else(|| "ffprobe 无视频流".to_string())
 }
 
 /// 探测一个地址。
@@ -713,7 +748,7 @@ pub async fn probe(
     {
         if let Ok(permit) = gates.probe_semaphore.clone().try_acquire_owned() {
             capture_permit = Some(permit);
-            capture = Some(Vec::new());
+            capture = Some(Vec::with_capacity(limits.ffprobe_sample_bytes));
         }
     }
     for segment in segments {
@@ -1169,6 +1204,21 @@ high/index.m3u8\n";
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[tokio::test]
+    async fn detect_resolution_discards_extra_stdout() {
+        let dir = std::env::temp_dir().join(format!("tvb-ffprobe-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("建目录");
+        let script = write_script(
+            &dir,
+            b"#!/bin/sh\ncat > /dev/null\nprintf '{\"streams\":[{\"codec_type\":\"video\",\"width\":1280,\"height\":720}]}'\nprintf '%200000s' ''\n",
+        );
+
+        // 超过 64 KiB 的输出必须继续读取并丢弃。否则子进程会阻塞在满管道上。
+        let result = detect_resolution(&script, &[0x47; 400], Duration::from_secs(2)).await;
+        assert_eq!(result, Ok((1280, 720)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// 提供媒体清单与一个 TS 切片。清单不含 RESOLUTION。
     async fn serve_hls_segment() -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1187,7 +1237,7 @@ high/index.m3u8\n";
                 let (mime, payload): (&str, Vec<u8>) = if request.starts_with("GET /live.m3u8 ") {
                     (
                         "application/vnd.apple.mpegurl",
-                        b"#EXTM3U\n#EXTINF:1,\nseg1.ts\n#EXTINF:1,\nseg2.ts\n".to_vec(),
+                        b"#EXTM3U\n#EXTINF:1,\nseg1\n#EXTINF:1,\nseg2\n".to_vec(),
                     )
                 } else {
                     let mut segment = vec![0u8; 512];
@@ -1275,6 +1325,43 @@ high/index.m3u8\n";
         assert!(out.measurement.reachable);
         assert!(out.measurement.width.is_none());
         assert!(!marker.exists(), "ffprobe 关闭时不得运行进程");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn full_mode_keeps_speed_when_ffprobe_fails() {
+        let dir = std::env::temp_dir().join(format!("tvb-ffprobe-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("建目录");
+        let script = write_script(
+            &dir,
+            b"#!/bin/sh\ncat > /dev/null\nprintf 'bad input' >&2\nexit 1\n",
+        );
+        let client = reqwest::Client::new();
+        let limits = ProbeLimits {
+            ffprobe: true,
+            ffprobe_ready: true,
+            ffprobe_path: script,
+            ..ProbeLimits::for_test()
+        };
+        let url = serve_hls_segment().await;
+        let out = probe(
+            &client,
+            &url,
+            &[],
+            ProbeMode::Full,
+            None,
+            &limits,
+            &ProbeGates::unlimited(),
+        )
+        .await;
+        assert!(out.measurement.reachable);
+        assert!(!out.measurement.probe_error, "ffprobe 失败不得判探测错误");
+        assert!(
+            out.measurement.speed_mib.is_some(),
+            "ffprobe 失败不得丢失测速结果"
+        );
+        assert_eq!(out.measurement.width, None);
+        assert_eq!(out.measurement.height, None);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
