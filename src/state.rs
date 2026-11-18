@@ -76,6 +76,8 @@ pub struct AppState {
     pub cache_dir: PathBuf,
     /// 面板 ffmpeg 安装任务。
     pub ffmpeg_install: Arc<crate::tools::install::Installer>,
+    /// ffprobe 可用性缓存。`None` 表示尚未检测。
+    pub ffprobe_ready: tokio::sync::RwLock<Option<bool>>,
     /// 运行指标。
     pub stats: Stats,
     /// 出网字节、在线观众与资源占用。
@@ -207,6 +209,7 @@ impl AppState {
             history,
             cache_dir,
             ffmpeg_install: Arc::new(crate::tools::install::Installer::new()),
+            ffprobe_ready: tokio::sync::RwLock::new(None),
             stats: Stats::default(),
             metrics: Arc::new(crate::metrics::Metrics::new()),
             watchdog: Watchdog::new(),
@@ -279,6 +282,31 @@ impl AppState {
 
     pub fn ffprobe(&self) -> PathBuf {
         crate::tools::ffprobe(&self.data_dir())
+    }
+
+    /// ffprobe 是否可用。首次检测后缓存结果。
+    pub async fn ffprobe_ready(&self) -> bool {
+        if let Some(value) = *self.ffprobe_ready.read().await {
+            return value;
+        }
+        let mut guard = self.ffprobe_ready.write().await;
+        if let Some(value) = *guard {
+            return value;
+        }
+        let output = tokio::process::Command::new(self.ffprobe())
+            .arg("-version")
+            .output()
+            .await;
+        let value = output
+            .map(|output| output.status.success() && ffprobe_version_ok(&output.stdout))
+            .unwrap_or(false);
+        *guard = Some(value);
+        value
+    }
+
+    /// 清除 ffprobe 可用性缓存。安装或删除 ffprobe 后调用。
+    pub async fn invalidate_ffprobe_ready(&self) {
+        *self.ffprobe_ready.write().await = None;
     }
 
     /// 取当前配置快照。
@@ -619,6 +647,11 @@ impl AppState {
     }
 }
 
+/// 输出是否来自 ffprobe。`ffmpeg -version` 不含该标记。
+fn ffprobe_version_ok(stdout: &[u8]) -> bool {
+    String::from_utf8_lossy(stdout).contains("ffprobe version")
+}
+
 /// 收集配置里的 `gid/cid`。统计中间件用它判断请求是否指向真实频道。
 fn channel_keys_of(config: &Config) -> HashSet<String> {
     let mut keys = HashSet::new();
@@ -793,6 +826,12 @@ mod tests {
             "宽限内保留不得恢复为失败状态"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ffprobe_version_marker_is_required() {
+        assert!(ffprobe_version_ok(b"ffprobe version 6.1"));
+        assert!(!ffprobe_version_ok(b"ffmpeg version 6.1"));
     }
 }
 

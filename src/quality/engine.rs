@@ -10,7 +10,7 @@ use anyhow::Result;
 use crate::{
     config::model::{Channel, Config, Group},
     quality::{
-        admission::{url_hash_hex, Candidate, CandidateScope},
+        admission::{rule_hash, url_hash_hex, Candidate, CandidateScope, ProbeSignature},
         gate::{probe_candidate, CandidateOutcome, Guard, RunMemo},
         rules::{effective_rules, Reason},
         state::{Entry, RunScope, FLAG_OK, FLAG_REACHABLE},
@@ -90,6 +90,7 @@ pub fn due_targets(
     limit: usize,
     measure_only: bool,
     include_not_due: bool,
+    probe: &ProbeSignature,
 ) -> Result<Vec<Candidate>> {
     let mut items = Vec::new();
     let mut order = 0usize;
@@ -135,7 +136,14 @@ pub fn due_targets(
                 }
             }
             let next_check_at = previous.as_ref().map_or(0, |result| result.next_check_at);
-            if !include_not_due && next_check_at > now {
+            let current_hash = rule_hash(&rules, probe);
+            let next_due = previous
+                .as_ref()
+                .map_or(true, |result| result.next_check_at <= now);
+            let stale_hash = previous.as_ref().is_some_and(|result| {
+                result.rule_hash.is_empty() || result.rule_hash != current_hash
+            });
+            if !include_not_due && !next_due && !stale_hash {
                 continue;
             }
             items.push((
@@ -214,7 +222,12 @@ pub fn removal_allowed(config: &Config, removal: &Removal) -> bool {
 }
 
 /// 判定一组探测结果。
-pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) -> EngineDecision {
+pub fn decide(
+    outcomes: &[CandidateOutcome],
+    measure_only: bool,
+    guard: &Guard,
+    probe: &ProbeSignature,
+) -> EngineDecision {
     let now = crate::schedule::now_epoch();
     let mut decision = EngineDecision {
         tested: outcomes.len(),
@@ -246,7 +259,7 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
             if candidate.scope == CandidateScope::Manual {
                 decision
                     .results
-                    .push(result_for(candidate, outcome, "kept", now));
+                    .push(result_for(candidate, outcome, "kept", now, probe));
             }
             decision.kept += 1;
             continue;
@@ -256,7 +269,7 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
                 if outcome.verdict.reason == Reason::ProbeError {
                     decision
                         .results
-                        .push(result_for(candidate, outcome, "kept", now));
+                        .push(result_for(candidate, outcome, "kept", now, probe));
                     decision.kept += 1;
                     continue;
                 }
@@ -282,7 +295,7 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
                 }
                 decision
                     .results
-                    .push(result_for(candidate, outcome, action, now));
+                    .push(result_for(candidate, outcome, action, now, probe));
             }
             CandidateScope::Sync => {
                 if outcome.verdict.ok {
@@ -290,22 +303,26 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
                     decision.admitted += 1;
                     decision
                         .results
-                        .push(result_for(candidate, outcome, action, now));
+                        .push(result_for(candidate, outcome, action, now, probe));
                 } else if !candidate.sync_follow {
                     // 固定频道保留管理员编辑的字段，不参与移出。
                     decision.kept += 1;
                     decision
                         .results
-                        .push(result_for(candidate, outcome, "kept", now));
+                        .push(result_for(candidate, outcome, "kept", now, probe));
                 } else if outcome.verdict.reason == Reason::ProbeError {
                     decision.skipped += 1;
                     decision
                         .results
-                        .push(result_for(candidate, outcome, "skipped", now));
+                        .push(result_for(candidate, outcome, "skipped", now, probe));
                 } else if paused {
-                    decision
-                        .results
-                        .push(result_for(candidate, outcome, "removal_paused", now));
+                    decision.results.push(result_for(
+                        candidate,
+                        outcome,
+                        "removal_paused",
+                        now,
+                        probe,
+                    ));
                 } else {
                     decision.removed += 1;
                     decision.removals.push(Removal {
@@ -315,7 +332,7 @@ pub fn decide(outcomes: &[CandidateOutcome], measure_only: bool, guard: &Guard) 
                     });
                     decision
                         .results
-                        .push(result_for(candidate, outcome, "removed", now));
+                        .push(result_for(candidate, outcome, "removed", now, probe));
                 }
             }
         }
@@ -334,6 +351,8 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
     } else {
         usize::try_from(config.quality.max_channels_per_run).unwrap_or(usize::MAX)
     };
+    // 整轮只检测一次 ffprobe 可用性。
+    let probe = ProbeSignature::from_config(&config, state.ffprobe_ready().await);
     let targets = due_targets(
         &config,
         &state.quality_store,
@@ -342,6 +361,7 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
         limit,
         measure_only,
         spec.trigger == RunTrigger::Manual,
+        &probe,
     )?;
     state.quality.update_run(|run| {
         run.phase = "probing".into();
@@ -389,7 +409,7 @@ pub async fn run(state: &Arc<AppState>, spec: RunSpec) -> Result<RunSummary> {
         });
     }
 
-    let decision = decide(&outcomes, measure_only, &guard);
+    let decision = decide(&outcomes, measure_only, &guard, &probe);
     let EngineDecision {
         removals,
         manual_entries,
@@ -666,6 +686,7 @@ fn result_for(
     outcome: &CandidateOutcome,
     action: &str,
     now: i64,
+    probe: &ProbeSignature,
 ) -> QualityResult {
     QualityResult {
         key: candidate.key.clone(),
@@ -702,7 +723,7 @@ fn result_for(
         } else {
             candidate.previous_first_fail_at.or(Some(now))
         },
-        rule_hash: crate::quality::admission::rule_hash(&candidate.rules),
+        rule_hash: crate::quality::admission::rule_hash(&candidate.rules, probe),
         run_id: String::new(),
         updated_at_ms: 0,
     }
@@ -714,7 +735,7 @@ mod tests {
     use crate::{
         config::model::{Channel, Group, PlaylistSource},
         quality::{
-            admission::{Candidate, CandidateScope},
+            admission::{rule_hash, Candidate, CandidateScope, ProbeSignature},
             gate::CandidateOutcome,
             rules::{Measurement, Verdict},
         },
@@ -769,6 +790,10 @@ mod tests {
         }
     }
 
+    fn probe() -> ProbeSignature {
+        ProbeSignature::from_config(&Config::default(), false)
+    }
+
     fn config_with_sync_channel() -> Config {
         let mut config = Config::default();
         config.quality.enabled = true;
@@ -812,7 +837,7 @@ mod tests {
             min_remove_count: 10,
             base_channels: 0,
         };
-        let decision = decide(&outcomes, false, &guard);
+        let decision = decide(&outcomes, false, &guard, &probe());
         assert!(decision.paused);
         assert!(decision.removals.is_empty());
         assert_eq!(
@@ -834,7 +859,7 @@ mod tests {
             false,
             Reason::Unreachable,
         )];
-        let decision = decide(&outcomes, true, &Guard::default());
+        let decision = decide(&outcomes, true, &Guard::default(), &probe());
         assert!(decision.removals.is_empty());
         assert!(decision.manual_entries.is_empty());
         assert_eq!(decision.results[0].action, "kept");
@@ -852,6 +877,7 @@ mod tests {
             )],
             false,
             &Guard::default(),
+            &probe(),
         );
         assert_eq!(decision.results[0].action, "hidden");
         assert_eq!(decision.manual_entries.len(), 1);
@@ -895,8 +921,17 @@ mod tests {
             addr: "127.0.0.1:9".into(),
             ..Default::default()
         });
-        let due =
-            due_targets(&config, &store, &RunScope::All, 100, 0, false, false).expect("到期目标");
+        let due = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            0,
+            false,
+            false,
+            &ProbeSignature::from_config(&config, false),
+        )
+        .expect("到期目标");
         assert_eq!(due.len(), 1);
         assert_eq!(
             due[0].proxy.as_ref().map(|proxy| proxy.addr.as_str()),
@@ -919,8 +954,17 @@ mod tests {
             enabled: Some(true),
             ..Default::default()
         });
-        let due =
-            due_targets(&config, &store, &RunScope::All, 100, 0, false, false).expect("到期目标");
+        let due = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            0,
+            false,
+            false,
+            &ProbeSignature::from_config(&config, false),
+        )
+        .expect("到期目标");
         assert!(due.is_empty(), "源门控关闭后不得周期移出");
         assert_eq!(
             guard_base_channels(&config, &RunScope::All),
@@ -947,14 +991,14 @@ mod tests {
             bytes: 0,
             duration_ms: 0,
         };
-        let decision = decide(&[outcome.clone()], false, &Guard::default());
+        let decision = decide(&[outcome.clone()], false, &Guard::default(), &probe());
         assert_eq!(decision.results[0].action, "kept", "宽限内不隐藏");
         assert_eq!(decision.hidden, 0);
         assert!(decision.manual_entries.is_empty(), "宽限内不写失败状态");
 
         let mut expired = outcome;
         expired.candidate.previous_first_fail_at = Some(now - 61);
-        let decision = decide(&[expired], false, &Guard::default());
+        let decision = decide(&[expired], false, &Guard::default(), &probe());
         assert_eq!(decision.results[0].action, "hidden", "超过宽限后隐藏");
         assert_eq!(decision.hidden, 1);
     }
@@ -971,6 +1015,7 @@ mod tests {
             )],
             false,
             &Guard::default(),
+            &probe(),
         );
         assert_eq!(decision.results[0].action, "kept");
         assert_eq!(
@@ -991,6 +1036,7 @@ mod tests {
             )],
             false,
             &Guard::default(),
+            &probe(),
         );
         assert_eq!(decision.results[0].action, "kept");
         assert!(decision.manual_entries.is_empty(), "探测错误不改手工状态");
@@ -1002,6 +1048,7 @@ mod tests {
             &[outcome("channel:g/c", true, true, true, Reason::Pass)],
             false,
             &Guard::default(),
+            &probe(),
         );
         assert_eq!(decision.results[0].action, "kept");
         assert!(decision.manual_entries[0].2.ok());
@@ -1081,7 +1128,7 @@ mod tests {
             )
         }));
         assert!(
-            decide(&outcomes, false, &guard).paused,
+            decide(&outcomes, false, &guard, &probe()).paused,
             "手工频道不得稀释比例"
         );
 
@@ -1106,7 +1153,7 @@ mod tests {
             )
         }));
         assert!(
-            decide(&outcomes, false, &guard).paused,
+            decide(&outcomes, false, &guard, &probe()).paused,
             "探测错误不得稀释比例"
         );
     }
@@ -1117,7 +1164,7 @@ mod tests {
             outcome("sync:s1:c", false, false, false, Reason::Unreachable),
             outcome("channel:g/c", true, true, false, Reason::Unreachable),
         ];
-        let decision = decide(&outcomes, true, &Guard::default());
+        let decision = decide(&outcomes, true, &Guard::default(), &probe());
         assert!(
             decision
                 .results
@@ -1145,7 +1192,7 @@ mod tests {
             min_remove_count: 1,
             base_channels: 0,
         };
-        let decision = decide(&outcomes, false, &guard);
+        let decision = decide(&outcomes, false, &guard, &probe());
         assert!(decision.removals.is_empty(), "固定频道不得移出");
         assert_eq!(decision.removed, 0);
         assert_eq!(decision.results[0].action, "kept");
@@ -1191,8 +1238,17 @@ mod tests {
             })
             .expect("写结果");
         let config = config_with_sync_channel();
-        let due =
-            due_targets(&config, &store, &RunScope::All, 100, 0, false, false).expect("到期目标");
+        let due = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            0,
+            false,
+            false,
+            &ProbeSignature::from_config(&config, false),
+        )
+        .expect("到期目标");
         assert!(due.is_empty(), "暂停的新地址尚不应按旧地址重测");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1201,6 +1257,9 @@ mod tests {
     fn manual_run_includes_not_due_results() {
         let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
         let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
+        let config = config_with_sync_channel();
+        let probe = ProbeSignature::from_config(&config, false);
+        let rules = effective_rules(&config, &config.groups[0], &config.groups[0].channels[0]);
         store
             .upsert(&QualityResult {
                 key: "sync:s1:c".into(),
@@ -1212,16 +1271,125 @@ mod tests {
                 url_hash: url_hash_hex("http://up/live.m3u8"),
                 action: "removed".into(),
                 next_check_at: 9_999_999_999,
+                rule_hash: rule_hash(&rules, &probe),
+                ..QualityResult::default()
+            })
+            .expect("写结果");
+        let due = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            0,
+            false,
+            false,
+            &probe,
+        )
+        .expect("到期目标");
+        assert!(due.is_empty(), "未到期不进入周期校验");
+        let forced = due_targets(&config, &store, &RunScope::All, 100, 0, false, true, &probe)
+            .expect("手动目标");
+        assert_eq!(forced.len(), 1, "手动校验忽略下次检查时间");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn stale_rule_hash_makes_channel_due() {
+        let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
+        let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
+        store
+            .upsert(&QualityResult {
+                key: "sync:s1:c".into(),
+                scope: "sync".into(),
+                source_id: "s1".into(),
+                source_key: "c".into(),
+                gid: "g".into(),
+                cid: "c".into(),
+                url_hash: url_hash_hex("http://up/live.m3u8"),
+                action: "admitted".into(),
+                next_check_at: 9_999_999_999,
+                rule_hash: "stale".into(),
                 ..QualityResult::default()
             })
             .expect("写结果");
         let config = config_with_sync_channel();
-        let due =
-            due_targets(&config, &store, &RunScope::All, 100, 0, false, false).expect("到期目标");
-        assert!(due.is_empty(), "未到期不进入周期校验");
-        let forced =
-            due_targets(&config, &store, &RunScope::All, 100, 0, false, true).expect("手动目标");
-        assert_eq!(forced.len(), 1, "手动校验忽略下次检查时间");
+        let probe = ProbeSignature::from_config(&config, false);
+        let due = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            0,
+            false,
+            false,
+            &probe,
+        )
+        .expect("到期目标");
+        assert_eq!(due.len(), 1, "哈希不一致必须到期");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn matching_rule_hash_keeps_channel_not_due() {
+        let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
+        let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
+        let config = config_with_sync_channel();
+        let probe = ProbeSignature::from_config(&config, false);
+        let rules = effective_rules(&config, &config.groups[0], &config.groups[0].channels[0]);
+        store
+            .upsert(&QualityResult {
+                key: "sync:s1:c".into(),
+                scope: "sync".into(),
+                source_id: "s1".into(),
+                source_key: "c".into(),
+                gid: "g".into(),
+                cid: "c".into(),
+                url_hash: url_hash_hex("http://up/live.m3u8"),
+                action: "admitted".into(),
+                next_check_at: 9_999_999_999,
+                rule_hash: rule_hash(&rules, &probe),
+                ..QualityResult::default()
+            })
+            .expect("写结果");
+        let due = due_targets(
+            &config,
+            &store,
+            &RunScope::All,
+            100,
+            0,
+            false,
+            false,
+            &probe,
+        )
+        .expect("到期目标");
+        assert!(due.is_empty(), "哈希一致且未到期时跳过");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn manual_run_ignores_rule_hash() {
+        let dir = std::env::temp_dir().join(format!("tvb-engine-{}", uuid::Uuid::new_v4()));
+        let store = QualityStore::new(crate::db::connect(&dir.join("tvb.db")).expect("db"));
+        store
+            .upsert(&QualityResult {
+                key: "sync:s1:c".into(),
+                scope: "sync".into(),
+                source_id: "s1".into(),
+                source_key: "c".into(),
+                gid: "g".into(),
+                cid: "c".into(),
+                url_hash: url_hash_hex("http://up/live.m3u8"),
+                action: "admitted".into(),
+                next_check_at: 9_999_999_999,
+                rule_hash: "stale".into(),
+                ..QualityResult::default()
+            })
+            .expect("写结果");
+        let config = config_with_sync_channel();
+        let probe = ProbeSignature::from_config(&config, false);
+        let due = due_targets(&config, &store, &RunScope::All, 100, 0, false, true, &probe)
+            .expect("手动目标");
+        assert_eq!(due.len(), 1, "手动运行忽略到期与哈希");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

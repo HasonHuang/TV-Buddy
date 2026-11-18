@@ -10,7 +10,7 @@ use crate::{
     config::model::{Config, PlaylistSource},
     http::routes::stream as stream_headers,
     quality::{
-        admission::{candidate_rules, url_hash_hex, Candidate, CandidateScope},
+        admission::{candidate_rules, url_hash_hex, Candidate, CandidateScope, ProbeSignature},
         probe::{probe, ProbeMode, ProbeOutput},
         rules::{effective_rules, evaluate, EffectiveRules, Measurement, Reason, Verdict},
         schedule::{probe_limits, required_probe_mode, run_limit},
@@ -223,6 +223,7 @@ pub fn decide(
     targets: &GateTargets,
     outcomes: &[CandidateOutcome],
     guard: &Guard,
+    probe: &ProbeSignature,
 ) -> GateOutcome {
     let by_key: HashMap<&str, &CandidateOutcome> = outcomes
         .iter()
@@ -243,7 +244,7 @@ pub fn decide(
                 } else {
                     "removal_paused"
                 };
-                result_for(&outcome.candidate, outcome, action, now)
+                result_for(&outcome.candidate, outcome, action, now, probe)
             })
             .collect();
         return GateOutcome::Paused {
@@ -275,7 +276,7 @@ pub fn decide(
                 } else {
                     "removal_paused"
                 };
-                result_for(&outcome.candidate, outcome, action, now)
+                result_for(&outcome.candidate, outcome, action, now, probe)
             })
             .collect();
         return GateOutcome::Paused {
@@ -327,7 +328,7 @@ pub fn decide(
         } else {
             "rejected"
         };
-        results.push(result_for(&outcome.candidate, outcome, action, now));
+        results.push(result_for(&outcome.candidate, outcome, action, now, probe));
     }
 
     GateOutcome::Apply {
@@ -375,6 +376,7 @@ fn result_for(
     outcome: &CandidateOutcome,
     action: &str,
     now: i64,
+    probe: &ProbeSignature,
 ) -> QualityResult {
     let measurement = &outcome.measurement;
     QualityResult {
@@ -408,7 +410,7 @@ fn result_for(
         } else {
             candidate.previous_first_fail_at.or(Some(now))
         },
-        rule_hash: crate::quality::admission::rule_hash(&candidate.rules),
+        rule_hash: crate::quality::admission::rule_hash(&candidate.rules, probe),
         run_id: String::new(),
         updated_at_ms: 0,
     }
@@ -499,6 +501,8 @@ pub async fn filter_plan(
         .get(&source.id)
         .map(|status| status.gate_cursor.clone())
         .filter(|cursor| !cursor.is_empty());
+    // 整轮只检测一次 ffprobe 可用性。
+    let probe = ProbeSignature::from_config(config, state.ffprobe_ready().await);
     let max_new = run_limit(
         config.quality.budget_mb_per_run,
         8.0,
@@ -528,7 +532,7 @@ pub async fn filter_plan(
 
     for candidate in &targets.url_changed {
         if gate_expired(started, budget_secs) {
-            return paused_outcome("budget", &outcomes, &targets);
+            return paused_outcome("budget", &outcomes, &targets, &probe);
         }
         let mut candidate = candidate.clone();
         candidate.previous_first_fail_at = previous_first_fail(state, &candidate);
@@ -536,7 +540,7 @@ pub async fn filter_plan(
         let probe_error = outcome.measurement.probe_error;
         outcomes.push(outcome);
         if probe_error {
-            return decide(plan, &targets, &outcomes, &guard);
+            return decide(plan, &targets, &outcomes, &guard, &probe);
         }
     }
 
@@ -568,7 +572,7 @@ pub async fn filter_plan(
         targets.new.truncate(processed);
     }
 
-    decide(plan, &targets, &outcomes, &guard)
+    decide(plan, &targets, &outcomes, &guard, &probe)
 }
 
 fn previous_first_fail(state: &AppState, candidate: &Candidate) -> Option<i64> {
@@ -810,6 +814,7 @@ fn paused_outcome(
     reason: &str,
     outcomes: &[CandidateOutcome],
     targets: &GateTargets,
+    probe: &ProbeSignature,
 ) -> GateOutcome {
     let now = crate::schedule::now_epoch();
     let results = outcomes
@@ -820,7 +825,7 @@ fn paused_outcome(
             } else {
                 "removal_paused"
             };
-            result_for(&outcome.candidate, outcome, action, now)
+            result_for(&outcome.candidate, outcome, action, now, probe)
         })
         .collect();
     GateOutcome::Paused {
@@ -848,6 +853,10 @@ mod tests {
             mode: "sync".into(),
             ..PlaylistSource::default()
         }
+    }
+
+    fn probe() -> ProbeSignature {
+        ProbeSignature::from_config(&Config::default(), false)
     }
 
     fn plan_with(keys: &[&str]) -> Plan {
@@ -1107,7 +1116,7 @@ mod tests {
         };
         assert!(
             matches!(
-                decide(plan_with(&[]), &targets, &outcomes, &guard),
+                decide(plan_with(&[]), &targets, &outcomes, &guard, &probe()),
                 GateOutcome::Paused { .. }
             ),
             "探测错误不得稀释安全阀比例"
@@ -1198,6 +1207,7 @@ mod tests {
                 min_remove_count: 10,
                 base_channels: 0,
             },
+            &probe(),
         );
         match out {
             GateOutcome::Apply { plan, stats, .. } => {
@@ -1220,6 +1230,7 @@ mod tests {
             &targets,
             &[outcome("c1", false, Reason::ProbeError, true)],
             &Guard::default(),
+            &probe(),
         );
         assert!(matches!(out, GateOutcome::Paused { .. }));
     }
@@ -1273,6 +1284,7 @@ mod tests {
             &targets,
             &[outcome("new1", true, Reason::Pass, false)],
             &Guard::default(),
+            &probe(),
         );
         match out {
             GateOutcome::Apply { plan, .. } => {
@@ -1294,6 +1306,7 @@ mod tests {
             &targets,
             &[outcome("c1", false, Reason::Unreachable, true)],
             &Guard::default(),
+            &probe(),
         );
         match out {
             GateOutcome::Apply { plan, stats, .. } => {
@@ -1320,7 +1333,7 @@ mod tests {
             base_channels: 0,
         };
         assert!(matches!(
-            decide(plan_with(&[]), &targets, &outcomes, &guard),
+            decide(plan_with(&[]), &targets, &outcomes, &guard, &probe()),
             GateOutcome::Paused { .. }
         ));
     }
@@ -1341,7 +1354,7 @@ mod tests {
             base_channels: 0,
         };
         assert!(matches!(
-            decide(plan_with(&[]), &targets, &outcomes, &guard),
+            decide(plan_with(&[]), &targets, &outcomes, &guard, &probe()),
             GateOutcome::Apply { .. }
         ));
     }

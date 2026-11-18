@@ -57,10 +57,38 @@ pub fn candidate_rules(
     effective_rules(config, &group, &channel)
 }
 
-/// 有效规则的稳定哈希。只包含新引擎读取的字段。
-pub fn rule_hash(rules: &EffectiveRules) -> String {
+/// 探测设施的稳定签名。只包含全探针共用设置。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeSignature {
+    pub probe_mode: String,
+    pub ffprobe: bool,
+    pub ffprobe_ready: bool,
+    pub ffprobe_sample_kb: u64,
+    pub ffprobe_min_speed_mib_bits: u64,
+    pub sample_segments: u32,
+    pub sample_bytes_kb: u64,
+    pub sample_secs_bits: u64,
+}
+
+impl ProbeSignature {
+    pub fn from_config(config: &Config, ffprobe_ready: bool) -> Self {
+        Self {
+            probe_mode: config.quality.probe_mode.clone(),
+            ffprobe: config.quality.ffprobe,
+            ffprobe_ready,
+            ffprobe_sample_kb: config.quality.ffprobe_sample_kb,
+            ffprobe_min_speed_mib_bits: config.quality.ffprobe_min_speed_mib.to_bits(),
+            sample_segments: config.quality.sample_segments,
+            sample_bytes_kb: config.quality.sample_bytes_kb,
+            sample_secs_bits: config.quality.sample_secs.to_bits(),
+        }
+    }
+}
+
+/// 有效规则与探测设置的稳定哈希。只包含新引擎读取的字段。
+pub fn rule_hash(rules: &EffectiveRules, probe: &ProbeSignature) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"tvb-quality-rules-v1\0");
+    hasher.update(b"tvb-quality-rules-v2\0");
     hasher.update([u8::from(rules.enabled)]);
     hasher.update(rules.min_speed_mib.to_bits().to_le_bytes());
     hasher.update(rules.max_delay_ms.to_le_bytes());
@@ -72,6 +100,14 @@ pub fn rule_hash(rules: &EffectiveRules) -> String {
     }
     hasher.update([u8::from(rules.host_cache)]);
     hasher.update(rules.stale_keep_secs.to_le_bytes());
+    hasher.update(rules.fallback_speed_mib.to_bits().to_le_bytes());
+    hasher.update(probe.probe_mode.as_bytes());
+    hasher.update([u8::from(probe.ffprobe), u8::from(probe.ffprobe_ready)]);
+    hasher.update(probe.ffprobe_sample_kb.to_le_bytes());
+    hasher.update(probe.ffprobe_min_speed_mib_bits.to_le_bytes());
+    hasher.update(probe.sample_segments.to_le_bytes());
+    hasher.update(probe.sample_bytes_kb.to_le_bytes());
+    hasher.update(probe.sample_secs_bits.to_le_bytes());
     hex::encode(hasher.finalize())
 }
 
@@ -185,6 +221,10 @@ mod tests {
         assert!(has_override(&value));
     }
 
+    fn signature(config: &Config) -> ProbeSignature {
+        ProbeSignature::from_config(config, false)
+    }
+
     #[test]
     fn rule_hash_changes_with_threshold() {
         let mut rules = EffectiveRules {
@@ -192,9 +232,36 @@ mod tests {
             min_speed_mib: 1.0,
             ..EffectiveRules::default()
         };
-        let first = rule_hash(&rules);
+        let probe = signature(&Config::default());
+        let first = rule_hash(&rules, &probe);
         rules.min_speed_mib = 2.0;
-        assert_ne!(first, rule_hash(&rules));
+        assert_ne!(first, rule_hash(&rules, &probe));
+    }
+
+    #[test]
+    fn rule_hash_changes_with_fallback_speed() {
+        let config = Config::default();
+        let probe = signature(&config);
+        let a = EffectiveRules {
+            fallback_speed_mib: 0.5,
+            ..Default::default()
+        };
+        let b = EffectiveRules {
+            fallback_speed_mib: 0.8,
+            ..Default::default()
+        };
+        assert_ne!(rule_hash(&a, &probe), rule_hash(&b, &probe));
+    }
+
+    #[test]
+    fn rule_hash_changes_when_ffprobe_ready_changes() {
+        let config = Config::default();
+        let a = ProbeSignature::from_config(&config, false);
+        let b = ProbeSignature::from_config(&config, true);
+        assert_ne!(
+            rule_hash(&EffectiveRules::default(), &a),
+            rule_hash(&EffectiveRules::default(), &b)
+        );
     }
 
     #[test]

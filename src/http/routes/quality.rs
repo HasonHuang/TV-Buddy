@@ -128,6 +128,8 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
         .and_then(|value| value.parse::<i64>().ok())
         .unwrap_or(0);
     let statuses = state.sources.statuses();
+    // 只检测一次。三个字段共用同一结果。
+    let ready = state.ffprobe_ready().await;
     let source_errors: Vec<Value> = config
         .playlist
         .sources
@@ -156,6 +158,16 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
             "sources": config.playlist.sources.iter().filter(|source| source.mode == "sync").count(),
         },
         "source_errors": source_errors,
+        "ffprobe": {
+            "installed": ready,
+            "enabled": config.quality.ffprobe,
+            "ready": config.quality.ffprobe && ready,
+            "note": if ready {
+                ""
+            } else {
+                "未安装 ffprobe；分辨率识别不可用"
+            },
+        },
         "guard": {
             "enabled": config.quality.guard_enabled,
             "max_remove_ratio": config.quality.max_remove_ratio,
@@ -309,6 +321,7 @@ pub async fn effective(
         "rules": {
             "enabled": rules.enabled,
             "min_speed_mib": rules.min_speed_mib,
+            "fallback_speed_mib": rules.fallback_speed_mib,
             "max_delay_ms": rules.max_delay_ms,
             "min_resolution_px": rules.min_resolution_px,
             "max_resolution_px": rules.max_resolution_px,
