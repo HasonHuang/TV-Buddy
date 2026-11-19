@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { api, clearToken, getRole, getToken, setRole, setToken, UNAUTHORIZED_EVENT } from './api';
@@ -175,7 +175,12 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const sectionRef = useRef(section);
   /** 设置页有没有未保存修改；离开前先确认。只做拦截，不需要触发重渲染。 */
   const settingsDirtyRef = useRef(false);
+  /** 质量校验页有没有未保存的规则；离开前先确认。 */
+  const qualityDirtyRef = useRef(false);
   const [pendingNav, setPendingNav] = useState<SectionId | null>(null);
+  const [pendingDirty, setPendingDirty] = useState<'settings' | 'quality' | null>(
+    null,
+  );
   /** 侧栏分区搜索。只过滤导航，不触达接口。 */
   const [navQuery, setNavQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -242,11 +247,15 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     writeSection(next);
   };
 
-  /** 切分区。设置页有未保存修改时先弹确认。 */
+  /** 切分区。设置页或质量规则有未保存修改时先弹确认。 */
   const go = (next: SectionId) => {
     // 点当前分区不触发确认，也不清未保存标记。
     if (next === sectionRef.current) return;
-    if (sectionRef.current === 'settings' && settingsDirtyRef.current) {
+    const dirty =
+      (sectionRef.current === 'settings' && settingsDirtyRef.current) ||
+      (sectionRef.current === 'quality' && qualityDirtyRef.current);
+    if (dirty) {
+      setPendingDirty(sectionRef.current === 'quality' ? 'quality' : 'settings');
       setPendingNav(next);
       return;
     }
@@ -254,24 +263,37 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   };
 
   /** 设置页报告未保存状态。地址栏监听与切页拦截都读这个 ref。 */
-  const markSettingsDirty = (dirty: boolean) => {
+  const markSettingsDirty = useCallback((dirty: boolean) => {
     settingsDirtyRef.current = dirty;
-  };
+  }, []);
+
+  /** 质量校验页报告未保存的规则。 */
+  const markQualityDirty = useCallback((dirty: boolean) => {
+    qualityDirtyRef.current = dirty;
+  }, []);
 
   // 浏览器前进/后退：地址已经变了，让面板跟上。设置页有未保存修改时先确认；
   // 取消（或非法分区）后把地址改回当前分区，避免面板与地址栏不一致。
   useEffect(() => {
-    const onHistoryChange = () => {
+    const onHistoryChange = (event: Event) => {
       const next = sectionFromHash();
       if (!next) {
         writeSection(sectionRef.current, true);
         return;
       }
       if (next === sectionRef.current) return;
-      if (sectionRef.current === 'settings' && settingsDirtyRef.current) {
-        // pushState 保留后退目标条目；replaceState 会把目标改写成设置页，
-        // 取消离开后历史记录就被破坏。
-        writeSection(sectionRef.current);
+      const dirty =
+        (sectionRef.current === 'settings' && settingsDirtyRef.current) ||
+        (sectionRef.current === 'quality' && qualityDirtyRef.current);
+      if (dirty) {
+        // pushState 保留后退目标条目；replaceState 会把目标改写成当前分区，
+        // 取消离开后历史记录就被破坏。恢复完整哈希，子页也不会丢。
+        const restore =
+          event instanceof HashChangeEvent && event.oldURL
+            ? new URL(event.oldURL).hash
+            : `#/${sectionRef.current}`;
+        window.history.pushState(null, '', restore);
+        setPendingDirty(sectionRef.current === 'quality' ? 'quality' : 'settings');
         setPendingNav(next);
         return;
       }
@@ -423,7 +445,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         )}
         {active === 'cache' && <CachePage />}
         {active === 'groups' && <GroupsPage />}
-        {active === 'quality' && <QualityPage />}
+        {active === 'quality' && (
+          <QualityPage onDirtyChange={markQualityDirty} />
+        )}
         {active === 'settings' && <SettingsPage onDirtyChange={markSettingsDirty} />}
         {active === 'security' && <SecurityPage />}
         {active === 'users' && <UsersPage />}
@@ -447,14 +471,26 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
       {pendingNav ? (
         <Confirm
-          title="离开系统设置？"
-          text="当前有未保存的修改。离开后这些修改会丢失。"
+          title={
+            pendingDirty === 'quality' ? '离开质量校验？' : '离开系统设置？'
+          }
+          text={
+            pendingDirty === 'quality'
+              ? '当前有未保存的规则更改。离开后这些更改会丢失。'
+              : '当前有未保存的修改。离开后这些修改会丢失。'
+          }
           confirmText="放弃修改并离开"
-          onCancel={() => setPendingNav(null)}
+          onCancel={() => {
+            setPendingNav(null);
+            setPendingDirty(null);
+          }}
           onConfirm={() => {
             const next = pendingNav;
+            const dirty = pendingDirty;
             setPendingNav(null);
-            markSettingsDirty(false);
+            setPendingDirty(null);
+            if (dirty === 'quality') markQualityDirty(false);
+            else markSettingsDirty(false);
             show(next);
           }}
         />

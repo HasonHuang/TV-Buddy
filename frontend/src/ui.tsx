@@ -965,12 +965,21 @@ export function DateInput({
   );
 }
 
-/** 空状态。 */
-export function Empty({ text, icon = 'file' }: { text: string; icon?: IconName }) {
+/** 空状态。可带一个恢复动作。 */
+export function Empty({
+  text,
+  icon = 'file',
+  action,
+}: {
+  text: string;
+  icon?: IconName;
+  action?: React.ReactNode;
+}) {
   return (
     <div className="empty">
       <Icon name={icon} size={20} />
       <span>{text}</span>
+      {action ? <div className="empty-action">{action}</div> : null}
     </div>
   );
 }

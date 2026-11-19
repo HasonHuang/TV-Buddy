@@ -23,6 +23,7 @@ import {
   updatePlaylistSource,
   type PlaylistSourceConfig,
   type QualityResult,
+  type QualityRun,
   type QualitySource,
   type QualityStatus,
 } from './api';
@@ -93,6 +94,33 @@ function resultActionTone(item: QualityResult): string {
   }
 }
 
+/** 运行状态徽章。先看是否进行中，再看结束原因。 */
+function runBadge(status: QualityStatus): { tone: string; text: string } {
+  const run = status.run;
+  if (!run) return { tone: 'muted', text: '未运行' };
+  if (status.running) return { tone: 'info', text: '进行中' };
+  if (run.phase === 'failed' || run.error) return { tone: 'danger', text: '失败' };
+  if (run.paused_by_guard) return { tone: 'warn', text: '安全阀暂停' };
+  if (run.cancelled) return { tone: 'muted', text: '已取消' };
+  if (run.measure_only) return { tone: 'info', text: '仅测量' };
+  return { tone: 'ok', text: '已完成' };
+}
+
+/** 校验进度百分比。总数未知时返回 null，进度条显示为空。 */
+function runPercent(run: QualityRun): number | null {
+  if (run.total <= 0) return null;
+  return Math.max(0, Math.min(100, Math.round((run.tested / run.total) * 100)));
+}
+
+function scheduleText(status: QualityStatus): string {
+  if (status.schedule.mode === 'cron') return `cron ${status.schedule.cron}`;
+  return `每 ${status.schedule.interval_hours} 小时`;
+}
+
+function sourcePhaseText(phase: string): string {
+  return SOURCE_PHASE_LABEL[phase] ?? (phase || '—');
+}
+
 const REASON_LABEL: Record<string, string> = {
   pass: '合格',
   retained: '已保留',
@@ -119,6 +147,29 @@ const PROBE_LABEL: Record<string, string> = {
   full: '完整',
 };
 
+const TRIGGER_LABEL: Record<string, string> = {
+  manual: '手动',
+  schedule: '定时',
+};
+
+const RUN_PHASE_LABEL: Record<string, string> = {
+  queued: '排队中',
+  probing: '校验中',
+  done: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+  paused_by_guard: '安全阀暂停',
+};
+
+const SOURCE_PHASE_LABEL: Record<string, string> = {
+  fetching: '抓取清单',
+  parsing: '解析清单',
+  gating: '质量门控',
+  applying: '应用变更',
+  done: '已完成',
+  paused: '已暂停',
+};
+
 const OVERRIDE_LABEL: Record<string, string> = {
   enabled: '开关',
   min_speed_mib: '最低速率',
@@ -137,6 +188,19 @@ const OVERRIDE_LABEL: Record<string, string> = {
 function timeText(epoch: number): string {
   if (!Number.isFinite(epoch) || epoch <= 0) return '—';
   return new Date(epoch * 1000).toLocaleString('zh-CN', { hour12: false });
+}
+
+/** 状态条用的短时间。当天只显示时与分。 */
+function shortTimeText(epoch: number): string {
+  if (!Number.isFinite(epoch) || epoch <= 0) return '—';
+  const date = new Date(epoch * 1000);
+  const sameDay = date.toDateString() === new Date().toDateString();
+  return date.toLocaleString('zh-CN', {
+    ...(sameDay ? {} : { month: '2-digit', day: '2-digit' }),
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
 }
 
 function bytesText(bytes: number): string {
@@ -186,6 +250,31 @@ function qualityRoute(hash = window.location.hash): QualityRoute {
     reason: params.get('reason') ?? '',
     q: params.get('q') ?? '',
   };
+}
+
+function emptyRoute(tab: Tab): QualityRoute {
+  return {
+    tab,
+    gid: '',
+    cid: '',
+    source_id: '',
+    action: '',
+    reason: '',
+    q: '',
+  };
+}
+
+/** 生成地址栏哈希。只写入非空筛选，地址保持短。 */
+function routeHash(route: QualityRoute): string {
+  const params = new URLSearchParams();
+  if (route.source_id) params.set('source_id', route.source_id);
+  if (route.gid) params.set('gid', route.gid);
+  if (route.cid) params.set('cid', route.cid);
+  if (route.action) params.set('action', route.action);
+  if (route.reason) params.set('reason', route.reason);
+  if (route.q.trim()) params.set('q', route.q.trim());
+  const query = params.toString();
+  return `#/quality/${route.tab}${query ? `?${query}` : ''}`;
 }
 
 function broadcastQualityChanged() {
@@ -301,41 +390,194 @@ function overrideFields(value: unknown): string {
     .join('、');
 }
 
-/** 概览标签。 */
-function OverviewTab({
+/** 顶部状态条：所有标签共用，显示开关、调度、进度与告警。 */
+function QualityStatusBar({
   status,
   busy,
-  onRun,
+  onOpenOverview,
   onCancel,
 }: {
   status: QualityStatus | null;
   busy: boolean;
-  onRun: () => void;
+  onOpenOverview: () => void;
   onCancel: () => void;
+}) {
+  if (!status) return null;
+  const run = status.run;
+  const percent = run ? runPercent(run) : null;
+  const warnings =
+    status.source_errors.length +
+    (status.guard.tripped ? 1 : 0) +
+    (status.counts.probe_errors_7d > 0 ? 1 : 0);
+  return (
+    <section className="quality-status" aria-label="质量校验状态">
+      <div className="quality-status-main">
+        <Badge tone={status.enabled ? 'ok' : 'muted'}>
+          {status.enabled ? '已开启' : '已关闭'}
+        </Badge>
+        <span className="quality-status-text">{scheduleText(status)}</span>
+        <span className="quality-status-dot" aria-hidden="true">
+          ·
+        </span>
+        <span className="quality-status-text">
+          下次运行 {shortTimeText(status.schedule.next_run_at)}
+        </span>
+        {!status.enabled ? (
+          <span className="quality-status-text">手动运行只测量</span>
+        ) : null}
+      </div>
+      <div className="quality-status-run">
+        {status.running && run ? (
+          <>
+            <div className="quality-run-progress-head">
+              <span>正在校验</span>
+              <span className="mono">
+                {run.tested} / {run.total}
+              </span>
+            </div>
+            <div
+              className={`quality-run-bar${percent === null ? ' empty' : ''}`}
+              role="progressbar"
+              aria-label="校验进度"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={percent ?? undefined}
+              aria-valuetext={`已测 ${run.tested} / ${run.total}`}
+            >
+              <span style={{ width: `${percent ?? 0}%` }} />
+            </div>
+          </>
+        ) : run ? (
+          <span className="quality-status-text">
+            上次运行 {relativeText(run.started_at)} · 准入 {run.admitted} / 移出{' '}
+            {run.removed}
+          </span>
+        ) : (
+          <span className="quality-status-text">还没有运行记录</span>
+        )}
+      </div>
+      {warnings > 0 ? (
+        <button
+          type="button"
+          className="quality-status-alert"
+          title="查看概览中的警告"
+          onClick={onOpenOverview}
+        >
+          <Badge tone={status.guard.tripped ? 'danger' : 'warn'}>
+            {warnings} 项需要处理
+          </Badge>
+        </button>
+      ) : null}
+      {status.running ? (
+        <button className="ghost" onClick={onCancel} disabled={busy}>
+          取消任务
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+/** 校验进度：已测数量与百分比。 */
+function RunProgress({ run }: { run: QualityRun }) {
+  const percent = runPercent(run);
+  return (
+    <div className="quality-run-progress">
+      <div className="quality-run-progress-head">
+        <span>
+          已测 {run.tested} / {run.total}
+        </span>
+        <strong>{percent === null ? '准备中' : `${percent}%`}</strong>
+      </div>
+      <div
+        className={`quality-run-bar${percent === null ? ' empty' : ''}`}
+        role="progressbar"
+        aria-label="校验进度"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent ?? undefined}
+        aria-valuetext={`已测 ${run.tested} / ${run.total}`}
+      >
+        <span style={{ width: `${percent ?? 0}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/** 概览标签。 */
+function OverviewTab({
+  status,
+  onRun,
+  onOpenRules,
+  onOpenSources,
+  onOpenResults,
+}: {
+  status: QualityStatus | null;
+  onRun: () => void;
+  onOpenRules: () => void;
+  onOpenSources: () => void;
+  onOpenResults: (params?: Partial<QualityRoute>) => void;
 }) {
   if (!status) return <Empty text="正在读取质量状态…" icon="activity" />;
   const run = status.run;
-  const scheduleText =
-    status.schedule.mode === 'cron'
-      ? `cron：${status.schedule.cron}`
-      : `每 ${status.schedule.interval_hours} 小时`;
+  const badge = runBadge(status);
+  const warnings: Array<{
+    key: string;
+    tone: string;
+    badge: string;
+    text: string;
+    action: string;
+    onAction: () => void;
+  }> = [];
+  if (status.guard.tripped) {
+    warnings.push({
+      key: 'guard',
+      tone: 'danger',
+      badge: '安全阀',
+      text: `上一轮移出达到阈值，成员变更已暂停。阈值：${(
+        status.guard.max_remove_ratio * 100
+      ).toFixed(0)}%，至少 ${status.guard.min_remove_count} 个。`,
+      action: '查看规则',
+      onAction: onOpenRules,
+    });
+  }
+  for (const source of status.source_errors) {
+    warnings.push({
+      key: `source-${source.id}`,
+      tone: 'warn',
+      badge: '源抓取',
+      text: `${source.name || source.id}：${source.error}`,
+      action: '查看来源',
+      onAction: onOpenSources,
+    });
+  }
+  if (status.counts.probe_errors_7d > 0) {
+    warnings.push({
+      key: 'probe',
+      tone: 'warn',
+      badge: '探测错误',
+      text: `近 7 天有 ${status.counts.probe_errors_7d} 条探测错误，请检查解析脚本或探测地址。`,
+      action: '查看结果',
+      onAction: () => onOpenResults({ reason: 'probe_error' }),
+    });
+  }
   return (
     <>
+      {warnings.length > 0 ? (
+        <Card title="需要处理" note={`${warnings.length} 项，按影响排序`}>
+          <ul className="quality-warnings">
+            {warnings.map((item) => (
+              <li key={item.key}>
+                <Badge tone={item.tone}>{item.badge}</Badge>
+                <span title={item.text}>{item.text}</span>
+                <button type="button" className="quality-link" onClick={item.onAction}>
+                  {item.action}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
       <div className="stats">
-        <div className="stat">
-          <div className="k">
-            <Icon name="activity" size={13} />
-            质量校验
-          </div>
-          <div className="v">
-            <Badge tone={status.enabled ? 'ok' : 'muted'}>
-              {status.enabled ? '已开启' : '已关闭'}
-            </Badge>
-          </div>
-          <div className="hint">
-            {scheduleText}；下次 {timeText(status.schedule.next_run_at)}
-          </div>
-        </div>
         <div className="stat">
           <div className="k">当前准入</div>
           <div className="v">{status.counts.admitted}</div>
@@ -344,118 +586,155 @@ function OverviewTab({
         <div className="stat">
           <div className="k">近 7 天移出</div>
           <div className="v">{status.counts.removed_7d}</div>
-          <div className="hint">共 {status.counts.sources} 个同步源参与门控</div>
+          <div className="hint">按结果表的移出记录统计</div>
+        </div>
+        <div className="stat">
+          <div className="k">近 7 天探测错误</div>
+          <div className={status.counts.probe_errors_7d > 0 ? 'v danger' : 'v'}>
+            {status.counts.probe_errors_7d}
+          </div>
+          <div className="hint">检查解析脚本或探测地址</div>
+        </div>
+        <div className="stat">
+          <div className="k">同步源</div>
+          <div className="v">{status.counts.sources}</div>
+          <div className="hint">已配置的同步源</div>
         </div>
       </div>
-      {status.guard.tripped || status.source_errors.length > 0 || status.counts.probe_errors_7d > 0 ? (
-        <div className="card">
-          <div className="card-head">
-            <div className="card-head-text">
-              <h2>警告</h2>
-              <span className="muted">按影响排序</span>
-            </div>
-          </div>
-          <ul>
-            {status.guard.tripped ? (
-              <li>
-                <Badge tone="danger">安全阀</Badge> 上一轮移出达到阈值，成员变更已暂停。
-                <span className="hint">
-                  阈值：{(status.guard.max_remove_ratio * 100).toFixed(0)}%，至少{' '}
-                  {status.guard.min_remove_count} 个
-                </span>
-              </li>
-            ) : null}
-            {status.source_errors.map((source) => (
-              <li key={source.id}>
-                <Badge tone="warn">源抓取</Badge> {source.name || source.id}：
-                {source.error}
-              </li>
-            ))}
-            {status.counts.probe_errors_7d > 0 ? (
-              <li>
-                <Badge tone="muted">探测错误</Badge> 近 7 天有{' '}
-                {status.counts.probe_errors_7d} 条探测错误，请检查解析脚本或探测地址。
-              </li>
-            ) : null}
-          </ul>
-        </div>
-      ) : null}
-      <div className="card">
-        <div className="card-head">
-          <div className="card-head-text">
-            <h2>最近任务</h2>
-            <span className="muted">
-              {run ? `${run.trigger} · ${run.phase}` : '还没有运行记录'}
-            </span>
-          </div>
-          <div className="card-actions">
-            <button
-              className="ghost"
-              onClick={onRun}
-              disabled={busy || status.running}
-              title="按当前已保存的规则校验全部频道"
-            >
-              {busy ? '已排入…' : '立即校验'}
-            </button>
-            {status.running ? (
-              <button className="ghost" onClick={onCancel} disabled={busy}>
-                取消任务
-              </button>
-            ) : null}
-          </div>
-        </div>
-        {run ? (
-          <dl>
-            <dt>任务</dt>
-            <dd className="mono">{run.run_id}</dd>
-            <dt>开始</dt>
-            <dd>{timeText(run.started_at)}</dd>
-            <dt>进度</dt>
-            <dd>
-              {run.tested} / {run.total}，准入 {run.admitted}，移出 {run.removed}，拒绝{' '}
-              {run.rejected}，跳过 {run.skipped}
-            </dd>
-            <dt>流量</dt>
-            <dd>{bytesText(run.bytes)}</dd>
-            <dt>状态</dt>
-            <dd>
-              {run.finished ? '已完成' : '进行中'}
-              {run.cancelled ? '；已取消' : ''}
-              {run.paused_by_guard ? '；安全阀已暂停' : ''}
-              {run.measure_only ? '；仅测量（质量已关闭）' : ''}
-            </dd>
-            {run.error ? (
+      <div className="quality-overview-grid">
+        <div className="quality-overview-main">
+          <Card
+            title="最近任务"
+            note={
+              run
+                ? `${TRIGGER_LABEL[run.trigger] ?? run.trigger} · ${
+                    RUN_PHASE_LABEL[run.phase] ?? (run.phase || '—')
+                  }`
+                : '还没有运行记录'
+            }
+            actions={<Badge tone={badge.tone}>{badge.text}</Badge>}
+          >
+            {run ? (
               <>
-                <dt>错误</dt>
-                <dd>{run.error}</dd>
+                <RunProgress run={run} />
+                <div className="quality-run-metrics">
+                  <div>
+                    <span>准入</span>
+                    <strong>{run.admitted}</strong>
+                  </div>
+                  <div>
+                    <span>移出</span>
+                    <strong>{run.removed}</strong>
+                  </div>
+                  <div>
+                    <span>拒绝</span>
+                    <strong>{run.rejected}</strong>
+                  </div>
+                  <div>
+                    <span>跳过</span>
+                    <strong>{run.skipped}</strong>
+                  </div>
+                </div>
+                <dl className="quality-run-meta">
+                  <dt>开始</dt>
+                  <dd>{timeText(run.started_at)}</dd>
+                  <dt>流量</dt>
+                  <dd>{bytesText(run.bytes)}</dd>
+                  <dt>任务</dt>
+                  <dd className="mono">{run.run_id}</dd>
+                </dl>
+                {run.measure_only ? (
+                  <div className="msg info">
+                    质量已关闭，本次只测量，不改变分组与订阅。
+                  </div>
+                ) : null}
+                {run.paused_by_guard ? (
+                  <div className="msg warn">
+                    本轮移出达到安全阀阈值，成员变更已暂停。
+                  </div>
+                ) : null}
+                {run.cancelled ? (
+                  <div className="msg info">任务已取消，已完成的结果保留。</div>
+                ) : null}
+                {run.error ? <div className="msg err">{run.error}</div> : null}
               </>
-            ) : null}
-          </dl>
-        ) : (
-          <Empty text="尚未运行质量校验" icon="activity" />
-        )}
-      </div>
-      <div className="card">
-        <div className="card-head">
-          <div className="card-head-text">
-            <h2>安全阀</h2>
-            <span className="muted">阻止一次运行移出过多频道</span>
-          </div>
+            ) : (
+              <Empty
+                text={
+                  status.running ? '正在校验，结果稍后显示' : '还没有运行记录'
+                }
+                icon="activity"
+                action={
+                  status.running ? undefined : (
+                    <button type="button" onClick={onRun}>
+                      立即校验
+                    </button>
+                  )
+                }
+              />
+            )}
+          </Card>
         </div>
-        <dl>
-          <dt>开关</dt>
-          <dd>
-            <Badge tone={status.guard.enabled ? 'ok' : 'muted'}>
-              {status.guard.enabled ? '已开启' : '已关闭'}
-            </Badge>
-            {status.guard.tripped ? <Badge tone="danger">已触发</Badge> : null}
-          </dd>
-          <dt>触发条件</dt>
-          <dd>
-            移出比例超过 {(status.guard.max_remove_ratio * 100).toFixed(0)}%，且至少{' '}
-            {status.guard.min_remove_count} 个
-          </dd>
-        </dl>
+        <aside className="quality-overview-rail">
+          <Card
+            title="安全阀"
+            note="移出过多时暂停成员变更"
+            actions={
+              <Badge
+                tone={
+                  status.guard.tripped
+                    ? 'danger'
+                    : status.guard.enabled
+                      ? 'ok'
+                      : 'muted'
+                }
+              >
+                {status.guard.tripped
+                  ? '已触发'
+                  : status.guard.enabled
+                    ? '已开启'
+                    : '已关闭'}
+              </Badge>
+            }
+          >
+            <dl>
+              <dt>触发条件</dt>
+              <dd>
+                移出比例超过 {(status.guard.max_remove_ratio * 100).toFixed(0)}%，且至少{' '}
+                {status.guard.min_remove_count} 个
+              </dd>
+            </dl>
+            <div className="quality-card-foot">
+              <button type="button" className="ghost" onClick={onOpenRules}>
+                调整规则
+              </button>
+            </div>
+          </Card>
+          <Card title="分辨率探测" note="完整档读取切片开头识别分辨率">
+            <dl>
+              <dt>ffprobe</dt>
+              <dd>
+                <Badge tone={status.ffprobe.installed ? 'ok' : 'muted'}>
+                  {status.ffprobe.installed ? '已安装' : '未安装'}
+                </Badge>
+              </dd>
+              <dt>识别</dt>
+              <dd>
+                <Badge tone={status.ffprobe.enabled ? 'ok' : 'muted'}>
+                  {status.ffprobe.enabled ? '已启用' : '已关闭'}
+                </Badge>
+              </dd>
+            </dl>
+            {status.ffprobe.note ? (
+              <div className="hint">{status.ffprobe.note}</div>
+            ) : null}
+            <div className="quality-card-foot">
+              <button type="button" className="ghost" onClick={onOpenRules}>
+                查看规则
+              </button>
+            </div>
+          </Card>
+        </aside>
       </div>
     </>
   );
@@ -465,30 +744,40 @@ function OverviewTab({
 function RulesTab({
   status,
   onSaved,
+  onDirtyChange,
 }: {
   status: QualityStatus | null;
   onSaved: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const { node, ok, err } = useToast();
   const [draft, setDraft] = useState<Cfg | null>(null);
+  const [original, setOriginal] = useState<Cfg | null>(null);
   const [busy, setBusy] = useState('');
   const [preview, setPreview] = useState<number[]>([]);
   const [previewError, setPreviewError] = useState('');
   const [speedRows, setSpeedRows] = useState<SpeedRow[]>([]);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const config = await api<Cfg>('GET', '/config');
       setDraft(config);
+      setOriginal(config);
       setSpeedRows(readSpeedRows(config));
+      setConfirmDiscard(false);
+      onDirtyChange(false);
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     }
-  }, [err]);
+  }, [err, onDirtyChange]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 离开规则页时清掉脏标记。切页确认由页面容器处理。
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   const update = (path: string, value: unknown) => {
     setDraft((prev) => (prev ? setPath(prev, path, value) : prev));
@@ -497,6 +786,27 @@ function RulesTab({
   const commitSpeedRows = (next: SpeedRow[]) => {
     setSpeedRows(next);
     update('quality.rules.resolution_speed_map', speedRowsToMap(next));
+  };
+
+  /** 只有质量子树参与比较。分组与频道很多时，整份配置比较太贵。 */
+  const dirty = useMemo(
+    () =>
+      draft !== null &&
+      original !== null &&
+      JSON.stringify(getPath(draft, 'quality')) !==
+        JSON.stringify(getPath(original, 'quality')),
+    [draft, original],
+  );
+
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
+
+  const discard = async () => {
+    setConfirmDiscard(false);
+    setBusy('discard');
+    await load();
+    setBusy('');
   };
 
   const previewSchedule = async () => {
@@ -524,7 +834,9 @@ function RulesTab({
     setBusy('save');
     try {
       const revision = await putConfig(draft);
-      setDraft({ ...draft, revision });
+      const saved = { ...draft, revision };
+      setDraft(saved);
+      setOriginal(saved);
       ok('质量规则已保存');
       onSaved();
     } catch (error) {
@@ -614,10 +926,18 @@ function RulesTab({
             <span className="muted">保存后立即生效</span>
           </div>
           <div className="card-actions">
-            <button className="ghost" onClick={() => void load()} disabled={busy !== ''}>
-              重新读取
+            <button
+              className="ghost"
+              onClick={() => (dirty ? setConfirmDiscard(true) : void load())}
+              disabled={busy !== ''}
+            >
+              {dirty ? '放弃更改' : '重新读取'}
             </button>
-            <button onClick={() => void save()} disabled={busy !== ''}>
+            <button
+              onClick={() => void save()}
+              disabled={busy !== '' || !dirty}
+              title={dirty ? undefined : '没有未保存的更改'}
+            >
               {busy === 'save' ? '保存中…' : '保存规则'}
             </button>
           </div>
@@ -639,24 +959,31 @@ function RulesTab({
                 { value: 'interval', label: '按小时', desc: '每 N 小时运行一次。' },
                 { value: 'cron', label: 'cron', desc: '按 5 段 cron 表达式运行。' },
               ]}
-              onChange={(next) => update('quality.schedule', next)}
+              onChange={(next) => {
+                update('quality.schedule', next);
+                setPreview([]);
+                setPreviewError('');
+              }}
             />
           </Field>
-          <Field label="间隔小时" hint="1–8760">
-            <NumberInput
-              min={1}
-              max={8760}
-              value={asNumber(draft, 'quality.interval_hours')}
-              onChange={(value) => update('quality.interval_hours', value)}
-            />
-          </Field>
-          <Field label="cron 表达式" hint="分 时 日 月 周，按服务器时区">
-            <input
-              value={asText(draft, 'quality.cron')}
-              onChange={(event) => update('quality.cron', event.target.value)}
-              placeholder="0 */6 * * *"
-            />
-          </Field>
+          {scheduleMode === 'interval' ? (
+            <Field label="间隔小时" hint="1–8760">
+              <NumberInput
+                min={1}
+                max={8760}
+                value={asNumber(draft, 'quality.interval_hours')}
+                onChange={(value) => update('quality.interval_hours', value)}
+              />
+            </Field>
+          ) : (
+            <Field label="cron 表达式" hint="分 时 日 月 周，按服务器时区">
+              <input
+                value={asText(draft, 'quality.cron')}
+                onChange={(event) => update('quality.cron', event.target.value)}
+                placeholder="0 */6 * * *"
+              />
+            </Field>
+          )}
           <Field label="下次运行预览">
             <button
               className="ghost"
@@ -732,9 +1059,18 @@ function RulesTab({
             />
           </Field>
         </div>
-        {previewError ? <div className="hint">{previewError}</div> : null}
+        {previewError ? <div className="msg err">{previewError}</div> : null}
         {preview.length > 0 ? (
-          <div className="hint">未来运行：{preview.map(timeText).join('；')}</div>
+          <div className="quality-preview">
+            <span className="muted">未来运行</span>
+            <div className="quality-preview-times">
+              {preview.map((time) => (
+                <span className="badge info" key={time}>
+                  {timeText(time)}
+                </span>
+              ))}
+            </div>
+          </div>
         ) : null}
       </div>
       <div className="card quality-rules-card">
@@ -1002,6 +1338,39 @@ function RulesTab({
           </table>
         )}
       </Card>
+      {dirty ? (
+        <div
+          className="quality-save-bar"
+          role="region"
+          aria-label="未保存的规则更改"
+        >
+          <div className="quality-save-text">
+            <Badge tone="warn">未保存</Badge>
+            <span>规则更改尚未生效。</span>
+          </div>
+          <div className="card-actions">
+            <button
+              className="ghost"
+              onClick={() => setConfirmDiscard(true)}
+              disabled={busy !== ''}
+            >
+              放弃更改
+            </button>
+            <button onClick={() => void save()} disabled={busy !== ''}>
+              {busy === 'save' ? '保存中…' : '保存规则'}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {confirmDiscard ? (
+        <Confirm
+          title="放弃未保存的更改？"
+          text="将重新读取已保存的规则。未保存的更改会丢失。"
+          confirmText="放弃更改"
+          onCancel={() => setConfirmDiscard(false)}
+          onConfirm={() => void discard()}
+        />
+      ) : null}
     </>
   );
 }
@@ -1009,6 +1378,8 @@ function RulesTab({
 /** 结果标签。 */
 function ResultsTab({
   running,
+  enabled,
+  onRun,
   initialGid,
   initialCid,
   initialSourceId,
@@ -1017,6 +1388,8 @@ function ResultsTab({
   initialQuery,
 }: {
   running: boolean;
+  enabled: boolean;
+  onRun: () => void;
   initialGid: string;
   initialCid: string;
   initialSourceId: string;
@@ -1033,6 +1406,7 @@ function ResultsTab({
     reason: initialReason,
     q: initialQuery,
   });
+  const [debouncedQ, setDebouncedQ] = useState(initialQuery);
   const [limit, setLimit] = useState(100);
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState<{ total: number; items: QualityResult[] } | null>(null);
@@ -1051,6 +1425,7 @@ function ResultsTab({
       reason: initialReason,
       q: initialQuery,
     });
+    setDebouncedQ(initialQuery);
     setOffset(0);
   }, [
     initialGid,
@@ -1061,21 +1436,28 @@ function ResultsTab({
     initialQuery,
   ]);
 
+  // 搜索输入防抖。每敲一个字都请求接口会浪费流量。
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQ(filters.q), 250);
+    return () => window.clearTimeout(timer);
+  }, [filters.q]);
+
+  // 请求只用防抖后的搜索词；其它筛选立即生效。
+  const appliedFilters = useMemo(
+    () => ({ ...filters, q: debouncedQ }),
+    [
+      filters.source_id,
+      filters.gid,
+      filters.cid,
+      filters.action,
+      filters.reason,
+      debouncedQ,
+    ],
+  );
+
   // 筛选写入地址栏，刷新、复制链接与返回时都能恢复。
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (filters.source_id) params.set('source_id', filters.source_id);
-    if (filters.gid) params.set('gid', filters.gid);
-    if (filters.cid) params.set('cid', filters.cid);
-    if (filters.action) params.set('action', filters.action);
-    if (filters.reason) params.set('reason', filters.reason);
-    if (filters.q.trim()) params.set('q', filters.q.trim());
-    const query = params.toString();
-    window.history.replaceState(
-      null,
-      '',
-      `#/quality/results${query ? `?${query}` : ''}`,
-    );
+    window.history.replaceState(null, '', routeHash({ tab: 'results', ...filters }));
   }, [filters]);
 
   useEffect(() => {
@@ -1110,7 +1492,7 @@ function ResultsTab({
     const seq = ++requestSeq.current;
     try {
       const body = await fetchQualityResults({
-        ...filters,
+        ...appliedFilters,
         limit,
         offset,
       });
@@ -1120,7 +1502,7 @@ function ResultsTab({
         err(error instanceof Error ? error.message : String(error));
       }
     }
-  }, [err, filters, limit, offset]);
+  }, [appliedFilters, err, limit, offset]);
 
   useEffect(() => {
     void load();
@@ -1148,6 +1530,12 @@ function ResultsTab({
     setOffset(0);
   };
 
+  const clearFilters = () => {
+    setFilters({ source_id: '', gid: '', cid: '', action: '', reason: '', q: '' });
+    setDebouncedQ('');
+    setOffset(0);
+  };
+
   const doRerun = async () => {
     if (!rerun) return;
     try {
@@ -1168,166 +1556,196 @@ function ResultsTab({
   return (
     <>
       {node}
-      <div className="card">
-        <div className="card-head">
-          <div className="card-head-text">
-            <h2>结果</h2>
-            <span className="muted">共 {total} 条{filters.cid ? `，频道 ${filters.cid}` : ''}</span>
-          </div>
-          <div className="card-actions">
-            <button className="ghost" onClick={() => void load()}>
-              刷新
-            </button>
-          </div>
-        </div>
-        <div className="fields">
-          <Field label="来源">
-            <Select
-              ariaLabel="来源筛选"
-              value={filters.source_id}
-              compact
-              options={[
-                { value: '', label: '全部来源' },
-                ...sources.map((source) => ({ value: source.id, label: source.name })),
-              ]}
-              onChange={(next) => setFilter('source_id', next)}
-            />
-          </Field>
-          <Field label="分组">
-            <Select
-              ariaLabel="分组筛选"
-              value={filters.gid}
-              compact
-              options={[
-                { value: '', label: '全部分组' },
-                ...groups.map((group) => ({ value: group.id, label: group.name })),
-              ]}
-              onChange={(next) => setFilter('gid', next)}
-            />
-          </Field>
-          <Field label="动作">
-            <Select
-              ariaLabel="动作筛选"
-              value={filters.action}
-              compact
-              options={[
-                { value: '', label: '全部动作' },
-                { value: 'admitted', label: '已准入' },
-                { value: 'rejected', label: '未准入' },
-                { value: 'removed', label: '已移出' },
-                { value: 'hidden', label: '已下线' },
-                { value: 'kept', label: '已保留' },
-                { value: 'source_removed', label: '源已移除' },
-                { value: 'held', label: '暂停准入' },
-                { value: 'removal_paused', label: '暂停移出' },
-                { value: 'skipped', label: '跳过' },
-              ]}
-              onChange={(next) => setFilter('action', next)}
-            />
-          </Field>
-          <Field label="原因">
-            <Select
-              ariaLabel="原因筛选"
-              value={filters.reason}
-              compact
-              options={[
-                { value: '', label: '全部原因' },
-                { value: 'pass', label: '合格' },
-                { value: 'unreachable', label: '不可达' },
-                { value: 'speed_low', label: '速率低' },
-                { value: 'resolution_low', label: '分辨率低' },
-                { value: 'resolution_high', label: '分辨率高' },
-                { value: 'delay_high', label: '延迟高' },
-                { value: 'probe_error', label: '探测错误' },
-                { value: 'guard', label: '安全阀暂停' },
-                { value: 'source_removed', label: '源已移除' },
-              ]}
-              onChange={(next) => setFilter('reason', next)}
-            />
-          </Field>
-          <Field label="搜索">
-            <input
-              value={filters.q}
-              placeholder="频道名或 id"
-              onChange={(event) => setFilter('q', event.target.value)}
-            />
-          </Field>
+      <Card
+        title="结果"
+        note={`共 ${total} 条${running ? ' · 任务进行中，自动刷新' : ''}`}
+        actions={
+          <button className="ghost" onClick={() => void load()}>
+            <Icon name="refresh" size={14} />
+            刷新
+          </button>
+        }
+      >
+        <div className="filter-bar quality-filters">
+          <input
+            className="search"
+            value={filters.q}
+            aria-label="搜索频道名或 ID"
+            placeholder="搜索频道名或 ID"
+            onChange={(event) => setFilter('q', event.target.value)}
+          />
+          <Select
+            ariaLabel="来源筛选"
+            value={filters.source_id}
+            compact
+            options={[
+              { value: '', label: '全部来源' },
+              ...sources.map((source) => ({ value: source.id, label: source.name })),
+            ]}
+            onChange={(next) => setFilter('source_id', next)}
+          />
+          <Select
+            ariaLabel="分组筛选"
+            value={filters.gid}
+            compact
+            options={[
+              { value: '', label: '全部分组' },
+              ...groups.map((group) => ({ value: group.id, label: group.name })),
+            ]}
+            onChange={(next) => setFilter('gid', next)}
+          />
+          <Select
+            ariaLabel="动作筛选"
+            value={filters.action}
+            compact
+            options={[
+              { value: '', label: '全部动作' },
+              { value: 'admitted', label: '已准入' },
+              { value: 'rejected', label: '未准入' },
+              { value: 'removed', label: '已移出' },
+              { value: 'hidden', label: '已下线' },
+              { value: 'kept', label: '已保留' },
+              { value: 'source_removed', label: '源已移除' },
+              { value: 'held', label: '暂停准入' },
+              { value: 'removal_paused', label: '暂停移出' },
+              { value: 'skipped', label: '跳过' },
+            ]}
+            onChange={(next) => setFilter('action', next)}
+          />
+          <Select
+            ariaLabel="原因筛选"
+            value={filters.reason}
+            compact
+            options={[
+              { value: '', label: '全部原因' },
+              { value: 'pass', label: '合格' },
+              { value: 'unreachable', label: '不可达' },
+              { value: 'speed_low', label: '速率低' },
+              { value: 'resolution_low', label: '分辨率低' },
+              { value: 'resolution_high', label: '分辨率高' },
+              { value: 'delay_high', label: '延迟高' },
+              { value: 'probe_error', label: '探测错误' },
+              { value: 'guard', label: '安全阀暂停' },
+              { value: 'source_removed', label: '源已移除' },
+            ]}
+            onChange={(next) => setFilter('reason', next)}
+          />
           {filters.cid ? (
-            <Field label="当前频道">
+            <span className="badge info quality-scope">
+              频道 {filters.cid}
               <button
-                className="ghost"
+                type="button"
+                className="icon-btn"
+                aria-label="清除频道筛选"
                 onClick={() => {
                   setFilter('gid', '');
                   setFilter('cid', '');
                 }}
               >
-                清除频道筛选
+                <Icon name="close" size={12} />
               </button>
-            </Field>
+            </span>
+          ) : null}
+          {filtered ? (
+            <button className="ghost" onClick={clearFilters}>
+              清除筛选
+            </button>
           ) : null}
         </div>
-      </div>
-      <div className="card">
         {items.length === 0 ? (
           <Empty
-            text={filtered ? '没有匹配结果' : '没有结果记录'}
+            text={
+              filtered
+                ? '没有匹配结果'
+                : running
+                  ? '正在校验，结果稍后显示'
+                  : '还没有结果记录'
+            }
             icon="activity"
+            action={
+              filtered ? (
+                <button type="button" className="ghost" onClick={clearFilters}>
+                  清除筛选
+                </button>
+              ) : running ? undefined : (
+                <button type="button" onClick={onRun}>
+                  立即校验
+                </button>
+              )
+            }
           />
         ) : (
           <>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>频道</th>
-                  <th>来源</th>
-                  <th>目标分组</th>
-                  <th>动作</th>
-                  <th>原因</th>
-                  <th>延迟</th>
-                  <th>速率</th>
-                  <th>分辨率</th>
-                  <th>最近校验</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => (
-                  <tr key={item.key}>
-                    <td>
-                      {item.name || item.cid}
-                      <span className="cid">[{item.cid}]</span>
-                    </td>
-                    <td>{item.source_id ? sourceName(item.source_id) : '手工'}</td>
-                    <td>{item.target_group || '—'}</td>
-                    <td>
-                      <Badge tone={resultActionTone(item)}>{resultActionText(item)}</Badge>
-                    </td>
-                    <td>{REASON_LABEL[item.reason] ?? item.reason}</td>
-                    <td>{item.delay_ms === null ? '—' : `${item.delay_ms} ms`}</td>
-                    <td>
-                      {item.speed_mib === null ? '—' : `${item.speed_mib.toFixed(1)} MiB/s`}
-                    </td>
-                    <td>{resolutionText(item.resolution)}</td>
-                    <td title={timeText(item.checked_at)}>{relativeText(item.checked_at)}</td>
-                    <td>
-                      <button className="chip" onClick={() => setDetail(item)}>
-                        详情
-                      </button>
-                      {item.action === 'admitted' ? (
-                        <button className="chip" onClick={() => setRerun(item)}>
-                          重新校验
-                        </button>
-                      ) : null}
-                    </td>
+            <div className="table-wrap">
+              <table
+                className="table quality-results-table"
+                aria-label="质量校验结果"
+              >
+                <thead>
+                  <tr>
+                    <th>频道</th>
+                    <th>动作</th>
+                    <th>原因</th>
+                    <th>来源</th>
+                    <th>目标分组</th>
+                    <th className="right">延迟</th>
+                    <th className="right">速率</th>
+                    <th className="right">分辨率</th>
+                    <th>最近校验</th>
+                    <th>操作</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="card-head">
+                </thead>
+                <tbody>
+                  {items.map((item) => (
+                    <tr key={item.key}>
+                      <td>
+                        <span className="quality-channel-name">
+                          {item.name || item.cid}
+                        </span>
+                        <span className="cid">[{item.cid}]</span>
+                      </td>
+                      <td>
+                        <Badge tone={resultActionTone(item)}>
+                          {resultActionText(item)}
+                        </Badge>
+                      </td>
+                      <td>{REASON_LABEL[item.reason] ?? item.reason}</td>
+                      <td>{item.source_id ? sourceName(item.source_id) : '手工'}</td>
+                      <td>{item.target_group || '—'}</td>
+                      <td className="right num">
+                        {item.delay_ms === null ? '—' : `${item.delay_ms} ms`}
+                      </td>
+                      <td className="right num">
+                        {item.speed_mib === null
+                          ? '—'
+                          : `${item.speed_mib.toFixed(1)} MiB/s`}
+                      </td>
+                      <td className="right num">{resolutionText(item.resolution)}</td>
+                      <td title={timeText(item.checked_at)}>
+                        {relativeText(item.checked_at)}
+                      </td>
+                      <td>
+                        <div className="quality-row-actions">
+                          <button className="chip" onClick={() => setDetail(item)}>
+                            详情
+                          </button>
+                          {item.action === 'admitted' ? (
+                            <button className="chip" onClick={() => setRerun(item)}>
+                              重新校验
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="quality-table-foot">
               <span className="muted">
                 第 {total === 0 ? 0 : offset + 1}–{pageEnd} 条，共 {total} 条
               </span>
-              <div className="card-actions">
+              <div className="quality-pager" role="group" aria-label="分页">
                 <Select
                   ariaLabel="每页数量"
                   value={String(limit)}
@@ -1360,22 +1778,49 @@ function ResultsTab({
             </div>
           </>
         )}
-      </div>
+      </Card>
       {detail ? (
-        <Modal title="质量结果详情" onClose={() => setDetail(null)}>
+        <Modal
+          title="质量结果详情"
+          onClose={() => setDetail(null)}
+          footer={
+            <>
+              <button className="ghost" onClick={() => setDetail(null)}>
+                关闭
+              </button>
+              {detail.action === 'admitted' ? (
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    setRerun(detail);
+                    setDetail(null);
+                  }}
+                >
+                  重新校验
+                </button>
+              ) : null}
+            </>
+          }
+        >
+          <div className="quality-detail-head">
+            <div className="quality-detail-name">
+              {detail.name || detail.cid}
+              <span className="cid">[{detail.cid}]</span>
+            </div>
+            <div className="quality-detail-badges">
+              <Badge tone={resultActionTone(detail)}>
+                {resultActionText(detail)}
+              </Badge>
+              <Badge tone="muted">
+                {REASON_LABEL[detail.reason] ?? detail.reason}
+              </Badge>
+            </div>
+          </div>
           <dl>
-            <dt>频道</dt>
-            <dd>
-              {detail.name || detail.cid} <span className="cid">[{detail.cid}]</span>
-            </dd>
             <dt>来源</dt>
             <dd>{detail.source_id ? sourceName(detail.source_id) : '手工'}</dd>
             <dt>目标分组</dt>
             <dd>{detail.target_group || '—'}</dd>
-            <dt>动作</dt>
-            <dd>{resultActionText(detail)}</dd>
-            <dt>原因</dt>
-            <dd>{REASON_LABEL[detail.reason] ?? detail.reason}</dd>
             <dt>最近校验</dt>
             <dd>{timeText(detail.checked_at)}</dd>
             <dt>首次失败</dt>
@@ -1384,7 +1829,9 @@ function ResultsTab({
             <dd>{detail.delay_ms === null ? '—' : `${detail.delay_ms} ms`}</dd>
             <dt>速率</dt>
             <dd>
-              {detail.speed_mib === null ? '—' : `${detail.speed_mib.toFixed(2)} MiB/s`}
+              {detail.speed_mib === null
+                ? '—'
+                : `${detail.speed_mib.toFixed(2)} MiB/s`}
             </dd>
             <dt>分辨率</dt>
             <dd>{detail.resolution || '—'}</dd>
@@ -1392,6 +1839,8 @@ function ResultsTab({
             <dd>{detail.http_status ?? '—'}</dd>
             <dt>地址哈希</dt>
             <dd className="mono">{detail.url_hash || '—'}</dd>
+            <dt>规则哈希</dt>
+            <dd className="mono">{detail.rule_hash || '—'}</dd>
           </dl>
           {detail.action === 'removed' || detail.action === 'source_removed' ? (
             <p className="hint">需要重新同步源才能再次准入。</p>
@@ -1401,7 +1850,9 @@ function ResultsTab({
       {rerun ? (
         <Confirm
           title="重新校验这个频道？"
-          text={`将校验「${rerun.name || rerun.cid}」。失败会立即从分组移出。`}
+          text={`将校验「${rerun.name || rerun.cid}」。${
+            enabled ? '失败会立即从分组移出。' : '质量已关闭，本次只测量。'
+          }`}
           confirmText="开始校验"
           onCancel={() => setRerun(null)}
           onConfirm={() => void doRerun()}
@@ -1548,127 +1999,174 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
           </div>
           <div className="card-actions">
             <button className="ghost" onClick={() => void load()}>
+              <Icon name="refresh" size={14} />
               刷新
             </button>
           </div>
         </div>
         {items.length === 0 ? (
-          <Empty text="没有同步来源" icon="subs" />
+          <Empty
+            text="没有同步来源"
+            icon="subs"
+            action={
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  window.location.hash = '#/subs';
+                }}
+              >
+                前往订阅源
+              </button>
+            }
+          />
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>来源</th>
-                <th>状态</th>
-                <th>门控</th>
-                <th>最近同步 / 阶段</th>
-                <th>准入</th>
-                <th>最近移出</th>
-                <th>最近一轮失败率</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    {item.name || item.id}
-                    <span className="cid">[{item.id}]</span>
-                  </td>
-                  <td>
-                    <Badge tone={item.enabled ? 'ok' : 'muted'}>
-                      {item.enabled ? '已启用' : '已停用'}
-                    </Badge>
-                  </td>
-                  <td>
-                    <Switch
-                      checked={item.gate_enabled}
-                      disabled={busy !== ''}
-                      label={`${item.name || item.id} 门控`}
-                      onChange={(next) =>
-                        next ? void toggleGate(item, true) : setGateOff(item)
-                      }
-                    />
-                  </td>
-                  <td>
-                    <div>{item.phase || '—'}</div>
-                    <div className="hint">
-                      {timeText(item.last_at)}
-                      {item.truncated
-                        ? `；本轮准入 ${item.admitted}，剩余 ${item.remaining} 个候选下一轮继续`
-                        : ''}
-                      {item.paused
-                        ? `；${PAUSE_LABEL[item.pause_reason] ?? '本轮已暂停'}`
-                        : ''}
-                    </div>
-                  </td>
-                  <td>{item.channels}</td>
-                  <td>{item.removed}</td>
-                  <td>
-                    {item.tested > 0
-                      ? `${((item.removed / item.tested) * 100).toFixed(0)}%`
-                      : '—'}
-                  </td>
-                  <td>
-                    <button
-                      className="chip"
-                      disabled={busy !== '' || !item.enabled}
-                      onClick={() => void sync(item)}
-                    >
-                      立即同步
-                    </button>
-                    {item.enabled ? (
-                      <button
-                        className="chip"
-                        disabled={busy !== ''}
-                        onClick={() => {
-                          let remember = false;
-                          try {
-                            remember =
-                              localStorage.getItem('tv_buddy_quality_disable_keep') === '1';
-                          } catch {
-                            // 隐私模式下读写失败时按未记住处理。
-                          }
-                          setDisable({
-                            source: item,
-                            keep: true,
-                            remember,
-                            confirm: false,
-                          });
-                        }}
-                      >
-                        停用
-                      </button>
-                    ) : (
-                      <button
-                        className="chip"
-                        disabled={busy !== ''}
-                        onClick={() => void enable(item)}
-                      >
-                        启用
-                      </button>
-                    )}
-                    <button
-                      className="chip"
-                      title="到订阅源页编辑这个源"
-                      onClick={() => {
-                        window.location.hash = '#/subs';
-                      }}
-                    >
-                      编辑
-                    </button>
-                    <button
-                      className="chip danger-text"
-                      disabled={busy !== ''}
-                      onClick={() => setRemoving({ source: item, keep: true, confirm: false })}
-                    >
-                      删除
-                    </button>
-                  </td>
+          <div className="table-wrap">
+            <table
+              className="table quality-sources-table"
+              aria-label="同步源质量门控状态"
+            >
+              <thead>
+                <tr>
+                  <th>来源</th>
+                  <th>状态</th>
+                  <th>门控</th>
+                  <th>最近阶段</th>
+                  <th className="right">准入</th>
+                  <th className="right">移出</th>
+                  <th className="right">移出率</th>
+                  <th>操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <div className="quality-source-name">{item.name || item.id}</div>
+                      <span className="cid">[{item.id}]</span>
+                      {item.error ? (
+                        <div className="hint quality-source-error" title={item.error}>
+                          {item.error}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>
+                      <div className="quality-source-badges">
+                        <Badge tone={item.enabled ? 'ok' : 'muted'}>
+                          {item.enabled ? '已启用' : '已停用'}
+                        </Badge>
+                        {item.paused ? <Badge tone="warn">本轮暂停</Badge> : null}
+                        {item.truncated ? <Badge tone="info">下轮继续</Badge> : null}
+                        {item.error ? <Badge tone="danger">抓取错误</Badge> : null}
+                      </div>
+                    </td>
+                    <td>
+                      <Switch
+                        checked={item.gate_enabled}
+                        disabled={busy !== ''}
+                        label={`${item.name || item.id} 门控`}
+                        onChange={(next) =>
+                          next ? void toggleGate(item, true) : setGateOff(item)
+                        }
+                      />
+                    </td>
+                    <td>
+                      <div>{sourcePhaseText(item.phase)}</div>
+                      <div className="hint">
+                        {item.last_at ? timeText(item.last_at) : '尚未同步'}
+                        {item.truncated
+                          ? `；本轮准入 ${item.admitted}，剩余 ${item.remaining} 个下一轮继续`
+                          : ''}
+                        {item.paused
+                          ? `；${PAUSE_LABEL[item.pause_reason] ?? '本轮已暂停'}`
+                          : ''}
+                      </div>
+                    </td>
+                    <td className="right num">{item.channels}</td>
+                    <td className="right num">{item.removed}</td>
+                    <td
+                      className="right num"
+                      title={
+                        item.tested > 0
+                          ? `最近一轮已测 ${item.tested} 个`
+                          : undefined
+                      }
+                    >
+                      {item.tested > 0
+                        ? `${((item.removed / item.tested) * 100).toFixed(0)}%`
+                        : '—'}
+                    </td>
+                    <td>
+                      <div className="quality-row-actions">
+                        <button
+                          className="chip"
+                          disabled={busy !== '' || !item.enabled}
+                          title="按当前规则同步这个源"
+                          onClick={() => void sync(item)}
+                        >
+                          立即同步
+                        </button>
+                        {item.enabled ? (
+                          <button
+                            className="chip"
+                            disabled={busy !== ''}
+                            title="停用这个源"
+                            onClick={() => {
+                              let remember = false;
+                              try {
+                                remember =
+                                  localStorage.getItem(
+                                    'tv_buddy_quality_disable_keep',
+                                  ) === '1';
+                              } catch {
+                                // 隐私模式下读写失败时按未记住处理。
+                              }
+                              setDisable({
+                                source: item,
+                                keep: true,
+                                remember,
+                                confirm: false,
+                              });
+                            }}
+                          >
+                            停用
+                          </button>
+                        ) : (
+                          <button
+                            className="chip"
+                            disabled={busy !== ''}
+                            title="启用这个源"
+                            onClick={() => void enable(item)}
+                          >
+                            启用
+                          </button>
+                        )}
+                        <button
+                          className="chip"
+                          title="到订阅源页编辑这个源"
+                          onClick={() => {
+                            window.location.hash = '#/subs';
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          className="chip danger-text"
+                          disabled={busy !== ''}
+                          title="删除这个源"
+                          onClick={() =>
+                            setRemoving({ source: item, keep: true, confirm: false })
+                          }
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
       {aggregates.length > 0 ? (
@@ -1815,7 +2313,11 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
 }
 
 /** 质量校验页。 */
-export function QualityPage() {
+export function QualityPage({
+  onDirtyChange,
+}: {
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const { node, ok, err } = useToast();
   const [route, setRoute] = useState<QualityRoute>(() => qualityRoute());
   const [tab, setTab] = useState<Tab>(route.tab);
@@ -1823,10 +2325,92 @@ export function QualityPage() {
   const [busy, setBusy] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmRun, setConfirmRun] = useState(false);
+  const [rulesDirty, setRulesDirty] = useState(false);
+  const [pendingRoute, setPendingRoute] = useState<QualityRoute | null>(null);
+  const rulesDirtyRef = useRef(false);
+  const tabRef = useRef(tab);
+  const routeRef = useRef(route);
+
+  const markRulesDirty = useCallback((dirty: boolean) => {
+    rulesDirtyRef.current = dirty;
+    setRulesDirty(dirty);
+  }, []);
 
   useEffect(() => {
-    const onHash = () => {
-      const next = qualityRoute();
+    tabRef.current = tab;
+  }, [tab]);
+
+  useEffect(() => {
+    routeRef.current = route;
+  }, [route]);
+
+  // 把未保存状态交给外层导航，切分区前先确认。
+  useEffect(() => {
+    onDirtyChange?.(rulesDirty);
+  }, [onDirtyChange, rulesDirty]);
+
+  const applyRoute = useCallback((next: QualityRoute) => {
+    tabRef.current = next.tab;
+    routeRef.current = next;
+    setRoute(next);
+    setTab(next.tab);
+    const target = routeHash(next);
+    if (window.location.hash !== target) {
+      window.history.replaceState(null, '', target);
+    }
+  }, []);
+
+  /** 切标签。规则页有未保存修改时先确认。 */
+  const requestTab = useCallback(
+    (next: Tab) => {
+      if (next === tabRef.current) return;
+      const nextRoute = emptyRoute(next);
+      if (tabRef.current === 'rules' && rulesDirtyRef.current) {
+        setPendingRoute(nextRoute);
+        return;
+      }
+      applyRoute(nextRoute);
+    },
+    [applyRoute],
+  );
+
+  /** 打开结果页，可带筛选。规则页有未保存修改时先确认。 */
+  const openResults = useCallback(
+    (params: Partial<QualityRoute> = {}) => {
+      const nextRoute: QualityRoute = {
+        ...emptyRoute('results'),
+        ...params,
+        tab: 'results',
+      };
+      if (tabRef.current === 'rules' && rulesDirtyRef.current) {
+        setPendingRoute(nextRoute);
+        return;
+      }
+      applyRoute(nextRoute);
+    },
+    [applyRoute],
+  );
+
+  // 浏览器前进/后退：规则页有未保存修改时先确认。
+  useEffect(() => {
+    const onHash = (event: HashChangeEvent) => {
+      const nextHash = new URL(event.newURL).hash;
+      // 切到别的分区时由面板的导航守卫处理，这里只管质量页内部。
+      if (!nextHash.startsWith('#/quality')) return;
+      const next = qualityRoute(nextHash);
+      if (
+        tabRef.current === 'rules' &&
+        next.tab !== 'rules' &&
+        rulesDirtyRef.current
+      ) {
+        window.history.replaceState(
+          null,
+          '',
+          routeHash({ ...routeRef.current, tab: 'rules' }),
+        );
+        setPendingRoute(next);
+        return;
+      }
       setRoute(next);
       setTab(next.tab);
     };
@@ -1834,21 +2418,22 @@ export function QualityPage() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  const changeTab = (next: Tab) => {
-    setTab(next);
-    setRoute({
-      tab: next,
-      gid: '',
-      cid: '',
-      source_id: '',
-      action: '',
-      reason: '',
-      q: '',
-    });
-    const target = `#/quality/${next}`;
-    if (window.location.hash !== target) {
-      window.history.replaceState(null, '', target);
-    }
+  // 关闭或刷新页面时提示未保存的规则。
+  useEffect(() => {
+    if (!rulesDirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [rulesDirty]);
+
+  const discardAndGo = () => {
+    const next = pendingRoute;
+    setPendingRoute(null);
+    markRulesDirty(false);
+    if (next) applyRoute(next);
   };
 
   const load = useCallback(async () => {
@@ -1876,7 +2461,6 @@ export function QualityPage() {
       );
       await load();
       broadcastQualityChanged();
-      changeTab('overview');
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1899,6 +2483,29 @@ export function QualityPage() {
     }
   };
 
+  const onTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    let nextIndex = -1;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % TABS.length;
+    else if (event.key === 'ArrowLeft') {
+      nextIndex = (index - 1 + TABS.length) % TABS.length;
+    } else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = TABS.length - 1;
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    const next = TABS[nextIndex][0];
+    const blocked =
+      tabRef.current === 'rules' && rulesDirtyRef.current && next !== 'rules';
+    requestTab(next);
+    if (!blocked) {
+      window.requestAnimationFrame(() => {
+        document.getElementById(`quality-tab-${next}`)?.focus();
+      });
+    }
+  };
+
   return (
     <>
       {node}
@@ -1908,50 +2515,92 @@ export function QualityPage() {
         sub="同步源按质量准入；手工频道按失败策略下线。"
         help="所有质量接口仅管理员可用。结果只记录哈希与指标，不保存完整地址。"
       >
-        <button className="ghost" onClick={() => void load()} disabled={busy !== ''}>
-          刷新
+        <button
+          className="ghost"
+          onClick={() => void load()}
+          disabled={busy !== ''}
+          title="重新读取质量状态"
+        >
+          <Icon name="refresh" size={14} />
+          刷新状态
         </button>
         <button
           onClick={() => setConfirmRun(true)}
           disabled={busy !== '' || status?.running}
         >
-          {busy === 'run' ? '已排入…' : '立即校验'}
+          {status?.running
+            ? '校验进行中'
+            : busy === 'run'
+              ? '已排入…'
+              : '立即校验'}
         </button>
       </PageHead>
-      <div className="tabs" role="tablist">
-        {TABS.map(([id, label]) => (
+      <QualityStatusBar
+        status={status}
+        busy={busy !== ''}
+        onOpenOverview={() => requestTab('overview')}
+        onCancel={() => setConfirmCancel(true)}
+      />
+      <div className="tabs" role="tablist" aria-label="质量校验视图">
+        {TABS.map(([id, label], index) => (
           <button
             key={id}
+            id={`quality-tab-${id}`}
             role="tab"
             aria-selected={tab === id}
+            aria-controls="quality-panel"
+            tabIndex={tab === id ? 0 : -1}
             className={tab === id ? 'tab active' : 'tab'}
-            onClick={() => changeTab(id)}
+            onClick={() => requestTab(id)}
+            onKeyDown={(event) => onTabKeyDown(event, index)}
           >
             {label}
+            {id === 'rules' && rulesDirty ? (
+              <>
+                <span className="tab-dot" aria-hidden="true" />
+                <span className="sr-only">有未保存的更改</span>
+              </>
+            ) : null}
           </button>
         ))}
       </div>
-      {tab === 'overview' && (
-        <OverviewTab
-          status={status}
-          busy={busy !== ''}
-          onRun={() => setConfirmRun(true)}
-          onCancel={() => setConfirmCancel(true)}
-        />
-      )}
-      {tab === 'rules' && <RulesTab status={status} onSaved={() => void load()} />}
-      {tab === 'results' && (
-        <ResultsTab
-          running={status?.running === true}
-          initialGid={route.gid}
-          initialCid={route.cid}
-          initialSourceId={route.source_id}
-          initialAction={route.action}
-          initialReason={route.reason}
-          initialQuery={route.q}
-        />
-      )}
-      {tab === 'sources' && <SourcesTab onChanged={() => void load()} />}
+      <div
+        className="quality-panel"
+        role="tabpanel"
+        id="quality-panel"
+        aria-labelledby={`quality-tab-${tab}`}
+      >
+        {tab === 'overview' && (
+          <OverviewTab
+            status={status}
+            onRun={() => setConfirmRun(true)}
+            onOpenRules={() => requestTab('rules')}
+            onOpenSources={() => requestTab('sources')}
+            onOpenResults={openResults}
+          />
+        )}
+        {tab === 'rules' && (
+          <RulesTab
+            status={status}
+            onSaved={() => void load()}
+            onDirtyChange={markRulesDirty}
+          />
+        )}
+        {tab === 'results' && (
+          <ResultsTab
+            running={status?.running === true}
+            enabled={status?.enabled === true}
+            onRun={() => setConfirmRun(true)}
+            initialGid={route.gid}
+            initialCid={route.cid}
+            initialSourceId={route.source_id}
+            initialAction={route.action}
+            initialReason={route.reason}
+            initialQuery={route.q}
+          />
+        )}
+        {tab === 'sources' && <SourcesTab onChanged={() => void load()} />}
+      </div>
       {confirmRun ? (
         <Confirm
           title="立即校验全部频道？"
@@ -1969,31 +2618,23 @@ export function QualityPage() {
         />
       ) : null}
       {confirmCancel ? (
-        <div className="modal-overlay" onClick={() => setConfirmCancel(false)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-head">
-              <h3>取消当前质量任务？</h3>
-              <button
-                className="icon-btn"
-                onClick={() => setConfirmCancel(false)}
-                aria-label="关闭"
-              >
-                <Icon name="close" size={15} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <p>已提交的准入与移出不会回滚。未开始的频道会标记为取消。</p>
-            </div>
-            <div className="modal-foot">
-              <button className="ghost" onClick={() => setConfirmCancel(false)}>
-                继续运行
-              </button>
-              <button onClick={() => void cancel()} disabled={busy !== ''}>
-                取消任务
-              </button>
-            </div>
-          </div>
-        </div>
+        <Confirm
+          title="取消当前质量任务？"
+          text="已提交的准入与移出不会回滚。未开始的频道会标记为取消。"
+          confirmText="取消任务"
+          busy={busy === 'cancel'}
+          onCancel={() => setConfirmCancel(false)}
+          onConfirm={() => void cancel()}
+        />
+      ) : null}
+      {pendingRoute ? (
+        <Confirm
+          title="离开规则页？"
+          text="当前有未保存的规则更改。离开后这些更改会丢失。"
+          confirmText="放弃更改并离开"
+          onCancel={() => setPendingRoute(null)}
+          onConfirm={discardAndGo}
+        />
       ) : null}
     </>
   );
