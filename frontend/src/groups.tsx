@@ -1409,6 +1409,32 @@ export function GroupsPage() {
               <div className="ops">
                 {!multi && (
                   <>
+                    <div className="sort-group" role="group" aria-label="调整分组顺序">
+                      <button
+                        className="icon-btn"
+                        disabled={groupIndex <= 0}
+                        title="上移分组"
+                        aria-label="上移分组"
+                        onClick={() => {
+                          setGroupMenu('');
+                          void moveGroup(group.id, -1);
+                        }}
+                      >
+                        <Icon name="up" size={12} />
+                      </button>
+                      <button
+                        className="icon-btn"
+                        disabled={groupIndex >= groups.length - 1}
+                        title="下移分组"
+                        aria-label="下移分组"
+                        onClick={() => {
+                          setGroupMenu('');
+                          void moveGroup(group.id, 1);
+                        }}
+                      >
+                        <Icon name="down" size={12} />
+                      </button>
+                    </div>
                     <button
                       className="chip icon-only"
                       title={
@@ -1439,6 +1465,19 @@ export function GroupsPage() {
                     >
                       编辑
                     </button>
+                    {group.source_id && (
+                      <button
+                        className="chip"
+                        title="断开来源关系，内容保留"
+                        onClick={() => {
+                          setGroupMenu('');
+                          void detach('group', group.id);
+                        }}
+                      >
+                        <Icon name="link" size={12} />
+                        断开订阅
+                      </button>
+                    )}
                     <button
                       className="chip primary"
                       aria-label="新增频道"
@@ -1480,42 +1519,8 @@ export function GroupsPage() {
                   aria-label="更多分组操作"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <button
-                    className="chip"
-                    disabled={groupIndex <= 0}
-                    onClick={() => {
-                      setGroupMenu('');
-                      void moveGroup(group.id, -1);
-                    }}
-                  >
-                    <Icon name="up" size={12} />
-                    上移
-                  </button>
-                  <button
-                    className="chip"
-                    disabled={groupIndex >= groups.length - 1}
-                    onClick={() => {
-                      setGroupMenu('');
-                      void moveGroup(group.id, 1);
-                    }}
-                  >
-                    <Icon name="down" size={12} />
-                    下移
-                  </button>
-                  {group.source_id && (
-                    <button
-                      className="chip"
-                      title="断开来源关系，内容保留"
-                      onClick={() => {
-                        setGroupMenu('');
-                        void detach('group', group.id);
-                      }}
-                    >
-                      <Icon name="link" size={12} />
-                      断开订阅
-                    </button>
-                  )}
                   <span className="spacer" />
+                  <span className="row-more-label">危险操作</span>
                   <button
                     className="chip danger-text"
                     aria-label="删除分组"
@@ -1697,6 +1702,44 @@ export function GroupsPage() {
                   </div>
                   {!multi && (
                     <div className="ch-ops">
+                      <div className="sort-group" role="group" aria-label="调整频道顺序">
+                        <button
+                          className="icon-btn"
+                          disabled={channelIndex === 0}
+                          title="置顶频道"
+                          aria-label="置顶频道"
+                          onClick={() => {
+                            setChannelMenu('');
+                            void moveChannelTo(group.id, channel.id, null);
+                          }}
+                        >
+                          <Icon name="pin" size={12} />
+                        </button>
+                        <button
+                          className="icon-btn"
+                          disabled={channelIndex === 0}
+                          title="上移频道"
+                          aria-label="上移频道"
+                          onClick={() => {
+                            setChannelMenu('');
+                            void moveChannel(group.id, channel.id, -1);
+                          }}
+                        >
+                          <Icon name="up" size={12} />
+                        </button>
+                        <button
+                          className="icon-btn"
+                          disabled={channelIndex >= channels.length - 1}
+                          title="下移频道"
+                          aria-label="下移频道"
+                          onClick={() => {
+                            setChannelMenu('');
+                            void moveChannel(group.id, channel.id, 1);
+                          }}
+                        >
+                          <Icon name="down" size={12} />
+                        </button>
+                      </div>
                       <button
                         className="chip icon-only"
                         title="复制播放地址"
@@ -1733,6 +1776,19 @@ export function GroupsPage() {
                       >
                         编辑
                       </button>
+                      {channel.source_id && (
+                        <button
+                          className="chip"
+                          title="断开来源关系，内容保留"
+                          onClick={() => {
+                            setChannelMenu('');
+                            void detach('channel', group.id, channel.id);
+                          }}
+                        >
+                          <Icon name="link" size={12} />
+                          断开订阅
+                        </button>
+                      )}
                       <button
                         className="chip icon-only"
                         title="更多频道操作"
@@ -1752,45 +1808,6 @@ export function GroupsPage() {
                       role="group"
                       aria-label="更多频道操作"
                     >
-                      <button
-                        className="chip"
-                        disabled={channelIndex === 0}
-                        title="置顶频道"
-                        aria-label="置顶频道"
-                        onClick={() => {
-                          setChannelMenu('');
-                          void moveChannelTo(group.id, channel.id, null);
-                        }}
-                      >
-                        <Icon name="pin" size={12} />
-                        置顶
-                      </button>
-                      <button
-                        className="chip"
-                        disabled={channelIndex === 0}
-                        title="上移频道"
-                        aria-label="上移频道"
-                        onClick={() => {
-                          setChannelMenu('');
-                          void moveChannel(group.id, channel.id, -1);
-                        }}
-                      >
-                        <Icon name="up" size={12} />
-                        上移
-                      </button>
-                      <button
-                        className="chip"
-                        disabled={channelIndex >= channels.length - 1}
-                        title="下移频道"
-                        aria-label="下移频道"
-                        onClick={() => {
-                          setChannelMenu('');
-                          void moveChannel(group.id, channel.id, 1);
-                        }}
-                      >
-                        <Icon name="down" size={12} />
-                        下移
-                      </button>
                       {group.mode === 'dash' && (
                         <button
                           className="chip"
@@ -1804,20 +1821,8 @@ export function GroupsPage() {
                           查看轨道
                         </button>
                       )}
-                      {channel.source_id && (
-                        <button
-                          className="chip"
-                          title="断开来源关系，内容保留"
-                          onClick={() => {
-                            setChannelMenu('');
-                            void detach('channel', group.id, channel.id);
-                          }}
-                        >
-                          <Icon name="link" size={12} />
-                          断开订阅
-                        </button>
-                      )}
                       <span className="spacer" />
+                      <span className="row-more-label">危险操作</span>
                       <button
                         className="chip danger-text"
                         aria-label="删除频道"

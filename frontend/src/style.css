@@ -1801,6 +1801,40 @@ a.compact {
   cursor: default;
 }
 
+/* 排序按钮组：置顶、上移、下移。连成一组，始终可见。 */
+.sort-group {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.sort-group .icon-btn {
+  width: 30px;
+  height: 26px;
+  border-radius: 0;
+  color: var(--text2);
+}
+
+.sort-group .icon-btn:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.sort-group .icon-btn:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.sort-group .icon-btn + .icon-btn {
+  border-left: 1px solid var(--line);
+}
+
+.sort-group .icon-btn:disabled {
+  opacity: 0.3;
+}
+
 /* 图标 + 文字的轻量按钮（卡片头里的操作）。 */
 .chip {
   display: inline-flex;
@@ -4492,6 +4526,12 @@ button.ov-range-btn.active {
   cursor: default;
 }
 
+.row-more-label {
+  color: var(--text3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* 频道行。 */
 .ch-row {
   display: flex;
@@ -4614,6 +4654,8 @@ button.ov-range-btn.active {
   align-items: center;
   gap: 4px;
   flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   padding-top: 1px;
 }
 
