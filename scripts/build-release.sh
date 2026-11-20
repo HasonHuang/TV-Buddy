@@ -55,6 +55,7 @@ package() { # 参数：架构（amd64/arm64）
   install -m 0755 install.sh "$stage/install.sh"
   install -m 0644 packaging/tv-buddy.service "$stage/tv-buddy.service"
   install -m 0755 packaging/tv-buddy.openrc "$stage/tv-buddy.openrc"
+  install -m 0644 scripts/nginx/default.conf "$stage/nginx.default.conf"
   tar -C "$OUT" -czf "$OUT/tv-buddy-$VERSION-linux-$platform.tar.gz" "tv-buddy-$VERSION-linux-$platform"
   ( cd "$OUT" && shasum -a 256 "tv-buddy-$VERSION-linux-$platform.tar.gz" > "tv-buddy-$VERSION-linux-$platform.tar.gz.sha256" )
   echo "    产物：$OUT/tv-buddy-$VERSION-linux-$platform.tar.gz"

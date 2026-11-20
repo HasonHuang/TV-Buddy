@@ -108,6 +108,7 @@ Linux 版本是静态链接的 musl 二进制。macOS 版本是系统原生二�
 | `ffmpeg` | DASH 录制、素材转换 |
 | `ffprobe` | 分辨率识别 |
 | systemd 或 OpenRC | Linux 开机自启（安装脚本自动选择） |
+| NGINX | 反向代理，可选。安装脚本可代装 |
 | Python 3 | EPG 脚本源（默认命令名 `python3`） |
 
 面板可以安装 ffmpeg 与 ffprobe。打开「系统状态」或「视频素材」页，点「安装 ffmpeg / ffprobe」。
@@ -152,6 +153,11 @@ curl -fsSL https://raw.githubusercontent.com/HasonHuang/TV-Buddy/main/install.sh
 4. 解包到 `/opt/tv-buddy`。
 5. 注册 systemd 或 OpenRC 服务。
 6. 启动服务。
+
+安装前会询问两件事：是否使用低配参数，是否安装 NGINX。回答 `y` 表示是，回车或 `n` 表示否。
+NGINX 选 `y` 时，脚本用系统包管理器安装 NGINX（apk、apt、dnf、yum），
+把反向代理配置写为默认站点，并把原配置备份为 `<文件>.bak.<时间>`。
+配置校验失败时恢复原配置。
 
 装完就能打开面板。加 `--no-start` 可只装不启动。
 
@@ -201,10 +207,14 @@ sudo ./install.sh
 | `--start` | 安装后启动服务（默认行为，保留以兼容旧用法） |
 | `--low-spec` | 写入低配参数：省内存、省 CPU。不询问 |
 | `--no-low-spec` | 不写入低配参数。不询问 |
+| `--nginx` | 安装 NGINX 并写入反向代理配置。不询问 |
+| `--no-nginx` | 不安装 NGINX。不询问 |
 | `-h`、`--help` | 显示帮助 |
 
 不加 `--low-spec` 或 `--no-low-spec` 时，安装前询问是否使用低配参数。
 脚本显示检测到的内存与 CPU 核数。无交互终端时默认不使用。
+不加 `--nginx` 或 `--no-nginx` 时，安装前询问是否安装 NGINX。
+无交互终端时默认不安装。`--nginx` 需要 root。
 
 ### 安装内容
 

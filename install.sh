@@ -10,6 +10,9 @@
 #   低配机器：  sudo ./install.sh --low-spec   # 直接写入省内存/省 CPU 的参数
 #   高配机器：  sudo ./install.sh --no-low-spec # 直接跳过低配参数
 #   不指定时：  安装前询问是否使用低配参数
+#   反向代理：  sudo ./install.sh --nginx       # 安装 NGINX 并写入反向代理配置
+#               sudo ./install.sh --no-nginx    # 不安装 NGINX
+#   不指定时：  安装前询问是否安装 NGINX
 #   远程安装包：sudo ./install.sh --archive https://example.com/tv-buddy.tar.gz
 #
 # 只支持 Linux amd64/arm64。脚本幂等；已有数据库不覆盖。
@@ -29,6 +32,8 @@ DO_START=1
 USE_DIST=0
 # 空值表示尚未选择，安装前询问。1 用低配，0 不用。
 LOW_SPEC=
+# 空值表示尚未选择，安装前询问。1 安装 NGINX，0 不安装。
+DO_NGINX=
 TMP_DIR=
 DOWNLOADED=
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -49,6 +54,8 @@ usage() {
   --no-link          不创建 tv-buddy 命令软链
   --low-spec         使用低配参数（省内存与 CPU），不询问
   --no-low-spec      不使用低配参数，不询问
+  --nginx            安装 NGINX 并写入反向代理配置，不询问
+  --no-nginx         不安装 NGINX，不询问
   --no-start         安装后不启动服务（默认会启动）
   --start            安装后启动服务（默认行为，保留以兼容旧用法）
   -h, --help         显示本帮助
@@ -86,7 +93,8 @@ ask_low_spec() {
     [ -z "$LOW_SPEC" ] || return 0
 
     # 优先读控制终端，兼容 `curl ... | sh` 的安装方式。
-    if { : </dev/tty; } 2>/dev/null; then
+    # 用 `true` 探测：`:` 是特殊内建命令，重定向失败会让整个脚本退出。
+    if { true </dev/tty; } 2>/dev/null; then
         exec 3</dev/tty
     elif [ -t 0 ]; then
         exec 3<&0
@@ -117,6 +125,34 @@ ask_low_spec() {
     else
         echo "低配模式：不启用"
     fi
+}
+
+# 安装前询问是否安装 NGINX。`--nginx` 与 `--no-nginx` 跳过询问。
+# 无交互终端时默认不安装，保持自动化安装的旧行为。
+ask_nginx() {
+    [ -z "$DO_NGINX" ] || return 0
+
+    if { true </dev/tty; } 2>/dev/null; then
+        exec 3</dev/tty
+    elif [ -t 0 ]; then
+        exec 3<&0
+    else
+        DO_NGINX=0
+        echo "无交互终端，默认不安装 NGINX。需要时加 --nginx。"
+        return 0
+    fi
+
+    if command -v nginx >/dev/null 2>&1; then
+        printf 'NGINX 已安装。是否写入反向代理配置（监听 80，备份原配置）？[y/N] '
+    else
+        printf '是否安装 NGINX 并配置反向代理（监听 80，备份原配置）？[y/N] '
+    fi
+    IFS= read -r answer <&3 || answer=
+    exec 3<&-
+    case "$answer" in
+        [Yy]|[Yy][Ee][Ss]) DO_NGINX=1 ;;
+        *) DO_NGINX=0 ;;
+    esac
 }
 
 while [ "$#" -gt 0 ]; do
@@ -169,6 +205,14 @@ while [ "$#" -gt 0 ]; do
             LOW_SPEC=0
             shift
             ;;
+        --nginx)
+            DO_NGINX=1
+            shift
+            ;;
+        --no-nginx)
+            DO_NGINX=0
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -209,6 +253,12 @@ fi
 
 # 安装动作开始前询问一次低配选择。
 ask_low_spec
+# 安装动作开始前询问一次 NGINX。
+ask_nginx
+
+if [ "$DO_NGINX" = 1 ] && [ "$(id -u)" -ne 0 ]; then
+    fail "安装或配置 NGINX 需要 root；可加 --no-nginx 跳过"
+fi
 
 # 校验同名 .sha256 文件。缺失时跳过。
 verify_digest() {
@@ -338,6 +388,133 @@ extract_archive() {
     BIN_SRC=$(find "$EXTRACT_DIR" -type f -name tv-buddy -perm -u+x | head -n 1)
     [ -n "$BIN_SRC" ] || fail "安装包内没有 tv-buddy：$archive"
     SRC_DIR=$(dirname "$BIN_SRC")
+}
+
+# 找随包分发的 NGINX 配置。发布包放在顶层；仓库里在 scripts/nginx/。
+nginx_conf_src() {
+    for candidate in "$ASSET_DIR/nginx.default.conf" "$SRC_DIR/scripts/nginx/default.conf"; do
+        if [ -f "$candidate" ]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# 用发行版的包管理器安装 NGINX。已安装时直接返回 0。
+install_nginx_package() {
+    command -v nginx >/dev/null 2>&1 && return 0
+    echo "安装 NGINX..."
+    if command -v apk >/dev/null 2>&1; then
+        apk add --no-cache nginx
+    elif command -v apt-get >/dev/null 2>&1; then
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y nginx
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y nginx
+    else
+        echo "找不到 apk/apt-get/dnf/yum，无法安装 NGINX。"
+        return 1
+    fi
+}
+
+# 恢复 NGINX 配置。没有备份时删除写入的文件。
+restore_nginx_conf() {
+    if [ -n "$2" ]; then
+        cp -p "$2" "$1"
+    else
+        rm -f "$1"
+    fi
+    echo "已恢复原配置：$1"
+}
+
+# 写入反向代理配置，替换发行版的默认站点。
+# 原文件备份为 <文件>.bak.<时间>。`nginx -t` 失败时恢复原文件。
+configure_nginx() {
+    src=$(nginx_conf_src) || {
+        echo "警告：找不到 NGINX 配置（nginx.default.conf）。跳过反向代理配置。"
+        return 1
+    }
+
+    # Alpine 用 http.d；Debian 系用 sites-available；其余用 conf.d。
+    if [ -d /etc/nginx/http.d ]; then
+        conf_dir=/etc/nginx/http.d
+        conf_name=default.conf
+    elif [ -d /etc/nginx/sites-available ]; then
+        conf_dir=/etc/nginx/sites-available
+        conf_name=default
+    else
+        conf_dir=/etc/nginx/conf.d
+        conf_name=default.conf
+    fi
+    conf="$conf_dir/$conf_name"
+
+    install -d "$conf_dir"
+    backup=
+    if [ -e "$conf" ]; then
+        backup="$conf.bak.$(date +%Y%m%d%H%M%S)"
+        cp -p "$conf" "$backup" || {
+            echo "警告：无法备份 $conf"
+            return 1
+        }
+    fi
+
+    install -m 0644 "$src" "$conf" || {
+        echo "警告：无法写入 $conf"
+        restore_nginx_conf "$conf" "$backup"
+        return 1
+    }
+
+    # Debian 系靠 sites-enabled 里的软链启用站点。
+    if [ "$conf_dir" = /etc/nginx/sites-available ]; then
+        if [ ! -e /etc/nginx/sites-enabled/default ]; then
+            install -d /etc/nginx/sites-enabled
+            ln -s ../sites-available/default /etc/nginx/sites-enabled/default
+        fi
+    fi
+
+    output=$(nginx -t 2>&1) || {
+        echo "警告：NGINX 配置校验失败。"
+        printf '%s\n' "$output"
+        restore_nginx_conf "$conf" "$backup"
+        return 1
+    }
+    # 已有别的默认站点时，请求不会落到本配置。nginx 只警告，不报错。
+    if printf '%s\n' "$output" | grep -q "conflicting server name"; then
+        echo "警告：NGINX 已有其他默认站点，配置冲突。"
+        restore_nginx_conf "$conf" "$backup"
+        return 1
+    fi
+    echo "NGINX 配置：$conf"
+    if [ -n "$backup" ]; then
+        echo "原配置备份：$backup"
+    fi
+    return 0
+}
+
+# 启动 NGINX 并设置开机自启。失败只警告，不中断安装。
+start_nginx() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl enable nginx >/dev/null 2>&1 || true
+        if systemctl restart nginx; then
+            echo "NGINX：已启动（systemd）"
+            return 0
+        fi
+        echo "警告：NGINX 启动失败，见 systemctl status nginx"
+        return 1
+    elif command -v rc-update >/dev/null 2>&1; then
+        rc-update add nginx default >/dev/null 2>&1 || true
+        if rc-service nginx restart; then
+            echo "NGINX：已启动（OpenRC）"
+            return 0
+        fi
+        echo "警告：NGINX 启动失败，见 /var/log/messages"
+        return 1
+    fi
+    echo "警告：未发现 systemd/OpenRC；请手动启动 NGINX"
+    return 1
 }
 
 # 下载 tar.gz 及其同名 .sha256 到 TMP_DIR，结果写入全局 DOWNLOADED。
@@ -477,6 +654,20 @@ if [ "$DO_START" = 1 ]; then
     esac
 fi
 
+# NGINX 失败不影响 tv-buddy 安装。
+NGINX_CONF_OK=0
+NGINX_STARTED=0
+if [ "$DO_NGINX" = 1 ]; then
+    if install_nginx_package && configure_nginx; then
+        NGINX_CONF_OK=1
+        if [ "$DO_START" = 1 ]; then
+            if start_nginx; then
+                NGINX_STARTED=1
+            fi
+        fi
+    fi
+fi
+
 echo "安装完成：$PREFIX"
 echo "数据：$PREFIX/tv-buddy.db"
 echo "面板：http://<主机>:9900/panel（账号 admin；初始口令见下）"
@@ -489,4 +680,16 @@ else
         openrc) echo "启动：rc-service tv-buddy start" ;;
         *) echo "启动：$PREFIX/tv-buddy.sh start" ;;
     esac
+fi
+
+if [ "$DO_NGINX" = 1 ]; then
+    if [ "$NGINX_CONF_OK" != 1 ]; then
+        echo "NGINX：未配置。见上方警告"
+    elif [ "$NGINX_STARTED" = 1 ]; then
+        echo "NGINX：反向代理已配置并启动，入口 http://<主机>/panel"
+    elif [ "$DO_START" = 0 ]; then
+        echo "NGINX：反向代理已配置，未启动（--no-start）"
+    else
+        echo "NGINX：反向代理已配置，启动失败。见上方警告"
+    fi
 fi
