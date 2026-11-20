@@ -898,6 +898,73 @@ export function NumberBox({
   );
 }
 
+/** 简洁数字输入。编辑期间保留原始文本，失焦后才回退到有效值。
+ *
+ * 与 `NumberBox` 的区别：没有加减按钮，外观与普通输入框一致。
+ * 设置页与质量校验页使用它；需要步进按钮的页面继续用 `NumberBox`。
+ */
+export function NumberInput({
+  value,
+  min,
+  max,
+  step,
+  ariaLabel,
+  title,
+  placeholder,
+  disabled,
+  className = '',
+  onChange,
+}: {
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  ariaLabel?: string;
+  title?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  onChange: (value: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(String(value));
+  }, [focused, value]);
+  const commit = (raw: string) => {
+    const parsed = Number(raw);
+    if (raw.trim() === '' || !Number.isFinite(parsed)) return;
+    let next = parsed;
+    if (min !== undefined && next < min) next = min;
+    if (max !== undefined && next > max) next = max;
+    onChange(next);
+  };
+  return (
+    <input
+      className={`number-input${className ? ` ${className}` : ''}`}
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={text}
+      aria-label={ariaLabel}
+      title={title}
+      placeholder={placeholder}
+      disabled={disabled}
+      onFocus={() => setFocused(true)}
+      onChange={(event) => {
+        setText(event.target.value);
+        commit(event.target.value);
+      }}
+      onBlur={() => {
+        setFocused(false);
+        const parsed = Number(text);
+        if (text.trim() === '' || !Number.isFinite(parsed)) setText(String(value));
+      }}
+    />
+  );
+}
+
 /** 日期与时间输入：左侧日历图标，整块可点。
  *
  * 支持 `showPicker` 且能隐藏原生小图标的浏览器，隐藏原生图标，改用左侧

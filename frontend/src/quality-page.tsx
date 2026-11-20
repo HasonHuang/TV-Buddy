@@ -35,6 +35,7 @@ import {
   Empty,
   Field,
   Modal,
+  NumberInput,
   PageHead,
   Select,
   Switch,
@@ -332,54 +333,6 @@ function speedRowsToMap(rows: SpeedRow[]): Record<string, number> {
     }
   }
   return map;
-}
-
-/** 数字输入。编辑期间保留原始文本，避免 0、空值与小数点被默认值覆盖。 */
-function NumberInput({
-  value,
-  min,
-  max,
-  step,
-  onChange,
-}: {
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  onChange: (value: number) => void;
-}) {
-  const [text, setText] = useState(String(value));
-  const [focused, setFocused] = useState(false);
-  useEffect(() => {
-    if (!focused) setText(String(value));
-  }, [focused, value]);
-  const commit = (raw: string) => {
-    const parsed = Number(raw);
-    if (raw.trim() === '' || !Number.isFinite(parsed)) return;
-    let next = parsed;
-    if (min !== undefined && next < min) next = min;
-    if (max !== undefined && next > max) next = max;
-    onChange(next);
-  };
-  return (
-    <input
-      type="number"
-      min={min}
-      max={max}
-      step={step}
-      value={text}
-      onFocus={() => setFocused(true)}
-      onChange={(event) => {
-        setText(event.target.value);
-        commit(event.target.value);
-      }}
-      onBlur={() => {
-        setFocused(false);
-        const parsed = Number(text);
-        if (text.trim() === '' || !Number.isFinite(parsed)) setText(String(value));
-      }}
-    />
-  );
 }
 
 function overrideFields(value: unknown): string {

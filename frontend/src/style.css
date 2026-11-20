@@ -993,6 +993,11 @@ select {
   height: 34px;
 }
 
+/* 数字输入：等宽数字便于上下扫读。 */
+.number-input {
+  font-variant-numeric: tabular-nums;
+}
+
 input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='range']):hover:not(:disabled),
 select:hover:not(:disabled),
 textarea:hover:not(:disabled) {
@@ -4787,10 +4792,10 @@ pre code {
   padding-right: 12px;
 }
 
-/* 按功能类型分组：分组之间留白，组内两列网格。
+/* 按功能类型分组：分组之间留白，组内单列堆叠。
  *
- * 宽卡片（`wide`）与 `span-all` 外壳跨两列。组内不用多栏布局，
- * 避免通栏卡片前后出现无法控制的空白带。
+ * 双列时，服务器等长卡与面板等短卡并排，后续宽卡换行会留下空单元格。
+ * 单列后卡片统一占满一行，字段仍按卡片宽度分两到三列。
  */
 .settings-page .settings-sections {
   display: flex;
@@ -4835,14 +4840,9 @@ pre code {
 
 .settings-page .settings-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
   align-items: start;
-}
-
-.settings-page .settings-cards > .card.wide,
-.settings-page .settings-cards > .span-all {
-  grid-column: 1 / -1;
 }
 
 /* 设置页卡片自己带 gap，不再叠加外边距。 */
@@ -4914,10 +4914,10 @@ pre code {
   min-width: 0;
 }
 
-/* 数字字段内容短，固定窄宽并右对齐，扫读时数位成列。 */
-.settings-page .field-control > .num-box {
+/* 数字字段与短下拉同宽，单位紧跟在框右侧。 */
+.settings-page .field-control > .number-input {
   flex: 0 1 var(--control-w);
-  width: auto;
+  width: var(--control-w);
   min-width: 104px;
 }
 
@@ -4957,12 +4957,6 @@ pre code {
 /* 设置页的动作按钮在卡片头右侧，不挤压标题。 */
 .settings-page .card-head {
   align-items: center;
-}
-
-@media (max-width: 1200px) {
-  .settings-page .settings-cards {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* 分享卡：基础项两列，角色设置分块。两列变窄时标签放到控件上方。 */

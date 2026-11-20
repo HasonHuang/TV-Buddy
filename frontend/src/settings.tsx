@@ -22,7 +22,7 @@ import { api, putConfig } from './api';
 import { Icon } from './icons';
 import type { Recommend } from './lowcfg';
 import { BackupPage } from './ops';
-import { Card, Confirm, NumberBox, PageHead, Select, Tip, useToast } from './ui';
+import { Card, Confirm, NumberInput, PageHead, Select, Tip, useToast } from './ui';
 
 type Cfg = Record<string, unknown>;
 
@@ -102,16 +102,13 @@ function Num({
         {tip ? <Tip text={tip} /> : null}
       </label>
       <div className="field-control">
-        <NumberBox
+        <NumberInput
           min={min}
           max={max}
           step={step ?? 1}
           ariaLabel={label}
-          value={String(asNumber(draft, path))}
-          onChange={(next) => {
-            const value = Number(next);
-            update(path, Number.isFinite(value) ? value : 0);
-          }}
+          value={asNumber(draft, path)}
+          onChange={(value) => update(path, value)}
         />
         {unit ? <span className="field-unit">{unit}</span> : null}
       </div>
