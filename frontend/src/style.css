@@ -1691,6 +1691,14 @@ a.ghost:hover {
   border-color: var(--text3);
 }
 
+/* 开关型 ghost 按钮：按下时用浅主色，和主操作按钮区分。 */
+button.ghost[aria-pressed='true'],
+button.ghost[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--accent-weak);
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
 button.danger {
   background: var(--danger);
   border-color: var(--danger);
@@ -1793,24 +1801,6 @@ a.compact {
   cursor: default;
 }
 
-/* 上移/下移：小方框。 */
-.icon-btn.move {
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--line-strong);
-  border-radius: 5px;
-  background: var(--panel);
-}
-
-.icon-btn.move:hover:not(:disabled) {
-  border-color: var(--text3);
-}
-
-.icon-btn.move:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
 /* 图标 + 文字的轻量按钮（卡片头里的操作）。 */
 .chip {
   display: inline-flex;
@@ -1828,7 +1818,7 @@ a.compact {
   white-space: nowrap;
 }
 
-.chip:hover {
+button.chip:hover:not(:disabled) {
   background: var(--panel-2);
   border-color: var(--text3);
 }
@@ -1840,7 +1830,7 @@ a.compact {
   font-weight: 600;
 }
 
-.chip.primary:hover {
+button.chip.primary:hover:not(:disabled) {
   background: var(--btn-hover);
   border-color: var(--btn-hover);
 }
@@ -1852,7 +1842,7 @@ a.compact {
   font-weight: 600;
 }
 
-.chip.danger:hover {
+button.chip.danger:hover:not(:disabled) {
   background: var(--danger-dark);
   border-color: var(--danger-dark);
 }
@@ -1865,7 +1855,7 @@ a.compact {
   font-weight: 500;
 }
 
-.chip.danger-text:hover {
+button.chip.danger-text:hover:not(:disabled) {
   background: var(--danger-weak);
   border-color: var(--danger);
   color: var(--danger);
@@ -1873,6 +1863,13 @@ a.compact {
 
 .chip.icon-only {
   padding: 0 7px;
+}
+
+/* 「更多」按钮展开时保持高亮，鼠标仍停在按钮上也能看出状态。 */
+button.chip[aria-expanded='true']:not(:disabled) {
+  border-color: var(--accent-line);
+  background: var(--accent-weak);
+  color: var(--accent);
 }
 
 /* --- 徽章 --- */
@@ -4318,6 +4315,12 @@ button.ov-range-btn.active {
   margin-bottom: 12px;
 }
 
+/* 多选：分组被选中时给标题栏一条主色边，和频道行的高亮一致。 */
+.group-card.selected .group-head {
+  background: var(--accent-weak);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .group-head {
   display: flex;
   align-items: center;
@@ -4448,6 +4451,16 @@ button.ov-range-btn.active {
 .group-head .count {
   font-size: 12px;
   color: var(--text2);
+  white-space: nowrap;
+}
+
+/* 分组信息：来源、模式、质量与频道数。和右侧动作分开。 */
+.group-head .group-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .group-head .ops {
@@ -4458,6 +4471,27 @@ button.ov-range-btn.active {
   flex-wrap: wrap;
 }
 
+/* 行内「更多」操作条：展开在动作行下方，不遮住列表内容。 */
+.row-more {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  cursor: default;
+  user-select: text;
+}
+
+.row-more .chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* 频道行。 */
 .ch-row {
   display: flex;
@@ -4465,6 +4499,7 @@ button.ov-range-btn.active {
   gap: 9px;
   padding: 9px 12px;
   border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
 }
 
 .ch-row:last-child {
@@ -4502,29 +4537,6 @@ button.ov-range-btn.active {
   cursor: grab;
   flex: none;
   padding-top: 2px;
-}
-
-/* 置顶按钮在悬停或键盘聚焦时出现；保留槽位，不推挤其他按钮。
- * 用 opacity 而不是 visibility：键盘 Tab 能进入按钮，聚焦后由 :focus-within 显示。 */
-.ch-row .pin-top {
-  opacity: 0;
-  transition: opacity var(--ease);
-}
-
-.ch-row:hover .pin-top,
-.ch-row:focus-within .pin-top {
-  opacity: 1;
-}
-
-.ch-row .pin-top:disabled {
-  opacity: 0;
-}
-
-/* 触摸设备没有悬停，直接显示置顶按钮。 */
-@media (hover: none) {
-  .ch-row .pin-top {
-    opacity: 1;
-  }
 }
 
 /* 探测状态点。 */
@@ -4609,6 +4621,55 @@ button.ov-range-btn.active {
   padding: 14px 12px;
   color: var(--text3);
   font-size: 12.5px;
+}
+
+/* 多选操作条：贴在视口底部，滚动列表时仍可操作。 */
+.batch-bar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-top: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.batch-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text2);
+  font-size: 12.5px;
+}
+
+.batch-info .icon {
+  color: var(--accent);
+}
+
+/* 窄屏：频道动作换到下一行，避免挤压名称与地址。 */
+@media (max-width: 720px) {
+  .ch-ops {
+    flex: 1 0 100%;
+    justify-content: flex-end;
+    padding-left: 22px;
+  }
+
+  .group-head .ops {
+    margin-left: 0;
+    flex: 1 0 100%;
+    justify-content: flex-end;
+  }
+
+  .group-head .group-meta {
+    flex: 1 0 100%;
+  }
 }
 
 /* --- 侧栏底部信息 --- */

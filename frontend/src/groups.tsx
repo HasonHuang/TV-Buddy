@@ -23,7 +23,9 @@ import { QualityBadges, qualityCounts } from './quality';
 import { ScriptManagerModal } from './scripts';
 import {
   Badge,
+  Card,
   Confirm,
+  Empty,
   Field,
   HoverTip,
   Modal,
@@ -485,6 +487,10 @@ export function GroupsPage() {
   const [selectedChannels, setSelectedChannels] = useState<{ gid: string; cid: string }[]>([]);
   /** 已折叠的分组 id。只影响本页显示，不写回配置。 */
   const [collapsed, setCollapsed] = useState<string[]>([]);
+  /** 展开「更多」操作的分组 id。空串表示没有。 */
+  const [groupMenu, setGroupMenu] = useState('');
+  /** 展开「更多」操作的频道。键为 `gid/cid`。 */
+  const [channelMenu, setChannelMenu] = useState('');
   /** 正在拖动的分组 id。为空表示没有拖动。 */
   const [dragging, setDragging] = useState('');
   /** 正在拖动的频道。只允许在同一分组内排序。 */
@@ -512,6 +518,12 @@ export function GroupsPage() {
     if (active && !searching.current) setCollapsed([]);
     searching.current = active;
   }, [keyword]);
+
+  // 筛选变化后，已展开的行可能被隐藏。收起行内操作，避免留下悬空状态。
+  useEffect(() => {
+    setGroupMenu('');
+    setChannelMenu('');
+  }, [keyword, groupFilter, accessFilter]);
 
   // 分组被删除后，清掉失效的分组筛选。
   useEffect(() => {
@@ -920,9 +932,24 @@ export function GroupsPage() {
 
   /** 折叠或展开一个分组的频道列表。 */
   const toggleCollapsed = (gid: string) => {
+    setGroupMenu('');
+    setChannelMenu('');
     setCollapsed((current) =>
       current.includes(gid) ? current.filter((item) => item !== gid) : [...current, gid],
     );
+  };
+
+  /** 打开一个分组的「更多」操作；同时收起其他行。 */
+  const toggleGroupMenu = (gid: string) => {
+    setGroupMenu((current) => (current === gid ? '' : gid));
+    setChannelMenu('');
+  };
+
+  /** 打开一个频道的「更多」操作；同时收起其他行。 */
+  const toggleChannelMenu = (gid: string, cid: string) => {
+    const key = `${gid}/${cid}`;
+    setChannelMenu((current) => (current === key ? '' : key));
+    setGroupMenu('');
   };
 
   /** 批量导出：逐个 `GET /groups/{gid}/export`，合成一个 JSON 数组。 */
@@ -1091,6 +1118,10 @@ export function GroupsPage() {
       channels: (group.channels ?? []).filter(matchesChannel),
     }))
     .filter((item) => needle === '' || item.channels.length > 0);
+  /** 全部频道数，含折叠与未匹配项。筛选条常驻显示。 */
+  const totalChannels = groups.reduce((sum, group) => sum + (group.channels?.length ?? 0), 0);
+  /** 当前可见的频道数。筛选时只算命中的频道。 */
+  const shownChannels = visible.reduce((sum, item) => sum + item.channels.length, 0);
   const clearFilters = () => {
     setKeyword('');
     setGroupFilter('');
@@ -1149,12 +1180,15 @@ export function GroupsPage() {
           导出全部
         </button>
         <button
-          className={multi ? '' : 'ghost'}
-          title="进入批量选择模式，可批量删除分组或频道"
+          className="ghost"
+          title={multi ? '退出批量选择模式' : '进入批量选择模式，可批量删除分组或频道'}
+          aria-pressed={multi}
           onClick={() => {
             setMulti(!multi);
             setSelected([]);
             setSelectedChannels([]);
+            setGroupMenu('');
+            setChannelMenu('');
           }}
         >
           <Icon name="check" size={14} />
@@ -1199,45 +1233,51 @@ export function GroupsPage() {
             清除筛选
           </button>
         )}
-        {filtering && (
-          <span className="muted filter-count">
-            显示 {visible.length} / {groups.length} 个分组
+        {groups.length > 0 && (
+          <span className="muted filter-count" aria-live="polite">
+            {filtering
+              ? `显示 ${visible.length} / ${groups.length} 个分组 · ${shownChannels} 个频道`
+              : `共 ${groups.length} 个分组 · ${totalChannels} 个频道`}
           </span>
         )}
       </div>
 
-      {multi && (selected.length > 0 || selectedChannels.length > 0) && (
-        <div className="card">
-          <div className="row between">
-            <span>已选 {selectionText}</span>
-            <div className="row">
-              {selected.length > 0 && (
-                <button
-                  className="ghost"
-                  title="导出已选分组为 JSON"
-                  onClick={() => void exportSelected()}
-                >
-                  批量导出
-                </button>
-              )}
-              <button
-                className="ghost danger-text"
-                title="删除已选分组与频道"
-                onClick={() => setConfirmBatch(true)}
-              >
-                批量删除
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {visible.length === 0 && (
-        <div className="card muted">
-          {groups.length === 0
-            ? '还没有分组。点「新建分组」创建，或用 M3U 导入现有清单。'
-            : '没有匹配的分组或频道。'}
-        </div>
+        <Card>
+          <Empty
+            icon="groups"
+            text={
+              groups.length === 0
+                ? '还没有分组。点「新建分组」创建，或用 M3U 导入现有清单。'
+                : '没有匹配的分组或频道。'
+            }
+            action={
+              groups.length === 0 ? (
+                <div className="row">
+                  <button
+                    className="ghost"
+                    onClick={() => {
+                      setImporting({ kind: 'm3u', force: false });
+                      setImportText('');
+                    }}
+                  >
+                    <Icon name="upload" size={14} />
+                    M3U 导入
+                  </button>
+                  <button onClick={() => openGroup()}>
+                    <Icon name="plus" size={14} />
+                    新建分组
+                  </button>
+                </div>
+              ) : (
+                <button className="ghost" onClick={clearFilters}>
+                  <Icon name="close" size={14} />
+                  清除筛选
+                </button>
+              )
+            }
+          />
+        </Card>
       )}
 
       {visible.map(({ group, channels: shown }) => {
@@ -1245,10 +1285,13 @@ export function GroupsPage() {
         // 排序按 `groups` 的绝对下标；搜索过滤时也不会错位。
         const groupIndex = groups.indexOf(group);
         const isCollapsed = collapsed.includes(group.id);
+        const groupMenuOpen = groupMenu === group.id;
         const counts = qualityCounts(channels, quality, group.id);
         return (
           <div
-            className={`card flush group-card${dragging === group.id ? ' dragging' : ''}`}
+            className={`card flush group-card${dragging === group.id ? ' dragging' : ''}${
+              multi && selected.includes(group.id) ? ' selected' : ''
+            }`}
             key={group.id}
             onDragOver={(event) => {
               if (dragging === '') return;
@@ -1315,6 +1358,7 @@ export function GroupsPage() {
                   type="checkbox"
                   style={{ width: 'auto', height: 'auto' }}
                   title="选择分组"
+                  aria-label={`选择分组 ${group.name || group.id}`}
                   checked={selected.includes(group.id)}
                   onChange={() => toggleSelected(group.id)}
                 />
@@ -1322,21 +1366,21 @@ export function GroupsPage() {
               <Icon name="folder" size={15} className="folder" />
               <span className="gname">{group.name || group.id}</span>
               <span className="gid">[{group.id}]</span>
-              {group.source_id ? (
-                <HoverTip text="这个分组由托管源同步生成。断开订阅后，分组和频道保留为本地内容。">
-                  <Badge tone="info">
-                    来源：{sourceNames[group.source_id] ?? group.source_id}
-                  </Badge>
-                </HoverTip>
-              ) : (
-                <Badge tone="muted">本地</Badge>
-              )}
-              {group.offline_on_fail === true && (
-                <HoverTip text="组内探测失败的频道不进订阅。频道可以单独覆盖。">
-                  <Badge tone="warn">失败下线</Badge>
-                </HoverTip>
-              )}
-              <div className="ops">
+              <div className="group-meta">
+                {group.source_id ? (
+                  <HoverTip text="这个分组由托管源同步生成。断开订阅后，分组和频道保留为本地内容。">
+                    <Badge tone="info">
+                      来源：{sourceNames[group.source_id] ?? group.source_id}
+                    </Badge>
+                  </HoverTip>
+                ) : (
+                  <Badge tone="muted">本地</Badge>
+                )}
+                {group.offline_on_fail === true && (
+                  <HoverTip text="组内探测失败的频道不进订阅。频道可以单独覆盖。">
+                    <Badge tone="warn">失败下线</Badge>
+                  </HoverTip>
+                )}
                 <HoverTip text={modeTip(group.mode)}>
                   <span className={`badge mode ${group.mode}`}>{modeCode(group.mode)}</span>
                 </HoverTip>
@@ -1361,88 +1405,144 @@ export function GroupsPage() {
                     ? `${shown.length} / ${channels.length} 频道`
                     : `${channels.length} 频道`}
                 </span>
-                <button
-                  className="icon-btn move"
-                  disabled={groupIndex <= 0}
-                  title="上移分组"
-                  onClick={() => void moveGroup(group.id, -1)}
-                >
-                  <Icon name="up" size={12} />
-                </button>
-                <button
-                  className="icon-btn move"
-                  disabled={groupIndex < 0 || groupIndex >= groups.length - 1}
-                  title="下移分组"
-                  onClick={() => void moveGroup(group.id, 1)}
-                >
-                  <Icon name="down" size={12} />
-                </button>
-                <button
-                  className="chip"
-                  aria-label="编辑分组"
-                  onClick={() => openGroup(group)}
-                >
-                  编辑
-                </button>
-                <button
-                  className="chip icon-only"
-                  title={
-                    group.access === 'archived'
-                      ? '归档分组已停播，不提供订阅链接'
-                      : '复制该分组的 M3U 链接'
-                  }
-                  aria-label={
-                    group.access === 'archived'
-                      ? '归档分组已停播，不提供订阅链接'
-                      : '复制该分组的 M3U 链接'
-                  }
-                  disabled={group.access === 'archived'}
-                  onClick={() => void copyGroupPlaylist(group)}
-                >
-                  <Icon name="copy" size={13} />
-                </button>
-                {group.source_id && (
-                  <button
-                    className="chip"
-                    title="断开来源关系，内容保留"
-                    onClick={() => void detach('group', group.id)}
-                  >
-                    断开订阅
-                  </button>
+              </div>
+              <div className="ops">
+                {!multi && (
+                  <>
+                    <button
+                      className="chip icon-only"
+                      title={
+                        group.access === 'archived'
+                          ? '归档分组已停播，不提供订阅链接'
+                          : '复制该分组的 M3U 链接'
+                      }
+                      aria-label={
+                        group.access === 'archived'
+                          ? '归档分组已停播，不提供订阅链接'
+                          : '复制该分组的 M3U 链接'
+                      }
+                      disabled={group.access === 'archived'}
+                      onClick={() => {
+                        setGroupMenu('');
+                        void copyGroupPlaylist(group);
+                      }}
+                    >
+                      <Icon name="copy" size={13} />
+                    </button>
+                    <button
+                      className="chip"
+                      aria-label="编辑分组"
+                      onClick={() => {
+                        setGroupMenu('');
+                        openGroup(group);
+                      }}
+                    >
+                      编辑
+                    </button>
+                    <button
+                      className="chip primary"
+                      aria-label="新增频道"
+                      onClick={() => {
+                        setGroupMenu('');
+                        openChannel(group.id);
+                      }}
+                    >
+                      <Icon name="plus" size={13} />
+                      频道
+                    </button>
+                    <button
+                      className="chip icon-only"
+                      title="更多分组操作"
+                      aria-label="更多分组操作"
+                      aria-expanded={groupMenuOpen}
+                      aria-controls={`group-more-${group.id}`}
+                      onClick={() => toggleGroupMenu(group.id)}
+                    >
+                      <Icon name="more" size={14} />
+                    </button>
+                  </>
                 )}
-                <button
-                  className="chip danger-text"
-                  aria-label="删除分组"
-                  onClick={() =>
-                    setRemoving({ kind: 'group', gid: group.id, label: group.name || group.id })
-                  }
-                >
-                  删除
-                </button>
-                <button
-                  className="chip primary"
-                  aria-label="新增频道"
-                  onClick={() => openChannel(group.id)}
-                >
-                  <Icon name="plus" size={13} />
-                  频道
-                </button>
                 <button
                   className="icon-btn chev"
                   title={isCollapsed ? '展开分组' : '折叠分组'}
+                  aria-label={isCollapsed ? '展开分组' : '折叠分组'}
+                  aria-expanded={!isCollapsed}
                   onClick={() => toggleCollapsed(group.id)}
                 >
                   <Icon name="down" size={13} className={isCollapsed ? 'folded' : ''} />
                 </button>
               </div>
+              {!multi && groupMenuOpen && (
+                <div
+                  className="row-more group-more"
+                  id={`group-more-${group.id}`}
+                  role="group"
+                  aria-label="更多分组操作"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <button
+                    className="chip"
+                    disabled={groupIndex <= 0}
+                    onClick={() => {
+                      setGroupMenu('');
+                      void moveGroup(group.id, -1);
+                    }}
+                  >
+                    <Icon name="up" size={12} />
+                    上移
+                  </button>
+                  <button
+                    className="chip"
+                    disabled={groupIndex >= groups.length - 1}
+                    onClick={() => {
+                      setGroupMenu('');
+                      void moveGroup(group.id, 1);
+                    }}
+                  >
+                    <Icon name="down" size={12} />
+                    下移
+                  </button>
+                  {group.source_id && (
+                    <button
+                      className="chip"
+                      title="断开来源关系，内容保留"
+                      onClick={() => {
+                        setGroupMenu('');
+                        void detach('group', group.id);
+                      }}
+                    >
+                      <Icon name="link" size={12} />
+                      断开订阅
+                    </button>
+                  )}
+                  <span className="spacer" />
+                  <button
+                    className="chip danger-text"
+                    aria-label="删除分组"
+                    onClick={() => {
+                      setGroupMenu('');
+                      setRemoving({
+                        kind: 'group',
+                        gid: group.id,
+                        label: group.name || group.id,
+                      });
+                    }}
+                  >
+                    <Icon name="trash" size={12} />
+                    删除分组
+                  </button>
+                </div>
+              )}
             </div>
 
             {!isCollapsed &&
               shown.map((channel) => {
               // 排序按钮按完整列表的下标判断边界，搜索过滤不影响排序。
               const channelIndex = channels.indexOf(channel);
-              const state = health[`${group.id}/${channel.id}`];
-              const qualityResult = quality[`${group.id}/${channel.id}`];
+              const menuKey = `${group.id}/${channel.id}`;
+              const menuOpen = channelMenu === menuKey;
+              const state = health[menuKey];
+              const qualityResult = quality[menuKey];
               const offlineOnFail =
                 channel.offline_on_fail ?? (group.offline_on_fail === true);
               const offline = healthEnabled && offlineOnFail && state?.ok === false;
@@ -1532,6 +1632,10 @@ export function GroupsPage() {
                   )}
                   <span
                     className={`dot${state?.ok === true ? ' ok' : state?.ok === false ? ' err' : ''}`}
+                    role="img"
+                    aria-label={
+                      state ? (state.ok ? '最近探测成功' : '最近探测失败') : '未启用主动探测'
+                    }
                     title={state ? (state.ok ? '最近探测成功' : '最近探测失败') : '未启用主动探测'}
                   />
                   <div className="ch-main">
@@ -1579,102 +1683,160 @@ export function GroupsPage() {
                       <PrefetchBadge raw={channel.prefetch} />
                       <QualityBadges
                         result={qualityResult}
-                        onClick={() => {
-                          window.location.hash = `#/quality/results?gid=${encodeURIComponent(
-                            group.id,
-                          )}&cid=${encodeURIComponent(channel.id)}`;
-                        }}
+                        onClick={
+                          multi
+                            ? undefined
+                            : () => {
+                                window.location.hash = `#/quality/results?gid=${encodeURIComponent(
+                                  group.id,
+                                )}&cid=${encodeURIComponent(channel.id)}`;
+                              }
+                        }
                       />
                     </div>
                   </div>
-                  <div className="ch-ops">
-                    <button
-                      className="icon-btn move pin-top"
-                      disabled={channelIndex === 0}
-                      title="置顶频道"
-                      aria-label="置顶频道"
-                      onClick={() => void moveChannelTo(group.id, channel.id, null)}
-                    >
-                      <Icon name="pin" size={12} />
-                    </button>
-                    <button
-                      className="icon-btn move"
-                      disabled={channelIndex === 0}
-                      title="上移频道"
-                      onClick={() => void moveChannel(group.id, channel.id, -1)}
-                    >
-                      <Icon name="up" size={12} />
-                    </button>
-                    <button
-                      className="icon-btn move"
-                      disabled={channelIndex >= channels.length - 1}
-                      title="下移频道"
-                      onClick={() => void moveChannel(group.id, channel.id, 1)}
-                    >
-                      <Icon name="down" size={12} />
-                    </button>
-                    <button
-                      className="chip icon-only"
-                      title="复制播放地址"
-                      onClick={() => void copy(local, '播放地址')}
-                    >
-                      <Icon name="copy" size={13} />
-                    </button>
-                    {group.mode === 'dash' && (
+                  {!multi && (
+                    <div className="ch-ops">
                       <button
                         className="chip icon-only"
-                        title="查看轨道"
-                        onClick={() => void showTracks(group.id, channel.id)}
+                        title="复制播放地址"
+                        aria-label="复制播放地址"
+                        onClick={() => {
+                          setChannelMenu('');
+                          void copy(local, '播放地址');
+                        }}
                       >
-                        <Icon name="search" size={13} />
+                        <Icon name="copy" size={13} />
                       </button>
-                    )}
-                    <button
-                      className="chip"
-                      title="立即校验这个频道。使用已保存的质量规则。"
-                      disabled={checkingQuality === `${group.id}/${channel.id}`}
-                      onClick={() => {
-                        setQualityConfirm({
-                          gid: group.id,
-                          cid: channel.id,
-                          label: channel.name || channel.id,
-                        });
-                      }}
-                    >
-                      {checkingQuality === `${group.id}/${channel.id}` ? '已排入…' : '校验'}
-                    </button>
-                    <button
-                      className="chip"
-                      aria-label="编辑频道"
-                      onClick={() => openChannel(group.id, channel)}
-                    >
-                      编辑
-                    </button>
-                    {channel.source_id && (
                       <button
                         className="chip"
-                        title="断开来源关系，内容保留"
-                        onClick={() => void detach('channel', group.id, channel.id)}
+                        title="立即校验这个频道。使用已保存的质量规则。"
+                        disabled={checkingQuality === menuKey}
+                        onClick={() => {
+                          setChannelMenu('');
+                          setQualityConfirm({
+                            gid: group.id,
+                            cid: channel.id,
+                            label: channel.name || channel.id,
+                          });
+                        }}
                       >
-                        断开订阅
+                        {checkingQuality === menuKey ? '已排入…' : '校验'}
                       </button>
-                    )}
-                    <button
-                      className="chip danger-text"
-                      aria-label="删除频道"
-                      onClick={() =>
-                        setRemoving({
-                          kind: 'channel',
-                          gid: group.id,
-                          cid: channel.id,
-                          label: channel.name || channel.id,
-                          synced: Boolean(channel.source_id),
-                        })
-                      }
+                      <button
+                        className="chip"
+                        aria-label="编辑频道"
+                        onClick={() => {
+                          setChannelMenu('');
+                          openChannel(group.id, channel);
+                        }}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        className="chip icon-only"
+                        title="更多频道操作"
+                        aria-label="更多频道操作"
+                        aria-expanded={menuOpen}
+                        aria-controls={`channel-more-${group.id}-${channel.id}`}
+                        onClick={() => toggleChannelMenu(group.id, channel.id)}
+                      >
+                        <Icon name="more" size={14} />
+                      </button>
+                    </div>
+                  )}
+                  {!multi && menuOpen && (
+                    <div
+                      className="row-more ch-more"
+                      id={`channel-more-${group.id}-${channel.id}`}
+                      role="group"
+                      aria-label="更多频道操作"
                     >
-                      删除
-                    </button>
-                  </div>
+                      <button
+                        className="chip"
+                        disabled={channelIndex === 0}
+                        title="置顶频道"
+                        aria-label="置顶频道"
+                        onClick={() => {
+                          setChannelMenu('');
+                          void moveChannelTo(group.id, channel.id, null);
+                        }}
+                      >
+                        <Icon name="pin" size={12} />
+                        置顶
+                      </button>
+                      <button
+                        className="chip"
+                        disabled={channelIndex === 0}
+                        title="上移频道"
+                        aria-label="上移频道"
+                        onClick={() => {
+                          setChannelMenu('');
+                          void moveChannel(group.id, channel.id, -1);
+                        }}
+                      >
+                        <Icon name="up" size={12} />
+                        上移
+                      </button>
+                      <button
+                        className="chip"
+                        disabled={channelIndex >= channels.length - 1}
+                        title="下移频道"
+                        aria-label="下移频道"
+                        onClick={() => {
+                          setChannelMenu('');
+                          void moveChannel(group.id, channel.id, 1);
+                        }}
+                      >
+                        <Icon name="down" size={12} />
+                        下移
+                      </button>
+                      {group.mode === 'dash' && (
+                        <button
+                          className="chip"
+                          title="查看轨道"
+                          onClick={() => {
+                            setChannelMenu('');
+                            void showTracks(group.id, channel.id);
+                          }}
+                        >
+                          <Icon name="search" size={12} />
+                          查看轨道
+                        </button>
+                      )}
+                      {channel.source_id && (
+                        <button
+                          className="chip"
+                          title="断开来源关系，内容保留"
+                          onClick={() => {
+                            setChannelMenu('');
+                            void detach('channel', group.id, channel.id);
+                          }}
+                        >
+                          <Icon name="link" size={12} />
+                          断开订阅
+                        </button>
+                      )}
+                      <span className="spacer" />
+                      <button
+                        className="chip danger-text"
+                        aria-label="删除频道"
+                        onClick={() => {
+                          setChannelMenu('');
+                          setRemoving({
+                            kind: 'channel',
+                            gid: group.id,
+                            cid: channel.id,
+                            label: channel.name || channel.id,
+                            synced: Boolean(channel.source_id),
+                          });
+                        }}
+                      >
+                        <Icon name="trash" size={12} />
+                        删除频道
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1683,6 +1845,46 @@ export function GroupsPage() {
           </div>
         );
       })}
+
+      {multi && (selected.length > 0 || selectedChannels.length > 0) && (
+        <div className="batch-bar" role="region" aria-label="批量操作">
+          <div className="batch-info">
+            <Icon name="check" size={14} />
+            <span aria-live="polite">已选 {selectionText}</span>
+          </div>
+          <div className="row">
+            <button
+              className="chip"
+              title="退出多选并清除选择"
+              onClick={() => {
+                setMulti(false);
+                setSelected([]);
+                setSelectedChannels([]);
+              }}
+            >
+              退出多选
+            </button>
+            {selected.length > 0 && (
+              <button
+                className="chip"
+                title="导出已选分组为 JSON"
+                onClick={() => void exportSelected()}
+              >
+                <Icon name="download" size={12} />
+                批量导出
+              </button>
+            )}
+            <button
+              className="chip danger-text"
+              title="删除已选分组与频道"
+              onClick={() => setConfirmBatch(true)}
+            >
+              <Icon name="trash" size={12} />
+              批量删除
+            </button>
+          </div>
+        </div>
+      )}
 
       {groupForm && (
         <Modal
