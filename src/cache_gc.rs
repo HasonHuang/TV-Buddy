@@ -25,12 +25,71 @@ use crate::{
 
 /// 上限防呆系数：单个缓存最多占文件系统的 70%。
 const TOTAL_RATIO: f64 = 0.7;
+/// 自动上限最多占可用空间的比例。
+const DISK_BUDGET_RATIO: f64 = 0.8;
+/// 给系统、日志与其它数据预留的空间（MB）。
+const RESERVE_MB: u64 = 100;
+/// 自动上限的下限（MB）。
+const MIN_CAP_MB: u64 = 50;
+/// 回收任务周期（秒）；也是扫描间隔的下限。
+const GC_INTERVAL_SECS: u64 = 60;
 /// 启动后的首轮延迟，避开冷启动读盘高峰。
 const STARTUP_DELAY_SECS: u64 = 30;
-/// 扫描间隔下限，避免把 `interval_secs` 配成 0 后空转。
-const INTERVAL_FLOOR_SECS: u64 = 30;
+/// 单次扫描文件数的下限。
+const GC_SCAN_FLOOR: u64 = 500;
+/// 单次扫描文件数的上限。
+const GC_SCAN_MAX: u64 = 5_000;
+/// 单个切片的估算大小（MB），用于由上限推导扫描数。
+const SEGMENT_EST_MB: u64 = 4;
 /// 被回收的目录（相对缓存根）。
 const SWEPT_DIRS: [&str; 2] = ["seg_bytes", "seg_url"];
+
+/// 上限的限制来源。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitedBy {
+    /// `[cache].limit_mb` 非 0。
+    Manual,
+    /// 实测工作集最小。
+    Working,
+    /// 可用空间预算最小。
+    Budget,
+    /// 文件系统总量上限最小。
+    Ceiling,
+    /// 计算结果低于下限。
+    Floor,
+    /// 无实测工作集，回退值 150 MB 是限制因素。
+    NoData,
+    /// 读不到文件系统空间。
+    SpaceUnknown,
+}
+
+impl LimitedBy {
+    /// 返回接口用的稳定字符串。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Working => "working",
+            Self::Budget => "budget",
+            Self::Ceiling => "ceiling",
+            Self::Floor => "floor",
+            Self::NoData => "no_data",
+            Self::SpaceUnknown => "space_unknown",
+        }
+    }
+}
+
+/// 一次上限计算的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapPlan {
+    /// 目标占用上限（MB）。
+    pub cap_mb: u64,
+    /// 真正起作用的限制来源。
+    pub limited_by: LimitedBy,
+    /// 可用空间预算（MB）；读不到空间或手动上限时为 `None`。
+    pub budget_mb: Option<u64>,
+    /// 文件系统总量上限（MB）；读不到空间或手动上限时为 `None`。
+    pub ceiling_mb: Option<u64>,
+}
 
 /// 一次扫描的回收计划。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,39 +100,78 @@ pub struct Plan {
     pub emergency: bool,
 }
 
-/// 解析 `[cache]` 的显式总量上限。
-///
-/// `[cache].disk_max_mb` 与 `[cache.gc].max_disk_mb` 同义：两者都限制切片缓存的
-/// 占用总量，同时非 0 时取更小者；都为 0（不限）时返回 0，交给 §3.3 的公式。
-///
-/// `[cache].segment_cache_max_mb` **不参与**：它的默认值是 50，与用户显式填写的 50
-/// 无法区分。一旦生效，会把缓存静默压到 50 MB，低于 §3.3 算出的工作集（1 GB 盘约
-/// 140 MB），反而让 L1 提前淘汰、回源变多。理由见 `06` §3.4。
+/// 解析 `[cache]` 的显式总量上限（MB）；`0` 表示自动计算。
 pub fn explicit_cap_mb(cache: &CacheCfg) -> u64 {
-    [cache.gc.max_disk_mb, cache.disk_max_mb]
-        .into_iter()
-        .filter(|mb| *mb != 0)
-        .min()
-        .unwrap_or(0)
+    cache.limit_mb
+}
+
+/// 计算上限与限制来源。
+///
+/// 手动上限优先。其余情况：
+///
+/// - 读不到空间：`max(MIN_CAP_MB, 工作集或回退值)`，来源为 `SpaceUnknown`；
+/// - 有空间：`working = min(工作集或回退值, 可用空间 × 0.8 − 100)`，
+///   再夹到 `[MIN_CAP_MB, max(总量 × 0.7, MIN_CAP_MB)]`。
+///
+/// `limited_by` 按「触顶 → 触底 → 预算 → 无数据 → 工作集」的顺序判定。
+pub fn cap_plan(explicit_mb: u64, space: Option<(u64, u64)>, working_mb: Option<u64>) -> CapPlan {
+    if explicit_mb != 0 {
+        return CapPlan {
+            cap_mb: explicit_mb,
+            limited_by: LimitedBy::Manual,
+            budget_mb: None,
+            ceiling_mb: None,
+        };
+    }
+    let Some((total_mb, free_mb)) = space else {
+        return CapPlan {
+            cap_mb: working_mb.unwrap_or(FALLBACK_DISK_MB).max(MIN_CAP_MB),
+            limited_by: LimitedBy::SpaceUnknown,
+            budget_mb: None,
+            ceiling_mb: None,
+        };
+    };
+    let working = working_mb.unwrap_or(FALLBACK_DISK_MB);
+    let budget_mb = (free_mb as f64 * DISK_BUDGET_RATIO - RESERVE_MB as f64).max(0.0) as u64;
+    let ceiling_mb = ((total_mb as f64 * TOTAL_RATIO) as u64).max(MIN_CAP_MB);
+    let raw = working.min(budget_mb);
+    let cap_mb = raw.clamp(MIN_CAP_MB, ceiling_mb);
+    let limited_by = if raw > ceiling_mb {
+        LimitedBy::Ceiling
+    } else if raw < MIN_CAP_MB {
+        LimitedBy::Floor
+    } else if budget_mb < working {
+        LimitedBy::Budget
+    } else if working_mb.is_none() {
+        LimitedBy::NoData
+    } else {
+        LimitedBy::Working
+    };
+    CapPlan {
+        cap_mb,
+        limited_by,
+        budget_mb: Some(budget_mb),
+        ceiling_mb: Some(ceiling_mb),
+    }
+}
+
+/// 由上限推导单次扫描的文件数，限制在 `[GC_SCAN_FLOOR, GC_SCAN_MAX]`。
+pub fn scan_limit(cap_mb: u64) -> usize {
+    (cap_mb / SEGMENT_EST_MB).clamp(GC_SCAN_FLOOR, GC_SCAN_MAX) as usize
 }
 
 /// 按 `06` §3.3 算上限；`explicit_mb != 0` 时直接用它（显式配置优先）。
 ///
-/// `working_mb` 为空（尚无实测）时用回退值 150 MB。
+/// 保留旧签名供 `tick` 与 `recommendation` 使用，内部转交 [`cap_plan`]。
+/// `working_mb` 为空时用回退值 150 MB，仍参与夹取。
 pub fn effective_cap_mb(
-    cfg: &CacheGcCfg,
+    _cfg: &CacheGcCfg,
     explicit_mb: u64,
     total_mb: u64,
     free_mb: u64,
     working_mb: Option<u64>,
 ) -> u64 {
-    if explicit_mb != 0 {
-        return explicit_mb;
-    }
-    let working = working_mb.unwrap_or(FALLBACK_DISK_MB);
-    let budget = (free_mb as f64 * cfg.disk_budget_ratio - cfg.reserve_mb as f64).max(0.0) as u64;
-    let ceiling = ((total_mb as f64 * TOTAL_RATIO) as u64).max(cfg.min_mb);
-    working.min(budget).clamp(cfg.min_mb, ceiling)
+    cap_plan(explicit_mb, Some((total_mb, free_mb)), working_mb).cap_mb
 }
 
 /// 组装回收计划。`space` 为空（`statvfs` 失败）时按回退值设限，不进入紧急模式。
@@ -238,7 +336,7 @@ pub fn spawn(state: Arc<AppState>) {
                 .cache
                 .gc
                 .interval_secs
-                .max(INTERVAL_FLOOR_SECS);
+                .max(GC_INTERVAL_SECS);
             tokio::time::sleep(Duration::from_secs(interval)).await;
         }
     });
@@ -357,51 +455,84 @@ mod tests {
     }
 
     #[test]
-    fn explicit_cap_skips_formula() {
-        assert_eq!(effective_cap_mb(&cfg(), 200, 1024, 800, Some(140)), 200);
-        assert_eq!(effective_cap_mb(&cfg(), 200, 1024, 10, Some(140)), 200);
+    fn cap_plan_reports_limit_source() {
+        let plan = cap_plan(0, Some((1024, 800)), Some(140));
+        assert_eq!((plan.cap_mb, plan.limited_by), (140, LimitedBy::Working));
+        assert_eq!(plan.budget_mb, Some(540));
+        assert_eq!(plan.ceiling_mb, Some(716));
+
+        let plan = cap_plan(0, Some((1024, 300)), Some(140));
+        assert_eq!((plan.cap_mb, plan.limited_by), (140, LimitedBy::Working));
+
+        let plan = cap_plan(0, Some((2048, 2000)), Some(3000));
+        assert_eq!((plan.cap_mb, plan.limited_by), (1433, LimitedBy::Ceiling));
     }
 
-    /// U-10：`[cache].disk_max_mb` 与 `[cache.gc].max_disk_mb` 同义，取更小者；
-    /// `segment_cache_max_mb` 的默认 50 不参与，否则会静默压到 50 MB。
     #[test]
-    fn explicit_cap_resolves_cache_aliases() {
-        assert_eq!(explicit_cap_mb(&CacheCfg::default()), 0, "默认都交给公式");
+    fn cap_plan_fallback_participates_in_clamp() {
+        let plan = cap_plan(0, Some((1024, 800)), None);
+        assert_eq!((plan.cap_mb, plan.limited_by), (150, LimitedBy::NoData));
 
-        let only_cache = CacheCfg {
-            disk_max_mb: 120,
+        let plan = cap_plan(0, Some((1024, 120)), None);
+        assert_eq!((plan.cap_mb, plan.limited_by), (50, LimitedBy::Floor));
+    }
+
+    #[test]
+    fn cap_plan_space_unknown_applies_floor() {
+        let plan = cap_plan(0, None, Some(140));
+        assert_eq!(
+            (plan.cap_mb, plan.limited_by),
+            (140, LimitedBy::SpaceUnknown)
+        );
+        assert_eq!(plan.budget_mb, None);
+        assert_eq!(plan.ceiling_mb, None);
+
+        let plan = cap_plan(0, None, Some(30));
+        assert_eq!(
+            (plan.cap_mb, plan.limited_by),
+            (50, LimitedBy::SpaceUnknown)
+        );
+
+        let plan = cap_plan(0, None, None);
+        assert_eq!(
+            (plan.cap_mb, plan.limited_by),
+            (150, LimitedBy::SpaceUnknown)
+        );
+    }
+
+    #[test]
+    fn manual_cap_wins() {
+        let plan = cap_plan(200, Some((1024, 800)), Some(140));
+        assert_eq!((plan.cap_mb, plan.limited_by), (200, LimitedBy::Manual));
+        assert_eq!(plan.budget_mb, None);
+        assert_eq!(plan.ceiling_mb, None);
+    }
+
+    /// 显式上限只读 `[cache].limit_mb`；旧别名键不再参与。
+    #[test]
+    fn explicit_cap_reads_limit_mb() {
+        let cache = CacheCfg {
+            limit_mb: 120,
+            disk_max_mb: 80,
             ..CacheCfg::default()
         };
-        assert_eq!(explicit_cap_mb(&only_cache), 120);
+        assert_eq!(explicit_cap_mb(&cache), 120);
 
-        let gc_cfg = |max_disk_mb| CacheCfg {
+        let cache = CacheCfg {
             gc: CacheGcCfg {
-                max_disk_mb,
+                max_disk_mb: 90,
                 ..CacheGcCfg::default()
             },
             ..CacheCfg::default()
         };
-        assert_eq!(explicit_cap_mb(&gc_cfg(200)), 200);
+        assert_eq!(explicit_cap_mb(&cache), 0, "旧别名不参与");
+    }
 
-        let both = CacheCfg {
-            disk_max_mb: 120,
-            ..gc_cfg(200)
-        };
-        assert_eq!(explicit_cap_mb(&both), 120, "两个键同时设置取更小者");
-
-        let default_cfg = CacheCfg::default();
-        assert_eq!(default_cfg.segment_cache_max_mb, 50);
-        assert_eq!(
-            effective_cap_mb(
-                &default_cfg.gc,
-                explicit_cap_mb(&default_cfg),
-                1024,
-                800,
-                Some(140)
-            ),
-            140,
-            "段缓存默认 50 MB 不参与，上限仍是工作集"
-        );
+    #[test]
+    fn scan_limit_clamps() {
+        assert_eq!(scan_limit(140), 500);
+        assert_eq!(scan_limit(20_000), 5_000);
+        assert_eq!(scan_limit(4_000), 1_000);
     }
 
     #[test]
