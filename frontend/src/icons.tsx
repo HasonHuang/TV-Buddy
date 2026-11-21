@@ -9,6 +9,7 @@ import type { ReactNode } from 'react';
 export type IconName =
   | 'overview'
   | 'cache'
+  | 'database'
   | 'groups'
   | 'settings'
   | 'security'
@@ -68,6 +69,15 @@ const PATHS: Record<IconName, ReactNode> = {
       <ellipse cx="8" cy="3.6" rx="5" ry="1.9" />
       <path d="M3 3.6v4.1c0 1.05 2.24 1.9 5 1.9s5-.85 5-1.9V3.6" />
       <path d="M3 7.7v4.1c0 1.05 2.24 1.9 5 1.9s5-.85 5-1.9V7.7" />
+    </>
+  ),
+  /* 数据库：三层盘片，区别于缓存的两层盘片。 */
+  database: (
+    <>
+      <ellipse cx="8" cy="3.3" rx="4.6" ry="1.6" />
+      <path d="M3.4 3.3v2.4c0 .88 2.06 1.6 4.6 1.6s4.6-.72 4.6-1.6V3.3" />
+      <path d="M3.4 5.7v2.4c0 .88 2.06 1.6 4.6 1.6s4.6-.72 4.6-1.6V5.7" />
+      <path d="M3.4 8.1v2.4c0 .88 2.06 1.6 4.6 1.6s4.6-.72 4.6-1.6V8.1" />
     </>
   ),
   groups: (

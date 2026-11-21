@@ -774,26 +774,27 @@ export function Overview({
           <span className="badge muted">正在连接</span>
         )}
         {status !== null && groupCount > 0 ? (
-          <>
-            <button
-              className="ghost"
-              title="删除已保存的清单与切片，释放磁盘"
-              disabled={busy !== ''}
-              onClick={() => void action('flush', '/cache/flush', '本地缓存已清空')}
-            >
-              <Icon name="trash" size={14} />
-              {busy === 'flush' ? '清理中…' : '清空缓存'}
-            </button>
-            <button
-              className="ghost"
-              title="从数据库重新读取配置并立即生效"
-              disabled={busy !== ''}
-              onClick={() => void action('reload', '/reload', '配置已重新读取')}
-            >
-              <Icon name="refresh" size={14} />
-              {busy === 'reload' ? '读取中…' : '重读配置'}
-            </button>
-          </>
+          <button
+            className="ghost"
+            title="删除已保存的清单与切片，释放磁盘"
+            disabled={busy !== ''}
+            onClick={() => void action('flush', '/cache/flush', '本地缓存已清空')}
+          >
+            <Icon name="trash" size={14} />
+            {busy === 'flush' ? '清理中…' : '清空缓存'}
+          </button>
+        ) : null}
+        {/* 空配置也要能重读：CLI 导入后，运行中的快照可能仍是 0 个分组。 */}
+        {status !== null ? (
+          <button
+            className="ghost"
+            title="从数据库重新读取配置并立即生效"
+            disabled={busy !== ''}
+            onClick={() => void action('reload', '/reload', '配置已重新读取')}
+          >
+            <Icon name="database" size={14} />
+            {busy === 'reload' ? '读取中…' : '重读配置'}
+          </button>
         ) : null}
         <button
           className="ghost"

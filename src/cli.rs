@@ -96,6 +96,11 @@ fn print_help() {
     );
 }
 
+/// 提示：config 子命令只写库，运行中的服务不会自动读取。
+fn print_reload_hint() {
+    println!("提示：运行中的服务不会自动读取。请在面板点「重读配置」，或重启服务。");
+}
+
 fn config_command(raw: &[String]) -> Result<()> {
     let args = Args::parse(raw)?;
     let Some(action) = args.positional.first().map(String::as_str) else {
@@ -117,6 +122,7 @@ fn config_command(raw: &[String]) -> Result<()> {
             let config: Config = serde_json::from_str(&text).context("配置格式错误")?;
             store.save(&config)?;
             println!("已导入配置：{} 个分组", config.groups.len());
+            print_reload_hint();
         }
         "get" => {
             let Some(path) = args.positional.get(1) else {
@@ -139,6 +145,7 @@ fn config_command(raw: &[String]) -> Result<()> {
             let config: Config = serde_json::from_value(value).context("配置格式错误")?;
             store.save(&config)?;
             println!("{path} = {text}");
+            print_reload_hint();
         }
         "reset" => {
             if !args.force && store.load()?.is_some() {
@@ -146,6 +153,7 @@ fn config_command(raw: &[String]) -> Result<()> {
             }
             store.reset()?;
             println!("配置已恢复默认");
+            print_reload_hint();
         }
         other => bail!("未知的 config 子命令: {other}"),
     }
