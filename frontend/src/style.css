@@ -1810,6 +1810,8 @@ a.compact {
   border: 1px solid var(--line-strong);
   border-radius: 7px;
   background: var(--panel);
+  /* 整组是一块控制区。按钮之间不留箭头光标，避免鼠标扫过时闪烁。 */
+  cursor: pointer;
 }
 
 .sort-group .icon-btn {
@@ -1831,8 +1833,10 @@ a.compact {
   border-left: 1px solid var(--line);
 }
 
+/* 禁用项沿用组内光标。禁用状态由透明度表达。 */
 .sort-group .icon-btn:disabled {
   opacity: 0.3;
+  cursor: inherit;
 }
 
 /* 图标 + 文字的轻量按钮（卡片头里的操作）。 */
@@ -1973,6 +1977,12 @@ button.chip[aria-expanded='true']:not(:disabled) {
 
 .quality-jump:hover .badge {
   border-color: var(--accent-line);
+}
+
+/* 可点击容器里的提示徽章跟随容器的光标。
+ * 点整组会跳转，悬停不应变成问号。 */
+.quality-jump .hover-tip {
+  cursor: inherit;
 }
 
 /* 规则页：按卡片自身宽度分列，不跟随视口。 */
@@ -4657,6 +4667,14 @@ button.ov-range-btn.active {
   flex-wrap: wrap;
   justify-content: flex-end;
   padding-top: 1px;
+  /* 动作条是一块控制区。按钮间隙不留箭头光标，避免鼠标扫过时闪烁。 */
+  cursor: pointer;
+}
+
+/* 动作条里的禁用项沿用条内光标。按钮密集，光标不要来回跳。 */
+.group-head .ops button:disabled,
+.ch-ops button:disabled {
+  cursor: inherit;
 }
 
 .ch-empty {

@@ -96,8 +96,11 @@ const FOLLOW_HINT =
   '每次同步会用来源里的名称、地址和台标覆盖这个频道。手动改过这些字段后，频道停止跟随，之后的同步不再覆盖。';
 const FIXED_HINT = '已停止跟随。同步不改名称、地址和台标。来源删除这个频道时，也会保留。';
 
-/** 分组标题栏里的控件。点击这些控件不切换折叠。 */
-const GROUP_HEAD_CONTROLS = 'button, input, select, textarea, a, .grip, .hover-tip';
+/** 分组标题栏里的控件。点击这些控件不切换折叠。
+ *
+ * `.ops` 整块算控件：按钮密集，点偏到间隙不应折叠分组。
+ */
+const GROUP_HEAD_CONTROLS = 'button, input, select, textarea, a, .grip, .hover-tip, .ops';
 
 /** 频道行里的操作控件。点击这些控件不切换选中。 */
 const CHANNEL_ROW_CONTROLS = 'button, input, select, textarea, a, .grip';
