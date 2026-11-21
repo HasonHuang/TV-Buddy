@@ -451,16 +451,11 @@ async fn fixture_with_extra(extra: &str) -> Fixture {
 
 /// 带额外 JSON 片段与 `[auth]` 键的夹具。
 async fn fixture_with_extra_and_auth(extra: &str, auth_extra: &str) -> Fixture {
-    fixture_with_options(false, extra, true, auth_extra, "disk").await
+    fixture_with_options(false, extra, true, auth_extra).await
 }
 
 async fn fixture_with_all(epg_enabled: bool, extra_section: &str) -> Fixture {
-    fixture_with_options(epg_enabled, extra_section, true, "", "disk").await
-}
-
-/// 指定缓存后端的夹具。
-async fn fixture_with_backend(backend: &str) -> Fixture {
-    fixture_with_options(false, "", true, "", backend).await
+    fixture_with_options(epg_enabled, extra_section, true, "").await
 }
 
 async fn fixture_with_options(
@@ -468,7 +463,6 @@ async fn fixture_with_options(
     extra_section: &str,
     public_viewer_enabled: bool,
     auth_extra: &str,
-    cache_backend: &str,
 ) -> Fixture {
     let dir = std::env::temp_dir().join(format!("tv-buddy-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("建临时目录");
@@ -522,7 +516,6 @@ async fn fixture_with_options(
             "slice_sign_enabled": false
         },
         "cache": {
-            "backend": cache_backend,
             "disk_path": format!("{}/cache", dir.display()),
             "disguise": { "enabled": true, "formats": ["jpg", "png"] }
         },
@@ -4316,30 +4309,6 @@ async fn random_id_enabled_generates_random_channel_ids() {
     let generated: Vec<&String> = ids.iter().filter(|id| id.starts_with("r-")).collect();
     assert_eq!(generated.len(), 2, "{ids:?}");
     assert!(generated.iter().all(|id| id.len() == 10), "{ids:?}");
-}
-
-/// `[cache].backend = "memory"`：切片正文留在进程内，不写 `seg_bytes`。
-#[tokio::test]
-async fn memory_backend_keeps_segments_in_process() {
-    let fixture = fixture_with_backend("memory").await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
-    let body = response.text().await.expect("读正文");
-    let path = segment_path(&body, &fixture.base, 1);
-
-    let first = fetch(&fixture, &path).await;
-    assert_eq!(first.status(), StatusCode::OK);
-    assert_eq!(first.bytes().await.expect("读首片").as_ref(), SEGMENT);
-
-    // 第二次命中内存。
-    let second = fetch(&fixture, &path).await;
-    assert_eq!(second.status(), StatusCode::OK);
-    assert_eq!(second.bytes().await.expect("读次片").as_ref(), SEGMENT);
-
-    assert_eq!(
-        cached_segment_files(&fixture, "pg").await,
-        0,
-        "内存后端不应写 seg_bytes"
-    );
 }
 
 /// DASH 时移：清单要 `playseek`，切片按轨道录制序号命名。

@@ -52,8 +52,6 @@ pub struct AppState {
     pub http: reqwest::Client,
     /// 切片索引。
     pub segments: SegmentIndex,
-    /// `[cache].backend = "memory"` 时的切片正文字典。
-    pub memory: Arc<crate::cache_memory::MemoryStore>,
     /// 在线清单缓存（TTL 5 秒）。
     pub playlists: TtlCache,
     /// 订阅聚合源缓存（正文 + 状态，跨重启保留）。每个源按有效 `ttl_secs` 判定。
@@ -156,7 +154,7 @@ impl AppState {
         segments.set_limits(config.cache.segments.per_channel_max);
         let sources_ttl = Duration::from_secs(config.cache.ttl.sub_url_secs.max(1));
         let estimate = crate::cache_estimate::Estimator::load_or_default(&cache_dir);
-        estimate.set_auto_tune(config.cdn.auto_tune);
+        estimate.set_auto_tune(config.cache.auto_tune);
         let channel_keys = channel_keys_of(&config);
         let state = Self {
             db_path,
@@ -173,7 +171,6 @@ impl AppState {
                 .build()
                 .unwrap_or_default(),
             segments,
-            memory: Arc::new(crate::cache_memory::MemoryStore::new()),
             playlists: TtlCache::new(Duration::from_secs(5)),
             sources: crate::source_cache::SourceCache::load(&cache_dir, sources_ttl),
             resolver: crate::resolver::Cache::default(),
@@ -451,7 +448,7 @@ impl AppState {
             .set_limits(config.cache.segments.per_channel_max);
         self.sources
             .set_ttl(Duration::from_secs(config.cache.ttl.sub_url_secs.max(1)));
-        self.estimate.set_auto_tune(config.cdn.auto_tune);
+        self.estimate.set_auto_tune(config.cache.auto_tune);
         // 配置删除分组/频道后，统计键和频道校验集一起收缩，避免旧键常驻。
         let channel_keys = channel_keys_of(&config);
         let group_ids: HashSet<&str> = config
