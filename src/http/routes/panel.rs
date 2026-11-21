@@ -156,7 +156,6 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
 
     Json(json!({
         "uptime_secs": state.uptime_secs(),
-        "cache_backend": cfg.cache.backend,
         "active_sessions": state.sessions.len(),
         "online_viewers": state.metrics.online(cfg.stats.online_window_secs),
         "group_count": cfg.groups.len(),

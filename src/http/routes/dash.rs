@@ -159,7 +159,6 @@ pub async fn health(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
         "channels": channels,
         "sessions": state.sessions.len(),
         "cache": {
-            "backend": config.cache.backend,
             "disk_path": config.cache.disk_path,
         },
         "epg": {

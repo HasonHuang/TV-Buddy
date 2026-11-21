@@ -6270,14 +6270,25 @@ async fn cache_stats_includes_recommendation() {
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     // 已有键不变。
-    assert_eq!(body["backend"], "disk");
+    assert!(body.get("backend").is_none(), "单后端不再返回 backend");
     assert!(body["entries"].is_object(), "{body}");
     assert!(body["bytes"].is_u64(), "{body}");
     assert!(body["playlist_cache_entries"].is_u64(), "{body}");
+    // 新增占用字段：正文、索引与合计。
+    assert!(body["segment_body_bytes"].is_u64(), "{body}");
+    assert!(body["segment_index_bytes"].is_u64(), "{body}");
+    assert_eq!(
+        body["segment_cache_bytes"].as_u64(),
+        Some(
+            body["segment_body_bytes"].as_u64().unwrap()
+                + body["segment_index_bytes"].as_u64().unwrap()
+        )
+    );
     // 新增推荐块：尚未播放 → 回退值。
     assert_eq!(body["recommend"]["ttl_secs"], 600, "{body}");
     assert_eq!(body["recommend"]["ttl_source"], "fallback", "{body}");
     assert!(body["recommend"]["disk_cap_mb"].is_u64(), "{body}");
+    assert!(body["recommend"]["segment_body_bytes"].is_u64(), "{body}");
 }
 
 #[tokio::test]

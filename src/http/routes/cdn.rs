@@ -26,7 +26,7 @@ static ESTIMATE_LOCK: Mutex<()> = Mutex::const_new(());
 
 /// `POST /panel/api/cdn/estimate`。
 ///
-/// 全部失败时仍返回 `200`（`recommend.source` 回落 `fallback`）；并发请求返回 `409`。
+/// 全部失败时仍返回 `200`（`recommend.ttl_source` 回落 `fallback`）；并发请求返回 `409`。
 pub async fn estimate(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
