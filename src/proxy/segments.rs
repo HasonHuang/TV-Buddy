@@ -125,9 +125,13 @@ impl SegmentIndex {
         }
     }
 
-    /// 清空内存索引（清空缓存时调用）。
+    /// 清空内存索引与活动记录（清空缓存时调用）。
     pub fn clear(&self) {
         self.write().clear();
+        self.activity
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// 查索引：先内存，再磁盘。
@@ -428,6 +432,15 @@ mod tests {
             .unwrap()
             .insert("g/c1".into(), now.saturating_sub(100));
         assert_eq!(index.active_channels(Duration::from_secs(120)), 2);
+    }
+
+    #[test]
+    fn clear_resets_active_channels() {
+        let index = SegmentIndex::new();
+        index.note_channel("g", "c1");
+        assert_eq!(index.active_channels(Duration::from_secs(90)), 1);
+        index.clear();
+        assert_eq!(index.active_channels(Duration::from_secs(90)), 0);
     }
 
     #[test]
