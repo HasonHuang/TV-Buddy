@@ -91,7 +91,7 @@ T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
 AUTH="Authorization: Bearer $T"
 
 STATUS=$(curl -s -H "$AUTH" "$B/panel/api/status")
-for field in uptime_secs cache_backend active_sessions online_viewers group_count channel_count \
+for field in uptime_secs active_sessions online_viewers group_count channel_count \
   version mem_rss_mb cpu_seconds disk_cache_mb recording_mb low_resource_mode poll_interval_secs \
   traffic_in_bytes traffic_out_bytes whole_file_committed whole_file_budget whole_file_peak \
   whole_file_hits whole_file_fallbacks entry_exts cpu_cores; do
@@ -114,9 +114,14 @@ curl -s -o /dev/null -H 'X-Forwarded-For: 9.9.9.9' "$B/mx/c1.m3u8?token=$TK"
 check "换 IP 增到 2" "2" "$(curl -s -H "$AUTH" "$B/panel/api/status" | py 'import sys,json;print(json.load(sys.stdin)["online_viewers"])')"
 
 CACHE=$(curl -s -H "$AUTH" "$B/panel/api/cache/stats")
-for field in backend disk_bytes m3u8_entries segment_entries segment_url_entries sub_url_entries \
+for field in disk_bytes m3u8_entries segment_entries segment_url_entries \
+  segment_body_bytes segment_index_bytes segment_cache_bytes sub_url_entries \
   dash_disk_bytes timeshift_disk_bytes recording_disk_bytes livestream_disk_bytes; do
   check "cache/stats 有 $field" "1" "$(printf '%s' "$CACHE" | py "import sys,json;d=json.load(sys.stdin);print(1 if '$field' in d else 0)")"
+done
+for field in ttl_source cap_source limited_by channels working_channels \
+  segment_index_limit_bytes segment_cache_bytes gc_last_run_secs_ago; do
+  check "recommend 有 $field" "1" "$(printf '%s' "$CACHE" | py "import sys,json;d=json.load(sys.stdin)['recommend'];print(1 if '$field' in d else 0)")"
 done
 
 # 探测跑满一轮：间隔 10 秒。

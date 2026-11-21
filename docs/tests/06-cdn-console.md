@@ -17,7 +17,7 @@
 | 默认监听 | `[::]:9900`（`src/config/model.rs:139`） |
 | 日志文件 | `/opt/tv-buddy/tv-buddy.log`（`src/logging.rs:163`） |
 | 面板 | `[panel].enabled = true`，默认成立（`src/config/model.rs:158-169`） |
-| 缓存后端 | `[cache].backend = "disk"`（`src/config/model.rs:251-270`） |
+| 缓存后端 | 只有磁盘后端；切片正文写入 `<cache>/seg_bytes` |
 
 服务必须以数据库路径作为第一个参数启动。默认取 `tv-buddy.db`。systemd 单元已按此写法生成。
 
@@ -104,7 +104,7 @@ printf 'token=%s\n' "$ADMIN"
 
 ```bash
 curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
-  | jq '{cdn, cache_backend: .cache.backend, disk_path: .cache.disk_path, prefetch: .cache.prefetch.enabled, gc: .cache.gc.enabled, token_enabled: .auth.token_enabled}'
+  | jq '{cdn, cache: {limit_mb: .cache.limit_mb, auto_tune: .cache.auto_tune, disk_path: .cache.disk_path, prefetch: .cache.prefetch.enabled, gc: .cache.gc}, token_enabled: .auth.token_enabled}'
 ```
 
 预期输出含以下键：
@@ -113,16 +113,17 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
 {
   "cdn": {
     "enabled": false,
-    "auto_tune": true,
-    "segment_max_age_secs": 0,
     "shared_cache_hits": false,
     "dont_cache_empty": false,
     "empty_status": 502
   },
-  "cache_backend": "disk",
-  "disk_path": "./cache",
-  "prefetch": true,
-  "gc": true,
+  "cache": {
+    "limit_mb": 0,
+    "auto_tune": true,
+    "disk_path": "./cache",
+    "prefetch": true,
+    "gc": { "max_age_secs": 1800 }
+  },
   "token_enabled": false
 }
 ```
@@ -156,33 +157,43 @@ EXT=m3u8
 curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq .recommend
 ```
 
-预期输出含 14 个键：
+预期输出含 21 个键：
 
 ```json
 {
   "ttl_secs": 600,
+  "ttl_source": "fallback",
   "disk_cap_mb": 150,
-  "source": "fallback",
-  "ttl_manual": false,
-  "disk_manual": false,
+  "cap_source": "auto",
+  "limited_by": "no_data",
+  "channels": 0,
+  "working_channels": 3,
+  "working_mb": null,
+  "budget_mb": 540,
+  "ceiling_mb": 716,
+  "gc_last_run_secs_ago": 30,
   "groups": 0,
   "updated_secs_ago": null,
-  "working_mb": null,
-  "disk_total_mb": null,
-  "disk_free_mb": null,
-  "seg_files": 0,
-  "seg_bytes": 0,
-  "gc_enabled": true,
+  "disk_total_mb": 1024,
+  "disk_free_mb": 800,
+  "segment_body_bytes": 0,
+  "segment_index_bytes": 0,
+  "segment_index_limit_bytes": 15000000,
+  "segment_cache_bytes": 0,
+  "segment_body_files": 0,
   "auto_tune": true
 }
 ```
 
 数值是示例。判定看键与范围：
 - `ttl_secs` 是整数。
-- `source` 是 `measured`、`manual`、`fallback` 之一。
-- `ttl_secs` 在 300–900 之间，或 `source=manual`。
+- `ttl_source` 是 `measured`、`manual`、`fallback` 之一。
+- `cap_source` 是 `auto`、`manual` 之一。
+- `limited_by` 是 `manual`、`working`、`budget`、`ceiling`、`floor`、`no_data`、`space_unknown` 之一。
+- `channels` 与 `working_channels` 是整数；`working_channels >= 3`。
+- `ttl_secs` 在 300–900 之间，或 `ttl_source=manual`。
 
-依据：服务端每次 `GET /panel/api/cache/stats` 都重新计算（`src/http/routes/admin.rs:68`、`src/cache_gc.rs:283-333`）。
+依据：服务端每次 `GET /panel/api/cache/stats` 都重新计算（`src/http/routes/admin.rs`、`src/cache_gc.rs` 的 `recommendation`）。
 
 面板同样显示该卡片。打开面板 → 「缓存状态」。卡片标题「CDN 推荐值」（`frontend/src/lowcfg.tsx:83`）。
 卡片上的「立即估算」调用 `POST /panel/api/cdn/estimate`。系统设置页不再重复该卡片。
@@ -195,15 +206,15 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq .r
 | `manual` | 手动配置 |
 | `fallback` | 回退值 |
 
-`manual` 不一定是 TTL 手填。磁盘上限手填也会让 `source=manual`（`src/cache_gc.rs:290-298`）。
+`ttl_source=manual` 表示 `cache.ttl.segment_secs` 非 0。磁盘上限手填只影响 `cap_source`，不影响 `ttl_source`。
 
-### 3.5 触发一次估算（`source=fallback` 时）
+### 3.5 触发一次估算（`ttl_source=fallback` 时）
 
 首次安装没有实测数据。先播放一个频道，或执行估算：
 
 ```bash
 curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cdn/estimate" \
-  | jq '{ok, groups, failed, recommend: (.recommend | {ttl_secs, source, groups, updated_secs_ago})}'
+  | jq '{ok, groups, failed, recommend: (.recommend | {ttl_secs, ttl_source, cap_source, groups, updated_secs_ago})}'
 ```
 
 预期：
@@ -215,14 +226,15 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cdn/estimate
   "failed": [],
   "recommend": {
     "ttl_secs": 300,
-    "source": "measured",
+    "ttl_source": "measured",
+    "cap_source": "auto",
     "groups": 3,
     "updated_secs_ago": 0
   }
 }
 ```
 
-`groups` 是成功探测的分组数，范围 0–3（`src/http/routes/cdn.rs:22`）。`failed` 是失败明细。全部失败也返回 200，`recommend.source` 回退 `fallback`（`src/http/routes/cdn.rs:27-39`）。
+`groups` 是成功探测的分组数，范围 0–3（`src/http/routes/cdn.rs`）。`failed` 是失败明细。全部失败也返回 200，`recommend.ttl_source` 回退 `fallback`（`src/http/routes/cdn.rs`）。
 
 并发估算返回 409。响应文案固定为「已有估算正在进行，请稍后再试」（`src/http/routes/cdn.rs:34-36`）。
 
@@ -459,12 +471,15 @@ curl -sS -o /dev/null -D - "$BASE$LAST_PATH" | grep -iE '^(cache-control|content
 
 | `[cdn].enabled` | 第 1 次 | 第 2 次 |
 | --- | --- | --- |
-| `false`（默认） | `public, max-age=300` | `private, max-age=300` |
-| `true` | `public, max-age=<TTL>` | `private, max-age=<TTL>`，`shared_cache_hits=true` 时为 `public` |
+| `false`（默认） | `public, max-age=<TTL>` | `private, max-age=<TTL>` |
+| `true`，`shared_cache_hits=false` | `public, max-age=<TTL>` | `private, max-age=<TTL>` |
+| `true`，`shared_cache_hits=true` | `public, max-age=<TTL>` | `public, max-age=<TTL>` |
 
-`[cache.ttl].segment_secs` 默认 300（`src/config/model.rs:399-416`）。`[cdn].enabled=false` 时用它（`src/http/routes/stream.rs:47-55`）。`[cdn].enabled=true` 时用 `[cdn].segment_max_age_secs`、实测值或 600（`src/http/routes/stream.rs:57-63`）。
+TTL 由 `[cache.ttl].segment_secs` 控制（`src/http/routes/stream.rs` 的 `segment_ttl_secs`）。
+`0` 用实测值，无实测用 600 秒；手动值在 CDN 开/关下都生效。
+`[cdn].enabled` 只控制响应头范围与空体状态码。
 
-预取默认开启（`src/config/model.rs:287-298`）。多数切片会先落到本地磁盘。人工请求得到 `private` 属正常现象。本步用最后一��，`skip_tail=1` 默认不预取最后一片。清单只有 1 片时，第 1 次也可能是本地命中。记录该情况，继续。
+预取默认开启（`src/config/model.rs:287-298`）。多数切片会先落到本地磁盘。人工请求得到 `private` 属正常现象。本步用最后一片，`skip_tail=1` 默认不预取最后一片。清单只有 1 片时，第 1 次也可能是本地命中。记录该情况，继续。
 
 ### 3.16 验证 TTL 到期
 
@@ -536,15 +551,15 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/logout" | jq
 | ID | 检查 | 通过 | 不通过 | 依据 |
 | --- | --- | --- | --- | --- |
 | J1 | 面板会话 | `ADMIN` 为非空 UUID | 空值，或登录返回非 200 | `src/http/routes/panel.rs:37-91` |
-| J2 | 推荐值字段 | 14 个键齐全，`ttl_secs` 为整数 | 缺键，或 `ttl_secs` 非整数 | `src/cache_gc.rs:283-333` |
-| J3 | TTL 范围 | `measured` 时 300–900；`fallback` 时 600；`manual` 时为配置值 | 超出范围 | `src/cache_estimate.rs:30-42` |
+| J2 | 推荐值字段 | 21 个键齐全，`ttl_secs` 为整数 | 缺键，或 `ttl_secs` 非整数 | `src/cache_gc.rs` 的 `recommendation` |
+| J3 | TTL 范围 | `measured` 时 300–900；`fallback` 时 600；`manual` 时为配置值 | 超出范围 | `src/cache_estimate.rs` |
 | J4 | 清单 BYPASS | CDN 缓存状态为 `BYPASS` | `HIT`、`MISS`、`STALE` | `docs/design/06-low-spec-optimization.md:129` |
 | J5 | 切片第 2 次 | `HIT`，且 `Age` 存在 | 仍为 `MISS` 或 `BYPASS` | `docs/design/06-low-spec-optimization.md:129` |
 | J6 | 切片字节 | 三个 SHA-256 完全相同 | 任一不同 | `docs/design/06-low-spec-optimization.md:116-129` |
 | J7 | 面板接口 | `BYPASS` | 非 `BYPASS` | `docs/design/06-low-spec-optimization.md:125-129` |
 | J8 | 订阅清单 | `BYPASS` | 非 `BYPASS` | `docs/design/06-low-spec-optimization.md:129` |
 | J9 | 清单地址 | 首行以 `https://<CDN 域名>/` 开头 | `http://`，或指向源站 | `src/http/routes/stream.rs:1220-1240` |
-| J10 | 源站头 | `[cdn].enabled=false` 时 `max-age=300`；`true` 时 `max-age=<TTL>` | 值不符 | `src/http/routes/stream.rs:47-70` |
+| J10 | 源站头 | `max-age` 等于 TTL（手动值，或实测/600 回退）。`[cdn].enabled` 只控制 `public`/`private` 范围 | 值不符 | `src/http/routes/stream.rs` |
 | J11 | 换台 | 两次 `200`，第二次不是缓存 302 | 第二次 404 或 302 | `src/http/routes/stream.rs:1537-1549` |
 | J12 | TTL 到期 | `TTL+60` 秒后 `MISS`，或 `Age > TTL` | 仍 `HIT` 且 `Age < TTL` | 控制台侧，第 2.6 节 |
 | J13 | 四域名 | 四个域名 J4–J9 全部通过 | 任一域名失败 | `docs/design/06-low-spec-optimization.md:156-160` |
@@ -564,9 +579,9 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/logout" | jq
 - 服务版本：
 - 配置路径：
 - 测试分组：gid=... cid=... mode=... format=... access=...
-- `[cdn]`：enabled=... auto_tune=... segment_max_age_secs=... shared_cache_hits=...
-- `[cache].backend`：
-- 推荐值：ttl_secs=... source=... disk_cap_mb=... groups=... updated_secs_ago=...
+- `[cdn]`：enabled=... shared_cache_hits=... empty_status=...
+- `[cache]`：limit_mb=... auto_tune=... segment_secs=... max_age_secs=...
+- 推荐值：ttl_secs=... ttl_source=... cap_source=... limited_by=... channels=... working_channels=... disk_cap_mb=... groups=... updated_secs_ago=...
 - 控制台厂商与入口：
 - 控制台字段实际名称：
   - 第 1 项：
@@ -674,7 +689,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/logs?limit=500" | jq
 tail -n 200 /opt/tv-buddy/tv-buddy.log
 curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq .recommend
 curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
-  | jq '{cdn, cache: {backend: .cache.backend, disk_path: .cache.disk_path, ttl: .cache.ttl, prefetch: .cache.prefetch, gc: .cache.gc}, token_enabled: .auth.token_enabled}'
+  | jq '{cdn, cache: {limit_mb: .cache.limit_mb, auto_tune: .cache.auto_tune, disk_path: .cache.disk_path, ttl: .cache.ttl, prefetch: .cache.prefetch, gc: .cache.gc}, token_enabled: .auth.token_enabled}'
 ```
 
 `GET /panel/api/logs` 读取进程内环形缓冲，默认 200 行，上限 500 行（`src/http/routes/admin.rs:133-148`）。
@@ -713,8 +728,8 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
 | 时移切片不缓存 | 四段路径不在 `/*/*/*`。补 CACHE | `src/timeshift.rs:7` |
 | DASH 时移清单被缓存 | 五段路径不在规则 A。补 BYPASS | `src/dash_timeshift.rs:7` |
 | `HIT` 但 `content-length` 变化 | CDN 压缩或转码。关闭内容压缩改写与图片优化 | `docs/design/06-low-spec-optimization.md:69` |
-| 源站 `max-age` 不是推荐 TTL | `[cdn].enabled=false`。此时源站用 `[cache.ttl].segment_secs`，默认 300 | `src/http/routes/stream.rs:47-55` |
-| `source` 显示「手动配置」但 TTL 未手填 | 磁盘上限手填也会置 `manual` | `src/cache_gc.rs:290-298` |
+| 源站 `max-age` 不是推荐 TTL | 检查 `[cache.ttl].segment_secs`。`0` 时用实测值，无实测 600 | `src/http/routes/stream.rs` 的 `segment_ttl_secs` |
+| `ttl_source` 显示「手动配置」但 TTL 未手填 | 检查 `cache.ttl.segment_secs`。磁盘上限手填只影响 `cap_source` | `src/cache_gc.rs` 的 `recommendation` |
 | 估算返回 409 | 已有估算在跑。等待后重试一次 | `src/http/routes/cdn.rs:34-36` |
 | 估算全失败 | 上游不可达或清单无 `#EXTINF`。看 `failed[].error` | `src/http/routes/cdn.rs:96-118` |
 | 面板接口返回 401 | 未带会话。缓存头检查仍有效，但不能把 200 当预期 | `src/http/ext.rs:23-36` |

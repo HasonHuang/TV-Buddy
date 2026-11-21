@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 系统设置页冒烟：整份配置往返、字段路径存在性、U-10 生效、口令契约、前端资源已内嵌。
+# 系统设置页冒烟：整份配置往返、字段路径存在性、手动缓存上限、口令契约、前端资源已内嵌。
 # 首次安装的初始口令固定为 admin，供脚本登录。
 export TV_BUDDY_INITIAL_PASSWORD=admin
 
@@ -113,13 +113,11 @@ cache.disguise.enabled bool
 cache.disguise.formats array
 health.interval_secs number
 stats.online_window_secs number
-cache.backend string
-cache.disk_max_mb number
-cache.memory_max_mb number
+cache.limit_mb number
+cache.auto_tune bool
 cache.prefetch.mpd_readahead number
-cache.gc.max_disk_mb number
-cache.gc.disk_budget_ratio number
-cdn.segment_max_age_secs number
+cache.gc.max_age_secs number
+cache.ttl.segment_secs number
 cache.segments.per_channel_max number
 subtitle.style.enabled bool
 subtitle.style.font_size string
@@ -194,18 +192,17 @@ cache.dash.mpd_body_dedup bool
 cache.dash.whole_file_serve string
 PATHS
 
-# 3) U-10：设了 [cache].disk_max_mb 之后，推荐值必须变成手动源并等于该值。
+# 3) 手动上限：设了 [cache].limit_mb 之后，上限来源必须为 manual，值等于该值。
 python3 - "$WORK/b.json" "$WORK/c.json" <<'PY'
 import json,sys
 cfg=json.load(open(sys.argv[1]))
-cfg['cache']['disk_max_mb']=33
-cfg['cache']['memory_max_mb']=2
-cfg['cache']['segments']['global_max']=0
+cfg['cache']['limit_mb']=33
 json.dump(cfg,open(sys.argv[2],'w'),ensure_ascii=False)
 PY
-check "写入 U-10 配置 200" "200" "$(putcfg "$WORK/c.json")"
+check "写入手动上限配置 200" "200" "$(putcfg "$WORK/c.json")"
 STATS=$(curl -s -H "$AUTH" "$B/panel/api/cache/stats")
-check "推荐值来源 manual" "True" "$(echo "$STATS" | python3 -c 'import json,sys;print(json.load(sys.stdin)["recommend"]["disk_manual"])')"
+check "上限来源 manual" "manual" "$(echo "$STATS" | python3 -c 'import json,sys;print(json.load(sys.stdin)["recommend"]["cap_source"])')"
+check "限制因素 manual" "manual" "$(echo "$STATS" | python3 -c 'import json,sys;print(json.load(sys.stdin)["recommend"]["limited_by"])')"
 check "推荐上限 = 33" "33" "$(echo "$STATS" | python3 -c 'import json,sys;print(json.load(sys.stdin)["recommend"]["disk_cap_mb"])')"
 
 # 4) 口令：账号在 users.db，改密走 `PUT /users/:id/password`。
@@ -228,9 +225,11 @@ BUNDLE=$(curl -s "$B$ASSET")
 for needle in \
   'cache.disguise.formats' \
   'cache.prefetch.mpd_readahead' \
-  'cache.gc.disk_budget_ratio' \
+  'cache.limit_mb' \
+  'cache.auto_tune' \
+  'cache.gc.max_age_secs' \
+  'cache.ttl.segment_secs' \
   'cache.segments.per_channel_max' \
-  'cdn.segment_max_age_secs' \
   'share.follower_urls' \
   '/assets/' \
   'cache.dash.watchdog_rebuild_stagger_ms' \

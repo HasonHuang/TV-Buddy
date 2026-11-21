@@ -177,7 +177,7 @@ struct AppState {
 | 键 | 上游绝对 URL 的 SHA-256 十六进制 | 与切片 `<S>` 同源，便于校验 |
 | 窗口 | 首写 `public, max-age=300`；命中 `private, max-age=300`；入口 `public, max-age=5, s-maxage=5` | S-DIS-06、F-006 |
 | flush | 清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash/`** | S-CACHE-06 |
-| 容量 | 键面保留；P0 **不实现**上限（目标上限未生效，F-015） | S-CACHE-03 |
+| 容量 | 按 `cache.limit_mb` 自动或手动上限回收切片正文与磁盘索引（`04-config-and-storage.md` §11） | S-CACHE-03 |
 | `Range` | 切片请求忽略 `Range`，返回 200 全量 | S-DIS-07 |
 
 ## 8. 伪装设计

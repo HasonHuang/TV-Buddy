@@ -5,7 +5,7 @@
 > 链路：大陆用户 → 4 家 CDN（同一控制面板）→ VPS → HLS 源站（4–9 Mbps）。
 >
 > 状态：代码侧已实施。T0（CDN 控制台配置）未完成，见 §2。
-> 最后更新：2026-10-25。
+> 最后更新：2026-11-22。
 > 部署与运维步骤：[`18-low-spec-deployment.md`](18-low-spec-deployment.md)。
 
 本设计修三处缺陷：
@@ -16,7 +16,7 @@
    1 GB 磁盘会被占满。
 
 范围外：切片 URL、伪装扩展名轮换、清单响应头、路由表。这些不改。
-本设计不引入嵌入式数据库（`[cache].backend` 保持 `disk`），也不新增环境变量。
+本设计只保留磁盘后端，不引入嵌入式数据库，也不新增环境变量。
 
 ---
 
@@ -35,7 +35,8 @@
 L2（内存滚动预热）取消。它只把 L1 的数据再存一份进内存，收益接近 0。
 
 **磁盘上限**：VPS 本地 `<cache>/seg_bytes` 与 `seg_url` 的总量上限。
-上限不写死。默认值由**可用磁盘空间**与片源工作集算出（§3.3）。
+配置键为 `[cache].limit_mb`。`0` 表示自动，非 0 表示手动且优先。
+自动值由**可用磁盘空间**与片源工作集算出（§3.3）。
 例：1 GB 磁盘、可用 800 MB、片源 4.26 MB/片 × 7 片 × 3 频道 → 上限约 **140 MB**。
 
 ---
@@ -207,51 +208,56 @@ TTL = clamp( ceil60(W + 2T), 300, 900 )
 **磁盘上限**
 
 ```
-working = round10( 3 × N × seg_mb × 1.5 )   # 3 个并发频道的工作集，加 50% 余量
-free    = statvfs(cache_dir).available      # 每次扫描重新取
-budget  = free × 0.8 − 100 MB               # 占比 0.8，预留 100 MB
-cap     = clamp( min(working, budget), 50 MB, total × 0.7 )
+working_channels = max(3, 最近一个在线窗口内活动的频道数)
+working  = round10( working_channels × N × seg_mb × 1.5 )  # 加 50% 余量
+free     = statvfs(cache_dir).available                   # 每轮扫描重新取
+budget   = free × 0.8 − 100 MB                            # 占比 0.8，预留 100 MB
+cap      = clamp( min(working, budget), 50 MB, total × 0.7 )
 ```
+
+`N` 与 `seg_mb` 取各分组的最大值。多分组时偏保守。
 
 样本（1 GB 磁盘）：
 
 | 场景 | free | budget | working | cap |
 | --- | --- | --- | --- | --- |
-| 空闲 800 MB | 800 | 540 | 134 | **140 MB**（受工作集限制） |
-| 空闲 300 MB | 300 | 140 | 134 | **140 MB** |
-| 空闲 120 MB | 120 | 负值 | 134 | **50 MB**（取下限），同时触发清理 |
+| 空闲 800 MB，3 个频道 | 800 | 540 | 134 | **140 MB**（受工作集限制） |
+| 空闲 300 MB，3 个频道 | 300 | 140 | 134 | **140 MB** |
+| 空闲 120 MB，3 个频道 | 120 | 负值 | 134 | **50 MB**（取下限），同时触发清理 |
 | 9 Mbps × 12 片 × 3 频道 | 800 | 540 | 486 | **486 MB**（受工作集限制） |
 
 - 不用固定 250 MB。1 GB 磁盘上 250 MB 可能超过剩余空间的一半。
 - `total × 0.7` 只是防呆上限（1 GB 磁盘为 716 MB）。实际起作用的是工作集与可用空间。
 - `working` 列是取整到 10 MB 后的值。`seg_mb` 与 `cap` 按十进制 MB（10⁶）计算。
-- 每次 GC 扫描都重算 `cap`。
-- `statvfs` 失败时回退 150 MB。
-- 其它缓存目录（`sub_url`、EPG raw、DASH、timeshift/remux）由 `reserve_mb` 覆盖。
+- 每次 GC 扫描都重算 `cap`。扫描周期固定 60 秒。
+- `statvfs` 失败时上限 = `max(50 MB, 实测工作集)`；无工作集用 150 MB。
+  不进入紧急模式；`recommend.limited_by = space_unknown`。
+- 其它缓存目录（`sub_url`、EPG raw、DASH、timeshift/remux）由固定的 100 MB 预留覆盖。
+- 磁盘索引 `seg_url` 占上限的 10% 子预算；正文至少保留 90%。
+- 进程内索引按 600 秒活动窗口淘汰。配置里没有索引总量键。
 
 ### 3.4 生效方式与开关
 
 | 消费方 | 用法 |
 | --- | --- |
 | CDN 控制台 | 应用不能写第三方面板。缓存状态页显示推荐 TTL，附「复制」按钮。你复制后填入统一面板 |
-| `[cdn].segment_max_age_secs = 0` | 运行时取实测值。填数则覆盖 |
-| `[cache.gc].max_disk_mb = 0` | 运行时取 §3.3 的公式值。填数则覆盖 |
-| `[cache].disk_max_mb` | 与 `[cache.gc].max_disk_mb` 同义；同时非 0 时取更小者（U-10） |
-| `[cache].memory_max_mb` | 内存切片索引的字节预算；按约 256 B/条换算成条目数，与 `[cache.segments].global_max` 取更小者（U-10） |
-| `[cache].segment_cache_max_mb` | **不消费**（U-10）。目标同键亦不生效；默认 50 与显式值无法区分，生效会静默压容 |
+| `[cache.ttl].segment_secs = 0` | 运行时取实测值，无实测用 600 秒回退。填数则覆盖；CDN 开/关都生效 |
+| `[cache].limit_mb = 0` | 运行时取 §3.3 的公式值。填数则覆盖 |
+| `[cache].auto_tune = false` | 停止新采样，不冻结上限 |
 
-`[cache]` 里其余容量键（`m3u8_max_entries`、`segment_max_entries`）同样保留键面、不消费：
-目标既不生效，本实现也不消费。详见 [`04-config-and-storage.md`](04-config-and-storage.md) §11.5。
+索引预算由 `[cache].limit_mb` 推导：磁盘索引占 10%；进程内索引按 600 秒活动窗口淘汰。
+配置里没有索引总量键。
 
 - 统计按分组存在内存，重启后清零并重新累积。同时落盘 `<cache>/cache_estimate.json`，重启后可延续。
 - 更新节流：每 5 分钟最多刷新一次推荐值。GC 上限在下个扫描周期生效。
 - 无数据时用回退值，面板标注「回退值」。
 
-`[cdn].auto_tune = false` 关闭被动实测：
+`[cache].auto_tune = false` 停止被动采样：
 
 - 不再累计统计，不再周期写盘。只沿用上次落盘的值。没有则用回退值。
+- 上限不冻结：仍按当前 `statvfs` 计算 `budget` 与 `ceiling`。
 - 代价：片源变化后推荐值不跟随。需要点「立即估算」或手填。
-- GC 不受影响。`max_disk_mb=0` 时用旧估算值或回退值。
+- GC 不受影响。`limit_mb = 0` 时用旧估算值或回退值。
 
 ---
 
@@ -281,10 +287,11 @@ cap     = clamp( min(working, budget), 50 MB, total × 0.7 )
 | 开关 | 作用 | 何时需要 |
 | --- | --- | --- |
 | `shared_cache_hits` | 命中路径的 `private` 改为 `public` | 某家只能用「遵循源站头」时 |
-| `segment_max_age_secs` | 切片头 TTL。0 = 自动 | 同上 |
 | `dont_cache_empty` | 空体加 `no-store` | CDN 跟随源站头时 |
 | `empty_status = 502` | 上游失败时返回 502 | **强制 TTL 时必开**。`no-store` 会被忽略 |
 | `public_base` | 固定的对外基址 | CDN 不下发 XFP 时 |
+
+切片头 TTL 由 `[cache.ttl].segment_secs` 控制，不由 `[cdn]` 控制。
 
 `empty_status` 只在取 4xx 或 5xx 时改状态码。填 `0` 或 2xx 时状态码仍为 200，
 只有 `dont_cache_empty` 生效。
@@ -295,21 +302,17 @@ cap     = clamp( min(working, budget), 50 MB, total × 0.7 )
 ### 6.2 磁盘回收（1 GB 磁盘的硬前提）
 
 ```json
-{ "cache": { "gc": {
-  "enabled": true,
-  "max_disk_mb": 0,
-  "max_age_secs": 1800,
-  "interval_secs": 300,
-  "scan_limit": 500,
-  "disk_budget_ratio": 0.8,
-  "reserve_mb": 100,
-  "min_mb": 50
-} } }
+{ "cache": {
+  "limit_mb": 0,
+  "gc": { "max_age_secs": 1800 },
+  "ttl": { "segment_secs": 0 }
+} }
 ```
 
-`max_disk_mb = 0` 表示按 §3.3 自动。`scan_limit` 是单次扫描上限，避免 1 vCPU 抖动。
-`disk_budget_ratio` 是最多占可用空间的比例。`reserve_mb` 给系统、日志、其它缓存目录预留。
-`min_mb` 是自动值的下限。
+磁盘回收常开，没有开关。`limit_mb = 0` 表示按 §3.3 自动；非 0 时手动值优先。
+`max_age_secs = 0` 关闭超龄删除；`1..=59` 拒绝。
+扫描周期固定 60 秒；单轮扫描数按上限推导（`clamp(上限 MB / 4, 500, 5000)`），避免 1 vCPU 抖动。
+磁盘索引占上限的 10% 子预算；进程内索引 600 秒无活动即淘汰。
 
 实现：按 mtime 删旧文件。顺序是超龄 → 超量 LRU → 磁盘见底时紧急清理。
 紧急模式忽略 `max_age_secs`，删到 `cap / 2`。
@@ -355,17 +358,21 @@ L1 的默认值不变：`enabled=true`、`concurrency=4`、`prefetch_limit=0`、
 也可以改为手动值。
 
 ```json
-{ "cdn": {
-  "enabled": true,
+{ "cache": {
+  "limit_mb": 0,
   "auto_tune": true,
-  "segment_max_age_secs": 0,
+  "ttl": { "segment_secs": 0 }
+},
+"cdn": {
+  "enabled": true,
   "shared_cache_hits": false,
   "dont_cache_empty": false,
   "empty_status": 502
 } }
 ```
 
-`auto_tune = false` 关闭被动实测。`segment_max_age_secs = 0` 用自动推荐值。
+`auto_tune = false` 停止新采样，不冻结上限。`segment_secs = 0` 用自动推荐值；
+手动值在 CDN 开/关下都生效。
 四家 CDN 都能忽略源站头时，`shared_cache_hits` 不需要打开。
 强制 TTL 下 `dont_cache_empty` 无效，用 `empty_status = 502` 代替。
 CDN 不下发 `X-Forwarded-Proto` 时补 `public_base`。
@@ -374,7 +381,7 @@ CDN 不下发 `X-Forwarded-Proto` 时补 `public_base`。
 | --- | --- | --- |
 | 推荐值展示（只读） | **缓存状态页** →「CDN 推荐值」卡片 | 扩展 `GET /panel/api/cache/stats` |
 | `[cdn]` 编辑 | **系统设置页** →「CDN 兜底」卡片 | `GET/PUT /panel/api/config` |
-| `[cache.gc]` 编辑 | **系统设置页** →「磁盘回收」卡片 | 同上 |
+| `[cache]` 上限与过期删除 | **系统设置页** →「缓存容量与回收」卡片 | 同上 |
 | `[cache.prefetch]` 编辑 | **系统设置页** →「预载配置」卡片 | 同上 |
 | 分组与频道 `prefetch` | 分组 / 频道编辑对话框 | `PUT /groups/{gid}`、`POST` 或 `PUT /channels[/{cid}]` |
 | 「立即估算」按钮 | 缓存状态页 →「CDN 推荐值」卡片右上角 | `POST /panel/api/cdn/estimate` |
@@ -418,10 +425,10 @@ CDN 不下发 `X-Forwarded-Proto` 时补 `public_base`。
 `[cdn].enabled = false` 时，既有契约断言一行未改。
 
 S4 与 S6 需要目标 VPS。本地只覆盖公式与淘汰逻辑：单测复现 §3.3 的四行取值，
-并覆盖超龄、超量、紧急与 `scan_limit` 四类路径。
+并覆盖超龄、超量、紧急与单轮扫描数四类路径。
 
 回滚：`cache.segments.per_channel_max` 改回 `0`，`cache.prefetch.concurrency` 改回 `4`；
-不再使用 CDN 兜底时再把 `[cdn].enabled` 改回 `false`。不要关闭 `[cache.gc].enabled`。
+不再使用 CDN 兜底时再把 `[cdn].enabled` 改回 `false`。磁盘回收常开，没有开关。
 `config set` 直接写库；重启服务或调用 `POST /panel/api/reload` 后生效。
 
 ---

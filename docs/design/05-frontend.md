@@ -114,13 +114,13 @@
 | 面板认证 | `[panel]` | `username`；新密码（浏览器算 `password_sha256`） | ✅ |
 | 切片伪装 | `[cache.disguise]` | `enabled`、`subtitle`、`playlist`、`master`、`formats` | ✅ |
 | 监控 | `[health]`、`[stats]` | `enabled`、`interval_secs`、`timeout_secs`、`concurrency`；`enabled`、`online_window_secs` | ✅ |
-| 缓存配置 | `[cache]` | `backend`、`disk_path`、`disk_max_mb`、`memory_max_mb`、`m3u8_max_entries`、`segment_max_entries`、`segment_cache_max_mb`（后三项兼容保留）；清空本地缓存 | ✅ |
-| 缓存有效期 | `[cache.ttl]` | `sub_url_secs`、`segment_secs`、`refresh_ratio`、`fallback_mpd_secs`（后两项兼容保留） | ✅ |
+| 缓存配置 | `[cache]` | `disk_path`、`limit_mb`、`auto_tune`、`disguise.*`；清空本地缓存 | ✅ |
+| 缓存有效期 | `[cache.ttl]` | `sub_url_secs`、`segment_secs` | ✅ |
 | Remux | `[cache.remux]` | `target_duration_secs`、`window_segments`、`publish_delay_segments`、`reconnect_backoff_ms` | ✅ |
 | 预载配置 | `[cache.prefetch]` | `enabled`、`concurrency`、`timeout`、`prefetch_limit`、`mpd_readahead`、`skip_tail` | ✅ |
-| 磁盘回收 | `[cache.gc]` | §11.2 的八个键 | ✅ |
+| 磁盘回收 | `[cache.gc]` | `max_age_secs`（回收常开） | ✅ |
 | CDN 兜底 | `[cdn]` | §11.1 的键 | ✅ |
-| 切片缓存 | `[cache.segments]` | `global_max`、`per_channel_max`、`retain_count`（本实现扩展） | ✅ |
+| 切片缓存 | `[cache.segments]` | `per_channel_max` | ✅ |
 | 节目指南 | `[epg]` | `keep_yesterday`、`match_by_name`、`allow_scripts`、`public_viewer_enabled`（兼容保留）、`keep_days`、`future_days`、`script_timeout_secs`、`record_pad_before_secs`、`record_pad_after_secs`、`python_bin`；总开关 `enabled` 在「功能开关」 | ✅ |
 | 字幕设置 | `[subtitle]` | `compat_mode`、`srt_ua_keywords`（兼容保留）、`style.*`（开关 / 字号 / 颜色 / 字重 / 位置滑杆）、`translate.*`（机翻、源语言、目标语言多选、双语与译文上下、译轴、超时、每批条数、MTranServer、API Key）+ 测试与清理译文缓存 | ✅（样式注入未实现，兼容保留） |
 | DASH 调优 | `[cache.dash]` | 播放体验 / 网络性能 / 特殊场景三组 | ⏳ |

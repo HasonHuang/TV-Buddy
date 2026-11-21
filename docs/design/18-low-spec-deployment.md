@@ -8,7 +8,7 @@
 
 TV Buddy 可在 **1 vCPU / 128 MB 内存 / 1 GB 磁盘** 的实例上运行。前提是前面挂 CDN，把播放流量挡在边缘。
 
-1 GB 磁盘是硬约束。切片正文只写不删，必须开启磁盘回收。
+1 GB 磁盘是硬约束。切片正文只写不删，磁盘回收常开。
 
 ## 2. 安装
 
@@ -40,8 +40,8 @@ sudo ./install.sh --low-spec
 
 | 顺序 | 面板路径 | 改为 |
 | --- | --- | --- |
-| 1 | 系统设置 → 缓存与回收 → 切片缓存 → 单频道上限 | `200` |
-| 2 | 系统设置 → 缓存与回收 → 预载配置 → 拉取并发 | `2` |
+| 1 | 系统设置 → 缓存与回收 → 高级设置 → 单频道索引条目上限 | `200` |
+| 2 | 系统设置 → 缓存与回收 → 高级设置 → 预载配置 → 拉取并发 | `2` |
 | 3 | 系统设置 → 分发与伪装 → CDN 兜底 → 启用 CDN 兜底 | 开启 |
 | 4 | 安全管控 → 访问与链接 → IP 管控 | 开启 |
 | 5 | 安全管控 → 访问与链接 → 播放凭证 | 开启 |
@@ -60,7 +60,7 @@ sudo ./install.sh --low-spec
 
 | # | 前提 | 说明 |
 | --- | --- | --- |
-| 1 | `[cache.gc].enabled = true` | 切片正文只写不删，全靠它回收。关掉后磁盘会被占满 |
+| 1 | 磁盘回收常开 | 切片正文只写不删，全靠它回收。没有关闭开关 |
 | 2 | CDN 侧强制 TTL + 忽略源站头 + 忽略 Cookie | 四家 CDN 的规则内容相同。见 §6 |
 
 ## 5. 服务端配置
@@ -74,23 +74,17 @@ sudo ./install.sh --low-spec
   "auth": { "token_enabled": true, "ip_guard_enabled": true },
   "cache": {
     "disk_path": "./cache",
+    "limit_mb": 0,
+    "auto_tune": true,
     "segments": { "per_channel_max": 200 },
     "prefetch": { "enabled": true, "concurrency": 2 },
-    "gc": {
-      "enabled": true,
-      "max_disk_mb": 0,
-      "max_age_secs": 1800,
-      "interval_secs": 300,
-      "scan_limit": 500,
-      "disk_budget_ratio": 0.8,
-      "reserve_mb": 100,
-      "min_mb": 50
-    }
+    "gc": { "max_age_secs": 1800 },
+    "ttl": { "sub_url_secs": 1800, "segment_secs": 0 }
   },
   "cdn": {
     "enabled": true,
-    "auto_tune": true,
-    "segment_max_age_secs": 0,
+    "shared_cache_hits": false,
+    "dont_cache_empty": false,
     "empty_status": 502
   }
 }
@@ -98,13 +92,15 @@ sudo ./install.sh --low-spec
 
 | 键 | 说明 |
 | --- | --- |
-| `max_disk_mb = 0` | 自动。1 GB 盘通常落在 100–150 MB |
-| `scan_limit = 500` | 单轮最多处理的文件数。避免 1 vCPU 抖动 |
-| `segment_max_age_secs = 0` | 使用实测推荐值 |
+| `limit_mb = 0` | 自动。1 GB 盘通常落在 100–150 MB。非 0 为手动上限，优先于自动值 |
+| `auto_tune = true` | 被动采样。改为 `false` 只停止采样，不冻结上限 |
+| `max_age_secs = 1800` | 过期删除阈值。`0` 关闭超龄删除；`1..=59` 拒绝 |
+| `segment_secs = 0` | 切片 TTL 用实测值，无数据用 600 秒。手动值在 CDN 开/关下都生效 |
 | `empty_status = 502` | 在强制 TTL 下挡住「200 + 空体」 |
 
-CDN 不下发 `X-Forwarded-Proto` 时，在 `cdn` 里加 `"public_base": "https://cdn.example"`。
-
+磁盘回收常开，扫描周期固定 60 秒。磁盘索引占上限的 10% 子预算；进程内索引 600 秒
+无活动即淘汰。CDN 不下发 `X-Forwarded-Proto` 时，在 `cdn` 里加
+`"public_base": "https://cdn.example"`。
 公式与推荐值来源见 [`06-low-spec-optimization.md`](06-low-spec-optimization.md) §3。
 
 ## 6. CDN 控制台设置
@@ -223,7 +219,7 @@ sudo tv-buddy restart
 ```
 
 - `auth.token_enabled` 与 `auth.ip_guard_enabled` 的常规默认值也是 `true`，不需要改。
-- 不要关闭 `cache.gc.enabled`。它是 1 GB 磁盘的硬前提（§4），不属于低配 profile。
+- 磁盘回收常开（§4），没有关闭开关，也不属于低配 profile。
 - `groups.0.prefetch.enabled` 只覆盖第一个分组，不能用来回滚全局预取。
 - `per_channel_max = 0` 表示使用内置上限 4096。
 - 不要省略 `--db`。省略时二进制会写当前目录的 `./tv-buddy.db`。

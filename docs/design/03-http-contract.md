@@ -112,12 +112,13 @@ GET /{gid}/{cid}/index.m3u8
   → 与入口同义（路径别名）
 GET /{gid}/{cid}/<P>_<S>.<ext>
   → 200  切片；忽略 Range（返回全量）
-         首次写入 public, max-age=300；命中缓存 private, max-age=300
+         首次写入 public, max-age=<TTL>；命中缓存 private, max-age=<TTL>
 ```
 
 | 项 | 契约 | 依据 |
 | --- | --- | --- |
 | 清单缓存窗口 | **VOD**：`max-age` = `#EXT-X-TARGETDURATION`（缺失按 6 秒）；**直播**：`no-cache, no-store` | F-018、F-019 |
+| 切片 TTL | `cache.ttl.segment_secs`：手动值优先；`0` 用实测值，无数据 600 秒。CDN 开/关都生效 | 设计决策（2026-11-21） |
 | 切片地址 | 绝对地址（`http://<Host>/…`），不是根相对路径 | F-018 |
 | 扩展名 | 入口后缀白名单 `.m3u8` / `.mpd` / `.txt`，**或不带后缀**；三者正文相同。`format` 只决定订阅里下发哪个后缀 | S-URL-01、F-017 §5.2 |
 | `<S>` | `sha256(上游切片绝对 URL)` 前 32 hex，小写 | S-DIS-04 |
@@ -268,7 +269,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | --- | --- | --- | --- |
 | POST | `/panel/api/login` | `{"username","password"}` | `{"token":"<uuid>"}`；错 → `401`；失败过多 → `429`（`locked_for_secs`） |
 | POST | `/panel/api/logout` | — | `{"ok":true}` |
-| GET | `/panel/api/status` | — | 目标字段：`uptime_secs, cache_backend, active_sessions, online_viewers, group_count, channel_count, version, mem_rss_mb, cpu_seconds, disk_cache_mb, recording_mb, low_resource_mode, poll_interval_secs, traffic_in_bytes, traffic_out_bytes, whole_file_{committed,budget,peak,hits,fallbacks}, entry_exts{gid → ext}, cpu_cores`。附加字段：`name, bind, log_level, timezone_offset_hours, cache_disk_path, host_cpu_percent, mem_total_mb, load_avg, disk_total_mb, disk_free_mb, host_net_rx_bytes, host_net_tx_bytes, group_modes`。`traffic_in_bytes` 恒 0（S-BUG-01）。附加的主机指标只读 `/proc` 与 `statvfs`，读不到时输出 0 |
+| GET | `/panel/api/status` | — | 目标字段：`uptime_secs, active_sessions, online_viewers, group_count, channel_count, version, mem_rss_mb, cpu_seconds, disk_cache_mb, recording_mb, low_resource_mode, poll_interval_secs, traffic_in_bytes, traffic_out_bytes, whole_file_{committed,budget,peak,hits,fallbacks}, entry_exts{gid → ext}, cpu_cores`。附加字段：`name, bind, log_level, timezone_offset_hours, cache_disk_path, host_cpu_percent, mem_total_mb, load_avg, disk_total_mb, disk_free_mb, host_net_rx_bytes, host_net_tx_bytes, group_modes`。`traffic_in_bytes` 恒 0（S-BUG-01）。附加的主机指标只读 `/proc` 与 `statvfs`，读不到时输出 0。缓存只有磁盘后端，响应不含后端字段 |
 | GET | `/panel/api/config` | — | 全量配置 JSON |
 | PUT | `/panel/api/config` | 全量配置 | `{"ok":true,"revision":<n>}`；非法 → `400`；缺 `revision` 或版本不符 → `409 stale_revision` |
 | POST | `/panel/api/reload` | — | `{"ok":true}`；读取或保存失败 → `500`（保留当前快照） |
@@ -345,7 +346,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 响应 |
 | --- | --- | --- |
-| `GET` | `/panel/api/cache/stats` | 目标字段：`backend, disk_bytes, m3u8_entries, segment_entries, segment_url_entries, sub_url_entries, dash_disk_bytes, timeshift_disk_bytes, recording_disk_bytes, livestream_disk_bytes`。附加字段：`disk_path, entries, bytes, playlist_cache_entries, recommend` |
+| `GET` | `/panel/api/cache/stats` | 目标字段：`disk_bytes, m3u8_entries, segment_entries, segment_url_entries, segment_body_bytes, segment_index_bytes, segment_cache_bytes, sub_url_entries, dash_disk_bytes, timeshift_disk_bytes, recording_disk_bytes, livestream_disk_bytes`。附加字段：`disk_path, entries, bytes, playlist_cache_entries, recommend`。只有磁盘后端，响应不含后端字段；`recommend` 字段见 `04-config-and-storage.md` §11.4 |
 | `POST` | `/panel/api/cache/flush` | `{"ok":true,"removed":<文件数>}`；清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash`**（S-CACHE-06）；同时丢弃进程内索引与清单缓存 |
 | `GET` | `/panel/api/stats` | `{"version","uptime_secs","requests","playlists","segments","segment_hits","upstream_failures","online_window_secs","groups":[{"id","requests"}]}`。`groups` 只含配置中存在的分组；统计键有上限（分组 1024、频道 16384），未知路径只增加总请求数 |
 | `GET` | `/panel/api/metrics/history?range=5m` | `{"range","points":[{"ts","net_rx","net_tx","cpu_host","cpu_proc"}]}`。窗口：`5m`、`10m`、`1h`、`24h`、`7d`；未知值按 `5m`。原始采样 10 秒一行，SQLite 保留 7 天，查询时按窗口聚合 |

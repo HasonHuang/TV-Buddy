@@ -6,7 +6,7 @@
 
 - 1 vCPU 抖动的量化阈值。仓库只写「不抖动」，没有延迟或 CPU 上限（`docs/design/06-low-spec-optimization.md:412`）。
 - 非回收目录的增长阈值。GC 只扫 `seg_bytes` 与 `seg_url`（`src/cache_gc.rs:33`）。
-- 64 MB 档位的专用配置。仓库只有 128 MB 档位的 `memory_max_mb = 4` 注释（`docs/design/config-low-spec.json`）。
+- 64 MB 档位的专用配置。仓库只有 128 MB 档位的 `docs/design/config-low-spec.json`。
 
 ## 2. 前置条件
 
@@ -133,7 +133,7 @@ TV_BUDDY_INITIAL_PASSWORD='NEWPASS' sudo -E sh install.sh --low-spec
 ```bash
 BIN=/opt/tv-buddy/tv-buddy
 DB=/opt/tv-buddy/tv-buddy.db
-sudo "$BIN" config set cache.gc.max_disk_mb 120 --db "$DB"
+sudo "$BIN" config set cache.limit_mb 120 --db "$DB"
 sudo tv-buddy restart
 ```
 
@@ -208,19 +208,25 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "X-Token: $TOKEN" \
 curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/cache/stats
 ```
 
-预期：JSON 含 `"recommend":{...,"disk_cap_mb":<整数>,"source":"fallback",...}`。
+预期：JSON 含 `"recommend":{...,"disk_cap_mb":<整数>,"ttl_source":"fallback","cap_source":"auto","limited_by":"no_data","channels":0,"working_channels":3,"segment_index_limit_bytes":<整数>,...}`。
 
-取值：
+取值与断言：
 
 ```bash
-CAP_MB=$(curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/cache/stats \
-  | sed -n 's/.*"disk_cap_mb":\([0-9]*\).*/\1/p')
+STATS=$(curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/cache/stats)
+CAP_MB=$(printf '%s' "$STATS" | sed -n 's/.*"disk_cap_mb":\([0-9]*\).*/\1/p')
 echo "CAP_MB=$CAP_MB"
+for field in ttl_source cap_source limited_by channels working_channels segment_index_limit_bytes; do
+  printf '%s\n' "$STATS" | sed -n "s/.*\"$field\":\"\{0,1\}\([^\",}]*\)\"\{0,1\}.*/$field=\1/p"
+done
 ```
 
-从未播放过时，`working` 为空，上限回退 150 MB（`src/cache_gc.rs:73`）。可用空间不少于 313 MB 时，`disk_cap_mb` 应为 `150`。
+从未播放过时，`working` 为空，上限回退 150 MB（`src/cache_gc.rs` 的 `cap_plan`）。
+可用空间不少于 313 MB 时，`disk_cap_mb` 应为 `150`，`limited_by` 应为 `no_data`。
+`channels` 应为 `0`，`working_channels` 应为 `3`。
+`segment_index_limit_bytes` 应等于 `CAP_MB × 1000000 × 0.1`；`CAP_MB=150` 时为 `15000000`。
 
-取值依据 `src/cache_gc.rs:305-320`。
+取值依据 `src/cache_gc.rs` 的 `cap_plan` 与 `recommendation`。
 
 ### 3.5 S4-1：造 200 MB 后回落到上限
 
@@ -253,7 +259,7 @@ find /opt/tv-buddy/cache/seg_bytes -type f -printf '%s\n' | awk '{s+=$1} END{pri
 
 预期：`209715200`。
 
-步骤 4：等一轮 GC。进程启动后 30 秒跑第一轮，之后每 `interval_secs` 秒一轮（`src/cache_gc.rs:233-242`）。样例是 300 秒。
+步骤 4：等一轮 GC。进程启动后 30 秒跑第一轮，之后每 60 秒一轮（`src/cache_gc.rs`）。
 
 ```bash
 sudo tail -n 20 /opt/tv-buddy/tv-buddy.log | grep '磁盘回收完成'
@@ -274,10 +280,10 @@ find /opt/tv-buddy/cache/seg_bytes /opt/tv-buddy/cache/seg_url -type f -printf '
 
 ```bash
 curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/cache/stats \
-  | sed -n 's/.*"seg_bytes":\([0-9]*\).*/\1/p'
+  | sed -n 's/.*"segment_body_bytes":\([0-9]*\).*/\1/p'
 ```
 
-预期：明显小于 209715200。该字段只统计 `seg_bytes`，不含 `seg_url`（`src/cache_gc.rs:315`）。
+预期：明显小于 209715200。该字段只统计 `seg_bytes`，不含 `seg_url`（`src/cache_gc.rs`）。
 
 步骤 7：清理测试文件，避免影响 S4-2 的起点：
 
@@ -287,15 +293,15 @@ sudo find /opt/tv-buddy/cache/seg_bytes -maxdepth 1 -name 'fill_*.bin' -delete
 
 ### 3.6 S4-2：可用空间低于预留时紧急清理
 
-本条测「紧急模式」。条件是 `free_mb < reserve_mb`，默认阈值 100 MB（`src/cache_gc.rs:90`）。
+本条测「紧急模式」。条件是 `free_mb < 100 MB`（固定预留，`src/cache_gc.rs` 的 `RESERVE_MB`）。
 
 步骤 1：确认上限是自动值：
 
 ```bash
-sudo "$BIN" config get cache.gc.max_disk_mb --db "$DB"
+sudo "$BIN" config get cache.limit_mb --db "$DB"
 ```
 
-预期：`max_disk_mb = 0`。显式填数时，代码直接返回该值，公式不参与（`src/cache_gc.rs:70-72`）。
+预期：`limit_mb = 0`。显式填数时，代码直接返回该值，公式不参与（`src/cache_gc.rs` 的 `cap_plan`）。
 
 步骤 2：停服务，避免中途 tick 打断造盘：
 
@@ -373,7 +379,7 @@ sudo find /opt/tv-buddy/cache/seg_bytes -maxdepth 1 -name 'fill_*.bin' -delete
 
 ### 3.7 S4-3：1 vCPU 不抖动
 
-代码事实：目录遍历与删除在阻塞线程池执行，不占 tokio 异步线程（`src/cache_gc.rs:265-269`）。单轮最多处理 `scan_limit` 个文件，默认 500（`src/cache_gc.rs:184`）。
+代码事实：目录遍历与删除在阻塞线程池执行，不占 tokio 异步线程（`src/cache_gc.rs`）。单轮扫描数按上限推导：`clamp(上限 MB / 4, 500, 5000)`。
 
 步骤 1：确认采集工具：
 
@@ -443,15 +449,15 @@ sudo find /opt/tv-buddy/cache/seg_bytes -maxdepth 1 -name 'fill_*.bin' -delete
 
 本条需要真实播放流量。只起服务不播放，`seg_bytes` 不会增长。
 
-步骤 1：确认内存档位与 GC：
+步骤 1：确认内存档位与回收设置：
 
 ```bash
 free -m
 cat /sys/fs/cgroup/memory.max
-sudo "$BIN" config get cache.gc.enabled --db "$DB"
+sudo "$BIN" config get cache.gc.max_age_secs --db "$DB"
 ```
 
-预期：内存与 64 MB 或 128 MB 档一致；`enabled = true`。
+预期：内存与 64 MB 或 128 MB 档一致；`max_age_secs = 1800`。磁盘回收常开，没有开关。
 
 步骤 2：重启服务，记录起点：
 
@@ -629,7 +635,7 @@ sudo "$BIN" config set panel.session_ttl 86400 --db "$DB"
 sudo tv-buddy restart
 ```
 
-不要关闭 `cache.gc.enabled`。它是 1 GB 磁盘的硬前提，不属于低配参数。
+磁盘回收常开，没有开关，也不属于低配参数。
 `per_channel_max = 0` 表示使用内置上限 4096。`config set` 直接写库，运行中的进程不会自动读取；
 `sudo tv-buddy restart` 后生效。
 
@@ -648,7 +654,7 @@ sudo rm -f /root/s6-load.sh /root/s6-sample.sh /root/s4-gc-*.txt /root/s4-base-l
 | P-2 | 服务启动 | `systemctl is-active` 返回 `active` | 返回 `inactive` 或 `failed` |
 | S4-1-a | 回落到上限 | 实际字节数不大于 `CAP_MB × 1000000` | 超时后仍大于上限 |
 | S4-1-b | 回收日志 | 含「磁盘回收完成」，`files` 大于 0，`emergency=false` | 无该行，或只有「读磁盘空间失败」 |
-| S4-1-c | 面板同步 | `recommend.seg_bytes` 明显小于造盘值 | 数值不变 |
+| S4-1-c | 面板同步 | `recommend.segment_body_bytes` 明显小于造盘值 | 数值不变 |
 | S4-2-a | 紧急日志 | 含「已紧急回收」，随后「磁盘回收完成」且 `emergency=true` | 无紧急告警 |
 | S4-2-b | 紧急目标 | 实际字节数不大于 `25000000` | 大于 25000000 |
 | S4-2-c | 空间回升 | 可用空间明显大于 100 MB | 仍小于 100 MB |
@@ -688,7 +694,7 @@ S4-3-b 与 S6-e 只能记录数值，结论写「未验证」，并写缺什么�
 - 造盘后字节：
 - 回收后字节：
 - 回收日志行：
-- `recommend.seg_bytes`：
+- `recommend.segment_body_bytes`：
 - S4-1-a：通过 / 不通过
 - S4-1-b：通过 / 不通过
 - S4-1-c：通过 / 不通过

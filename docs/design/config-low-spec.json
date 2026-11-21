@@ -12,6 +12,8 @@
   },
   "cache": {
     "disk_path": "./cache",
+    "limit_mb": 0,
+    "auto_tune": true,
     "segments": {
       "per_channel_max": 200
     },
@@ -22,20 +24,15 @@
       "skip_tail": 1
     },
     "gc": {
-      "enabled": true,
-      "max_disk_mb": 0,
-      "max_age_secs": 1800,
-      "interval_secs": 300,
-      "scan_limit": 500,
-      "disk_budget_ratio": 0.8,
-      "reserve_mb": 100,
-      "min_mb": 50
+      "max_age_secs": 1800
+    },
+    "ttl": {
+      "sub_url_secs": 1800,
+      "segment_secs": 0
     }
   },
   "cdn": {
     "enabled": true,
-    "auto_tune": true,
-    "segment_max_age_secs": 0,
     "shared_cache_hits": false,
     "dont_cache_empty": false,
     "empty_status": 502
