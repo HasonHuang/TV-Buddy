@@ -8,6 +8,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::RwLock,
+    time::{Duration, SystemTime},
 };
 
 use serde::{Deserialize, Serialize};
@@ -32,38 +33,15 @@ pub struct Entry {
 /// JSON 每天可长到几十 MB，1 GB 盘上无法接受。
 pub const DEFAULT_INDEX_MAX: usize = 4096;
 
-/// 内存索引每条记录的粗略占用（字节）：`HashMap` 的键字符串，加 `Entry` 里两个
-/// `String` 的头与容量，再加桶开销。
+/// 内存索引条目的存活时间（秒）。
 ///
-/// 只用于把 `[cache].memory_max_mb` 的字节预算换算成条目预算（U-10）。是估算值，
-/// 不是实测；换算结果只作上限，偏保守。
-pub const ENTRY_BYTES_EST: u64 = 256;
-
-/// 把 `[cache].memory_max_mb` 换算成内存索引的条目预算；`0`（默认）表示不限。
-pub fn memory_budget_entries(mb: u64) -> u64 {
-    if mb == 0 {
-        return 0;
-    }
-    mb.saturating_mul(crate::cache_estimate::MB) / ENTRY_BYTES_EST
-}
-
-/// 合并 `[cache.segments].global_max` 与 `[cache].memory_max_mb`。
-///
-/// 两个键都限制内存索引的条目数，因此同时非 0 时取更小者；都为 0 表示不限。
-/// 上游按键计数，而 `memory_max_mb` 给的是字节预算，所以先按
-/// [`ENTRY_BYTES_EST`] 换算。
-pub fn global_limit(global_max: u64, memory_max_mb: u64) -> u64 {
-    match (global_max, memory_budget_entries(memory_max_mb)) {
-        (0, budget) => budget,
-        (global, 0) => global,
-        (global, budget) => global.min(budget),
-    }
-}
+/// GC 每轮调用 [`SegmentIndex::active_channels`]；超过该时长未被重新登记的条目会被
+/// 清掉，空闲进程的内存索引算术上收敛到 0。
+pub const INDEX_TTL_SECS: u64 = 600;
 
 /// 内存索引容量限制；`0` 表示不限制。
 #[derive(Default, Clone, Copy)]
 struct Limits {
-    global: usize,
     per_channel: usize,
 }
 
@@ -71,6 +49,8 @@ struct Limits {
 #[derive(Default)]
 pub struct SegmentIndex {
     inner: RwLock<HashMap<String, Entry>>,
+    /// `"{gid}/{cid}" -> 最近一次登记切片的 Unix 秒。
+    activity: RwLock<HashMap<String, u64>>,
     limits: RwLock<Limits>,
 }
 
@@ -84,11 +64,30 @@ impl SegmentIndex {
     }
 
     /// 更新 `[cache.segments]` 的索引上限。
-    pub fn set_limits(&self, global: u64, per_channel: u64) {
+    pub fn set_limits(&self, per_channel: u64) {
         *self.limits.write().unwrap_or_else(|e| e.into_inner()) = Limits {
-            global: global as usize,
             per_channel: per_channel as usize,
         };
+    }
+
+    /// 记下频道最近的活动时间，供 [`Self::active_channels`] 统计活跃频道数。
+    pub fn note_channel(&self, gid: &str, cid: &str) {
+        let mut activity = self.activity.write().unwrap_or_else(|e| e.into_inner());
+        activity.insert(format!("{gid}/{cid}"), now_epoch());
+    }
+
+    /// 清掉窗口外的活动记录与超过 [`INDEX_TTL_SECS`] 的索引条目，返回剩余活跃频道数。
+    pub fn active_channels(&self, window: Duration) -> usize {
+        let now = now_epoch();
+        let window_secs = window.as_secs();
+        let active = {
+            let mut activity = self.activity.write().unwrap_or_else(|e| e.into_inner());
+            activity.retain(|_, at| now.saturating_sub(*at) <= window_secs);
+            activity.len()
+        };
+        self.write()
+            .retain(|_, entry| now.saturating_sub(entry.at) <= INDEX_TTL_SECS);
+        active
     }
 
     /// 登记一批切片。
@@ -97,14 +96,16 @@ impl SegmentIndex {
             return;
         }
         let limits = *self.limits.read().unwrap_or_else(|e| e.into_inner());
+        let now = now_epoch();
         let mut map = self.write();
+        map.retain(|_, entry| now.saturating_sub(entry.at) <= INDEX_TTL_SECS);
         for (suffix, url, ext) in entries {
             map.insert(
                 Self::key(gid, cid, suffix),
                 Entry {
                     url: url.clone(),
                     ext: ext.clone(),
-                    at: now_epoch(),
+                    at: now,
                 },
             );
         }
@@ -120,13 +121,6 @@ impl SegmentIndex {
                 for key in keys.into_iter().take(remove) {
                     map.remove(&key);
                 }
-            }
-        }
-        if limits.global > 0 && map.len() > limits.global {
-            let overflow = map.len() - limits.global;
-            let keys: Vec<String> = map.keys().take(overflow).cloned().collect();
-            for key in keys {
-                map.remove(&key);
             }
         }
     }
@@ -178,6 +172,62 @@ pub fn load_index(dir: &Path, gid: &str, cid: &str) -> HashMap<String, Entry> {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
+}
+
+/// 统计索引目录下直接子文件的数量与总字节；读目录失败时返回 `(0, 0)`。
+pub fn index_usage(dir: &Path) -> (u64, u64) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return (0, 0);
+    };
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    for entry in read_dir.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.is_file() {
+            files += 1;
+            bytes = bytes.saturating_add(metadata.len());
+        }
+    }
+    (files, bytes)
+}
+
+/// 按 mtime 从旧到新删除索引文件，直到总量不超过 `budget_bytes` 或删满 `limit` 个。
+///
+/// 返回 `(删除数, 删除字节)`。读目录失败时返回 `(0, 0)`。
+pub fn prune_index(dir: &Path, budget_bytes: u64, limit: usize) -> (u64, u64) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return (0, 0);
+    };
+    let mut files: Vec<(SystemTime, u64, PathBuf)> = Vec::new();
+    for entry in read_dir.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let mtime = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        files.push((mtime, metadata.len(), entry.path()));
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
+    let mut total = files
+        .iter()
+        .fold(0u64, |sum, (_, len, _)| sum.saturating_add(*len));
+    let mut deleted = 0u64;
+    let mut freed = 0u64;
+    for (_, len, path) in files {
+        if total <= budget_bytes || deleted as usize >= limit {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(len);
+            freed = freed.saturating_add(len);
+            deleted += 1;
+        }
+    }
+    (deleted, freed)
 }
 
 /// 写索引文件。与已有内容合并；超过 `max_entries` 时按登记时间丢弃最旧的。
@@ -346,7 +396,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tv-buddy-seg-limit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let index = SegmentIndex::new();
-        index.set_limits(0, 2);
+        index.set_limits(2);
         let entries: Vec<(String, String, String)> = (0..4)
             .map(|n| (n.to_string(), format!("http://up/{n}.ts"), "jpg".into()))
             .collect();
@@ -359,18 +409,75 @@ mod tests {
     }
 
     #[test]
-    fn global_limit_folds_memory_budget() {
-        // 默认全 0 → 不限。
-        assert_eq!(global_limit(0, 0), 0);
-        assert_eq!(memory_budget_entries(0), 0);
-        // 只设条目上限（`[cache.segments].global_max`）。
-        assert_eq!(global_limit(10, 0), 10);
-        // 只设字节预算（`[cache].memory_max_mb`）：1 MB ÷ 256 B ≈ 3906 条。
-        assert_eq!(memory_budget_entries(1), 1_000_000 / ENTRY_BYTES_EST);
-        assert_eq!(global_limit(0, 1), 3_906);
-        // 两者都设 → 取更小者。
-        assert_eq!(global_limit(10, 1), 10);
-        assert_eq!(global_limit(100_000, 1), 3_906);
+    fn active_channels_tracks_window() {
+        let index = SegmentIndex::new();
+        index.note_channel("g", "c1");
+        index.note_channel("g", "c2");
+        assert_eq!(index.active_channels(Duration::from_secs(90)), 2);
+        let now = now_epoch();
+        index
+            .activity
+            .write()
+            .unwrap()
+            .insert("g/c1".into(), now.saturating_sub(100));
+        assert_eq!(index.active_channels(Duration::from_secs(90)), 1);
+        // 上一轮把 c1 淘汰了；重新放进活动表再验证更宽的窗口。
+        index
+            .activity
+            .write()
+            .unwrap()
+            .insert("g/c1".into(), now.saturating_sub(100));
+        assert_eq!(index.active_channels(Duration::from_secs(120)), 2);
+    }
+
+    #[test]
+    fn index_ttl_evicts_stale_entries() {
+        let index = SegmentIndex::new();
+        index.set_limits(0);
+        index.write().insert(
+            "g/c/old".into(),
+            Entry {
+                url: "http://up/old.ts".into(),
+                ext: "jpg".into(),
+                at: now_epoch().saturating_sub(601),
+            },
+        );
+        // GC 每轮调用 active_channels；这里顺带清掉过期索引。
+        assert_eq!(index.active_channels(Duration::from_secs(90)), 0);
+        assert!(index.read().get("g/c/old").is_none(), "超过 600 秒应淘汰");
+    }
+
+    #[test]
+    fn index_usage_sums_files() {
+        let dir = std::env::temp_dir().join(format!("tv-buddy-index-usage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(index_usage(&dir), (0, 0), "目录不存在时返回零");
+        std::fs::create_dir_all(&dir).expect("建目录");
+        std::fs::write(dir.join("a.json"), vec![b'x'; 10]).expect("写文件");
+        std::fs::write(dir.join("b.json"), vec![b'x'; 20]).expect("写文件");
+        assert_eq!(index_usage(&dir), (2, 30));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_index_deletes_oldest_files() {
+        let dir = std::env::temp_dir().join(format!("tv-buddy-index-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("建目录");
+        for index in 0..5 {
+            let path = dir.join(format!("{index}.json"));
+            std::fs::write(&path, vec![b'x'; 1_000]).expect("写文件");
+            let when = SystemTime::now() - Duration::from_secs(10 * (5 - index));
+            std::fs::File::open(&path)
+                .expect("打开")
+                .set_modified(when)
+                .expect("mtime");
+        }
+        let (files, bytes) = prune_index(&dir, 2_000, 100);
+        assert_eq!(files, 3);
+        assert_eq!(bytes, 3_000);
+        assert_eq!(std::fs::read_dir(&dir).expect("读目录").count(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

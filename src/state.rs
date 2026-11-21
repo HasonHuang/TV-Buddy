@@ -16,7 +16,7 @@ use crate::{
     auth::SessionStore,
     config::Config,
     logging::RingBuffer,
-    proxy::{segments, AddressCache, SegmentIndex, TtlCache},
+    proxy::{AddressCache, SegmentIndex, TtlCache},
     stats::Stats,
     watchdog::Watchdog,
 };
@@ -151,10 +151,7 @@ impl AppState {
         let offset_hours = config.server.timezone_offset_hours as i64;
         ensure_cache_dirs(&cache_dir);
         let segments = SegmentIndex::new();
-        segments.set_limits(
-            segments::global_limit(config.cache.segments.global_max, config.cache.memory_max_mb),
-            config.cache.segments.per_channel_max,
-        );
+        segments.set_limits(config.cache.segments.per_channel_max);
         let sources_ttl = Duration::from_secs(config.cache.ttl.sub_url_secs.max(1));
         let estimate = crate::cache_estimate::Estimator::load_or_default(&cache_dir);
         estimate.set_auto_tune(config.cdn.auto_tune);
@@ -447,10 +444,8 @@ impl AppState {
     /// 原子替换配置。同时解除全部冷却（S-MODE-17）。
     pub fn replace(&self, config: Config) {
         self.watchdog.clear_all();
-        self.segments.set_limits(
-            segments::global_limit(config.cache.segments.global_max, config.cache.memory_max_mb),
-            config.cache.segments.per_channel_max,
-        );
+        self.segments
+            .set_limits(config.cache.segments.per_channel_max);
         self.sources
             .set_ttl(Duration::from_secs(config.cache.ttl.sub_url_secs.max(1)));
         self.estimate.set_auto_tune(config.cdn.auto_tune);
