@@ -18,8 +18,9 @@ use std::{
 };
 
 use crate::{
-    cache_estimate::{FALLBACK_DISK_MB, MB},
-    config::model::{CacheCfg, CacheGcCfg},
+    cache_estimate::{FALLBACK_DISK_MB, FALLBACK_TTL_SECS, MB, MIN_CONCURRENT_CHANNELS},
+    config::model::CacheCfg,
+    proxy::segments,
     state::AppState,
 };
 
@@ -41,8 +42,8 @@ const GC_SCAN_FLOOR: u64 = 500;
 const GC_SCAN_MAX: u64 = 5_000;
 /// 单个切片的估算大小（MB），用于由上限推导扫描数。
 const SEGMENT_EST_MB: u64 = 4;
-/// 被回收的目录（相对缓存根）。
-const SWEPT_DIRS: [&str; 2] = ["seg_bytes", "seg_url"];
+/// 磁盘索引占缓存上限的比例。
+const INDEX_RATIO: f64 = 0.10;
 
 /// 上限的限制来源。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,41 +161,12 @@ pub fn scan_limit(cap_mb: u64) -> usize {
     (cap_mb / SEGMENT_EST_MB).clamp(GC_SCAN_FLOOR, GC_SCAN_MAX) as usize
 }
 
-/// 按 `06` §3.3 算上限；`explicit_mb != 0` 时直接用它（显式配置优先）。
-///
-/// 保留旧签名供 `tick` 与 `recommendation` 使用，内部转交 [`cap_plan`]。
-/// `working_mb` 为空时用回退值 150 MB，仍参与夹取。
-pub fn effective_cap_mb(
-    _cfg: &CacheGcCfg,
-    explicit_mb: u64,
-    total_mb: u64,
-    free_mb: u64,
-    working_mb: Option<u64>,
-) -> u64 {
-    cap_plan(explicit_mb, Some((total_mb, free_mb)), working_mb).cap_mb
-}
-
-/// 组装回收计划。`space` 为空（`statvfs` 失败）时按回退值设限，不进入紧急模式。
-pub fn plan(
-    cfg: &CacheGcCfg,
-    explicit_mb: u64,
-    space: Option<(u64, u64)>,
-    working_mb: Option<u64>,
-) -> Plan {
-    match space {
-        Some((total_mb, free_mb)) => Plan {
-            cap_bytes: effective_cap_mb(cfg, explicit_mb, total_mb, free_mb, working_mb)
-                .saturating_mul(MB),
-            emergency: free_mb < cfg.reserve_mb,
-        },
-        None => Plan {
-            cap_bytes: if explicit_mb != 0 {
-                explicit_mb.saturating_mul(MB)
-            } else {
-                FALLBACK_DISK_MB.saturating_mul(MB)
-            },
-            emergency: false,
-        },
+/// 组装回收计划。`space` 为空（`statvfs` 失败）时按工作集或回退值设限，不进入紧急模式。
+pub fn plan(explicit_mb: u64, space: Option<(u64, u64)>, working_mb: Option<u64>) -> Plan {
+    let cap = cap_plan(explicit_mb, space, working_mb);
+    Plan {
+        cap_bytes: cap.cap_mb.saturating_mul(MB),
+        emergency: space.map_or(false, |(_, free)| free < RESERVE_MB),
     }
 }
 
@@ -240,62 +212,52 @@ pub fn dir_usage(dir: &Path) -> (u64, u64) {
     (files, bytes)
 }
 
-/// 淘汰：超龄 → 超量 LRU（→ 紧急模式按一半回收）。
+/// 淘汰：超龄 → 索引子预算 → 超量 LRU（→ 紧急模式按一半回收）。
 ///
-/// `dirs` 的占用合计与 `cap_bytes` 比较。返回 `(删除文件数, 删除字节数)`。
+/// `body_dir` 与 `index_dir` 的占用合计与 `cap_bytes` 比较。
+/// 返回 `(删除文件数, 删除字节数)`。
 fn sweep(
-    dirs: &[PathBuf],
+    body_dir: &Path,
+    index_dir: &Path,
     cap_bytes: u64,
     max_age: Duration,
     limit: usize,
     emergency: bool,
 ) -> (u64, u64) {
-    let now = SystemTime::now();
-    let mut files: Vec<(PathBuf, u64, SystemTime)> = Vec::new();
-    let mut total = 0u64;
-    for dir in dirs {
-        let Ok(read) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        for entry in read.flatten() {
-            let Ok(meta) = entry.metadata() else { continue };
-            if !meta.is_file() {
-                continue;
-            }
-            total += meta.len();
-            files.push((
-                entry.path(),
-                meta.len(),
-                meta.modified().unwrap_or(UNIX_EPOCH),
-            ));
-        }
-    }
-    // 最旧优先：直播切片的 mtime 就是热度信号。
-    files.sort_by_key(|(_, _, mtime)| *mtime);
-
     let mut removed_files = 0u64;
     let mut removed_bytes = 0u64;
-    let mut survivors: Vec<(PathBuf, u64, SystemTime)> = Vec::new();
 
-    // 1) 超龄。紧急模式下忽略门槛，交给第 2 步按容量删。
-    for (path, len, mtime) in files {
-        if emergency || removed_files as usize >= limit {
-            survivors.push((path, len, mtime));
-            continue;
-        }
-        let age = now.duration_since(mtime).unwrap_or_default();
-        if age > max_age {
-            if drop_file(&path, len, &mut removed_files, &mut removed_bytes) {
-                total = total.saturating_sub(len);
+    // 1) 超龄：两个目录一起按 mtime 从旧到新删。紧急模式忽略门槛。
+    if !emergency && !max_age.is_zero() {
+        let now = SystemTime::now();
+        for (path, len, mtime) in scan_files(&[body_dir, index_dir]) {
+            if removed_files as usize >= limit {
+                break;
             }
-        } else {
-            survivors.push((path, len, mtime));
+            let age = now.duration_since(mtime).unwrap_or_default();
+            if age > max_age {
+                drop_file(&path, len, &mut removed_files, &mut removed_bytes);
+            }
         }
     }
 
-    // 2) 超量：删到 ≤ cap；紧急模式删到 cap / 2。
+    // 2) 索引子预算：先压索引，正文至少保留 90%。
+    let index_budget = (cap_bytes as f64 * INDEX_RATIO) as u64;
+    let (index_files, index_bytes) = segments::prune_index(
+        index_dir,
+        index_budget,
+        limit.saturating_sub(removed_files as usize),
+    );
+    removed_files += index_files;
+    removed_bytes += index_bytes;
+
+    // 3) 重新扫描两个目录，合计当前占用。
+    let files = scan_files(&[body_dir, index_dir]);
+    let mut total: u64 = files.iter().map(|(_, len, _)| *len).sum();
+
+    // 4) 超量：删到 ≤ cap；紧急模式删到 cap / 2。
     let target = if emergency { cap_bytes / 2 } else { cap_bytes };
-    for (path, len, _) in &survivors {
+    for (path, len, _) in &files {
         if total <= target || removed_files as usize >= limit {
             break;
         }
@@ -314,6 +276,30 @@ fn sweep(
     (removed_files, removed_bytes)
 }
 
+/// 扫描目录内的直接子文件，按 mtime 从旧到新排序。
+fn scan_files(dirs: &[&Path]) -> Vec<(PathBuf, u64, SystemTime)> {
+    let mut files = Vec::new();
+    for dir in dirs {
+        let Ok(read) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in read.flatten() {
+            let Ok(meta) = entry.metadata() else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            files.push((
+                entry.path(),
+                meta.len(),
+                meta.modified().unwrap_or(UNIX_EPOCH),
+            ));
+        }
+    }
+    // 最旧优先：直播切片的 mtime 就是热度信号。
+    files.sort_by_key(|(_, _, mtime)| *mtime);
+    files
+}
+
 fn drop_file(path: &Path, len: u64, files: &mut u64, bytes: &mut u64) -> bool {
     match std::fs::remove_file(path) {
         Ok(()) => {
@@ -325,19 +311,13 @@ fn drop_file(path: &Path, len: u64, files: &mut u64, bytes: &mut u64) -> bool {
     }
 }
 
-/// 起回收任务；`[cache.gc].enabled=false` 时只保留实测落盘。
+/// 起回收任务；每 [`GC_INTERVAL_SECS`] 秒扫描一轮。
 pub fn spawn(state: Arc<AppState>) {
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(STARTUP_DELAY_SECS)).await;
         loop {
             tick(&state).await;
-            let interval = state
-                .snapshot()
-                .cache
-                .gc
-                .interval_secs
-                .max(GC_INTERVAL_SECS);
-            tokio::time::sleep(Duration::from_secs(interval)).await;
+            tokio::time::sleep(Duration::from_secs(GC_INTERVAL_SECS)).await;
         }
     });
 }
@@ -345,26 +325,31 @@ pub fn spawn(state: Arc<AppState>) {
 /// 一轮扫描：算上限 → 回收 → 顺带落盘实测（省一个定时器）。
 async fn tick(state: &Arc<AppState>) {
     let config = state.snapshot();
-    let gc = config.cache.gc.clone();
     state.estimate.persist(false);
-    if !gc.enabled {
-        return;
-    }
     let root = state.cache_dir.clone();
-    let dirs: Vec<PathBuf> = SWEPT_DIRS.iter().map(|name| root.join(name)).collect();
-    let working = state
-        .estimate
-        .working_mb(crate::cache_estimate::MIN_CONCURRENT_CHANNELS);
+    let body_dir = root.join("seg_bytes");
+    let index_dir = root.join("seg_url");
+    let window = Duration::from_secs(config.stats.online_window_secs.max(1));
+    let active = state.segments.active_channels(window) as u64;
+    let working_channels = active.max(MIN_CONCURRENT_CHANNELS);
+    let working = state.estimate.working_mb(working_channels);
     let space = fs_space(&root);
     if space.is_none() {
         tracing::warn!(dir = %root.display(), "读磁盘空间失败；按回退值回收");
     }
-    let plan = plan(&gc, explicit_cap_mb(&config.cache), space, working);
-    let max_age = Duration::from_secs(gc.max_age_secs);
-    let limit = gc.scan_limit.max(1) as usize;
+    let plan = plan(config.cache.limit_mb, space, working);
+    let max_age = Duration::from_secs(config.cache.gc.max_age_secs);
+    let limit = scan_limit(plan.cap_bytes / MB);
     // 目录遍历是阻塞系统调用：放到阻塞线程池，避免 1 vCPU 上抖动。
     let result = tokio::task::spawn_blocking(move || {
-        sweep(&dirs, plan.cap_bytes, max_age, limit, plan.emergency)
+        sweep(
+            &body_dir,
+            &index_dir,
+            plan.cap_bytes,
+            max_age,
+            limit,
+            plan.emergency,
+        )
     })
     .await;
     match result {
@@ -375,84 +360,91 @@ async fn tick(state: &Arc<AppState>) {
         }
         Err(error) => tracing::warn!(error = %error, "回收任务失败"),
     }
+    state
+        .gc_last_run_epoch
+        .store(now_epoch(), std::sync::atomic::Ordering::Relaxed);
 }
 
 /// 面板用推荐摘要。
 ///
-/// `source` 为 `manual`（显式配置优先）/ `measured`（有实测）/ `fallback`（回退值）。
+/// `ttl_source` 为 `manual`（显式配置优先）/ `measured`（有实测）/ `fallback`（回退值）；
+/// `cap_source` 为 `manual` / `auto`。上限与回收共用 [`cap_plan`] 的结果。
 pub fn recommendation(state: &AppState) -> serde_json::Value {
     let config = state.snapshot();
     let measured_ttl = state.estimate.ttl_secs();
-    let working = state
-        .estimate
-        .working_mb(crate::cache_estimate::MIN_CONCURRENT_CHANNELS);
-    let space = fs_space(&state.cache_dir);
 
-    let ttl_manual = config.cdn.segment_max_age_secs != 0;
-    let explicit_mb = explicit_cap_mb(&config.cache);
-    let disk_manual = explicit_mb != 0;
-    let source = if ttl_manual || disk_manual {
+    let ttl_manual = config.cache.ttl.segment_secs != 0;
+    let ttl_source = if ttl_manual {
         "manual"
     } else if measured_ttl.is_some() {
         "measured"
     } else {
         "fallback"
     };
-
     let ttl_secs = if ttl_manual {
-        config.cdn.segment_max_age_secs
+        config.cache.ttl.segment_secs
     } else {
-        measured_ttl.unwrap_or(crate::cache_estimate::FALLBACK_TTL_SECS)
+        measured_ttl.unwrap_or(FALLBACK_TTL_SECS)
     };
-    let disk_cap_mb = if disk_manual {
-        explicit_mb
+
+    let window = Duration::from_secs(config.stats.online_window_secs.max(1));
+    let channels = state.segments.active_channels(window) as u64;
+    let working_channels = channels.max(MIN_CONCURRENT_CHANNELS);
+    let working = state.estimate.working_mb(working_channels);
+    let space = fs_space(&state.cache_dir);
+    let cap = cap_plan(config.cache.limit_mb, space, working);
+    let cap_source = if config.cache.limit_mb != 0 {
+        "manual"
     } else {
-        match space {
-            Some((total_mb, free_mb)) => {
-                effective_cap_mb(&config.cache.gc, 0, total_mb, free_mb, working)
-            }
-            None => working.unwrap_or(FALLBACK_DISK_MB),
-        }
+        "auto"
     };
-    let (seg_files, seg_bytes) = dir_usage(&state.cache_dir.join("seg_bytes"));
+
+    let (segment_body_files, segment_body_bytes) = dir_usage(&state.cache_dir.join("seg_bytes"));
+    let (_, segment_index_bytes) = segments::index_usage(&state.cache_dir.join("seg_url"));
+    let segment_index_limit_bytes = (cap.cap_mb.saturating_mul(MB) as f64 * INDEX_RATIO) as u64;
+
+    let last = state
+        .gc_last_run_epoch
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let gc_last_run_secs_ago = (last != 0).then(|| now_epoch().saturating_sub(last));
 
     serde_json::json!({
         "ttl_secs": ttl_secs,
-        "disk_cap_mb": disk_cap_mb,
-        "source": source,
-        "ttl_manual": ttl_manual,
-        "disk_manual": disk_manual,
+        "ttl_source": ttl_source,
+        "disk_cap_mb": cap.cap_mb,
+        "cap_source": cap_source,
+        "limited_by": cap.limited_by.as_str(),
+        "channels": channels,
+        "working_channels": working_channels,
+        "working_mb": working,
+        "budget_mb": cap.budget_mb,
+        "ceiling_mb": cap.ceiling_mb,
+        "gc_last_run_secs_ago": gc_last_run_secs_ago,
         "groups": state.estimate.group_count(),
         "updated_secs_ago": state.estimate.updated_secs_ago(),
-        "working_mb": working,
         "disk_total_mb": space.map(|(total, _)| total),
         "disk_free_mb": space.map(|(_, free)| free),
-        "seg_files": seg_files,
-        "seg_bytes": seg_bytes,
-        "gc_enabled": config.cache.gc.enabled,
+        "segment_body_bytes": segment_body_bytes,
+        "segment_index_bytes": segment_index_bytes,
+        "segment_index_limit_bytes": segment_index_limit_bytes,
+        "segment_cache_bytes": segment_body_bytes.saturating_add(segment_index_bytes),
+        "segment_body_files": segment_body_files,
         "auto_tune": state.estimate.auto_tune(),
     })
+}
+
+/// 当前 Unix 秒。
+fn now_epoch() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn cfg() -> CacheGcCfg {
-        CacheGcCfg::default()
-    }
-
-    #[test]
-    fn effective_cap_matches_design_table() {
-        // `06` §3.3 四行（1 GB 盘 = 1024 MB）。
-        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 800, Some(140)), 140);
-        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 300, Some(140)), 140);
-        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 120, Some(140)), 50);
-        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 800, Some(486)), 486);
-        // 工作集为空 → 回退 150 MB（受 budget 限制时取 budget）。
-        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 800, None), 150);
-        assert_eq!(effective_cap_mb(&cfg(), 0, 1024, 120, None), 50);
-    }
+    use crate::config::model::CacheGcCfg;
 
     #[test]
     fn cap_plan_reports_limit_source() {
@@ -537,14 +529,18 @@ mod tests {
 
     #[test]
     fn plan_emergency_when_below_reserve() {
-        assert!(!plan(&cfg(), 0, Some((1024, 800)), Some(140)).emergency);
-        assert!(plan(&cfg(), 0, Some((1024, 80)), Some(140)).emergency);
-        // statvfs 失败：用回退上限，不紧急。
-        let fallback = plan(&cfg(), 0, None, Some(140));
+        assert!(!plan(0, Some((1024, 800)), Some(140)).emergency);
+        assert!(plan(0, Some((1024, 80)), Some(140)).emergency);
+        // statvfs 失败：用工作集上限，不紧急。
+        let fallback = plan(0, None, Some(140));
         assert!(!fallback.emergency);
-        assert_eq!(fallback.cap_bytes, FALLBACK_DISK_MB * MB);
+        assert_eq!(
+            fallback.cap_bytes,
+            140 * MB,
+            "无空间数据时用工作集而非固定 150 MB"
+        );
         // 显式值在读空间失败时仍然生效。
-        assert_eq!(plan(&cfg(), 200, None, Some(140)).cap_bytes, 200 * MB);
+        assert_eq!(plan(200, None, Some(140)).cap_bytes, 200 * MB);
     }
 
     fn temp_dir(tag: &str) -> PathBuf {
@@ -567,6 +563,7 @@ mod tests {
     #[test]
     fn sweep_removes_by_age() {
         let dir = temp_dir("age");
+        let index = temp_dir("age-index");
         for index in 0..5 {
             let age = if index < 3 {
                 Duration::from_secs(3_600)
@@ -576,7 +573,8 @@ mod tests {
             touch(&dir.join(format!("{index}.jpg")), 1_000, age);
         }
         let (files, bytes) = sweep(
-            std::slice::from_ref(&dir),
+            &dir,
+            &index,
             1_000_000,
             Duration::from_secs(1_800),
             500,
@@ -586,6 +584,7 @@ mod tests {
         assert_eq!(bytes, 3_000);
         assert_eq!(std::fs::read_dir(&dir).expect("读目录").count(), 2);
         let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&index);
     }
 
     #[test]
@@ -596,7 +595,8 @@ mod tests {
         touch(&url_dir.join("b.json"), 1_000, Duration::from_secs(3_600));
         touch(&url_dir.join("c.json"), 1_000, Duration::from_secs(5));
         let (files, _) = sweep(
-            &[bytes_dir.clone(), url_dir.clone()],
+            &bytes_dir,
+            &url_dir,
             1_000_000,
             Duration::from_secs(1_800),
             500,
@@ -609,20 +609,67 @@ mod tests {
     }
 
     #[test]
+    fn sweep_prunes_index_before_total() {
+        let body = temp_dir("idx-body");
+        let index = temp_dir("idx-index");
+        for n in 0..10 {
+            touch(
+                &body.join(format!("b{n}.jpg")),
+                1_000,
+                Duration::from_secs(300),
+            );
+        }
+        for n in 0..20 {
+            let age = Duration::from_secs(10 * (20 - n));
+            touch(&index.join(format!("{n}.json")), 1_000, age);
+        }
+        // cap 10 KB → 索引子预算 1 KB，总量 10 KB。
+        let (files, _) = sweep(
+            &body,
+            &index,
+            10_000,
+            Duration::from_secs(86_400),
+            500,
+            false,
+        );
+        assert!(files >= 19, "至少删掉 19 个超额索引");
+        let index_left = std::fs::read_dir(&index).expect("读索引目录").count();
+        assert_eq!(index_left, 1, "索引保留 1 个文件");
+        let total = std::fs::read_dir(&body).expect("读正文目录").count() as u64 * 1_000
+            + index_left as u64 * 1_000;
+        assert!(total <= 10_000, "总量应回收到上限内");
+        let _ = std::fs::remove_dir_all(&body);
+        let _ = std::fs::remove_dir_all(&index);
+    }
+
+    #[test]
+    fn zero_max_age_skips_age_pruning() {
+        let dir = temp_dir("zero-age");
+        let index = temp_dir("zero-age-index");
+        for n in 0..3 {
+            touch(
+                &dir.join(format!("{n}.jpg")),
+                1_000,
+                Duration::from_secs(3_600),
+            );
+        }
+        let (files, _) = sweep(&dir, &index, 1_000_000, Duration::ZERO, 500, false);
+        assert_eq!(files, 0, "max_age=0 表示不按时间删除");
+        assert_eq!(std::fs::read_dir(&dir).expect("读目录").count(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&index);
+    }
+
+    #[test]
     fn sweep_enforces_cap_lru() {
         let dir = temp_dir("lru");
+        let index = temp_dir("lru-index");
         // 10 个文件，越新越大：最旧的先被删。
         for index in 0..10 {
             let age = Duration::from_secs(10 * (10 - index));
             touch(&dir.join(format!("{index}.jpg")), 1_000, age);
         }
-        let (files, bytes) = sweep(
-            std::slice::from_ref(&dir),
-            3_000,
-            Duration::from_secs(86_400),
-            500,
-            false,
-        );
+        let (files, bytes) = sweep(&dir, &index, 3_000, Duration::from_secs(86_400), 500, false);
         assert_eq!(files, 7, "10KB 收到 3KB");
         assert_eq!(bytes, 7_000);
         // 留下的三个是最新的（7、8、9）。
@@ -634,11 +681,13 @@ mod tests {
         left.sort();
         assert_eq!(left, vec!["7.jpg", "8.jpg", "9.jpg"]);
         let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&index);
     }
 
     #[test]
     fn emergency_ignores_age_and_halves() {
         let dir = temp_dir("emergency");
+        let index = temp_dir("emergency-index");
         for index in 0..4 {
             touch(
                 &dir.join(format!("{index}.jpg")),
@@ -648,7 +697,8 @@ mod tests {
         }
         // 未紧急：都新鲜 → 一个不删（超量按 cap 处理，这里 cap 足够）。
         let (files, _) = sweep(
-            std::slice::from_ref(&dir),
+            &dir,
+            &index,
             100_000,
             Duration::from_secs(1_800),
             500,
@@ -656,22 +706,18 @@ mod tests {
         );
         assert_eq!(files, 0);
         // 紧急：忽略 max_age，删到 cap / 2 = 2KB。
-        let (files, bytes) = sweep(
-            std::slice::from_ref(&dir),
-            4_000,
-            Duration::from_secs(1_800),
-            500,
-            true,
-        );
+        let (files, bytes) = sweep(&dir, &index, 4_000, Duration::from_secs(1_800), 500, true);
         assert_eq!(files, 2);
         assert_eq!(bytes, 2_000);
         assert_eq!(std::fs::read_dir(&dir).expect("读目录").count(), 2);
         let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&index);
     }
 
     #[test]
     fn scan_limit_bounds_work() {
         let dir = temp_dir("limit");
+        let index = temp_dir("limit-index");
         for index in 0..20 {
             touch(
                 &dir.join(format!("{index}.jpg")),
@@ -679,16 +725,11 @@ mod tests {
                 Duration::from_secs(3_600),
             );
         }
-        let (files, _) = sweep(
-            std::slice::from_ref(&dir),
-            1_000,
-            Duration::from_secs(1_800),
-            5,
-            false,
-        );
+        let (files, _) = sweep(&dir, &index, 1_000, Duration::from_secs(1_800), 5, false);
         assert_eq!(files, 5, "单次最多处理 scan_limit 个");
         assert_eq!(std::fs::read_dir(&dir).expect("读目录").count(), 15);
         let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&index);
     }
 
     #[test]

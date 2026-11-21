@@ -6140,7 +6140,7 @@ async fn estimate_returns_recommendation() {
     assert_eq!(body["groups"], 2, "{body}");
     assert_eq!(body["failed"].as_array().map(Vec::len), Some(0), "{body}");
     assert_eq!(body["recommend"]["ttl_secs"], 300, "{body}");
-    assert_eq!(body["recommend"]["source"], "measured", "{body}");
+    assert_eq!(body["recommend"]["ttl_source"], "measured", "{body}");
     assert!(body["recommend"]["disk_cap_mb"].is_u64(), "{body}");
 }
 
@@ -6200,7 +6200,7 @@ async fn estimate_all_failed_is_not_500() {
     assert_eq!(body["groups"], 0, "{body}");
     assert_eq!(body["failed"].as_array().map(Vec::len), Some(2), "{body}");
     assert_eq!(body["recommend"]["ttl_secs"], 600, "回退 TTL");
-    assert_eq!(body["recommend"]["source"], "fallback", "{body}");
+    assert_eq!(body["recommend"]["ttl_source"], "fallback", "{body}");
 }
 
 #[tokio::test]
@@ -6307,7 +6307,7 @@ async fn cache_stats_includes_recommendation() {
     assert!(body["playlist_cache_entries"].is_u64(), "{body}");
     // 新增推荐块：尚未播放 → 回退值。
     assert_eq!(body["recommend"]["ttl_secs"], 600, "{body}");
-    assert_eq!(body["recommend"]["source"], "fallback", "{body}");
+    assert_eq!(body["recommend"]["ttl_source"], "fallback", "{body}");
     assert!(body["recommend"]["disk_cap_mb"].is_u64(), "{body}");
 }
 

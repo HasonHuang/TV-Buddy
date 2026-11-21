@@ -44,7 +44,7 @@ const EMA_ALPHA: f64 = 0.3;
 const PERSIST_MIN_SECS: u64 = 300;
 /// 估算文件的结构版本；不匹配时丢弃旧文件。
 const SCHEMA_VERSION: u32 = 1;
-/// 工作集余量：另有 2 个频道可能随时开播。
+/// 工作集余量。
 const WORKING_HEADROOM: f64 = 1.5;
 
 /// 一次媒体清单的窗口参数。

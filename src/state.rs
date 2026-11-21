@@ -106,6 +106,8 @@ pub struct AppState {
     pub unban_quota: crate::auth::UnbanQuota,
     /// 被动实测统计（推荐 TTL 与磁盘上限）。
     pub estimate: crate::cache_estimate::Estimator,
+    /// 最近一次磁盘回收的 Unix 秒；`0` 表示尚未运行。
+    pub gc_last_run_epoch: std::sync::atomic::AtomicU64,
     /// 按代理配置缓存的 HTTP 客户端。
     proxy_clients: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
     /// 质量探测客户端。重定向上限更小。
@@ -198,6 +200,7 @@ impl AppState {
             login_guard: crate::auth::LoginGuard::new(),
             unban_quota: crate::auth::UnbanQuota::new(),
             estimate,
+            gc_last_run_epoch: std::sync::atomic::AtomicU64::new(0),
             proxy_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
             probe_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
             sync_lock: Arc::new(tokio::sync::Mutex::new(())),
