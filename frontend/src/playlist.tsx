@@ -201,6 +201,55 @@ function parseMap(text: string): Record<string, string> {
   return out;
 }
 
+/**
+ * 多行输入。编辑期间显示原文，解析结果只写回草稿。
+ *
+ * 若直接用解析后的列表或映射生成 value，空行会被过滤掉：回车新建的行
+ * 立刻消失，表现为无法换行。改名表还会丢掉没写完的「源=目标」行。
+ */
+function MultilineBox({
+  label,
+  tip,
+  hint,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  tip?: string;
+  hint?: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (text: string) => void;
+}) {
+  const [text, setText] = useState(value);
+  const [editing, setEditing] = useState(false);
+
+  // 外部修改（如「加入改名表」）在未编辑时同步到输入框。
+  useEffect(() => {
+    if (!editing) setText(value);
+  }, [value, editing]);
+
+  return (
+    <label>
+      {label}
+      {tip ? <Tip text={tip} /> : null}
+      <textarea
+        value={text}
+        disabled={disabled}
+        spellCheck={false}
+        onFocus={() => setEditing(true)}
+        onChange={(event) => {
+          setText(event.target.value);
+          onChange(event.target.value);
+        }}
+        onBlur={() => setEditing(false)}
+      />
+      {hint ? <span className="hint">{hint}</span> : null}
+    </label>
+  );
+}
+
 /** 代理字段 → 草稿值。保留空地址，保存时再清空。 */
 function proxyDraft(
   current: Source['proxy'],
@@ -1069,18 +1118,12 @@ export function PlaylistPage() {
             </span>
           </label>
         </div>
-        <label>
-          全局排除
-          <Tip text="这些名字不会出现在聚合和同步结果里。每行一条。支持 *（任意长度）和 ?（一个字符）通配符。" />
-          <textarea
-            aria-label="全局排除关键词"
-            value={(global.global_exclude ?? []).join('\n')}
-            onChange={(event) =>
-              setGlobal({ ...global, global_exclude: lines(event.target.value) })
-            }
-            spellCheck={false}
-          />
-        </label>
+        <MultilineBox
+          label="全局排除"
+          tip="这些名字不会出现在聚合和同步结果里。每行一条。支持 *（任意长度）和 ?（一个字符）通配符。"
+          value={(global.global_exclude ?? []).join('\n')}
+          onChange={(text) => setGlobal({ ...global, global_exclude: lines(text) })}
+        />
       </div>
 
       {drawer && (
@@ -1383,37 +1426,31 @@ export function PlaylistPage() {
               </table>
             </div>
           )}
-          <label>
-            分组改名表
-            <Tip text="每行一条「源里的分组=新分组名」。写入的分组同时成为选择集，映射外的分组按上面的设置处理。" />
-            <textarea
-              value={mapText(drawer.draft.group_map)}
-              disabled={groupModeOf(drawer.draft) !== 'map'}
-              onChange={(event) => patch({ group_map: parseMap(event.target.value) })}
-            />
-            {groupModeOf(drawer.draft) !== 'map' && (
-              <span className="hint">
-                当前分组方式不使用改名表。点表格里的「加入改名表」会自动切换为「按映射改名」。
-              </span>
-            )}
-          </label>
+          <MultilineBox
+            label="分组改名表"
+            tip="每行一条「源里的分组=新分组名」。写入的分组同时成为选择集，映射外的分组按上面的设置处理。"
+            value={mapText(drawer.draft.group_map)}
+            disabled={groupModeOf(drawer.draft) !== 'map'}
+            onChange={(text) => patch({ group_map: parseMap(text) })}
+            hint={
+              groupModeOf(drawer.draft) !== 'map'
+                ? '当前分组方式不使用改名表。点表格里的「加入改名表」会自动切换为「按映射改名」。'
+                : undefined
+            }
+          />
           <div className="form-grid two">
-            <label>
-              只保留
-              <Tip text="只保留匹配的频道。每行一条。支持 *（任意长度）和 ?（一个字符）。开头可写 group: 匹配分组，id: 匹配 tvg-id，url: 精确匹配地址。不含通配符时按子串匹配。" />
-              <textarea
-                value={drawer.draft.include.join('\n')}
-                onChange={(event) => patch({ include: lines(event.target.value) })}
-              />
-            </label>
-            <label>
-              排除
-              <Tip text="匹配的频道会被排除。支持 * 与 ? 通配符。在列表里删除托管频道时，会自动写入这里。" />
-              <textarea
-                value={drawer.draft.exclude.join('\n')}
-                onChange={(event) => patch({ exclude: lines(event.target.value) })}
-              />
-            </label>
+            <MultilineBox
+              label="只保留"
+              tip="只保留匹配的频道。每行一条。支持 *（任意长度）和 ?（一个字符）。开头可写 group: 匹配分组，id: 匹配 tvg-id，url: 精确匹配地址。不含通配符时按子串匹配。"
+              value={drawer.draft.include.join('\n')}
+              onChange={(text) => patch({ include: lines(text) })}
+            />
+            <MultilineBox
+              label="排除"
+              tip="匹配的频道会被排除。支持 * 与 ? 通配符。在列表里删除托管频道时，会自动写入这里。"
+              value={drawer.draft.exclude.join('\n')}
+              onChange={(text) => patch({ exclude: lines(text) })}
+            />
           </div>
 
           {drawer.draft.mode === 'sync' && (
@@ -1528,14 +1565,12 @@ export function PlaylistPage() {
 
           <hr className="divider" />
           <h3>高级</h3>
-          <label>
-            抓取请求头
-            <Tip text="每行一条「名称: 值」。读取播放列表时带上。" />
-            <textarea
-              value={drawer.draft.headers.join('\n')}
-              onChange={(event) => patch({ headers: lines(event.target.value) })}
-            />
-          </label>
+          <MultilineBox
+            label="抓取请求头"
+            tip="每行一条「名称: 值」。读取播放列表时带上。"
+            value={drawer.draft.headers.join('\n')}
+            onChange={(text) => patch({ headers: lines(text) })}
+          />
           <div className="form-grid two">
             <label>
               代理类型
