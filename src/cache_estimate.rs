@@ -6,7 +6,7 @@
 //! - 切片体积按分组做 EMA（α=0.3），**不为估算多打一次上游**；
 //! - 推荐 TTL = `clamp(ceil60(W + 2T), 300, 900)`，取各分组最大值；
 //! - 工作集 = `round10(参与计算的频道数 × N × seg_mb × 1.5)`；
-//! - `[cdn].auto_tune = false` 时不采集，只沿用已落盘的旧值。
+//! - `[cache].auto_tune = false` 时不采集，只沿用已落盘的旧值。
 //!
 //! 统计落盘到 `<cache>/cache_estimate.json`（带 schema 版本），重启后延续。
 
@@ -94,7 +94,7 @@ pub struct Estimator {
     groups: RwLock<HashMap<String, GroupStat>>,
     /// 上次落盘时刻；`None` 表示尚未落盘（不节流）。
     last_persist: Mutex<Option<Instant>>,
-    /// 是否采集（与 `[cdn].auto_tune` 同步）。
+    /// 是否采集（与 `[cache].auto_tune` 同步）。
     auto_tune: AtomicBool,
     /// 落盘路径。
     path: PathBuf,
@@ -118,7 +118,7 @@ impl Estimator {
         }
     }
 
-    /// 同步 `[cdn].auto_tune`。
+    /// 同步 `[cache].auto_tune`。
     pub fn set_auto_tune(&self, on: bool) {
         self.auto_tune.store(on, Ordering::Relaxed);
     }

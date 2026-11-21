@@ -264,8 +264,8 @@ mod tests {
     #[test]
     fn set_and_get_dotted_path() {
         let mut root = json!({ "server": { "bind": "[::]:9900" } });
-        set_path(&mut root, "cache.gc.max_disk_mb", json!(120)).expect("写入");
-        assert_eq!(get_path(&root, "cache.gc.max_disk_mb"), Some(&json!(120)));
+        set_path(&mut root, "cache.limit_mb", json!(120)).expect("写入");
+        assert_eq!(get_path(&root, "cache.limit_mb"), Some(&json!(120)));
         assert_eq!(get_path(&root, "server.bind"), Some(&json!("[::]:9900")));
     }
 

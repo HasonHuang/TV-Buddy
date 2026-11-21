@@ -444,7 +444,6 @@ fn now_epoch() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::model::CacheGcCfg;
 
     #[test]
     fn cap_plan_reports_limit_source() {
@@ -500,24 +499,14 @@ mod tests {
         assert_eq!(plan.ceiling_mb, None);
     }
 
-    /// 显式上限只读 `[cache].limit_mb`；旧别名键不再参与。
+    /// 显式上限只读 `[cache].limit_mb`。
     #[test]
     fn explicit_cap_reads_limit_mb() {
         let cache = CacheCfg {
             limit_mb: 120,
-            disk_max_mb: 80,
             ..CacheCfg::default()
         };
         assert_eq!(explicit_cap_mb(&cache), 120);
-
-        let cache = CacheCfg {
-            gc: CacheGcCfg {
-                max_disk_mb: 90,
-                ..CacheGcCfg::default()
-            },
-            ..CacheCfg::default()
-        };
-        assert_eq!(explicit_cap_mb(&cache), 0, "旧别名不参与");
     }
 
     #[test]

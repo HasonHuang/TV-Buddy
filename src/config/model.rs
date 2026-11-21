@@ -60,6 +60,38 @@ impl Config {
         if self.cache.disk_path.trim().is_empty() {
             self.cache.disk_path = "./cache".into();
         }
+        strip_legacy(
+            &mut self.cache.extra,
+            &[
+                "backend",
+                "m3u8_max_entries",
+                "segment_max_entries",
+                "disk_max_mb",
+                "memory_max_mb",
+                "segment_cache_max_mb",
+            ],
+        );
+        strip_legacy(
+            &mut self.cache.segments.extra,
+            &["global_max", "retain_count"],
+        );
+        strip_legacy(
+            &mut self.cache.gc.extra,
+            &[
+                "enabled",
+                "max_disk_mb",
+                "interval_secs",
+                "scan_limit",
+                "disk_budget_ratio",
+                "reserve_mb",
+                "min_mb",
+            ],
+        );
+        strip_legacy(
+            &mut self.cache.ttl.extra,
+            &["refresh_ratio", "fallback_mpd_secs"],
+        );
+        strip_legacy(&mut self.cdn.extra, &["auto_tune", "segment_max_age_secs"]);
         for group in &mut self.groups {
             if group.origin.trim().is_empty() {
                 group.origin = "manual".to_string();
@@ -145,6 +177,13 @@ impl Config {
             .find(|channel| channel.id == cid)
             .and_then(|channel| channel.offline_on_fail)
             .unwrap_or(group.offline_on_fail)
+    }
+}
+
+/// 从 `extra` 删除旧键。迁移后不再有读者，保存时不再写回。
+fn strip_legacy(extra: &mut Extra, keys: &[&str]) {
+    for key in keys {
+        extra.remove(*key);
     }
 }
 
@@ -256,10 +295,6 @@ impl Default for PanelCfg {
 pub struct CdnCfg {
     /// 总开关。
     pub enabled: bool,
-    /// 被动实测：累计分组窗口统计与切片体积，供推荐 TTL / 磁盘上限使用。
-    pub auto_tune: bool,
-    /// 切片 `Cache-Control` 的 `max-age`（秒）；`0` = 用实测推荐值。
-    pub segment_max_age_secs: u64,
     /// 命中路径（二次请求）也标 `public`，供只能「遵循源站头」的 CDN 共享缓存。
     pub shared_cache_hits: bool,
     /// 空体加 `no-store`；强制 TTL 时会被 CDN 忽略，此时用 [`CdnCfg::empty_status`]。
@@ -277,8 +312,6 @@ impl Default for CdnCfg {
     fn default() -> Self {
         Self {
             enabled: false,
-            auto_tune: true,
-            segment_max_age_secs: 0,
             shared_cache_hits: false,
             dont_cache_empty: false,
             empty_status: 502,
@@ -288,36 +321,15 @@ impl Default for CdnCfg {
     }
 }
 
-/// `[cache]`。
+/// `[cache]`——磁盘缓存。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CacheCfg {
-    /// `disk`（默认）或 `memory`。
-    ///
-    /// `memory` 时切片正文留在进程内，不写 `seg_bytes`；进程重启即清空。
-    /// 总量受 [`CacheCfg::memory_max_mb`] 限制。索引与清单仍按原路径处理。
-    pub backend: String,
     pub disk_path: String,
     /// 磁盘缓存总上限（MB），包含正文与索引；`0` = 自动。
     pub limit_mb: u64,
     /// 被动采样开关；关闭后沿用上次实测，不冻结上限。
     pub auto_tune: bool,
-    /// 内存清单条数上限。目标同键**未观测到生效**（S-CACHE-03）；本实现保留键面，
-    /// 不消费（U-10）。
-    pub m3u8_max_entries: u64,
-    /// 内存切片索引条数上限。同样未观测到目标生效，本实现不消费；实际限制走
-    /// `[cache.segments]` 与 `[cache].memory_max_mb`（U-10）。
-    pub segment_max_entries: u64,
-    /// 切片缓存总量上限（MB）；`0` = 不限。与 `[cache.gc].max_disk_mb` 同义，
-    /// 同时非 0 时取更小者（U-10）。
-    pub disk_max_mb: u64,
-    /// 内存切片索引的字节预算（MB）；`0` = 不限。按每条约 256 B 估算成条目数，
-    /// 再与 `[cache.segments].global_max` 取更小者（U-10）。
-    pub memory_max_mb: u64,
-    /// 段缓存上限（MB）。目标同键**未观测到生效**（S-CACHE-03）；其默认值 50 与用户
-    /// 显式填写的 50 无法区分，一旦生效会把缓存静默压到 50 MB，因此本实现保留键面
-    /// 但**不消费**，限容走 `[cache.gc]`（U-10）。
-    pub segment_cache_max_mb: u64,
     pub prefetch: CachePrefetchCfg,
     pub segments: CacheSegmentsCfg,
     /// `[cache.gc]`——磁盘回收；补「切片只写不删」的洞。
@@ -333,15 +345,9 @@ pub struct CacheCfg {
 impl Default for CacheCfg {
     fn default() -> Self {
         Self {
-            backend: "disk".into(),
             disk_path: "./cache".into(),
             limit_mb: 0,
             auto_tune: true,
-            m3u8_max_entries: 500,
-            segment_max_entries: 2000,
-            disk_max_mb: 0,
-            memory_max_mb: 0,
-            segment_cache_max_mb: 50,
             prefetch: CachePrefetchCfg::default(),
             segments: CacheSegmentsCfg::default(),
             gc: CacheGcCfg::default(),
@@ -419,9 +425,7 @@ pub struct PrefetchOverrideCfg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CacheSegmentsCfg {
-    pub global_max: u64,
     pub per_channel_max: u64,
-    pub retain_count: u64,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -429,9 +433,7 @@ pub struct CacheSegmentsCfg {
 impl Default for CacheSegmentsCfg {
     fn default() -> Self {
         Self {
-            global_max: 0,
             per_channel_max: 0,
-            retain_count: 20,
             extra: Extra::new(),
         }
     }
@@ -444,21 +446,8 @@ impl Default for CacheSegmentsCfg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CacheGcCfg {
-    pub enabled: bool,
-    /// 回收上限（MB）；`0` = 按可用空间与工作集自动推算。
-    pub max_disk_mb: u64,
     /// 超过该时长的文件直接删（秒）。
     pub max_age_secs: u64,
-    /// 扫描周期（秒）。
-    pub interval_secs: u64,
-    /// 单次扫描最多处理的文件数，避免 1 vCPU 抖动。
-    pub scan_limit: u64,
-    /// 自动上限最多占可用空间的比例。
-    pub disk_budget_ratio: f64,
-    /// 给系统、日志与其它缓存目录预留的空间（MB）。
-    pub reserve_mb: u64,
-    /// 自动上限的下限（MB）。
-    pub min_mb: u64,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -466,15 +455,7 @@ pub struct CacheGcCfg {
 impl Default for CacheGcCfg {
     fn default() -> Self {
         Self {
-            // 默认开：不开则 1 GB 磁盘会被切片吃满。
-            enabled: true,
-            max_disk_mb: 0,
             max_age_secs: 1_800,
-            interval_secs: 300,
-            scan_limit: 500,
-            disk_budget_ratio: 0.8,
-            reserve_mb: 100,
-            min_mb: 50,
             extra: Extra::new(),
         }
     }
@@ -486,8 +467,6 @@ impl Default for CacheGcCfg {
 pub struct CacheTtlCfg {
     pub sub_url_secs: u64,
     pub segment_secs: u64,
-    pub refresh_ratio: f64,
-    pub fallback_mpd_secs: u64,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -497,8 +476,6 @@ impl Default for CacheTtlCfg {
         Self {
             sub_url_secs: 1_800,
             segment_secs: 0,
-            refresh_ratio: 0.4,
-            fallback_mpd_secs: 8,
             extra: Extra::new(),
         }
     }
@@ -1619,7 +1596,7 @@ mod tests {
             "cache": {
                 "disk_path": "cache",
                 "prefetch": { "enabled": false, "concurrency": 2 },
-                "segments": { "global_max": 10, "per_channel_max": 3 },
+                "segments": { "per_channel_max": 3 },
                 "ttl": { "segment_secs": 42 },
                 "dash": { "mpd_timeout_secs": 7 },
                 "remux": {
@@ -1632,7 +1609,6 @@ mod tests {
         let config: Config = serde_json::from_value(body).expect("解析配置");
         assert!(!config.cache.prefetch.enabled);
         assert_eq!(config.cache.prefetch.concurrency, 2);
-        assert_eq!(config.cache.segments.global_max, 10);
         assert_eq!(config.cache.segments.per_channel_max, 3);
         assert_eq!(config.cache.ttl.segment_secs, 42);
         assert_eq!(config.cache.dash.mpd_timeout_secs, 7);
@@ -1656,6 +1632,83 @@ mod tests {
         config.cache.disk_path = "  ".into();
         config.normalize();
         assert_eq!(config.cache.disk_path, "./cache");
+    }
+
+    #[test]
+    fn cache_defaults_match_disk_only_design() {
+        let cache = Config::default().cache;
+        assert_eq!(cache.disk_path, "./cache");
+        assert_eq!(cache.limit_mb, 0);
+        assert!(cache.auto_tune);
+        assert_eq!(cache.ttl.segment_secs, 0);
+        assert_eq!(cache.gc.max_age_secs, 1_800);
+        assert_eq!(cache.segments.per_channel_max, 0);
+    }
+
+    #[test]
+    fn normalize_strips_legacy_cache_keys() {
+        let mut config: Config = serde_json::from_value(serde_json::json!({
+            "cache": {
+                "backend": "memory",
+                "disk_path": "",
+                "m3u8_max_entries": 1,
+                "segment_max_entries": 2,
+                "disk_max_mb": 3,
+                "memory_max_mb": 4,
+                "segment_cache_max_mb": 5,
+                "segments": { "global_max": 6, "retain_count": 7, "per_channel_max": 8 },
+                "gc": {
+                    "enabled": false, "max_disk_mb": 9, "max_age_secs": 1800,
+                    "interval_secs": 300, "scan_limit": 500,
+                    "disk_budget_ratio": 0.8, "reserve_mb": 100, "min_mb": 50
+                },
+                "ttl": { "refresh_ratio": 0.4, "fallback_mpd_secs": 8 }
+            },
+            "cdn": { "auto_tune": false, "segment_max_age_secs": 0 }
+        }))
+        .expect("解析旧配置");
+        config.normalize();
+        assert_eq!(config.cache.disk_path, "./cache", "空路径补默认值");
+        let encoded = serde_json::to_value(&config).expect("序列化");
+        let cache = &encoded["cache"];
+        for key in [
+            "backend",
+            "m3u8_max_entries",
+            "segment_max_entries",
+            "disk_max_mb",
+            "memory_max_mb",
+            "segment_cache_max_mb",
+        ] {
+            assert!(cache.get(key).is_none(), "旧键 {key} 应被删除: {encoded}");
+        }
+        assert!(cache["segments"].get("global_max").is_none());
+        assert!(cache["segments"].get("retain_count").is_none());
+        for key in [
+            "enabled",
+            "max_disk_mb",
+            "interval_secs",
+            "scan_limit",
+            "disk_budget_ratio",
+            "reserve_mb",
+            "min_mb",
+        ] {
+            assert!(cache["gc"].get(key).is_none(), "旧键 gc.{key} 应被删除");
+        }
+        assert!(cache["ttl"].get("refresh_ratio").is_none());
+        assert!(cache["ttl"].get("fallback_mpd_secs").is_none());
+        assert!(encoded["cdn"].get("auto_tune").is_none());
+        assert!(encoded["cdn"].get("segment_max_age_secs").is_none());
+    }
+
+    #[test]
+    fn normalize_strips_legacy_memory_config() {
+        let mut config: Config = serde_json::from_value(serde_json::json!({
+            "cache": { "backend": "memory", "disk_path": "./cache" }
+        }))
+        .expect("解析旧内存配置");
+        config.normalize();
+        let encoded = serde_json::to_value(&config).expect("序列化");
+        assert!(encoded["cache"].get("backend").is_none());
     }
 
     #[test]
@@ -1871,12 +1924,10 @@ mod tests {
     fn cdn_and_gc_defaults_are_inert() {
         let config = Config::default();
         assert!(!config.cdn.enabled);
-        assert!(config.cdn.auto_tune);
-        assert_eq!(config.cdn.segment_max_age_secs, 0);
         assert_eq!(config.cdn.empty_status, 502);
         assert!(config.cdn.public_base.is_none());
-        assert!(config.cache.gc.enabled);
-        assert_eq!(config.cache.gc.max_disk_mb, 0);
+        assert!(config.cache.auto_tune);
+        assert_eq!(config.cache.limit_mb, 0);
         assert_eq!(config.cache.gc.max_age_secs, 1_800);
     }
 
@@ -1885,10 +1936,10 @@ mod tests {
         let mut config = Config::default();
         config.cdn.enabled = true;
         config.cdn.public_base = Some("https://cdn.example".into());
-        config.cache.gc.max_disk_mb = 200;
+        config.cache.limit_mb = 200;
         let encoded = serde_json::to_value(&config).expect("序列化");
         assert_eq!(encoded["cdn"]["enabled"], true);
-        assert_eq!(encoded["cache"]["gc"]["max_disk_mb"], 200);
+        assert_eq!(encoded["cache"]["limit_mb"], 200);
         assert_eq!(encoded["cdn"]["public_base"], "https://cdn.example");
         let decoded: Config = serde_json::from_value(encoded).expect("再解析");
         assert!(decoded.cdn.enabled);
@@ -1896,7 +1947,7 @@ mod tests {
             decoded.cdn.public_base.as_deref(),
             Some("https://cdn.example")
         );
-        assert_eq!(decoded.cache.gc.max_disk_mb, 200);
+        assert_eq!(decoded.cache.limit_mb, 200);
     }
 
     #[test]
