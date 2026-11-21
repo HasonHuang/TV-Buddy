@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
 import { Icon } from './icons';
-import { Badge, Confirm, Field, Modal, PageHead, Select, Switch, useToast } from './ui';
+import { Badge, Confirm, Field, Loading, Modal, PageHead, Select, Switch, useToast } from './ui';
 
 type Role = 'admin' | 'user';
 
@@ -137,6 +137,8 @@ export function UsersPage() {
   const { node, ok, err } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [options, setOptions] = useState<OptionGroup[]>([]);
+  /** 首次加载；已有数据后的刷新保留表格。 */
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<{ form: UserForm; id: string | null } | null>(null);
   const [tokenFor, setTokenFor] = useState<User | null>(null);
   const [tokens, setTokens] = useState<AccessToken[]>([]);
@@ -159,6 +161,8 @@ export function UsersPage() {
       setOptions(opts.groups ?? []);
     } catch (error) {
       err(errorText(error));
+    } finally {
+      setLoading(false);
     }
   }, [err]);
 
@@ -341,6 +345,7 @@ export function UsersPage() {
       <PageHead icon="users" title="用户与设备" sub="管理面板账号与每个用户能看的分组">
         <button
           title="创建面板账号并设置可见范围"
+          disabled={loading}
           onClick={() => setEditing({ form: emptyForm(), id: null })}
         >
           <Icon name="plus" size={14} />
@@ -348,6 +353,10 @@ export function UsersPage() {
         </button>
       </PageHead>
 
+      {loading ? (
+        <Loading />
+      ) : (
+        <>
       <div className="card flush">
         <table className="table" style={{ marginTop: 0 }}>
           <thead>
@@ -432,6 +441,8 @@ export function UsersPage() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
 
       {editing && form && (
         <Modal

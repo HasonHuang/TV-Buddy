@@ -1051,6 +1051,22 @@ export function Empty({
   );
 }
 
+/** 数据加载占位。默认是一张卡片，`compact` 用于卡片或标签页内部。 */
+export function Loading({
+  text = '加载中…',
+  compact = false,
+}: {
+  text?: string;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`loading${compact ? ' compact' : ''}`} role="status" aria-live="polite">
+      <span className="loading-spinner" aria-hidden="true" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
 /** 开关。 */
 export function Switch({
   checked,

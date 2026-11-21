@@ -10,7 +10,7 @@ import { api, apiText, getToken, putConfig } from './api';
 import { EpgBindingsTab, EpgRulesTab, EpgSourcesTab } from './epg';
 import { Icon } from './icons';
 import { ScriptManagerCard } from './scripts';
-import { Badge, Confirm, Field, NumberBox, PageHead, Select, Tip } from './ui';
+import { Badge, Confirm, Field, Loading, NumberBox, PageHead, Select, Tip } from './ui';
 
 type IpEntry = {
   ip: string;
@@ -189,7 +189,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
     );
   }
   if (!config) {
-    return <div className="card muted">读取配置…</div>;
+    return <Loading text="读取访问控制配置…" />;
   }
 
   const auth = config.auth ?? {};
@@ -461,6 +461,8 @@ function errorText(error: unknown): string {
 /** 安全管控：访问控制、IP 统计与封禁。 */
 export function SecurityPage() {
   const [stats, setStats] = useState<IpStats | null>(null);
+  /** 首次读取 IP 统计；封禁/解封后的刷新保留页面。 */
+  const [loading, setLoading] = useState(true);
   const [ip, setIp] = useState('');
   const [seconds, setSeconds] = useState('3600');
   const [message, setMessage] = useState('');
@@ -474,6 +476,8 @@ export function SecurityPage() {
       setError('');
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -549,6 +553,10 @@ export function SecurityPage() {
         </button>
       </PageHead>
 
+      {loading ? (
+        <Loading />
+      ) : (
+        <>
       <AuthConfigCard
         onSaved={() => {
           void load();
@@ -638,6 +646,8 @@ export function SecurityPage() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
     </>
   );
 }
@@ -676,6 +686,8 @@ function levelOf(line: string): string {
 export function LogsPage() {
   const [lines, setLines] = useState<string[]>([]);
   const [total, setTotal] = useState(0);
+  /** 首屏读取；之后每 5 秒轮询时保留当前日志。 */
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [limit, setLimit] = useState('200');
   const [level, setLevel] = useState<Level>('all');
@@ -691,6 +703,8 @@ export function LogsPage() {
       setError('');
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setLoading(false);
     }
   }, [limit]);
 
@@ -707,7 +721,11 @@ export function LogsPage() {
       <PageHead
         icon="logs"
         title="运行日志"
-        sub={`最近 ${shown.length} 行${level === 'all' ? '' : `（${LEVEL_LABELS[level]}）`}（共 ${total} 行）`}
+        sub={
+          loading
+            ? '正在读取日志'
+            : `最近 ${shown.length} 行${level === 'all' ? '' : `（${LEVEL_LABELS[level]}）`}（共 ${total} 行）`
+        }
       >
         <div className="row log-tools">
           <Select
@@ -742,18 +760,22 @@ export function LogsPage() {
       </PageHead>
       <div className="card">
         {error && <div className="msg err">{error}</div>}
-        <pre className="log" style={{ marginTop: 0 }}>
-          {shown.map((line, index) => {
-            const lv = levelOf(line);
-            return (
-              <span key={index} className={lv === '' ? undefined : `lv-${lv}`}>
-                {plain(line)}
-                {'\n'}
-              </span>
-            );
-          })}
-        </pre>
-        {level !== 'all' && shown.length === 0 && (
+        {loading ? (
+          <Loading compact text="读取运行日志…" />
+        ) : (
+          <pre className="log" style={{ marginTop: 0 }}>
+            {shown.map((line, index) => {
+              const lv = levelOf(line);
+              return (
+                <span key={index} className={lv === '' ? undefined : `lv-${lv}`}>
+                  {plain(line)}
+                  {'\n'}
+                </span>
+              );
+            })}
+          </pre>
+        )}
+        {!loading && level !== 'all' && shown.length === 0 && (
           <p className="muted">当前日志里没有 {LEVEL_LABELS[level]} 级别的行。</p>
         )}
       </div>
@@ -996,7 +1018,7 @@ function EpgTranslateCard({ onChanged }: { onChanged: () => void }) {
     return (
       <div className="card">
         <h2>节目单翻译</h2>
-        {error ? <div className="msg err">{error}</div> : <p className="muted">读取中…</p>}
+        {error ? <div className="msg err">{error}</div> : <Loading compact text="读取翻译配置…" />}
       </div>
     );
   }
@@ -1365,6 +1387,8 @@ function EpgCronCard({ onChanged }: { onChanged: () => void }) {
 export function EpgPanelPage() {
   const [status, setStatus] = useState<EpgStatus | null>(null);
   const [data, setData] = useState<EpgMapData>({ mappings: {}, extra: [] });
+  /** 首次读取采集状态与映射；之后刷新保留页面。 */
+  const [loading, setLoading] = useState(true);
   const [mapping, setMapping] = useState({
     gid: '',
     cid: '',
@@ -1393,6 +1417,8 @@ export function EpgPanelPage() {
       setError('');
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -1496,7 +1522,15 @@ export function EpgPanelPage() {
       <PageHead
         icon="epg"
         title="节目指南"
-        sub={status?.enabled ? '已开启' : '已关闭'}
+        sub={
+          loading
+            ? '读取中…'
+            : error
+              ? '读取失败'
+              : status?.enabled
+                ? '已开启'
+                : '已关闭'
+        }
       >
         <button
           className="ghost"
@@ -1510,18 +1544,22 @@ export function EpgPanelPage() {
           className="ghost"
           title="按当前映射重新生成 XMLTV"
           onClick={() => void regenerate()}
-          disabled={busy}
+          disabled={busy || loading}
         >
           重新生成
         </button>
         <button
           title="立即运行一次全部节目源采集"
           onClick={() => void refresh()}
-          disabled={busy || !status?.enabled}
+          disabled={busy || loading || !status?.enabled}
         >
           {busy ? '采集中…' : '立即采集'}
         </button>
       </PageHead>
+      {loading ? (
+        <Loading text="读取节目指南状态…" />
+      ) : (
+        <>
       <div className="tabs" role="tablist">
         {(
           [
@@ -1738,6 +1776,8 @@ export function EpgPanelPage() {
         </table>
         </div>
       </div>
+        </>
+      )}
         </>
       )}
     </>
@@ -2215,7 +2255,7 @@ function LinkInfoCard({ refreshKey }: { refreshKey: number }) {
           </dd>
         </dl>
       ) : error ? null : (
-        <p className="muted">读取中…</p>
+        <Loading compact text="读取播放链接信息…" />
       )}
       {info && !info.token_enabled && (
         <div className="msg warn">播放凭证校验已关闭：拿到播放地址的人都能播放。</div>

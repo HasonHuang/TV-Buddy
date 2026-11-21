@@ -28,6 +28,7 @@ import {
   Empty,
   Field,
   HoverTip,
+  Loading,
   Modal,
   NumberBox,
   PageHead,
@@ -437,6 +438,8 @@ function textToHeaders(value: string): string[] {
 export function GroupsPage() {
   const { node, ok, err } = useToast();
   const [groups, setGroups] = useState<Group[]>([]);
+  /** 首次加载。已有数据后的刷新沿用列表，不切回加载占位。 */
+  const [loading, setLoading] = useState(true);
   /** 频道关键字：匹配频道 ID、名称与源地址。 */
   const [keyword, setKeyword] = useState('');
   /** 分组筛选：分组 id；空串表示全部分组。 */
@@ -559,6 +562,8 @@ export function GroupsPage() {
       );
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
     }
   }, [err]);
 
@@ -1135,8 +1140,7 @@ export function GroupsPage() {
     .filter(Boolean)
     .join('、');
 
-  return (
-    <>
+  const head = (
       <PageHead icon="groups" title="分组管理" sub="管理直播分组与频道">
         <button
           className="ghost"
@@ -1199,6 +1203,21 @@ export function GroupsPage() {
           新建分组
         </button>
       </PageHead>
+  );
+
+  if (loading) {
+    return (
+      <>
+        {head}
+        <Loading />
+        {node}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {head}
 
       <div className="filter-bar">
         <input

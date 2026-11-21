@@ -12,7 +12,7 @@ import { Icon, type IconName } from './icons';
 import { MODES } from './modes';
 import { STATUS_LABELS, STATUS_TONE } from './schedule';
 import { SystemPage } from './system';
-import { PageHead, useToast } from './ui';
+import { Loading, PageHead, useToast } from './ui';
 
 type Status = Record<string, unknown>;
 
@@ -468,7 +468,7 @@ function ChartCard({
         </div>
       </CardHead>
       {loading ? (
-        <div className="ov-empty">加载中…</div>
+        <Loading compact text="读取趋势…" />
       ) : ready ? (
         <div className="ov-chart-frame">
           <div className="ov-y-axis">
@@ -556,6 +556,8 @@ export function Overview({
   featureLabels: [string, string][];
 }) {
   const [status, setStatus] = useState<Status | null>(null);
+  /** 首屏加载；之后每 5 秒轮询时保留当前仪表盘。 */
+  const [initialLoading, setInitialLoading] = useState(true);
   const [stats, setStats] = useState<PlayStats | null>(null);
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [dash, setDash] = useState<DashSession[]>([]);
@@ -622,6 +624,7 @@ export function Overview({
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
         if (manual) setBusy('');
+        setInitialLoading(false);
       }
     },
     [wantStats, wantRecording, sample],
@@ -758,15 +761,18 @@ export function Overview({
     a.start_time.localeCompare(b.start_time),
   );
 
-  return (
-    <>
+  const head = (
       <PageHead
         icon="overview"
         title="系统概览"
         sub="实时运行状态、播放流量与资源占用"
         sticky
       >
-        <span className="badge ok">● 运行 {formatUptime(uptimeSecs)}</span>
+        {status ? (
+          <span className="badge ok">● 运行 {formatUptime(uptimeSecs)}</span>
+        ) : (
+          <span className="badge muted">正在连接</span>
+        )}
         {status !== null && groupCount > 0 ? (
           <>
             <button
@@ -792,13 +798,28 @@ export function Overview({
         <button
           className="ghost"
           title="立即刷新状态与实时指标"
-          disabled={busy !== ''}
+          disabled={busy !== '' || initialLoading}
           onClick={() => void load(true)}
         >
           <Icon name="refresh" size={14} />
-          {busy === 'refresh' ? '刷新中…' : '刷新'}
+          {initialLoading ? '加载中…' : busy === 'refresh' ? '刷新中…' : '刷新'}
         </button>
       </PageHead>
+  );
+
+  if (initialLoading) {
+    return (
+      <>
+        {head}
+        <Loading />
+        {node}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {head}
 
       <div className="ov-kpis">
         <Kpi
@@ -897,7 +918,7 @@ export function Overview({
             </button>
           </CardHead>
           {tasks === null ? (
-            <div className="ov-empty">加载中…</div>
+            <div className="ov-empty">录制任务暂时无法读取，点「刷新」重试</div>
           ) : upcoming.length > 0 ? (
             <div className="ov-task-list">
               {upcoming.slice(0, 4).map((task) => (

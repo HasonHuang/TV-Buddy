@@ -34,6 +34,7 @@ import {
   Confirm,
   Empty,
   Field,
+  Loading,
   Modal,
   NumberInput,
   PageHead,
@@ -706,6 +707,9 @@ function RulesTab({
   const { node, ok, err } = useToast();
   const [draft, setDraft] = useState<Cfg | null>(null);
   const [original, setOriginal] = useState<Cfg | null>(null);
+  /** 首次读取配置；失败时保留重试入口。 */
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [busy, setBusy] = useState('');
   const [preview, setPreview] = useState<number[]>([]);
   const [previewError, setPreviewError] = useState('');
@@ -713,6 +717,7 @@ function RulesTab({
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const load = useCallback(async () => {
+    setLoadError('');
     try {
       const config = await api<Cfg>('GET', '/config');
       setDraft(config);
@@ -721,7 +726,11 @@ function RulesTab({
       setConfirmDiscard(false);
       onDirtyChange(false);
     } catch (error) {
-      err(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setLoadError(message);
+      err(message);
+    } finally {
+      setLoading(false);
     }
   }, [err, onDirtyChange]);
 
@@ -840,7 +849,27 @@ function RulesTab({
     return rows;
   }, [draft]);
 
-  if (!draft) return <Empty text="正在读取配置…" icon="settings" />;
+  if (loading) return <Loading text="读取质量规则…" />;
+
+  if (!draft) {
+    return (
+      <>
+        <div className="card">
+          <Empty
+            icon="close"
+            text={loadError ? `读取配置失败：${loadError}` : '读取配置失败。'}
+            action={
+              <button className="ghost" onClick={() => void load()}>
+                <Icon name="refresh" size={14} />
+                重试
+              </button>
+            }
+          />
+        </div>
+        {node}
+      </>
+    );
+  }
 
   const scheduleMode = asText(draft, 'quality.schedule') === 'cron' ? 'cron' : 'interval';
   const configuredProbe = asText(draft, 'quality.probe_mode');
@@ -1363,6 +1392,8 @@ function ResultsTab({
   const [limit, setLimit] = useState(100);
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState<{ total: number; items: QualityResult[] } | null>(null);
+  /** 首次读取结果；已有数据后的筛选与翻页保留表格。 */
+  const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<{ id: string; name: string }[]>([]);
   const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
   const [detail, setDetail] = useState<QualityResult | null>(null);
@@ -1443,6 +1474,7 @@ function ResultsTab({
 
   const load = useCallback(async () => {
     const seq = ++requestSeq.current;
+    setLoading(true);
     try {
       const body = await fetchQualityResults({
         ...appliedFilters,
@@ -1454,6 +1486,8 @@ function ResultsTab({
       if (seq === requestSeq.current) {
         err(error instanceof Error ? error.message : String(error));
       }
+    } finally {
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [appliedFilters, err, limit, offset]);
 
@@ -1505,6 +1539,10 @@ function ResultsTab({
   const total = data?.total ?? 0;
   const items = data?.items ?? [];
   const pageEnd = Math.min(offset + limit, total);
+
+  if (loading && data === null) {
+    return <Loading text="读取校验结果…" />;
+  }
 
   return (
     <>
@@ -1820,6 +1858,9 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
   const { node, ok, err } = useToast();
   const [items, setItems] = useState<QualitySource[] | null>(null);
   const [configSources, setConfigSources] = useState<PlaylistSourceConfig[]>([]);
+  /** 首次读取来源；失败时保留重试入口。 */
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [busy, setBusy] = useState('');
   const [gateOff, setGateOff] = useState<QualitySource | null>(null);
   const [disable, setDisable] = useState<{
@@ -1835,6 +1876,7 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
   } | null>(null);
 
   const load = useCallback(async () => {
+    setLoadError('');
     try {
       const [quality, playlist] = await Promise.all([
         fetchQualitySources(),
@@ -1843,7 +1885,11 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
       setItems(quality.items ?? []);
       setConfigSources(playlist.sources ?? []);
     } catch (error) {
-      err(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setLoadError(message);
+      err(message);
+    } finally {
+      setLoading(false);
     }
   }, [err]);
 
@@ -1937,7 +1983,27 @@ function SourcesTab({ onChanged }: { onChanged: () => void }) {
     }
   };
 
-  if (!items) return <Empty text="正在读取来源…" icon="subs" />;
+  if (loading) return <Loading text="读取质量来源…" />;
+
+  if (!items) {
+    return (
+      <>
+        <div className="card">
+          <Empty
+            icon="close"
+            text={loadError ? `读取来源失败：${loadError}` : '读取来源失败。'}
+            action={
+              <button className="ghost" onClick={() => void load()}>
+                <Icon name="refresh" size={14} />
+                重试
+              </button>
+            }
+          />
+        </div>
+        {node}
+      </>
+    );
+  }
 
   const aggregates = configSources.filter((source) => source.mode !== 'sync');
 
@@ -2275,6 +2341,8 @@ export function QualityPage({
   const [route, setRoute] = useState<QualityRoute>(() => qualityRoute());
   const [tab, setTab] = useState<Tab>(route.tab);
   const [status, setStatus] = useState<QualityStatus | null>(null);
+  /** 首次读取状态失败时给出重试入口，避免加载占位一直转。 */
+  const [statusError, setStatusError] = useState('');
   const [busy, setBusy] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmRun, setConfirmRun] = useState(false);
@@ -2392,10 +2460,12 @@ export function QualityPage({
   const load = useCallback(async () => {
     try {
       setStatus(await fetchQualityStatus());
+      setStatusError('');
     } catch (error) {
-      err(error instanceof Error ? error.message : String(error));
+      // 轮询失败时只记录，页面用错误卡提示；不每隔 10 秒弹一次 toast。
+      setStatusError(error instanceof Error ? error.message : String(error));
     }
-  }, [err]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -2479,7 +2549,7 @@ export function QualityPage({
         </button>
         <button
           onClick={() => setConfirmRun(true)}
-          disabled={busy !== '' || status?.running}
+          disabled={busy !== '' || status?.running || status === null}
         >
           {status?.running
             ? '校验进行中'
@@ -2488,6 +2558,25 @@ export function QualityPage({
               : '立即校验'}
         </button>
       </PageHead>
+      {status === null ? (
+        statusError ? (
+          <div className="card">
+            <Empty
+              icon="close"
+              text={`读取质量状态失败：${statusError}`}
+              action={
+                <button className="ghost" onClick={() => void load()}>
+                  <Icon name="refresh" size={14} />
+                  重试
+                </button>
+              }
+            />
+          </div>
+        ) : (
+          <Loading text="读取质量状态…" />
+        )
+      ) : (
+        <>
       <QualityStatusBar
         status={status}
         busy={busy !== ''}
@@ -2554,6 +2643,8 @@ export function QualityPage({
         )}
         {tab === 'sources' && <SourcesTab onChanged={() => void load()} />}
       </div>
+        </>
+      )}
       {confirmRun ? (
         <Confirm
           title="立即校验全部频道？"

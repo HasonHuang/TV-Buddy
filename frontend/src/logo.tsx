@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken } from './api';
 import { formatBytes } from './format';
-import { Confirm, Empty, Modal, NumberBox, PageHead, Select, Tip } from './ui';
+import { Confirm, Empty, Loading, Modal, NumberBox, PageHead, Select, Tip } from './ui';
 import './style.css';
 
 type Logo = {
@@ -138,6 +138,8 @@ function channelKey(channel: Missing): string {
 
 export function LogosPage() {
   const [logos, setLogos] = useState<Logo[]>([]);
+  /** 首次读取台标库。 */
+  const [loading, setLoading] = useState(true);
   const [report, setReport] = useState<Report | null>(null);
   const [suggestions, setSuggestions] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<Record<string, string>>({});
@@ -154,24 +156,30 @@ export function LogosPage() {
   const [renaming, setRenaming] = useState<{ file: string; name: string } | null>(null);
 
   const load = useCallback(async () => {
-    const data = await api<{ logos?: Logo[] }>('GET', '/logo/list');
-    setLogos(data.logos ?? []);
-    if (!getToken()) {
-      return;
-    }
-    const nextReport = await api<Report>('GET', '/logo/match-report');
-    setReport(nextReport);
-    const nextSuggest = await api<{ channels: Suggestion[] }>('POST', '/logo/suggest', {
-      threshold: 0.4,
-    });
-    const map: Record<string, string> = {};
-    for (const item of nextSuggest.channels) {
-      const first = item.suggest[0];
-      if (first) {
-        map[`${item.gid}/${item.cid}`] = first.file;
+    try {
+      const data = await api<{ logos?: Logo[] }>('GET', '/logo/list');
+      setLogos(data.logos ?? []);
+      if (!getToken()) {
+        return;
       }
+      const nextReport = await api<Report>('GET', '/logo/match-report');
+      setReport(nextReport);
+      const nextSuggest = await api<{ channels: Suggestion[] }>('POST', '/logo/suggest', {
+        threshold: 0.4,
+      });
+      const map: Record<string, string> = {};
+      for (const item of nextSuggest.channels) {
+        const first = item.suggest[0];
+        if (first) {
+          map[`${item.gid}/${item.cid}`] = first.file;
+        }
+      }
+      setSuggestions(map);
+    } catch (error) {
+      setMessage((error as Error).message);
+    } finally {
+      setLoading(false);
     }
-    setSuggestions(map);
   }, []);
 
   useEffect(() => {
@@ -337,7 +345,7 @@ export function LogosPage() {
             <button
               className="ghost"
               title="给所有静态 WebP 台标生成动效"
-              disabled={busy}
+              disabled={busy || loading}
               onClick={() => setPendingAction({ kind: 'animate-all' })}
             >
               一键全部动态化
@@ -345,7 +353,7 @@ export function LogosPage() {
             <button
               className="ghost"
               title="用 .orig 备份还原所有动效台标"
-              disabled={busy}
+              disabled={busy || loading}
               onClick={() => setPendingAction({ kind: 'restore-all' })}
             >
               全部还原静态
@@ -367,6 +375,10 @@ export function LogosPage() {
           </>
         )}
       </PageHead>
+      {loading ? (
+        <Loading />
+      ) : (
+        <>
       <div className="card">
         <p className="muted">
           共 {logos.length} 个台标。公开地址形如 <code className="mono">/logo/&lt;文件名&gt;</code>。
@@ -492,6 +504,8 @@ export function LogosPage() {
           ))}
         </div>
       </div>
+        </>
+      )}
 
       {animating && (
         <div className="card" style={{ marginTop: 16 }}>

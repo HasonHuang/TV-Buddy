@@ -7,7 +7,7 @@ import { FfmpegCard, useFfmpeg } from './ffmpeg';
 import { formatUptime } from './format';
 import { Icon } from './icons';
 import { ScriptManagerCard } from './scripts';
-import { Badge, PageHead, Tip, useToast } from './ui';
+import { Badge, Loading, PageHead, Tip, useToast } from './ui';
 
 type HealthEntry = {
   checked_at: number;
@@ -57,6 +57,8 @@ const PROBE_PAGE_SIZE = 10;
 
 export function SystemPage({ embedded = false }: { embedded?: boolean }) {
   const [health, setHealth] = useState<Health | null>(null);
+  /** 首次读取健康状态；之后刷新保留页面。 */
+  const [loading, setLoading] = useState(true);
   const [timeshift, setTimeshift] = useState<Timeshift | null>(null);
   const [dash, setDash] = useState<DashSession[]>([]);
   const [scanUrl, setScanUrl] = useState('');
@@ -79,6 +81,8 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
       setDash(Array.isArray(nextDash) ? nextDash : []);
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
     }
   }, [err]);
 
@@ -153,6 +157,10 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
           </button>
         </PageHead>
       )}
+      {loading ? (
+        <Loading text="读取系统状态…" />
+      ) : (
+        <>
       <div className="card">
         <h2>运行与能力</h2>
         {health ? (
@@ -189,7 +197,7 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
             </dd>
           </dl>
         ) : (
-          <p className="muted">加载中…</p>
+          <p className="muted">读取健康状态失败，请点「刷新」重试。</p>
         )}
       </div>
 
@@ -314,6 +322,8 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
           </>
         )}
       </div>
+        </>
+      )}
 
       {node}
     </>

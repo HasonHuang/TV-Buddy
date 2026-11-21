@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from './api';
 import { ScriptManagerModal } from './scripts';
-import { Badge, Confirm, Empty, Field, Modal, Select, Switch, Tip, useToast } from './ui';
+import { Badge, Confirm, Empty, Field, Loading, Modal, Select, Switch, Tip, useToast } from './ui';
 
 type Header = { name: string; value: string };
 
@@ -554,6 +554,8 @@ function SourceModal({
 
 export function EpgSourcesTab() {
   const [sources, setSources] = useState<Source[]>([]);
+  /** 首次读取 EPG 源。 */
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Source | undefined>();
   const [adding, setAdding] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Source | null>(null);
@@ -570,6 +572,8 @@ export function EpgSourcesTab() {
       setError('');
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -631,13 +635,21 @@ export function EpgSourcesTab() {
           <span className="muted">按优先级合并。同一频道由高优先级源提供节目。</span>
         </div>
         <div className="card-actions">
-          <button onClick={() => setAdding(true)} title="添加一个 XMLTV 源">
+          <button
+            onClick={() => setAdding(true)}
+            title="添加一个 XMLTV 源"
+            disabled={loading}
+          >
             添加源
           </button>
         </div>
       </div>
       {message && <div className="msg ok">{message}</div>}
       {error && <div className="msg err">{error}</div>}
+      {loading ? (
+        <Loading compact text="读取 EPG 源…" />
+      ) : (
+        <>
       <div className="table-wrap">
         <table className="table">
           <thead>
@@ -762,6 +774,8 @@ export function EpgSourcesTab() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
       {toast.node}
       {(adding || editing) && (
         <SourceModal
@@ -1043,6 +1057,8 @@ function BindingModal({
 export function EpgBindingsTab() {
   const [rows, setRows] = useState<BindingRow[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
+  /** 首次读取绑定。 */
+  const [loading, setLoading] = useState(true);
   const [group, setGroup] = useState('');
   const [query, setQuery] = useState('');
   const [origin, setOrigin] = useState('all');
@@ -1060,6 +1076,8 @@ export function EpgBindingsTab() {
       setError('');
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -1095,10 +1113,16 @@ export function EpgBindingsTab() {
             <Tip text="源刷新后自动按精确匹配写入绑定。未匹配的频道在这里手动指定。" />
           </h2>
           <span className="muted">
-            已绑定 {bound}/{rows.length} · {rows.length - bound} 个未绑定
+            {loading
+              ? '读取中…'
+              : `已绑定 ${bound}/${rows.length} · ${rows.length - bound} 个未绑定`}
           </span>
         </div>
       </div>
+      {loading ? (
+        <Loading compact text="读取 EPG 绑定…" />
+      ) : (
+        <>
       <div className="row" style={{ marginBottom: 10 }}>
         <Select
           value={group}
@@ -1173,6 +1197,8 @@ export function EpgBindingsTab() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
       {editing && (
         <BindingModal
           row={editing}
@@ -1542,6 +1568,8 @@ function RuleModal({
 export function EpgRulesTab() {
   const [rows, setRows] = useState<RuleRow[]>([]);
   const [bindings, setBindings] = useState<BindingRow[]>([]);
+  /** 首次读取规则。 */
+  const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Rule | undefined>();
   const [pendingDelete, setPendingDelete] = useState<Rule | null>(null);
@@ -1559,6 +1587,8 @@ export function EpgRulesTab() {
       setError('');
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -1601,12 +1631,20 @@ export function EpgRulesTab() {
           <span className="muted">条件可用全部满足 / 任一满足 / 全部不满足嵌套。</span>
         </div>
         <div className="card-actions">
-          <button onClick={() => setAdding(true)} title="新建一条关键字规则">
+          <button
+            onClick={() => setAdding(true)}
+            title="新建一条关键字规则"
+            disabled={loading}
+          >
             新建规则
           </button>
         </div>
       </div>
       {error && <div className="msg err">{error}</div>}
+      {loading ? (
+        <Loading compact text="读取关键字规则…" />
+      ) : (
+        <>
       <div className="table-wrap">
         <table className="table">
           <thead>
@@ -1664,6 +1702,8 @@ export function EpgRulesTab() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
       {toast.node}
       {(adding || editing) && (
         <RuleModal

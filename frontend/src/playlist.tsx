@@ -10,6 +10,7 @@ import {
   Drawer,
   Field,
   HoverTip,
+  Loading,
   Modal,
   NumberBox,
   PageHead,
@@ -465,6 +466,8 @@ function statusView(status?: Status, warnRatio = 0.2): StatusView | null {
 export function PlaylistPage() {
   const [global, setGlobal] = useState<GlobalCfg>(GLOBAL_DEFAULT);
   const [sources, setSources] = useState<Source[]>([]);
+  /** 首次读取订阅源；之后操作后的刷新保留页面。 */
+  const [loading, setLoading] = useState(true);
   const [statuses, setStatuses] = useState<Record<string, Status>>({});
   const [drawer, setDrawer] = useState<DrawerState | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -508,6 +511,8 @@ export function PlaylistPage() {
       }
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
     }
   }, [err]);
 
@@ -828,10 +833,16 @@ export function PlaylistPage() {
         title="订阅源"
         sub="聚合源在播放时读取源。托管源把频道保存到本地。"
       >
-        <button onClick={() => openSource()}>添加源</button>
+        <button onClick={() => openSource()} disabled={loading}>
+          添加源
+        </button>
         <Tip text="聚合：每次播放时读取源。托管：频道保存在本地，可以分组、授权、设置节目单。" />
       </PageHead>
 
+      {loading ? (
+        <Loading text="读取订阅源…" />
+      ) : (
+        <>
       {unauthorizedSync > 0 ? (
         <div className="msg warn">
           有 {unauthorizedSync} 个托管分组还没有授权给普通用户。请到「用户与设备」页勾选。
@@ -1125,6 +1136,8 @@ export function PlaylistPage() {
           onChange={(text) => setGlobal({ ...global, global_exclude: lines(text) })}
         />
       </div>
+        </>
+      )}
 
       {drawer && (
         <Drawer

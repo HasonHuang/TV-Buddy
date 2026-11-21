@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, getRole } from './api';
 import { formatBytes } from './format';
-import { Badge, Confirm } from './ui';
+import { Badge, Confirm, Loading } from './ui';
 
 type FfmpegJob = {
   phase: string;
@@ -49,6 +49,7 @@ const ACTIVE = new Set(['downloading', 'verifying', 'installing']);
 /** 读取 ffmpeg 状态，并在安装任务运行期间每秒刷新。 */
 export function useFfmpeg() {
   const [status, setStatus] = useState<FfmpegStatus | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [watching, setWatching] = useState(false);
@@ -64,6 +65,8 @@ export function useFfmpeg() {
       }
     } catch (err) {
       if (mounted.current) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (mounted.current) setLoading(false);
     }
   }, []);
 
@@ -105,12 +108,12 @@ export function useFfmpeg() {
   const install = useCallback(() => run('/tools/ffmpeg/install', true), [run]);
   const remove = useCallback(() => run('/tools/ffmpeg/remove'), [run]);
 
-  return { status, busy, error, install, remove, refresh };
+  return { status, loading, busy, error, install, remove, refresh };
 }
 
 /** ffmpeg 状态卡：来源、版本、安装与删除。 */
 export function FfmpegCard({ state }: { state: ReturnType<typeof useFfmpeg> }) {
-  const { status, busy, error, install, remove } = state;
+  const { status, loading, busy, error, install, remove } = state;
   const [confirming, setConfirming] = useState(false);
   const admin = getRole() === 'admin';
   const job = status?.job ?? null;
@@ -121,6 +124,10 @@ export function FfmpegCard({ state }: { state: ReturnType<typeof useFfmpeg> }) {
   return (
     <div className="card">
       <div className="section-title">ffmpeg / ffprobe</div>
+      {loading ? (
+        <Loading compact text="读取 ffmpeg 状态…" />
+      ) : (
+        <>
       <dl>
         <dt>ffmpeg</dt>
         <dd>
@@ -213,6 +220,8 @@ export function FfmpegCard({ state }: { state: ReturnType<typeof useFfmpeg> }) {
       ) : null}
 
       <p className="muted">来源：eugeneware/ffmpeg-static（GPLv3）</p>
+        </>
+      )}
 
       {confirming ? (
         <Confirm

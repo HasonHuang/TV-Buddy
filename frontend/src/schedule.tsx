@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, getToken } from './api';
 import type { Channel, Group } from './groups';
-import { Badge, Confirm, DateInput, Field, PageHead, Select, Tip, useToast } from './ui';
+import { Badge, Confirm, DateInput, Field, Loading, PageHead, Select, Tip, useToast } from './ui';
 
 type Task = {
   id: string;
@@ -99,6 +99,8 @@ export function SchedulePage({
   view?: 'all' | 'schedule' | 'livestream';
 } = {}) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  /** 首次读取任务与分组；之后操作后的刷新保留页面。 */
+  const [loading, setLoading] = useState(true);
   const [pendingDelete, setPendingDelete] = useState<number | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [timeshift, setTimeshift] = useState<TimeshiftStatus | null>(null);
@@ -127,6 +129,8 @@ export function SchedulePage({
       setTimeshift(nextTimeshift);
     } catch (error) {
       err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
     }
   }, [err]);
 
@@ -276,6 +280,29 @@ export function SchedulePage({
       err(error instanceof Error ? error.message : String(error));
     }
   };
+
+  if (loading) {
+    return (
+      <>
+        {view !== 'livestream' && (
+          <PageHead
+            icon="schedule"
+            title="定时录制"
+            sub="按时间表自动录制节目，保存为视频文件"
+          />
+        )}
+        {view !== 'schedule' && (
+          <PageHead
+            icon="livestream"
+            title="回看管理"
+            sub="为频道保留历史内容，可以回看过去的节目"
+          />
+        )}
+        <Loading />
+        {node}
+      </>
+    );
+  }
 
   return (
     <>

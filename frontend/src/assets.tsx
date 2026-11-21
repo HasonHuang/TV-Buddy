@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, copyText } from './api';
 import { FfmpegCard, useFfmpeg } from './ffmpeg';
 import { formatBytes } from './format';
-import { Badge, Confirm, Empty, PageHead, Select, Tip } from './ui';
+import { Badge, Confirm, Empty, Loading, PageHead, Select, Tip } from './ui';
 
 type Entry = {
   file: string;
@@ -105,9 +105,12 @@ function Library({
 }: {
   kind: Kind;
   accept: string;
-  ffmpegReady: boolean;
+  /** `null` 表示 ffmpeg 状态还没读到，不要显示「未检测到」。 */
+  ffmpegReady: boolean | null;
 }) {
   const [files, setFiles] = useState<Entry[]>([]);
+  /** 首次读取文件列表。 */
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [translation, setTranslation] = useState<TranslationInfo | null>(null);
@@ -140,6 +143,8 @@ function Library({
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
     }
   }, [kind]);
 
@@ -256,7 +261,7 @@ function Library({
           <Tip text="同名文件会被覆盖。字幕支持常见文本格式。视频转换需要 ffmpeg。" />
         </div>
       </div>
-      {kind === 'assets' && !ffmpegReady && (
+      {kind === 'assets' && ffmpegReady === false && (
         <p className="muted">未检测到 ffmpeg：视频转换不可用。</p>
       )}
       {kind === 'subtitle' && translation && !translation.enabled && (
@@ -265,11 +270,15 @@ function Library({
       {kind === 'subtitle' && translation?.enabled && translation.engine === 'none' && (
         <p className="muted">还没有配置翻译服务地址，翻译会失败。</p>
       )}
-      {kind === 'assets' && (
+      {kind === 'assets' && !loading && (
         <p className="muted">
           未被引用的素材 {unused.length} 个（共 {files.length} 个）。配置里没有任何地址指向的文件算作未被引用。
         </p>
       )}
+      {loading ? (
+        <Loading compact text="读取素材…" />
+      ) : (
+        <>
       <div className="table-wrap">
         <table className="table">
           <thead>
@@ -334,6 +343,8 @@ function Library({
         </table>
         {shown.length === 0 ? <Empty text="暂无文件。" /> : null}
       </div>
+        </>
+      )}
       {message && <div className="msg ok">{message}</div>}
       {error && <div className="msg err">{error}</div>}
 
@@ -355,7 +366,7 @@ function Library({
 }
 
 /** 远程素材转换：`POST /panel/api/assets/convert {url}`。 */
-function ConvertCard({ ready }: { ready: boolean }) {
+function ConvertCard({ ready }: { ready: boolean | null }) {
   const [url, setUrl] = useState('');
   const [result, setResult] = useState<{ local_path: string; bytes: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -402,7 +413,7 @@ function ConvertCard({ ready }: { ready: boolean }) {
         </button>
         <Tip text="转换会占用 CPU 和磁盘。完成后使用本地地址播放。" />
       </div>
-      {!ready && <div className="msg err">未检测到 ffmpeg，无法转换。</div>}
+      {ready === false && <div className="msg err">未检测到 ffmpeg，无法转换。</div>}
       {result && (
         <div className="msg ok">
           已生成{' '}
@@ -432,8 +443,10 @@ type Candidate = {
  * 目标的 5 个占位键常指向 MP4。部分播放器不显示 MP4，
  * 所以提供逐项与一键转本地 HLS。转换只写 `[assets].map`，不改配置里的跳转键。
  */
-function CandidatesCard({ ready }: { ready: boolean }) {
+function CandidatesCard({ ready }: { ready: boolean | null }) {
   const [items, setItems] = useState<Candidate[]>([]);
+  /** 首次读取占位地址。 */
+  const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState('');
   const [error, setError] = useState('');
 
@@ -444,6 +457,8 @@ function CandidatesCard({ ready }: { ready: boolean }) {
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -481,7 +496,7 @@ function CandidatesCard({ ready }: { ready: boolean }) {
         <h2>占位视频地址</h2>
         <button
           title="逐个转换所有未处理的占位地址"
-          disabled={!ready || busy || pending.length === 0}
+          disabled={!ready || busy || loading || pending.length === 0}
           onClick={() => void convertAll()}
         >
           一键转换（{pending.length}）
@@ -491,6 +506,10 @@ function CandidatesCard({ ready }: { ready: boolean }) {
         这些地址常指向 MP4。部分播放器不能播放 MP4，转成本地文件后可以显示。
         转换不会修改原配置。
       </p>
+      {loading ? (
+        <Loading compact text="读取占位地址…" />
+      ) : (
+        <>
       <table className="table">
         <thead>
           <tr>
@@ -525,7 +544,9 @@ function CandidatesCard({ ready }: { ready: boolean }) {
         </tbody>
       </table>
       {items.length === 0 && <p className="muted">未读取到占位 URL。</p>}
-      {!ready && <div className="msg err">未检测到 ffmpeg，无法转换。</div>}
+        </>
+      )}
+      {ready === false && <div className="msg err">未检测到 ffmpeg，无法转换。</div>}
       {error && <div className="msg err">{error}</div>}
     </div>
   );
@@ -534,14 +555,16 @@ function CandidatesCard({ ready }: { ready: boolean }) {
 /** 素材页：视频、字幕与 ffmpeg 状态。 */
 export function AssetsPage() {
   const ffmpeg = useFfmpeg();
+  /** 读取中传 null，避免子卡片把「还没读到」误报成「未安装」。 */
+  const ffmpegReady = ffmpeg.loading ? null : Boolean(ffmpeg.status?.installed);
 
   return (
     <>
       <PageHead icon="assets" title="视频素材" sub="上传、转换与引用本地视频与字幕" />
       <FfmpegCard state={ffmpeg} />
-      <CandidatesCard ready={Boolean(ffmpeg.status?.installed)} />
-      <Library kind="assets" accept="video/*" ffmpegReady={Boolean(ffmpeg.status?.installed)} />
-      <ConvertCard ready={Boolean(ffmpeg.status?.installed)} />
+      <CandidatesCard ready={ffmpegReady} />
+      <Library kind="assets" accept="video/*" ffmpegReady={ffmpegReady} />
+      <ConvertCard ready={ffmpegReady} />
       <Library kind="subtitle" accept=".srt,.ass,.ssa,.vtt" ffmpegReady={true} />
     </>
   );

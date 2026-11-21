@@ -22,7 +22,17 @@ import { api, putConfig } from './api';
 import { Icon } from './icons';
 import type { Recommend } from './lowcfg';
 import { BackupPage } from './ops';
-import { Card, Confirm, NumberInput, PageHead, Select, Tip, useToast } from './ui';
+import {
+  Card,
+  Confirm,
+  Empty,
+  Loading,
+  NumberInput,
+  PageHead,
+  Select,
+  Tip,
+  useToast,
+} from './ui';
 
 type Cfg = Record<string, unknown>;
 
@@ -611,6 +621,8 @@ export function SettingsPage({
   const [baseline, setBaseline] = useState<Cfg | null>(null);
   const [recommend, setRecommend] = useState<Recommend | null>(null);
   const [busy, setBusy] = useState('');
+  /** 首次读取失败时给出重试入口，避免加载占位一直转。 */
+  const [loadError, setLoadError] = useState('');
   const [confirmReload, setConfirmReload] = useState(false);
   const [confirmFlush, setConfirmFlush] = useState(false);
   const [confirmSubClear, setConfirmSubClear] = useState(false);
@@ -627,6 +639,7 @@ export function SettingsPage({
   }, [dirty, onDirtyChange]);
 
   const load = useCallback(async () => {
+    setLoadError('');
     try {
       const next = await api<Cfg>('GET', '/config');
       setDraft(next);
@@ -638,7 +651,9 @@ export function SettingsPage({
         setRecommend(null);
       }
     } catch (error) {
-      err(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setLoadError(message);
+      err(message);
     }
   }, [err]);
 
@@ -788,9 +803,22 @@ export function SettingsPage({
       </PageHead>
 
       {!draft || !value ? (
-        <div className="card">
-          <p className="muted">读取配置中…</p>
-        </div>
+        loadError ? (
+          <div className="card">
+            <Empty
+              icon="close"
+              text={`读取配置失败：${loadError}`}
+              action={
+                <button className="ghost" onClick={() => void load()}>
+                  <Icon name="refresh" size={14} />
+                  重试
+                </button>
+              }
+            />
+          </div>
+        ) : (
+          <Loading text="读取配置中…" />
+        )
       ) : (
         <DraftCtx.Provider value={value}>
           <div className="settings-sections">

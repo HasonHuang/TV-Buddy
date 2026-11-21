@@ -10,7 +10,7 @@ import { api } from './api';
 import { formatBytes, formatUptime } from './format';
 import { Icon } from './icons';
 import { RecommendCard, type Recommend } from './lowcfg';
-import { Confirm, Empty, PageHead, Tip } from './ui';
+import { Confirm, Empty, Loading, PageHead, Tip } from './ui';
 
 type CacheStats = {
   backend: string;
@@ -46,6 +46,8 @@ function errorText(error: unknown): string {
 /** 缓存状态：占用统计与清空。 */
 export function CachePage() {
   const [stats, setStats] = useState<CacheStats | null>(null);
+  /** 首次加载；已有数据后的刷新保留当前卡片。 */
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [confirmFlush, setConfirmFlush] = useState(false);
@@ -58,6 +60,8 @@ export function CachePage() {
       setError('');
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -119,12 +123,16 @@ export function CachePage() {
         </button>
         <button
           title="删除已保存的清单与切片"
-          disabled={busy}
+          disabled={busy || loading}
           onClick={() => setConfirmFlush(true)}
         >
           {busy ? '清理中…' : '清空缓存'}
         </button>
       </PageHead>
+      {loading ? (
+        <Loading />
+      ) : (
+        <>
       {stats && (
         <RecommendCard
           recommend={stats.recommend}
@@ -167,6 +175,8 @@ export function CachePage() {
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}
       </div>
+        </>
+      )}
 
       {confirmFlush ? (
         <Confirm
@@ -188,6 +198,8 @@ export function CachePage() {
 /** 频道热度：总请求与分组请求排行。 */
 export function StatsPage() {
   const [stats, setStats] = useState<Stats | null>(null);
+  /** 首次加载；已有数据后的刷新保留当前卡片。 */
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -196,6 +208,8 @@ export function StatsPage() {
       setError('');
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -207,7 +221,11 @@ export function StatsPage() {
 
   return (
     <>
-      <PageHead icon="stats" title="频道热度" sub={`版本 ${stats?.version ?? '—'}`}>
+      <PageHead
+        icon="stats"
+        title="频道热度"
+        sub={loading ? '读取中…' : `版本 ${stats?.version ?? '—'}`}
+      >
         <button
           className="ghost"
           title="重新读取频道热度统计"
@@ -217,6 +235,10 @@ export function StatsPage() {
           刷新
         </button>
       </PageHead>
+      {loading ? (
+        <Loading />
+      ) : (
+        <>
       <div className="stats">
         <div className="stat">
           <div className="k">
@@ -317,6 +339,8 @@ export function StatsPage() {
         </table>
         {error && <div className="msg err">{error}</div>}
       </div>
+        </>
+      )}
     </>
   );
 }

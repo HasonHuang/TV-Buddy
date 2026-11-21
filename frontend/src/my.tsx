@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
 import { Icon } from './icons';
-import { Empty, PageHead, Tip, useToast } from './ui';
+import { Empty, Loading, PageHead, Tip, useToast } from './ui';
 
 type Channel = { id: string; name: string; url: string };
 type Group = { id: string; name: string; channels: Channel[] };
@@ -53,23 +53,41 @@ export function MySubsPage() {
   const groups = me?.groups ?? [];
   const total = groups.reduce((sum, group) => sum + group.channels.length, 0);
 
+  const head = (
+    <PageHead
+      icon="subs"
+      title="我的订阅"
+      sub={
+        loading && me === null
+          ? '正在读取订阅信息'
+          : `${groups.length} 个分组 · ${total} 个频道`
+      }
+    >
+      <button
+        className="ghost"
+        title="重新读取你的订阅地址与授权频道"
+        onClick={() => void load()}
+        disabled={loading}
+      >
+        <Icon name="refresh" size={14} />
+        {loading ? '刷新中…' : '刷新'}
+      </button>
+    </PageHead>
+  );
+
+  if (loading && me === null) {
+    return (
+      <>
+        {head}
+        <Loading />
+        {node}
+      </>
+    );
+  }
+
   return (
     <>
-      <PageHead
-        icon="subs"
-        title="我的订阅"
-        sub={`${groups.length} 个分组 · ${total} 个频道`}
-      >
-        <button
-          className="ghost"
-          title="重新读取你的订阅地址与授权频道"
-          onClick={() => void load()}
-          disabled={loading}
-        >
-          <Icon name="refresh" size={14} />
-          {loading ? '刷新中…' : '刷新'}
-        </button>
-      </PageHead>
+      {head}
 
       <div className="card">
         <h2>
