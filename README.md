@@ -16,7 +16,7 @@ TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、�
 服务只用一个二进制运行。Linux 版本静态链接。前端资源内嵌在二进制中，不需要 Node 或数据库。默认监听 `9900` 端口。
 
 - **行为兼容**：配置键面、面板接口与播放链路对齐闭源 IPTV Proxy v0.8.2。可直接替换运行。
-- **低配置可跑**：1 vCPU / 128 MB 内存 / 1 GB 磁盘即可运行，配合前置 CDN 承载多观众。见 [低配置部署](#低配置部署)。
+- **低配置可跑**：1 vCPU / 128 MB 内存 / 1 GB 磁盘即可运行，配合前置 CDN 承载多观众。见 [低配置部署](docs/design/18-low-spec-deployment.md)。
 
 ---
 
@@ -269,6 +269,58 @@ docker run -d --name tv-buddy -p 9900:9900 -v /srv/tv-buddy:/data tv-buddy
 
 `tests/manual/local/docker-compose.yml` 复用同一份 `Dockerfile` 的 `local-test` 目标，验证安装流程。
 
+### Docker Compose
+
+仓库根目录的 `docker-compose.yml` 使用已发布镜像，不在本地构建。
+
+```bash
+docker compose up -d
+docker compose logs -f
+```
+
+| 项 | 值 |
+| --- | --- |
+| 服务名 | `tv-buddy` |
+| 镜像 | `hason666/tv-buddy:latest`。生产环境请改为固定 tag |
+| 端口 | `${TV_BUDDY_PORT:-9900}` 映射到容器 `9900` |
+| 数据卷 | 命名卷 `tv-buddy-data` 挂到 `/data` |
+| 初始口令 | `TV_BUDDY_INITIAL_PASSWORD`。仅首次启动生效。留空则随机生成 |
+| 日志 | `json-file`，单文件 10 MB，最多 3 个 |
+| 子进程回收 | `init: true`。ffmpeg 与 python3 需要 |
+
+读取初始口令：
+
+```bash
+docker compose exec tv-buddy cat /data/cache/admin_initial_credentials.txt
+```
+
+改端口或初始口令：
+
+```bash
+TV_BUDDY_PORT=8080 TV_BUDDY_INITIAL_PASSWORD='你的口令' docker compose up -d
+```
+
+更新镜像：
+
+```bash
+docker compose pull
+docker compose up -d --force-recreate
+```
+
+停止服务。默认保留数据卷：
+
+```bash
+docker compose down
+```
+
+加 `-v` 会同时删除数据卷。只在确认要清空数据时使用。
+
+用绑定挂载代替命名卷时，目录属主设置见上一节。
+
+镜像不含 ffmpeg 与 python3。需要时在面板安装，或按上一节自行构建。
+
+低配部署见 [`docs/design/18-low-spec-deployment.md`](docs/design/18-low-spec-deployment.md)。
+
 ### Docker Hub 自动发布
 
 推送 `v*` 标签时，CI 先跑测试和发布包，再构建 `linux/amd64` 与 `linux/arm64` 镜像并推送到 Docker Hub。两个架构用原生 runner 各自编译，最后合并成一个 manifest。
@@ -388,34 +440,11 @@ http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 
 ### 翻译服务
 
-内置客户端支持 MTranServer v5 与旧批量接口。先请求 `/translate/batch`，失败回退 `/translate`。地址可写根地址、`/translate` 或 `/translate/batch`。
+节目单与字幕共用 MTranServer 客户端。先请求 `/translate/batch`，失败回退 `/translate`。地址可写根地址、`/translate` 或 `/translate/batch`。
 
-```json
-{
-  "subtitle": { "translate": {
-    "enabled": true,
-    "url": "https://translate.ipacel.cc/translate",
-    "target": "zh-cn",
-    "source": "auto"
-  } }
-}
-```
-
-需要 token 时加 `"token": "..."`，以 `Authorization: Bearer` 发送。
+配置示例、面板入口、接口与联调脚本见 [`docs/design/17-translation.md`](docs/design/17-translation.md)。
 
 `https://translate.ipacel.cc/translate` 是社区试用服务。可用性、速度与额度不保证。生产环境建议自建 MTranServer。
-
-联调：
-
-```bash
-scripts/smoke-translate-live.sh
-
-# 指定其他服务
-TRANSLATE_URL=http://127.0.0.1:8989/translate scripts/smoke-translate-live.sh
-
-# 需要 Token 时
-TRANSLATE_URL=http://127.0.0.1:8989 TRANSLATE_TOKEN=secret scripts/smoke-translate-live.sh
-```
 
 ---
 
@@ -423,170 +452,15 @@ TRANSLATE_URL=http://127.0.0.1:8989 TRANSLATE_TOKEN=secret scripts/smoke-transla
 
 TV Buddy 可在 **1 vCPU / 128 MB 内存 / 1 GB 磁盘** 的实例上运行。前提是前面挂 CDN，把播放流量挡在边缘。
 
-装的时候脚本会询问是否使用低配参数。也可加 `--low-spec` 跳过询问：`sudo ./install.sh --low-spec`。
-样例：[`docs/design/config-low-spec.json`](docs/design/config-low-spec.json)。
+安装时脚本会询问是否使用低配参数。也可加 `--low-spec` 跳过询问：
+
+```bash
+sudo ./install.sh --low-spec
+```
+
+参数含义、切换步骤、服务端配置、CDN 控制台、验收与排障见 [`docs/design/18-low-spec-deployment.md`](docs/design/18-low-spec-deployment.md)。
+样例配置：[`docs/design/config-low-spec.json`](docs/design/config-low-spec.json)。
 原理与公式：[`docs/design/06-low-spec-optimization.md`](docs/design/06-low-spec-optimization.md)。
-
-### 配置键的作用
-
-| 键 | 默认（常规） | 低配 | 作用 |
-| --- | --- | --- | --- |
-| `cache.segments.per_channel_max` | `0`（内置 4096） | `200` | 每频道切片索引条数上限。降低内存占用 |
-| `cache.prefetch.concurrency` | `4` | `2` | 预取并发。降低开播与切台的 CPU 峰值 |
-| `auth.token_enabled` | `true` | `true` | 播放凭证。每台设备只能播放授权频道 |
-| `auth.ip_guard_enabled` | `true` | `true` | IP 限流、播放会话上限与封禁 |
-| `cdn.enabled` | `false` | `true` | 外部 CDN 未生效时，本机补齐缓存头与错误状态 |
-
-只有前 2 项减负。后 3 项改变安全或分发行为。
-
-面板里的「低配模式」只回显，不改变参数。不要把它当作切换开关。
-
-### 已安装用户如何切换
-
-用面板操作。保存后立即生效，不需要重启。
-
-| 顺序 | 面板路径 | 改为 |
-| --- | --- | --- |
-| 1 | 系统设置 → 缓存与回收 → 切片缓存 → 单频道上限 | `200` |
-| 2 | 系统设置 → 缓存与回收 → 预载配置 → 拉取并发 | `2` |
-| 3 | 系统设置 → 分发与伪装 → CDN 兜底 → 启用 CDN 兜底 | 开启 |
-| 4 | 安全管控 → 访问与链接 → IP 管控 | 开启 |
-| 5 | 安全管控 → 访问与链接 → 播放凭证 | 开启 |
-
-只想省资源时，做前 2 项。
-
-已有数据库保留原值。新的默认值只影响新建配置。
-
-默认 `auth.max_sessions_per_ip = 1`。同一出口 IP 同时只保留 1 路播放会话。
-多人共用网络时改大。
-
-### 两个硬前提
-
-缺一条就会在 1 GB 磁盘上出问题。
-
-| # | 前提 | 说明 |
-| --- | --- | --- |
-| 1 | `[cache.gc].enabled = true` | 切片正文只写不删，全靠它回收。关掉后磁盘会被吃满 |
-| 2 | CDN 侧强制 TTL + 忽略源站头 + 忽略 Cookie | 四家 CDN 的规则内容相同。见下文 |
-
-### 服务端配置
-
-`--low-spec` 写入 5 个键。下面的 JSON 是完整样例，多数键等于默认值。
-样例见 [`docs/design/config-low-spec.json`](docs/design/config-low-spec.json)。
-
-```json
-{
-  "server": { "bind": "[::]:9900", "log_level": "info" },
-  "panel": { "enabled": true },
-  "auth": { "token_enabled": true, "ip_guard_enabled": true },
-  "cache": {
-    "disk_path": "./cache",
-    "segments": { "per_channel_max": 200 },
-    "prefetch": { "enabled": true, "concurrency": 2 },
-    "gc": {
-      "enabled": true,
-      "max_disk_mb": 0,
-      "max_age_secs": 1800,
-      "interval_secs": 300,
-      "scan_limit": 500,
-      "disk_budget_ratio": 0.8,
-      "reserve_mb": 100,
-      "min_mb": 50
-    }
-  },
-  "cdn": {
-    "enabled": true,
-    "auto_tune": true,
-    "segment_max_age_secs": 0,
-    "empty_status": 502
-  }
-}
-```
-
-`max_disk_mb = 0` 表示自动。1 GB 盘通常落在 100–150 MB。
-`scan_limit` 是单轮最多处理的文件数，防 1 vCPU 抖动。
-`segment_max_age_secs = 0` 表示用实测推荐值。
-`empty_status = 502` 在强制 TTL 下挡住「200 + 空体」。
-CDN 不下发 `X-Forwarded-Proto` 时，在 `cdn` 里加 `"public_base": "https://cdn.example"`。
-
-### CDN 控制台设置
-
-五个设置项，四个域名各做一遍。面板支持「应用到全部域名」时做一次。
-
-| # | 设置项 | 设成 | 原因 |
-| --- | --- | --- | --- |
-| 1 | 缓存过期时间 | 媒体路径用推荐 TTL | 覆盖窗口加两次重试余量 |
-| 2 | 是否遵循源站缓存头 | 关闭（强制 TTL） | 各家能力不一致，强制 TTL 最容易移植 |
-| 3 | Set-Cookie | 媒体路径关闭注入 | 每个响应带新 Cookie 时 CDN 跳过缓存 |
-| 4 | 图片优化 / 自动 WebP / 压缩改写 | 全部关闭 | 切片是 TS 字节，转码后会「命中但播不动」 |
-| 5 | 回源请求头 | 加 `X-Forwarded-Proto: https` | 否则清单一直给 `http://` |
-
-另外确认：**不缓存 3xx**（`redirect` 模式会 302 到带时效的上游地址）、**不缓存非 200**。
-
-缓存规则用两条，顺序不能颠倒：
-
-```text
-规则 A：不缓存（放最前）
-  /panel*  /epg*  /subs/*  /sub/*  /api/*  /unban*  /share*  /health  /metrics
-  /*/*.m3u8  /*/*.mpd
-  /*/*/index.m3u8  /*/*/index.txt  /*/*/video/*  /*/*/mpd/*
-
-规则 B：缓存（放其后）
-  /*/*/* 中的其余路径（伪装切片、remux seg_*、timeshift/*、DASH 轨道切片）
-```
-
-> **不要按扩展名写规则。** 伪装扩展名在 jpg/png/gif/bmp/webp 之间轮换。控制台只支持扩展名时，改用路径前缀 `/{gid}/{cid}/`，逐分组配置。
-
-### 推荐值从哪来
-
-TTL 与磁盘上限不能写死。片源窗口在 48–100 秒，单片 1.1–9 MB，固定值要么提前过期，要么长期多占边缘存储。
-
-服务默认被动实测，不向源站额外发请求。首次安装还没有播放数据时用回退值：**TTL 600s / 磁盘 150 MB**。
-
-拿数字的两个入口：
-
-| 入口 | 位置 |
-| --- | --- |
-| 推荐 TTL（只读，带复制按钮） | 面板 → 缓存状态页顶部 |
-| 「立即估算」 | 面板 → 系统设置页 →「CDN 缓存」卡片 |
-
-「立即估算」探测最多 3 个分组、每组 1 个频道，只跑一次。并发请求返回 409。
-
-也可以直接调接口：
-
-```bash
-curl -X POST http://127.0.0.1:9900/panel/api/cdn/estimate
-```
-
-### 验收
-
-```bash
-# 1) 清单必须不缓存
-curl -s -o /dev/null -D - "https://<域名>/<分组>/<变体>.m3u8" | grep -iE 'x-cache|cache-control'
-
-# 2) 切片必须缓存。第二次应为 HIT 且带 Age
-SEG="https://<域名>/<分组>/<变体>/<从清单复制的切片路径>"
-for i in 1 2; do curl -s -o /dev/null -D - "$SEG" | grep -iE '^(x-cache|age|cache-control|content-length)'; done
-
-# 3) 字节未被改写
-curl -s "$SEG" | shasum -a 256
-
-# 4) 面板与 API 不被缓存
-curl -s -o /dev/null -D - "https://<域名>/panel/api/status" | grep -iE 'x-cache|cache-control'
-```
-
-期望：清单与面板返回 `BYPASS`。切片第二次返回 `HIT` 并带 `Age`。两次哈希一致。
-
-### 排障
-
-| 现象 | 原因 | 处理 |
-| --- | --- | --- |
-| 切片仍 `BYPASS` | 规则未生效、未刷新缓存、Cookie 未关 | 查设置项 1 与 3 |
-| `MISS` 不转 `HIT` | 缓存键含 Cookie 或请求头，或 TTL 太短 | 缓存键去掉 Cookie，TTL 用推荐值 |
-| `HIT` 但花屏或卡住 | 图片优化改写了字节 | 关闭图片处理，比对哈希 |
-| 清单被缓存 | 规则顺序颠倒 | 把规则 A 调到最前 |
-| 换台 404 | 302 被缓存 | 关闭 3xx 缓存 |
-| 清单仍给 `http://` | 未下发 XFP | 加回源请求头，或配 `[cdn].public_base` |
 
 ---
 
@@ -828,10 +702,12 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 | --- | --- |
 | [`docs/spec/`](docs/spec/) | 目标规格（`S-*`）与验证基线 |
 | [`docs/findings/`](docs/findings/) | 逆向证据（`F-*`、`D-*`） |
-| [`docs/design/`](docs/design/) | 实现方案：选型、架构、HTTP 契约、低配优化 |
+| [`docs/design/`](docs/design/) | 实现方案：选型、架构、HTTP 契约、低配优化、翻译 |
 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) | 路由表与接口契约 |
 | [`docs/design/11-subscription-sync.md`](docs/design/11-subscription-sync.md) | 定时订阅、托管同步与管理规则 |
 | [`docs/design/12-python-scripts.md`](docs/design/12-python-scripts.md) | Python 脚本开发：解析脚本与 EPG 采集脚本 |
+| [`docs/design/17-translation.md`](docs/design/17-translation.md) | 翻译服务：协议、配置、面板接口与联调 |
+| [`docs/design/18-low-spec-deployment.md`](docs/design/18-low-spec-deployment.md) | 低配置部署：参数、切换、CDN 控制台、验收与排障 |
 | [`PROGRESS.md`](PROGRESS.md) | 进度与缺口。唯一进度权威 |
 
 ---

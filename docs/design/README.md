@@ -35,6 +35,8 @@
 | [`14-quality-admission-product.md`](14-quality-admission-product.md) | 订阅源质量准入产品设计：逐频道准入、立即移出、结果记录、安全阀、源停用/删除选项 | ✅ 产品设计已批准 |
 | [`15-quality-admission-function.md`](15-quality-admission-function.md) | 质量准入功能设计：独立页面、规则/结果/来源、同步门控流程、Docker + Python 验收场景 | ✅ 功能设计已批准 |
 | [`16-quality-admission-system.md`](16-quality-admission-system.md) | 质量准入系统设计：配置、结果存储、门控引擎、调度、锁与事务、接口 | ✅ 已实施；容器验收通过 |
+| [`17-translation.md`](17-translation.md) | 翻译服务：MTranServer 协议兼容、字幕与节目单配置、面板接口、联调 | ✅ 已实施 |
+| [`18-low-spec-deployment.md`](18-low-spec-deployment.md) | 低配置部署：安装参数、切换步骤、CDN 控制台、验收与排障 | ✅ 已实施（T0 待人工） |
 | [`config-low-spec.json`](config-low-spec.json) | 低配 + 多 CDN 示例配置（1 vCPU / 128 MB / 1 GB） | ✅ 已试跑 |
 | [`reference/`](reference/) | 目标 UI 参考截图（30 张）+ 功能与证据映射 | ✅ 已采集 |
 

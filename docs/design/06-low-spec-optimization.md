@@ -6,6 +6,7 @@
 >
 > 状态：代码侧已实施。T0（CDN 控制台配置）未完成，见 §2。
 > 最后更新：2026-10-25。
+> 部署与运维步骤：[`18-low-spec-deployment.md`](18-low-spec-deployment.md)。
 
 本设计修三处缺陷：
 

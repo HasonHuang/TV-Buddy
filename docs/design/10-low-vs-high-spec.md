@@ -1,6 +1,7 @@
 # 低配与高配环境的运行参数差异
 
 > 写作风格：ASD-STE100 简化技术写作。一句一个意思。主动语态。用简单现在时。
+> 部署步骤与 CDN 控制台见 [`18-low-spec-deployment.md`](18-low-spec-deployment.md)。
 
 ## 1. 结论
 
