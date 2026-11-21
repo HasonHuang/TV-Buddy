@@ -9,14 +9,16 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { formatBytes, formatUptime } from './format';
 import { Icon } from './icons';
-import { RecommendCard, type Recommend } from './lowcfg';
+import { formatAgo, formatMB, LIMIT_LABEL, RecommendCard, type Recommend } from './lowcfg';
 import { Confirm, Empty, Loading, PageHead, Tip } from './ui';
 
 type CacheStats = {
-  backend: string;
   disk_path: string;
   entries: Record<string, number>;
   bytes: number;
+  segment_body_bytes: number;
+  segment_index_bytes: number;
+  segment_cache_bytes: number;
   playlist_cache_entries: number;
   recommend: Recommend;
 };
@@ -41,6 +43,67 @@ type Stats = {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** 本机缓存摘要：上限、限制因素、工作集与占用。 */
+function LocalCacheCard({ recommend }: { recommend: Recommend }) {
+  return (
+    <div className="card">
+      <h2>
+        本机缓存
+        <Tip text="切片只保存在硬盘。「预计需要」按同时播放的频道估算。" />
+      </h2>
+      <span className="muted">
+        活跃 {recommend.channels} · 按 {recommend.working_channels} 个估算
+      </span>
+      <div className="rec">
+        <div className="rec-item">
+          <div className="k">缓存上限</div>
+          <div className="v">{formatMB(recommend.disk_cap_mb)}</div>
+        </div>
+        <div className="rec-item">
+          <div className="k">上限来源</div>
+          <div className="v">{recommend.cap_source === 'manual' ? '手动' : '自动'}</div>
+        </div>
+        <div className="rec-item">
+          <div className="k">限制因素</div>
+          <div className="v">{LIMIT_LABEL[recommend.limited_by]}</div>
+        </div>
+        <div className="rec-item">
+          <div className="k">预计需要</div>
+          <div className="v">{formatMB(recommend.working_mb)}</div>
+        </div>
+        <div className="rec-item">
+          <div className="k">实际占用</div>
+          <div className="v">{formatBytes(recommend.segment_cache_bytes)}</div>
+        </div>
+        <div className="rec-item">
+          <div className="k">切片正文</div>
+          <div className="v">{formatBytes(recommend.segment_body_bytes)}</div>
+        </div>
+        <div className="rec-item">
+          <div className="k">索引 / 子预算</div>
+          <div className="v">
+            {formatBytes(recommend.segment_index_bytes)} /{' '}
+            {formatBytes(recommend.segment_index_limit_bytes)}
+          </div>
+        </div>
+      </div>
+      <dl>
+        <dt>上次回收</dt>
+        <dd>{formatAgo(recommend.gc_last_run_secs_ago)}</dd>
+        <dt>自动估算</dt>
+        <dd>{recommend.auto_tune ? '已开启' : '已关闭（沿用上次估算）'}</dd>
+        <dt>磁盘</dt>
+        <dd>
+          可用 {formatMB(recommend.disk_free_mb)} / 总 {formatMB(recommend.disk_total_mb)}
+        </dd>
+      </dl>
+      <p className="muted">
+        上限受播放需要、磁盘可用空间与总容量 70% 三者取小。手动上限低于播放需要时，换台可能回源变慢。
+      </p>
+    </div>
+  );
 }
 
 /** 缓存状态：占用统计与清空。 */
@@ -111,7 +174,7 @@ export function CachePage() {
       <PageHead
         icon="cache"
         title="缓存状态"
-        sub={stats ? `${stats.backend === 'memory' ? '内存' : '硬盘'} · ${formatBytes(stats.bytes)}` : '读取中…'}
+        sub={stats ? `硬盘 · ${formatBytes(stats.bytes)}` : '读取中…'}
       >
         <button
           className="ghost"
@@ -134,16 +197,19 @@ export function CachePage() {
       ) : (
         <>
       {stats && (
-        <RecommendCard
-          recommend={stats.recommend}
-          onEstimate={() => void estimate()}
-          estimating={estimating}
-        />
+        <>
+          <RecommendCard
+            recommend={stats.recommend}
+            onEstimate={() => void estimate()}
+            estimating={estimating}
+          />
+          <LocalCacheCard recommend={stats.recommend} />
+        </>
       )}
       <div className="card">
         <h2>
           缓存目录
-          <Tip text="保存缓存文件的位置。内存缓存只保存清单索引。" />
+          <Tip text="保存缓存文件的位置。" />
         </h2>
         <dl>
           <dt>目录</dt>

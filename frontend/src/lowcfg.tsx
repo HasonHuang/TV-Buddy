@@ -8,48 +8,72 @@
 import { useState } from 'react';
 
 import { copyText } from './api';
-import { formatBytes } from './format';
 import { Tip } from './ui';
 
 /** `GET /panel/api/cache/stats` 的 `recommend` 块。 */
 export type Recommend = {
   ttl_secs: number;
+  ttl_source: 'manual' | 'measured' | 'fallback';
   disk_cap_mb: number;
-  source: string;
-  ttl_manual: boolean;
-  disk_manual: boolean;
+  cap_source: 'manual' | 'auto';
+  limited_by:
+    | 'manual'
+    | 'working'
+    | 'budget'
+    | 'ceiling'
+    | 'floor'
+    | 'no_data'
+    | 'space_unknown';
+  channels: number;
+  working_channels: number;
+  working_mb: number | null;
+  budget_mb: number | null;
+  ceiling_mb: number | null;
+  gc_last_run_secs_ago: number | null;
   groups: number;
   updated_secs_ago: number | null;
-  working_mb: number | null;
   disk_total_mb: number | null;
   disk_free_mb: number | null;
-  seg_files: number;
-  seg_bytes: number;
-  gc_enabled: boolean;
+  segment_body_bytes: number;
+  segment_index_bytes: number;
+  segment_index_limit_bytes: number;
+  segment_cache_bytes: number;
+  segment_body_files: number;
   auto_tune: boolean;
 };
 
-const SOURCE_LABEL: Record<string, string> = {
+const TTL_SOURCE_LABEL: Record<Recommend['ttl_source'], string> = {
   measured: '实测',
   manual: '手动配置',
   fallback: '回退值',
 };
 
-function formatMB(mb: number | null | undefined): string {
+/** 自动缓存上限的限制来源。 */
+export const LIMIT_LABEL: Record<Recommend['limited_by'], string> = {
+  manual: '手动设置',
+  working: '播放需要',
+  budget: '可用空间',
+  ceiling: '总容量 70%',
+  floor: '下限',
+  no_data: '无数据',
+  space_unknown: '空间读取失败',
+};
+
+export function formatMB(mb: number | null | undefined): string {
   if (mb === null || mb === undefined) {
     return '—';
   }
   return `${mb} MB`;
 }
 
-function formatAgo(seconds: number | null): string {
+export function formatAgo(seconds: number | null): string {
   if (seconds === null) return '暂无';
   if (seconds < 60) return `${seconds} 秒前`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
   return `${Math.floor(seconds / 3600)} 小时前`;
 }
 
-/** 推荐摘要（缓存状态页）。`onEstimate` 提供立即估算入口。 */
+/** CDN 推荐摘要（缓存状态页）。`onEstimate` 提供立即估算入口。 */
 export function RecommendCard({
   recommend,
   onEstimate,
@@ -76,10 +100,10 @@ export function RecommendCard({
             CDN 推荐值
             <Tip text="根据最近的播放情况推算。把缓存时长填进 CDN 规则。" />
           </h2>
-          <span className={`badge ${recommend.source === 'fallback' ? 'warn' : 'ok'}`}>
-            {SOURCE_LABEL[recommend.source] ?? recommend.source}
+          <span className={`badge ${recommend.ttl_source === 'fallback' ? 'warn' : 'ok'}`}>
+            {TTL_SOURCE_LABEL[recommend.ttl_source] ?? recommend.ttl_source}
           </span>
-          {recommend.source === 'fallback' && (
+          {recommend.ttl_source === 'fallback' && (
             <span className="muted"> 尚未实测，先播放一个频道或点「立即估算」</span>
           )}
         </div>
@@ -109,40 +133,13 @@ export function RecommendCard({
           <div className="v">{recommend.ttl_secs}s</div>
         </div>
         <div className="rec-item">
-          <div className="k">磁盘上限</div>
-          <div className="v">{formatMB(recommend.disk_cap_mb)}</div>
-        </div>
-        <div className="rec-item">
-          <div className="k">实测占用</div>
-          <div className="v">{formatMB(recommend.working_mb)}</div>
-        </div>
-        <div className="rec-item">
-          <div className="k">统计分组</div>
-          <div className="v">{recommend.groups}</div>
-        </div>
-        <div className="rec-item">
           <div className="k">最近采样</div>
           <div className="v">{formatAgo(recommend.updated_secs_ago)}</div>
         </div>
-        <div className="rec-item">
-          <div className="k">切片占用</div>
-          <div className="v">{formatBytes(recommend.seg_bytes)}</div>
-        </div>
       </div>
-      <dl>
-        <dt>磁盘</dt>
-        <dd>
-          可用 {formatMB(recommend.disk_free_mb)} / 总 {formatMB(recommend.disk_total_mb)}
-        </dd>
-        <dt>自动实测</dt>
-        <dd>{recommend.auto_tune ? '已开启' : '已关闭（沿用上次估算）'}</dd>
-        <dt>磁盘回收</dt>
-        <dd>{recommend.gc_enabled ? '已开启' : '已关闭（切片不会自动删除）'}</dd>
-      </dl>
       <p className="muted">
         把缓存时长填进 CDN 面板的「强制缓存」规则。清单、面板和健康检查路径请设为不缓存。
       </p>
     </div>
   );
 }
-

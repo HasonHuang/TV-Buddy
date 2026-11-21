@@ -19,8 +19,9 @@ import {
 } from 'react';
 
 import { api, putConfig } from './api';
+import { formatBytes } from './format';
 import { Icon } from './icons';
-import type { Recommend } from './lowcfg';
+import { formatAgo, formatMB, LIMIT_LABEL, type Recommend } from './lowcfg';
 import { BackupPage } from './ops';
 import {
   Card,
@@ -123,6 +124,112 @@ function Num({
         {unit ? <span className="field-unit">{unit}</span> : null}
       </div>
       {hint ? <div className="hint">{hint}</div> : null}
+    </div>
+  );
+}
+
+/** 自动 / 手动数值。值 0 表示自动，输入框显示当前自动值。 */
+function AutoNum({
+  label,
+  path,
+  unit,
+  tip,
+  hint,
+  autoValue,
+  fallback,
+  min = 1,
+}: {
+  label: string;
+  path: string;
+  unit?: string;
+  tip?: string;
+  hint?: string;
+  autoValue: number | null | undefined;
+  fallback: number;
+  min?: number;
+}) {
+  const { draft, update } = useDraft();
+  const value = asNumber(draft, path);
+  const manual = value !== 0;
+  const current = autoValue ?? fallback;
+  return (
+    <div className="field">
+      <label>
+        {label}
+        {tip ? <Tip text={tip} /> : null}
+      </label>
+      <div className="field-control">
+        <Select
+          compact
+          ariaLabel={`${label}取值方式`}
+          value={manual ? 'manual' : 'auto'}
+          options={[
+            { value: 'auto', label: '自动' },
+            { value: 'manual', label: '手动' },
+          ]}
+          onChange={(next) => update(path, next === 'manual' ? current : 0)}
+        />
+        <NumberInput
+          min={min}
+          ariaLabel={label}
+          value={manual ? value : current}
+          disabled={!manual}
+          onChange={(next) => update(path, next)}
+        />
+        {unit ? <span className="field-unit">{unit}</span> : null}
+      </div>
+      <div className="hint">
+        {hint ?? (manual ? '手动值，覆盖自动估算' : `自动（当前 ${current}）`)}
+      </div>
+    </div>
+  );
+}
+
+/** 开关 + 数值。关闭表示 0。 */
+function ToggleNum({
+  label,
+  path,
+  unit,
+  tip,
+  enabledValue = 1800,
+  min = 60,
+}: {
+  label: string;
+  path: string;
+  unit?: string;
+  tip?: string;
+  enabledValue?: number;
+  min?: number;
+}) {
+  const { draft, update } = useDraft();
+  const value = asNumber(draft, path);
+  const on = value !== 0;
+  return (
+    <div className="field">
+      <label>
+        {label}
+        {tip ? <Tip text={tip} /> : null}
+      </label>
+      <div className="field-control">
+        <Select
+          compact
+          ariaLabel={`${label}开关`}
+          value={on ? 'on' : 'off'}
+          options={[
+            { value: 'on', label: '开启' },
+            { value: 'off', label: '关闭' },
+          ]}
+          onChange={(next) => update(path, next === 'on' ? enabledValue : 0)}
+        />
+        <NumberInput
+          min={min}
+          ariaLabel={label}
+          value={on ? value : enabledValue}
+          disabled={!on}
+          onChange={(next) => update(path, next)}
+        />
+        {unit ? <span className="field-unit">{unit}</span> : null}
+      </div>
     </div>
   );
 }
@@ -763,14 +870,12 @@ export function SettingsPage({
     }
   };
 
-  const ttlHint =
-    asNumber(draft ?? {}, 'cdn.segment_max_age_secs') === 0
-      ? `自动（当前 ${recommend?.ttl_secs ?? '—'}s）`
-      : '手动值，覆盖自动推荐';
-  const capHint =
-    asNumber(draft ?? {}, 'cache.gc.max_disk_mb') === 0
-      ? `自动（当前 ${recommend?.disk_cap_mb ?? '—'} MB）`
-      : '手动值，覆盖自动推荐';
+  const limitHint =
+    recommend === null
+      ? undefined
+      : recommend.cap_source === 'manual'
+        ? '手动值，覆盖自动估算'
+        : `自动 ${formatMB(recommend.disk_cap_mb)} · ${LIMIT_LABEL[recommend.limited_by]}`;
   const catchupHint = CATCHUP_HINTS[asText(draft ?? {}, 'server.catchup_tpl')] ?? '';
   const shareOn = asBool(draft ?? {}, 'share.enabled');
   const shareRole = asText(draft ?? {}, 'share.role') === 'follower' ? 'follower' : 'master';
@@ -1070,13 +1175,13 @@ export function SettingsPage({
             <section className="settings-section">
               <div className="settings-section-head">
                 <h3>缓存与回收</h3>
-                <span className="muted">存放位置、预载与磁盘回收</span>
+                <span className="muted">容量、有效期与预载</span>
               </div>
               <div className="settings-cards">
                 <Card
-                  title="缓存配置"
-                  note="存放位置与容量"
-                  tip="缓存位置决定切片存放的地方。容量填 0 时自动处理。"
+                  title="缓存容量与回收"
+                  note="存放位置、上限与过期删除"
+                  tip="切片只保存在硬盘。上限填 0 时按磁盘空间与播放需要自动估算。"
                   actions={
                     <button
                       className="ghost"
@@ -1089,83 +1194,48 @@ export function SettingsPage({
                   }
                 >
                   <div className="fields">
-                    <Pick
-                      label="缓存位置"
-                      path="cache.backend"
-                      tip="选择切片存放的位置。"
-                      options={[
-                        { value: 'disk', label: '硬盘', desc: '重启后保留。' },
-                        { value: 'memory', label: '内存', desc: '速度更快，重启后清空。' },
-                      ]}
-                    />
                     <Text
                       label="缓存目录"
                       path="cache.disk_path"
                       tip="缓存文件的保存目录。相对程序启动目录。保存后需重启。"
                       hint="相对程序启动目录；改后需重启"
                     />
-                    <Num
-                      label="硬盘上限"
-                      path="cache.disk_max_mb"
+                    <AutoNum
+                      label="缓存上限"
+                      path="cache.limit_mb"
                       unit="MB"
-                      tip="磁盘缓存最多用多少空间。0 表示不限。两个上限同时设置时，使用较小的值。"
+                      tip="磁盘缓存最多用多少空间。0 表示自动估算。"
+                      hint={limitHint}
+                      autoValue={recommend?.disk_cap_mb}
+                      fallback={150}
                     />
-                    <Num
-                      label="内存上限"
-                      path="cache.memory_max_mb"
-                      unit="MB"
-                      tip="内存缓存最多用多少空间。0 表示不限。"
+                    <BoolPick
+                      label="自动估算"
+                      path="cache.auto_tune"
+                      tip="从真实播放流量推算切片有效期与缓存上限。"
+                      hint="关闭后沿用上次实测值"
                     />
-                    <Num
-                      label="清单条目上限"
-                      path="cache.m3u8_max_entries"
-                      tip="兼容保留。当前版本不按该值限制清单条目。"
-                      hint="兼容保留；当前未生效"
-                    />
-                    <Num
-                      label="切片条目上限"
-                      path="cache.segment_max_entries"
-                      tip="兼容保留。当前版本不按该值限制切片条目。"
-                      hint="兼容保留；当前未生效"
-                    />
-                    <Num
-                      label="切片缓存容量"
-                      path="cache.segment_cache_max_mb"
-                      unit="MB"
-                      tip="兼容保留。当前版本不使用该容量。"
-                      hint="兼容保留；当前未生效"
+                    <ToggleNum
+                      label="过期删除"
+                      path="cache.gc.max_age_secs"
+                      unit="秒"
+                      tip="切片保留的最长时间，超过后删除。关闭表示不按时间删除。"
                     />
                   </div>
-                </Card>
-                <Card
-                  title="切片缓存"
-                  note="切片索引条目上限"
-                  tip="这些值只限制系统记录的切片条数，不直接限制磁盘空间。0 表示使用默认值。"
-                >
-                  <div className="fields">
-                    <Num
-                      label="全局条目上限"
-                      path="cache.segments.global_max"
-                      tip="所有频道的切片索引总上限。0 表示不限，与内存上限取更小者。"
-                      hint="0 = 不限；与「内存上限」取更小者"
-                    />
-                    <Num
-                      label="单频道上限"
-                      path="cache.segments.per_channel_max"
-                      tip="单个频道保留的切片索引数。0 表示使用内置默认 4096。"
-                      hint="0 = 仅用内置默认 4096"
-                    />
-                    <Num
-                      label="保留条数"
-                      path="cache.segments.retain_count"
-                      tip="每个清单保留的切片引用数。"
-                    />
-                  </div>
+                  {recommend ? (
+                    <div className="hint">
+                      {`已用 ${formatBytes(recommend.segment_cache_bytes)} · 索引 ${formatBytes(
+                        recommend.segment_index_bytes,
+                      )} / ${formatBytes(recommend.segment_index_limit_bytes)} · 上次回收 ${formatAgo(
+                        recommend.gc_last_run_secs_ago,
+                      )}`}
+                    </div>
+                  ) : null}
                 </Card>
                 <Card
                   title="缓存有效期"
-                  note="订阅、清单与切片的 TTL"
-                  tip="过期后重新向上游读取。填 0 时按 1 秒处理；标注「兼容保留」的字段当前未生效。"
+                  note="订阅地址与切片的 TTL"
+                  tip="过期后重新向上游读取。切片填 0 表示自动：有实测用实测值，无实测用 600 秒。"
                 >
                   <div className="fields">
                     <Num
@@ -1174,164 +1244,115 @@ export function SettingsPage({
                       unit="秒"
                       tip="订阅地址缓存的有效期。填 0 时按 1 秒处理。"
                     />
-                    <Num
+                    <AutoNum
                       label="切片有效期"
                       path="cache.ttl.segment_secs"
                       unit="秒"
-                      tip="切片 Cache-Control 的有效期。填 0 时按 1 秒处理。"
-                    />
-                    <Num
-                      label="刷新比例"
-                      path="cache.ttl.refresh_ratio"
-                      step={0.05}
-                      tip="兼容保留。当前版本未读取该值。"
-                      hint="兼容保留；当前未生效"
-                    />
-                    <Num
-                      label="MPD 兜底有效期"
-                      path="cache.ttl.fallback_mpd_secs"
-                      unit="秒"
-                      tip="兼容保留。当前版本未读取该值。"
-                      hint="兼容保留；当前未生效"
+                      tip="切片 Cache-Control 的有效期。0 表示自动。"
+                      autoValue={recommend?.ttl_secs}
+                      fallback={600}
                     />
                   </div>
                 </Card>
-                <Card
-                  title="Remux"
-                  note="转封装切片时长与重连"
-                  tip="只影响 remux 分组。切片越短起播越快，上游请求也越多。"
-                >
-                  <div className="fields">
-                    <Num
-                      label="目标切片时长"
-                      path="cache.remux.target_duration_secs"
-                      unit="秒"
-                      step={0.5}
-                      tip="重新封装后每个切片的时长。"
-                    />
-                    <Num
-                      label="窗口切片数"
-                      path="cache.remux.window_segments"
-                      unit="个"
-                      tip="清单中保留的切片数。"
-                    />
-                    <Num
-                      label="发布延迟"
-                      path="cache.remux.publish_delay_segments"
-                      unit="个"
-                      tip="生成后延迟多少个切片再发布，用来吸收上游抖动。"
-                    />
-                    <NumList
-                      label="重连退避"
-                      path="cache.remux.reconnect_backoff_ms"
-                      unit="ms"
-                      tip="上游断开后的重连等待时间，按顺序使用最后一个值循环。"
-                      hint="逗号分隔；例如 200, 1000, 2000"
-                    />
+                <details className="block">
+                  <summary>高级设置 · 预载、Remux、单频道索引</summary>
+                  <div className="settings-cards">
+                    <Card
+                      title="切片索引"
+                      note="单频道索引条目"
+                      tip="这些值只限制系统记录的切片条数，不直接限制磁盘空间。0 表示使用默认值。"
+                    >
+                      <div className="fields">
+                        <AutoNum
+                          label="单频道索引条目上限"
+                          path="cache.segments.per_channel_max"
+                          tip="单个频道保留的切片索引数。0 表示使用内置默认 4096。"
+                          autoValue={4096}
+                          fallback={4096}
+                        />
+                      </div>
+                    </Card>
+                    <Card
+                      title="预载配置"
+                      note="仅服务器转发模式生效"
+                      tip="提前读取后面的切片，减少起播后的卡顿。并发过高会占用上行带宽。"
+                    >
+                      <div className="fields">
+                        <BoolPick
+                          label="预载"
+                          path="cache.prefetch.enabled"
+                          tip="播放前提前读取后面的切片。仅服务器转发模式生效。"
+                        />
+                        <Num
+                          label="拉取并发"
+                          path="cache.prefetch.concurrency"
+                          unit="个"
+                          tip="同时发出的预取请求数。"
+                        />
+                        <Num
+                          label="拉取超时"
+                          path="cache.prefetch.timeout"
+                          unit="秒"
+                          tip="单个预取请求的超时时间。"
+                        />
+                        <Num
+                          label="HLS 预载"
+                          path="cache.prefetch.prefetch_limit"
+                          unit="片"
+                          tip="每个清单预取的切片数。0 表示抓满清单窗口。"
+                          hint="0 = 抓满清单窗口"
+                        />
+                        <Num
+                          label="MPD 预载"
+                          path="cache.prefetch.mpd_readahead"
+                          unit="片"
+                          tip="MPD 清单向前预读的切片数。"
+                        />
+                        <Num
+                          label="跳过末尾"
+                          path="cache.prefetch.skip_tail"
+                          unit="片"
+                          tip="清单末尾不预取的切片数，避免请求还没生成的切片。"
+                          hint="清单末尾不预取"
+                        />
+                      </div>
+                    </Card>
+                    <Card
+                      title="Remux"
+                      note="转封装切片时长与重连"
+                      tip="只影响 remux 分组。切片越短起播越快，上游请求也越多。"
+                    >
+                      <div className="fields">
+                        <Num
+                          label="目标切片时长"
+                          path="cache.remux.target_duration_secs"
+                          unit="秒"
+                          step={0.5}
+                          tip="重新封装后每个切片的时长。"
+                        />
+                        <Num
+                          label="窗口切片数"
+                          path="cache.remux.window_segments"
+                          unit="个"
+                          tip="清单中保留的切片数。"
+                        />
+                        <Num
+                          label="发布延迟"
+                          path="cache.remux.publish_delay_segments"
+                          unit="个"
+                          tip="生成后延迟多少个切片再发布，用来吸收上游抖动。"
+                        />
+                        <NumList
+                          label="重连退避"
+                          path="cache.remux.reconnect_backoff_ms"
+                          unit="ms"
+                          tip="上游断开后的重连等待时间，按顺序使用最后一个值循环。"
+                          hint="逗号分隔；例如 200, 1000, 2000"
+                        />
+                      </div>
+                    </Card>
                   </div>
-                </Card>
-                <Card
-                  title="预载配置"
-                  note="仅服务器转发模式生效"
-                  tip="提前读取后面的切片，减少起播后的卡顿。并发过高会占用上行带宽。"
-                >
-                  <div className="fields">
-                    <BoolPick
-                      label="预载"
-                      path="cache.prefetch.enabled"
-                      tip="播放前提前读取后面的切片。仅服务器转发模式生效。"
-                    />
-                    <Num
-                      label="拉取并发"
-                      path="cache.prefetch.concurrency"
-                      unit="个"
-                      tip="同时发出的预取请求数。"
-                    />
-                    <Num
-                      label="拉取超时"
-                      path="cache.prefetch.timeout"
-                      unit="秒"
-                      tip="单个预取请求的超时时间。"
-                    />
-                    <Num
-                      label="HLS 预载"
-                      path="cache.prefetch.prefetch_limit"
-                      unit="片"
-                      tip="每个清单预取的切片数。0 表示抓满清单窗口。"
-                      hint="0 = 抓满清单窗口"
-                    />
-                    <Num
-                      label="MPD 预载"
-                      path="cache.prefetch.mpd_readahead"
-                      unit="片"
-                      tip="MPD 清单向前预读的切片数。"
-                    />
-                    <Num
-                      label="跳过末尾"
-                      path="cache.prefetch.skip_tail"
-                      unit="片"
-                      tip="清单末尾不预取的切片数，避免请求还没生成的切片。"
-                      hint="清单末尾不预取"
-                    />
-                  </div>
-                </Card>
-                <Card
-                  title="磁盘回收"
-                  note="1 GB 盘的硬前提"
-                  tip="超过上限或超龄时自动删除切片。1 GB 小盘必须开启。"
-                >
-                  <div className="fields">
-                    <BoolPick
-                      label="磁盘回收"
-                      path="cache.gc.enabled"
-                      tip="超过上限或超龄时自动删除切片。"
-                    />
-                    <Num
-                      label="占用上限"
-                      path="cache.gc.max_disk_mb"
-                      unit="MB"
-                      tip="磁盘缓存上限。0 表示按可用空间自动推荐。"
-                      hint={capHint}
-                    />
-                    <Num
-                      label="超龄删除"
-                      path="cache.gc.max_age_secs"
-                      unit="秒"
-                      tip="切片保留的最长时间，超过后删除。"
-                    />
-                    <Num
-                      label="扫描周期"
-                      path="cache.gc.interval_secs"
-                      unit="秒"
-                      tip="两次回收扫描的间隔，服务内下限 30 秒。"
-                    />
-                    <Num
-                      label="单轮上限"
-                      path="cache.gc.scan_limit"
-                      unit="个文件"
-                      tip="每轮最多检查的文件数，避免一次扫描占用太久。"
-                    />
-                    <Num
-                      label="可用占比"
-                      path="cache.gc.disk_budget_ratio"
-                      step={0.05}
-                      tip="自动上限最多占磁盘可用空间的比例，默认 0.8。"
-                      hint="自动上限最多占可用空间的比例"
-                    />
-                    <Num
-                      label="预留"
-                      path="cache.gc.reserve_mb"
-                      unit="MB"
-                      tip="计算自动上限时为系统预留的空间。"
-                    />
-                    <Num
-                      label="自动下限"
-                      path="cache.gc.min_mb"
-                      unit="MB"
-                      tip="自动上限不会低于这个值。"
-                    />
-                  </div>
-                </Card>
+                </details>
               </div>
             </section>
 
@@ -1343,7 +1364,7 @@ export function SettingsPage({
               <div className="settings-cards">
                 <Card
                   title="CDN 兜底"
-                  note="外部 CDN 没有生效时，由本机补齐缓存头和错误状态；默认关闭"
+                  note="CDN 兜底只控制响应头与空体状态；缓存时长在缓存区设置"
                   tip="开启后由本机补齐缓存头与失败状态码，避免 CDN 缓存空响应。"
                 >
                   <div className="fields">
@@ -1352,19 +1373,6 @@ export function SettingsPage({
                       path="cdn.enabled"
                       tip="关闭时，响应头与状态码使用默认值。"
                       hint="关闭时使用默认行为"
-                    />
-                    <BoolPick
-                      label="被动实测"
-                      path="cdn.auto_tune"
-                      tip="从真实播放流量推算参数，不需要主动压测。"
-                      hint="从真实播放流量推算推荐值"
-                    />
-                    <Num
-                      label="切片缓存时长"
-                      path="cdn.segment_max_age_secs"
-                      unit="秒"
-                      tip="切片在 CDN 缓存多久。0 表示使用推荐值。"
-                      hint={ttlHint}
                     />
                     <Num
                       label="源失败时状态码"

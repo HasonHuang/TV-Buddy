@@ -709,7 +709,6 @@ export function Overview({
       )
     : ['0.00', '0.00', '0.00'];
   const groupModes = (status?.group_modes ?? {}) as Record<string, number>;
-  const cacheBackend = text(status, 'cache_backend') === 'memory' ? '内存' : '硬盘';
   const version = status?.version ? `v${status.version}` : '—';
   const bind = text(status, 'bind');
   const cachePath = text(status, 'cache_disk_path');
@@ -1128,10 +1127,6 @@ export function Overview({
               <div className="kv">
                 <span>运行时长</span>
                 <b>{formatUptime(uptimeSecs)}</b>
-              </div>
-              <div className="kv">
-                <span>缓存位置</span>
-                <b className="mono">{cacheBackend}</b>
               </div>
               <div className="kv">
                 <span>监听地址</span>
