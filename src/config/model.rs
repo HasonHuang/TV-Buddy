@@ -57,6 +57,9 @@ impl Config {
 
     /// 补齐默认值。
     pub fn normalize(&mut self) {
+        if self.cache.disk_path.trim().is_empty() {
+            self.cache.disk_path = "./cache".into();
+        }
         for group in &mut self.groups {
             if group.origin.trim().is_empty() {
                 group.origin = "manual".to_string();
@@ -295,6 +298,10 @@ pub struct CacheCfg {
     /// 总量受 [`CacheCfg::memory_max_mb`] 限制。索引与清单仍按原路径处理。
     pub backend: String,
     pub disk_path: String,
+    /// 磁盘缓存总上限（MB），包含正文与索引；`0` = 自动。
+    pub limit_mb: u64,
+    /// 被动采样开关；关闭后沿用上次实测，不冻结上限。
+    pub auto_tune: bool,
     /// 内存清单条数上限。目标同键**未观测到生效**（S-CACHE-03）；本实现保留键面，
     /// 不消费（U-10）。
     pub m3u8_max_entries: u64,
@@ -328,6 +335,8 @@ impl Default for CacheCfg {
         Self {
             backend: "disk".into(),
             disk_path: "./cache".into(),
+            limit_mb: 0,
+            auto_tune: true,
             m3u8_max_entries: 500,
             segment_max_entries: 2000,
             disk_max_mb: 0,
@@ -1631,6 +1640,22 @@ mod tests {
         let encoded = serde_json::to_value(&config).expect("序列化");
         let decoded: Config = serde_json::from_value(encoded).expect("再解析");
         assert_eq!(decoded.cache.remux.reconnect_backoff_ms, vec![100, 500]);
+    }
+
+    #[test]
+    fn new_cache_keys_have_disk_only_defaults() {
+        let cache = Config::default().cache;
+        assert_eq!(cache.disk_path, "./cache");
+        assert_eq!(cache.limit_mb, 0);
+        assert!(cache.auto_tune);
+    }
+
+    #[test]
+    fn normalize_fills_empty_cache_disk_path() {
+        let mut config = Config::default();
+        config.cache.disk_path = "  ".into();
+        config.normalize();
+        assert_eq!(config.cache.disk_path, "./cache");
     }
 
     #[test]

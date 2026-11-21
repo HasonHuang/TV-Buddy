@@ -138,6 +138,7 @@ mod tests {
         let mut config = Config::default();
         config.server.bind = "127.0.0.1:1234".into();
         config.cache.gc.max_disk_mb = 120;
+        config.cache.limit_mb = 120;
         // 未建模键会落进 extra，必须跟着往返。
         config.epg.extra.insert(
             "custom_flag".into(),
@@ -148,6 +149,7 @@ mod tests {
         let loaded = store.load().expect("读取").expect("有配置");
         assert_eq!(loaded.server.bind, "127.0.0.1:1234");
         assert_eq!(loaded.cache.gc.max_disk_mb, 120);
+        assert_eq!(loaded.cache.limit_mb, 120);
         // 未建模段跟着走。
         assert_eq!(
             loaded.epg.extra.get("custom_flag"),

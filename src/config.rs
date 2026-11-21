@@ -21,6 +21,12 @@ pub fn validate(config: &Config) -> anyhow::Result<()> {
     if config.server.bind.trim().is_empty() {
         bail!("server.bind 不能为空");
     }
+    if config.cache.disk_path.trim().is_empty() {
+        bail!("cache.disk_path 不能为空");
+    }
+    if (1..60).contains(&config.cache.gc.max_age_secs) {
+        bail!("cache.gc.max_age_secs 必须是 0 或至少 60");
+    }
     let window = config.auth.slice_sign_window_secs;
     if !(crate::sign::WINDOW_MIN..=crate::sign::WINDOW_MAX).contains(&window) {
         bail!(
@@ -394,6 +400,25 @@ mod tests {
     #[test]
     fn default_config_is_valid() {
         validate(&Config::default()).expect("默认配置应合法");
+    }
+
+    #[test]
+    fn validate_rejects_empty_cache_disk_path() {
+        let mut config = Config::default();
+        config.cache.disk_path = "  ".into();
+        let error = validate(&config).expect_err("空白路径应拒绝");
+        assert!(error.to_string().contains("disk_path"), "{error}");
+    }
+
+    #[test]
+    fn validate_rejects_short_gc_max_age() {
+        let mut config = Config::default();
+        config.cache.gc.max_age_secs = 59;
+        assert!(validate(&config).is_err());
+        config.cache.gc.max_age_secs = 60;
+        validate(&config).expect("60 秒起合法");
+        config.cache.gc.max_age_secs = 0;
+        validate(&config).expect("0 表示关闭");
     }
 
     #[test]
