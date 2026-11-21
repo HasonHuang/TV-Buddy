@@ -4087,6 +4087,11 @@ async fn dash_mode_converts_mpd_to_hls_and_proxies_segments() {
         .expect("请求切片");
     assert_eq!(segment.status(), StatusCode::OK);
     assert_eq!(
+        header(&segment, "cache-control"),
+        "public, max-age=600",
+        "DASH 切片与主动切片共用 TTL；无实测时用 600 秒回退"
+    );
+    assert_eq!(
         segment.bytes().await.expect("读切片").as_ref(),
         b"dash-segment"
     );

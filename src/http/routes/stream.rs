@@ -42,6 +42,19 @@ const REWRITE_CACHE: &str = "no-cache, must-revalidate";
 const MASTER_CACHE: &str = "no-cache, no-store";
 /// 清单缺 `#EXT-X-TARGETDURATION` 时的缓存窗口（秒）。
 const DEFAULT_TARGET_DURATION: u64 = 6;
+/// 切片 TTL（秒）：手动值优先；`0` 时用实测推荐值，无实测用 600 秒回退。
+pub(crate) fn segment_ttl_secs(state: &AppState) -> u64 {
+    let config = state.snapshot();
+    if config.cache.ttl.segment_secs != 0 {
+        config.cache.ttl.segment_secs
+    } else {
+        state
+            .estimate
+            .ttl_secs()
+            .unwrap_or(crate::cache_estimate::FALLBACK_TTL_SECS)
+    }
+}
+
 /// 切片缓存头；`[cache.ttl].segment_secs` 控制时长。
 ///
 /// `[cdn].enabled` 只控制响应头范围，不再控制 TTL 取值：
@@ -49,14 +62,7 @@ const DEFAULT_TARGET_DURATION: u64 = 6;
 /// CDN 开启且命中路径可共享时转 `public`（`docs/design/06-low-spec-optimization.md` §6）。
 fn segment_cache_control(state: &AppState, first: bool) -> String {
     let config = state.snapshot();
-    let secs = if config.cache.ttl.segment_secs != 0 {
-        config.cache.ttl.segment_secs
-    } else {
-        state
-            .estimate
-            .ttl_secs()
-            .unwrap_or(crate::cache_estimate::FALLBACK_TTL_SECS)
-    };
+    let secs = segment_ttl_secs(state);
     let scope = if !config.cdn.enabled {
         if first {
             "public"

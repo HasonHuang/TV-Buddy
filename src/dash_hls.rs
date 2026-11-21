@@ -466,7 +466,7 @@ impl Manager {
         let slice = crate::sign::prefix(&state.snapshot(), gid, cid);
         let segment_cache = format!(
             "public, max-age={}",
-            state.snapshot().cache.ttl.segment_secs.max(1)
+            crate::http::routes::stream::segment_ttl_secs(state)
         );
         let upstream = self.upstream(gid, cid).unwrap_or(configured);
         let (track, file) = rest.split_once('/')?;
