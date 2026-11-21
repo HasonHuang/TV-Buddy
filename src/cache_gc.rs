@@ -254,7 +254,9 @@ async fn tick(state: &Arc<AppState>) {
     }
     let root = state.cache_dir.clone();
     let dirs: Vec<PathBuf> = SWEPT_DIRS.iter().map(|name| root.join(name)).collect();
-    let working = state.estimate.working_mb();
+    let working = state
+        .estimate
+        .working_mb(crate::cache_estimate::MIN_CONCURRENT_CHANNELS);
     let space = fs_space(&root);
     if space.is_none() {
         tracing::warn!(dir = %root.display(), "读磁盘空间失败；按回退值回收");
@@ -283,7 +285,9 @@ async fn tick(state: &Arc<AppState>) {
 pub fn recommendation(state: &AppState) -> serde_json::Value {
     let config = state.snapshot();
     let measured_ttl = state.estimate.ttl_secs();
-    let working = state.estimate.working_mb();
+    let working = state
+        .estimate
+        .working_mb(crate::cache_estimate::MIN_CONCURRENT_CHANNELS);
     let space = fs_space(&state.cache_dir);
 
     let ttl_manual = config.cdn.segment_max_age_secs != 0;

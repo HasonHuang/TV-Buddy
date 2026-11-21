@@ -5,7 +5,7 @@
 //! - 清单解析得到 `#EXT-X-TARGETDURATION`（T）、`#EXTINF` 条数（N）与窗口时长（W）；
 //! - 切片体积按分组做 EMA（α=0.3），**不为估算多打一次上游**；
 //! - 推荐 TTL = `clamp(ceil60(W + 2T), 300, 900)`，取各分组最大值；
-//! - 工作集 = `round10(3 × N × seg_mb × 1.5)`；
+//! - 工作集 = `round10(参与计算的频道数 × N × seg_mb × 1.5)`；
 //! - `[cdn].auto_tune = false` 时不采集，只沿用已落盘的旧值。
 //!
 //! 统计落盘到 `<cache>/cache_estimate.json`（带 schema 版本），重启后延续。
@@ -31,6 +31,8 @@ pub const MB: u64 = 1_000_000;
 pub const FALLBACK_TTL_SECS: u64 = 600;
 /// 无实测数据时的回退磁盘上限（MB）。
 pub const FALLBACK_DISK_MB: u64 = 150;
+/// 临时下限：暂无实测活跃频道数时按 3 个并发频道估。
+pub const MIN_CONCURRENT_CHANNELS: u64 = 3;
 
 /// 推荐 TTL 下限（秒）：覆盖重连与回退。
 const TTL_MIN_SECS: u64 = 300;
@@ -42,8 +44,6 @@ const EMA_ALPHA: f64 = 0.3;
 const PERSIST_MIN_SECS: u64 = 300;
 /// 估算文件的结构版本；不匹配时丢弃旧文件。
 const SCHEMA_VERSION: u32 = 1;
-/// 磁盘工作集按 3 个并发频道估。
-const CONCURRENT_CHANNELS: f64 = 3.0;
 /// 工作集余量：另有 2 个频道可能随时开播。
 const WORKING_HEADROOM: f64 = 1.5;
 
@@ -198,15 +198,15 @@ impl Estimator {
             .max()
     }
 
-    /// 工作集（MB）：`round10(3 × N × seg_mb × 1.5)`；缺窗口或切片体积时返回 `None`。
-    pub fn working_mb(&self) -> Option<u64> {
+    /// 工作集（MB）：`round10(参与计算的频道数 × N × seg_mb × 1.5)`；缺窗口或切片体积时返回 `None`。
+    pub fn working_mb(&self, working_channels: u64) -> Option<u64> {
         let mut best: Option<f64> = None;
         for stat in self.read().values() {
             let (Some(window), Some(seg_bytes)) = (stat.window.as_ref(), stat.seg_bytes) else {
                 continue;
             };
             let seg_mb = seg_bytes / MB as f64;
-            let value = CONCURRENT_CHANNELS * window.count as f64 * seg_mb * WORKING_HEADROOM;
+            let value = working_channels as f64 * window.count as f64 * seg_mb * WORKING_HEADROOM;
             best = Some(best.map_or(value, |prev| prev.max(value)));
         }
         best.map(round10)
@@ -344,10 +344,23 @@ mod tests {
         for _ in 0..40 {
             estimator.observe_segment("g", 4_463_308);
         }
-        assert!(estimator.working_mb().is_none(), "缺窗口参数时无工作集");
+        assert!(estimator.working_mb(3).is_none(), "缺窗口参数时无工作集");
         estimator.observe_playlist("g", &playlist());
-        // 3 × 7 × 4.463308 × 1.5 = 140.6 → round10 = 140（设计稿 §3.3 第 1 行）。
-        assert_eq!(estimator.working_mb(), Some(140), "EMA 收敛后与设计稿一致");
+        // 3 个频道：7 片 × 4.463308 MB × 1.5 × 3 = 140.6 → round10 = 140（设计稿 §3.3 第 1 行）。
+        assert_eq!(estimator.working_mb(3), Some(140), "EMA 收敛后与设计稿一致");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn working_set_scales_with_channel_count() {
+        let dir = temp_dir("channels");
+        let estimator = Estimator::load_or_default(&dir);
+        for _ in 0..40 {
+            estimator.observe_segment("g", 4_463_308);
+        }
+        estimator.observe_playlist("g", &playlist());
+        assert_eq!(estimator.working_mb(3), Some(140));
+        assert_eq!(estimator.working_mb(6), Some(280));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -356,7 +369,7 @@ mod tests {
         let dir = temp_dir("empty");
         let estimator = Estimator::load_or_default(&dir);
         assert!(estimator.ttl_secs().is_none());
-        assert!(estimator.working_mb().is_none());
+        assert!(estimator.working_mb(3).is_none());
         assert_eq!(estimator.group_count(), 0);
         assert!(estimator.updated_secs_ago().is_none());
         let _ = std::fs::remove_dir_all(&dir);
@@ -388,7 +401,7 @@ mod tests {
 
         let reloaded = Estimator::load_or_default(&dir);
         assert_eq!(reloaded.ttl_secs(), estimator.ttl_secs());
-        assert_eq!(reloaded.working_mb(), estimator.working_mb());
+        assert_eq!(reloaded.working_mb(3), estimator.working_mb(3));
         assert_eq!(reloaded.group_count(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -423,14 +436,14 @@ mod tests {
         estimator.observe_playlist("g", &playlist());
         estimator.observe_segment("g", 4_463_308);
         assert!(estimator.ttl_secs().is_none());
-        assert!(estimator.working_mb().is_none());
+        assert!(estimator.working_mb(3).is_none());
         assert!(!dir.join("cache_estimate.json").exists(), "关闭后不落盘");
 
         // 「立即估算」不受 auto_tune 门控。
         estimator.probe_playlist("g", &playlist());
         estimator.probe_segment("g", 4_463_308);
         assert_eq!(estimator.ttl_secs(), Some(300));
-        assert!(estimator.working_mb().is_some());
+        assert!(estimator.working_mb(3).is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
