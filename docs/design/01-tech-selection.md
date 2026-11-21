@@ -190,9 +190,12 @@
 | 入口地址与 302 规则 | 未知频道、`access` 四档、`archived` | `S-URL-01/02/03` |
 | 反代与清单重写 | proxy 模式切片改写；rewrite 绝对化 | `S-MODE-03/05` |
 | 切片伪装 | `<S>` 与目标逐字节一致；扩展名→`Content-Type` | `S-DIS-01/02` |
-| 缓存窗口 | 首写 `public, max-age=300`；命中 `private, max-age=300` | `S-CACHE-01` |
+| 缓存窗口 | 首写 `public, max-age=<TTL>`；命中 `private, max-age=<TTL>` | `S-CACHE-01` |
 | Token 鉴权 | `?token=<48hex>`；失效 302 `token_failure_url` | `S-AUTH-01` |
 | 面板登录 | `POST /panel/api/login` 返回 UUID token；`Bearer`/`X-Token` 均可用 | `S-AUTH-02` |
+
+> 偏差：目标实测切片 `max-age=300`。本实现由 `cache.ttl.segment_secs` 决定：
+> 手动值优先；否则用实测值；无实测用 600 秒。CDN 开/关都生效。
 
 判据通过条件：与目标实例**逐条对拍**一致；差异须登记 `D-*`。
 
