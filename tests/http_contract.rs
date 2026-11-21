@@ -6271,6 +6271,7 @@ async fn cache_stats_includes_recommendation() {
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     // 已有键不变。
     assert!(body.get("backend").is_none(), "单后端不再返回 backend");
+    assert!(body["cdn_enabled"].is_boolean(), "{body}");
     assert!(body["entries"].is_object(), "{body}");
     assert!(body["bytes"].is_u64(), "{body}");
     assert!(body["playlist_cache_entries"].is_u64(), "{body}");
@@ -6289,6 +6290,45 @@ async fn cache_stats_includes_recommendation() {
     assert_eq!(body["recommend"]["ttl_source"], "fallback", "{body}");
     assert!(body["recommend"]["disk_cap_mb"].is_u64(), "{body}");
     assert!(body["recommend"]["segment_body_bytes"].is_u64(), "{body}");
+    assert_eq!(body["recommend"]["channels"], 0, "{body}");
+    assert_eq!(body["recommend"]["working_channels"], 3, "{body}");
+    assert!(body["recommend"]["limited_by"].is_string(), "{body}");
+    assert!(
+        body["recommend"]["segment_index_limit_bytes"].is_u64(),
+        "{body}"
+    );
+    assert!(
+        body["recommend"].get("seg_bytes").is_none(),
+        "旧字段 seg_bytes 不再返回: {body}"
+    );
+}
+
+#[tokio::test]
+async fn unknown_channel_is_not_counted_as_active() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    // 未配置的频道与路径：服务照常答复，但不能进入活动频道表。
+    fixture
+        .client
+        .get(format!("{}/unknown/unknown/x", fixture.base))
+        .send()
+        .await
+        .expect("未知频道请求");
+
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/cache/stats", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("缓存统计");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(
+        body["recommend"]["channels"], 0,
+        "未知路径不能增加活跃频道数: {body}"
+    );
 }
 
 #[tokio::test]

@@ -166,6 +166,31 @@ mod tests {
     }
 
     #[test]
+    fn load_clamps_short_gc_max_age() {
+        let (store, dir) = temp_store("short-gc-age");
+        let raw = serde_json::json!({
+            "cache": { "gc": { "max_age_secs": 30 } },
+            "groups": [{ "id": "g", "name": "组", "mode": "proxy", "access": "public" }]
+        });
+        store
+            .conn
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .execute(
+                "INSERT INTO settings (key, value, updated_at_ms) VALUES (?1, ?2, 0)",
+                params![CONFIG_KEY, raw.to_string()],
+            )
+            .expect("写入配置");
+
+        let loaded = store.load().expect("读取").expect("有配置");
+        assert_eq!(
+            loaded.cache.gc.max_age_secs, 60,
+            "旧库 1..=59 加载时夹到 60"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn rejects_invalid_config() {
         let (store, dir) = temp_store("invalid");
         let mut config = Config::default();

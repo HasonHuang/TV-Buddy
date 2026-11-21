@@ -257,6 +257,9 @@
 
 ### 3.1.7 P2-5 完成记录（2026-10-28）
 
+> 2026-11-21 缓存配置收敛已删除内存后端。只保留磁盘后端；`cache.backend`、
+> `cache.memory_max_mb` 与 `src/cache_memory.rs` 均已移除。以下为当时记录。
+
 `[cache].backend` 原来只回显，实际仍写磁盘。
 
 新增 `src/cache_memory.rs`。`backend = "memory"` 时：
@@ -264,7 +267,7 @@
 | 项 | 规则 |
 | --- | --- |
 | 切片正文 | 留在进程内的字典，键为 `gid/cid/suffix`，不写 `seg_bytes` |
-| 上限 | `[cache].memory_max_mb`；`0` 按 512 MB 处理 |
+| 上限 | `[cache].memory_max_mb`（已移除）；`0` 按 512 MB 处理 |
 | 淘汰 | 最近最少使用。单条超过上限时不存 |
 | 清空 | `POST /panel/api/cache/flush` 一并清空，计入返回的释放字节 |
 | 重启 | 全部丢失。这与磁盘后端不同，面板文案已写明 |
@@ -462,7 +465,7 @@
 | 分组「多选」的批量语义 | ✅ | 自定：批量导出（合成 JSON 数组）与批量删除。目标语义未观测。`frontend/src/groups.tsx:409`、`:428` |
 | `traffic_in_bytes` 恒 0 | ✅ | 固定输出 0。复刻目标缺陷，不要"修"。`src/http/routes/panel.rs:134`。S-BUG-01 |
 | `[share].share_token` | ❌ | 未实现。实测 `share_token=false` 时 `/api/share/pull` 载荷里仍有 Token（F-013），所以该键不控制载荷。面板文案「同时分享 token」与实际行为不符，语义未知，不猜 |
-| 缓存容量上限（3 键） | ❌ | 未实现。目标侧 `segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries` 均未观测到生效（S-CACHE-03）。复刻「不生效」才与目标一致；真正的上限由 `[cache.gc]` 与 `[cache.segments]` 提供 |
+| 缓存容量上限（3 键） | ✅ 已由新键替代 | 目标的 `segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries` 均未观测到生效（S-CACHE-03），旧键仍不读取。本实现的容量上限由 `[cache].limit_mb` 提供：每 60 秒回收切片正文与索引（2026-11-21） |
 | `[subtitle].style.*` 样式注入 | ❌ | 未实现。本实现没有面向播放器的字幕出口，注入样式无处生效 |
 | 播放侧 `compat_mode`、`srt_ua_keywords` | ❌ | 未实现。目标未测出行为（D19），不猜 |
 | DASH 文字轨出口 | ✅ 保留 | 目标夹具里不写 master。本实现输出 `SUBTITLES` 组，是超集，不影响播放 |
@@ -874,8 +877,8 @@ MPD 清单层保持单地址：`channel.url` 不支持多值（F-015 §1.3）。
 | P2-2 | `[auth]` 的 `l1/l2` 限流、违规计数、升级封禁（13 个键） | ✅ 已实现（2026-10-28）。只计播放入口请求；L2 突发、L1 持续；违规衰减后升级封禁；登录锁按阶梯升级。全部在 `ip_guard_enabled=true` 时生效 | F-010 |
 | P2-3 | `random_id_enabled`（播放链接随机化） | ✅ 已实现（2026-10-28）。导入 M3U 时忽略 `tvg-id`，新频道取 `r-<8hex>`。目标开启后已有频道与切片前缀不变，所以只影响新导入的频道 | F-010 §4 |
 | P2-4 | `[share].share_token` | ❌ 不做（2026-10-28）。实测 `share_token=false` 时载荷里仍有 Token（F-013），该键不控制 `/api/share/pull` 的内容；面板文案「同时分享 token」与实际行为不符，语义未知 | F-013、S-AUTH-06 |
-| P2-5 | `cache.backend=memory`（内存缓存后端） | ✅ 已实现（2026-10-28）。切片正文留在进程内，不写 `seg_bytes`；按 `memory_max_mb` 做 LRU 淘汰；flush 一并清空 | F-015 |
-| P2-6 | 缓存容量上限（`segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries`） | ❌ 不做（2026-10-28）。目标侧三项上限均未观测到生效（S-CACHE-03），复刻「不生效」才是一致行为。运维上限由 `[cache.gc]` 与 `[cache.segments]` 承担 | S-CACHE-03、`04` §11.5 |
+| P2-5 | `cache.backend=memory`（内存缓存后端） | ❌ 已移除（2026-11-21）。缓存收敛后只保留磁盘后端，`cache.backend` 与 `memory_max_mb` 不再存在；切片正文只写 `seg_bytes` | F-015 |
+| P2-6 | 缓存容量上限（`segment_cache_max_mb`、`m3u8_max_entries`、`segment_max_entries`） | ✅ 已实现（2026-11-21）。容量上限改由 `cache.limit_mb` 提供（`0` = 自动），回收切片正文与索引；目标侧三个旧键仍未观测到生效（S-CACHE-03），继续不读取 | S-CACHE-03、`04` §11.5 |
 
 ### 6.3 优先级 3：其他功能
 

@@ -1114,7 +1114,15 @@ export function useToast() {
   const ok = useCallback((text: string) => setToast({ kind: 'ok', text }), []);
   const err = useCallback((text: string) => setToast({ kind: 'err', text }), []);
 
-  const node = toast ? <div className={`toast ${toast.kind}`}>{toast.text}</div> : null;
+  const node = toast ? (
+    <div
+      className={`toast ${toast.kind}`}
+      role={toast.kind === 'err' ? 'alert' : 'status'}
+      aria-live={toast.kind === 'err' ? 'assertive' : 'polite'}
+    >
+      {toast.text}
+    </div>
+  ) : null;
 
   return { node, ok, err };
 }

@@ -435,8 +435,10 @@ http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 | --- | --- | --- |
 | `[cache.segments]` | `per_channel_max` | 每频道切片上限 |
 | `[cache.prefetch]` | `enabled`、`concurrency` | 预取开关与并发 |
-| `[cache.gc]` | `max_disk_mb` | 磁盘回收上限。`0` 按可用空间自动 |
-| `[cdn]` | `enabled`、`auto_tune` | CDN 兜底与推荐值实测 |
+| `[cache]` | `limit_mb`、`auto_tune` | 磁盘缓存总上限（`0` = 自动）与自动估算开关 |
+| `[cache.ttl]` | `sub_url_secs`、`segment_secs` | 订阅地址与切片有效期（`segment_secs = 0` = 自动） |
+| `[cache.gc]` | `max_age_secs` | 过期删除；`0` = 不按时间删除 |
+| `[cdn]` | `enabled` | CDN 兜底（只控制响应头与错误状态） |
 | `[subtitle.translate]` | `enabled`、`url` | 字幕机翻 |
 | `[epg.translate]` | `enabled`、`mtran_url` | 节目单翻译 |
 | `[[groups]]` | `mode`、`format`、`mpd_keep_seconds` | 分组行为 |
@@ -726,7 +728,7 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 - **平台**：Linux amd64/arm64、macOS arm64。Windows 不在支持范围。macOS 不提供系统服务集成。
 - **Remux**：纯 Rust 切片。冷启动时在首批切片产出前返回 `503 remux warming up`，不是恒 503。
 - **DASH**：已把 MPD 转成 HLS。需要 `SegmentTimeline`，或 `SegmentTemplate@duration` 加总时长。CENC/ClearKey 不解密，按原字节代理。
-- **缓存**：无容量上限校验。`cache.backend=memory` 只回显，实际仍落盘。
+- **缓存**：只有磁盘后端，切片正文不进入进程内存。`cache.limit_mb` 是每 60 秒扫描后的回收目标，不是实时硬上限；两次扫描之间占用可能短时超过上限。
 - **EPG**：录制前后缓冲与部分私有端点未实现。公开 EPG 页与全局 `/epg.xml` 已删除，改用 `/sub/<令牌>/epg.xml` 或面板「节目指南」。
 - **订阅托管**：同步一次写整份配置。大清单会增加写入时间。单源上限 20000 条，空清单默认拦截。上游分组改名按旧组删除、新组创建处理。
 - **探测下线**：只在下一次探测后生效。默认周期 300 秒。只隐藏订阅清单，直接播放地址仍可用。

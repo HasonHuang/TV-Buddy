@@ -499,16 +499,20 @@ async fn serve_rest(
 ) -> Response {
     // 签名开启后，本地切片一律要求带签名。入口别名 `index.m3u8` 除外：
     // 它自己会做令牌校验。
+    let resolved = resolve(config, gid, cid);
     if crate::sign::enabled(config) && !authorized && rest != "index.m3u8" {
         let local = matches!(
-            resolve(config, gid, cid).map(|(group, _)| group.mode),
-            Some(mode) if mode == "proxy" || mode == "remux" || mode == "dash"
+            resolved.as_ref().map(|(group, _)| group.mode.as_str()),
+            Some("proxy" | "remux" | "dash")
         );
         if local {
             return redirect_asset(config, &config.auth.token_failure_url);
         }
     }
-    state.segments.note_channel(gid, cid);
+    // 只统计配置里存在的频道：未知路径不能撑大活动表。
+    if resolved.is_some() {
+        state.segments.note_channel(gid, cid);
+    }
     if let Some(name) = rest.strip_prefix("timeshift/") {
         return state
             .timeshift
@@ -534,7 +538,7 @@ async fn serve_rest(
     if let Some(response) = state.remux.serve(gid, cid, rest) {
         return response;
     }
-    if let Some((group, _)) = resolve(config, gid, cid) {
+    if let Some((group, _)) = resolved.as_ref() {
         if group.mode == "dash" {
             if let Some(response) = state
                 .dash_hls
@@ -567,8 +571,8 @@ async fn serve_rest(
         // 伪装切片形状）一律 `302 not_found_url`。只有 `proxy` 模式的切片分支才用
         // `error_url`，两者不能混。
         _ if !matches!(
-            resolve(config, gid, cid).map(|(group, _)| group.mode),
-            Some(mode) if mode == "proxy"
+            resolved.as_ref().map(|(group, _)| group.mode.as_str()),
+            Some("proxy")
         ) =>
         {
             placeholder(config)

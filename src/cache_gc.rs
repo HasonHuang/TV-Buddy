@@ -3,7 +3,7 @@
 //! 依据 `docs/design/06-low-spec-optimization.md` §6.2：
 //!
 //! - 上限 = `clamp(min(工作集, 可用空间 × ratio − reserve), min_mb, total × 0.7)`；
-//! - 淘汰三段：超龄 → 超量 LRU（按 mtime）→ 磁盘见底进入紧急模式；
+//! - 淘汰：超龄 → 索引子预算（上限的 10%）→ 超量 LRU（按 mtime）→ 磁盘见底进入紧急模式；
 //! - 用 mtime LRU 而**不是**按频道整组淘汰：`segment_path` 的文件名经过 `slug()`，
 //!   标识超 48 字符或含非字母数字时被替换成 SHA-256，无法反解回 `gid/cid`；
 //!   而直播切片的 mtime 本身就是热度信号（正在看的频道刚被写过），LRU 等价且更简单。
@@ -166,7 +166,7 @@ pub fn plan(explicit_mb: u64, space: Option<(u64, u64)>, working_mb: Option<u64>
     let cap = cap_plan(explicit_mb, space, working_mb);
     Plan {
         cap_bytes: cap.cap_mb.saturating_mul(MB),
-        emergency: space.map_or(false, |(_, free)| free < RESERVE_MB),
+        emergency: space.is_some_and(|(_, free)| free < RESERVE_MB),
     }
 }
 
@@ -357,12 +357,13 @@ async fn tick(state: &Arc<AppState>) {
             if plan.emergency {
                 tracing::warn!(files, mb = bytes / MB, "可用空间低于预留，已紧急回收");
             }
+            // 只有真正完成一轮扫描才更新“上次回收”。任务失败时保留旧值。
+            state
+                .gc_last_run_epoch
+                .store(now_epoch(), std::sync::atomic::Ordering::Relaxed);
         }
         Err(error) => tracing::warn!(error = %error, "回收任务失败"),
     }
-    state
-        .gc_last_run_epoch
-        .store(now_epoch(), std::sync::atomic::Ordering::Relaxed);
 }
 
 /// 面板用推荐摘要。
@@ -457,6 +458,15 @@ mod tests {
 
         let plan = cap_plan(0, Some((2048, 2000)), Some(3000));
         assert_eq!((plan.cap_mb, plan.limited_by), (1433, LimitedBy::Ceiling));
+    }
+
+    #[test]
+    fn cap_plan_reports_budget_limit() {
+        // 可用空间预算 140 MB < 工作集 200 MB，未触顶也未触底。
+        let plan = cap_plan(0, Some((1024, 300)), Some(200));
+        assert_eq!((plan.cap_mb, plan.limited_by), (140, LimitedBy::Budget));
+        assert_eq!(plan.budget_mb, Some(140));
+        assert_eq!(plan.ceiling_mb, Some(716));
     }
 
     #[test]

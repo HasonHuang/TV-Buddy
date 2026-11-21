@@ -60,6 +60,15 @@ impl Config {
         if self.cache.disk_path.trim().is_empty() {
             self.cache.disk_path = "./cache".into();
         }
+        // 旧库可能存了 1..=59 的过期时长。校验要求 0 或 ≥60；加载时先夹到 60，
+        // 否则下一次保存会失败。
+        if (1..60).contains(&self.cache.gc.max_age_secs) {
+            tracing::warn!(
+                value = self.cache.gc.max_age_secs,
+                "cache.gc.max_age_secs 在 1..=59 之间，按 60 处理"
+            );
+            self.cache.gc.max_age_secs = 60;
+        }
         strip_legacy(
             &mut self.cache.extra,
             &[
@@ -1632,6 +1641,18 @@ mod tests {
         config.cache.disk_path = "  ".into();
         config.normalize();
         assert_eq!(config.cache.disk_path, "./cache");
+    }
+
+    #[test]
+    fn normalize_clamps_short_gc_max_age() {
+        let mut config = Config::default();
+        config.cache.gc.max_age_secs = 30;
+        config.normalize();
+        assert_eq!(config.cache.gc.max_age_secs, 60, "旧库短值夹到 60");
+
+        config.cache.gc.max_age_secs = 0;
+        config.normalize();
+        assert_eq!(config.cache.gc.max_age_secs, 0, "0 表示关闭，保持不变");
     }
 
     #[test]

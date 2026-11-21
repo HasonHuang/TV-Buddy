@@ -39,6 +39,17 @@ pub const DEFAULT_INDEX_MAX: usize = 4096;
 /// 清掉，空闲进程的内存索引算术上收敛到 0。
 pub const INDEX_TTL_SECS: u64 = 600;
 
+/// 活动表记录的频道数上限。
+///
+/// 未知路径与扫描请求不能无限撑大活动表。达到上限后只刷新已有键，不插入新键。
+pub const MAX_ACTIVITY_CHANNELS: usize = 1024;
+
+/// 磁盘索引命中的 mtime 刷新节流（秒）。
+///
+/// 磁盘命中会刷新索引文件的 mtime，避免回收按年龄删除仍在使用的索引。
+/// 只有 mtime 超过该时长才写一次。
+pub const INDEX_TOUCH_SECS: u64 = 60;
+
 /// 内存索引容量限制；`0` 表示不限制。
 #[derive(Default, Clone, Copy)]
 struct Limits {
@@ -71,9 +82,20 @@ impl SegmentIndex {
     }
 
     /// 记下频道最近的活动时间，供 [`Self::active_channels`] 统计活跃频道数。
+    ///
+    /// 活动表最多记 [`MAX_ACTIVITY_CHANNELS`] 个频道。达到上限后只刷新已有键；
+    /// 新键丢弃，避免未知地址撑大内存。
     pub fn note_channel(&self, gid: &str, cid: &str) {
+        let key = format!("{gid}/{cid}");
+        let now = now_epoch();
         let mut activity = self.activity.write().unwrap_or_else(|e| e.into_inner());
-        activity.insert(format!("{gid}/{cid}"), now_epoch());
+        if let Some(at) = activity.get_mut(&key) {
+            *at = now;
+            return;
+        }
+        if activity.len() < MAX_ACTIVITY_CHANNELS {
+            activity.insert(key, now);
+        }
     }
 
     /// 清掉窗口外的活动记录与超过 [`INDEX_TTL_SECS`] 的索引条目，返回剩余活跃频道数。
@@ -83,7 +105,12 @@ impl SegmentIndex {
         let active = {
             let mut activity = self.activity.write().unwrap_or_else(|e| e.into_inner());
             activity.retain(|_, at| now.saturating_sub(*at) <= window_secs);
-            activity.len()
+            let len = activity.len();
+            // 扫描或短期换台可能把表撑大；窗口清理后容量远超长度时归还内存。
+            if activity.capacity() > len.saturating_mul(2).saturating_add(64) {
+                activity.shrink_to_fit();
+            }
+            len
         };
         self.write()
             .retain(|_, entry| now.saturating_sub(entry.at) <= INDEX_TTL_SECS);
@@ -135,11 +162,16 @@ impl SegmentIndex {
     }
 
     /// 查索引：先内存，再磁盘。
+    ///
+    /// 磁盘命中后回填内存，并刷新索引文件 mtime（有节流）：VOD 或不再刷新的客户端
+    /// 即使内存条目过了 [`INDEX_TTL_SECS`]，磁盘索引也不会被按年龄或索引子预算删掉。
     pub fn get(&self, dir: &Path, gid: &str, cid: &str, suffix: &str) -> Option<Entry> {
         if let Some(entry) = self.read().get(&Self::key(gid, cid, suffix)) {
             return Some(entry.clone());
         }
+        let path = index_path(dir, gid, cid);
         let from_disk = load_index(dir, gid, cid).remove(suffix)?;
+        touch_index(&path);
         self.register(
             gid,
             cid,
@@ -176,6 +208,23 @@ pub fn load_index(dir: &Path, gid: &str, cid: &str) -> HashMap<String, Entry> {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
+}
+
+/// 磁盘命中后刷新索引文件 mtime。只有超过 [`INDEX_TOUCH_SECS`] 才写；错误忽略。
+fn touch_index(path: &Path) {
+    let Some(age) = std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+    else {
+        return;
+    };
+    if age.as_secs() < INDEX_TOUCH_SECS {
+        return;
+    }
+    if let Ok(file) = std::fs::File::open(path) {
+        let _ = file.set_modified(SystemTime::now());
+    }
 }
 
 /// 统计索引目录下直接子文件的数量与总字节；读目录失败时返回 `(0, 0)`。
@@ -357,6 +406,49 @@ mod tests {
     }
 
     #[test]
+    fn disk_hit_refreshes_index_mtime() {
+        let dir = std::env::temp_dir().join(format!("tv-buddy-seg-touch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let suffix = "c".repeat(32);
+        save_index(
+            &dir,
+            "g",
+            "c",
+            &[(
+                suffix.clone(),
+                "http://up/x.ts".to_string(),
+                "jpg".to_string(),
+            )],
+            0,
+        );
+        let path = index_path(&dir, "g", "c");
+        let old = SystemTime::now() - Duration::from_secs(INDEX_TOUCH_SECS * 3);
+        std::fs::File::open(&path)
+            .expect("打开索引")
+            .set_modified(old)
+            .expect("设置旧 mtime");
+
+        let index = SegmentIndex::new();
+        assert!(index.get(&dir, "g", "c", &suffix).is_some(), "磁盘回退命中");
+        let age = SystemTime::now()
+            .duration_since(
+                std::fs::metadata(&path)
+                    .expect("读元数据")
+                    .modified()
+                    .expect("读 mtime"),
+            )
+            .expect("mtime 不应在未来");
+        assert!(age.as_secs() < INDEX_TOUCH_SECS, "命中应刷新索引 mtime");
+        assert!(
+            index
+                .read()
+                .contains_key(&SegmentIndex::key("g", "c", &suffix)),
+            "磁盘命中应回填内存索引"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn save_index_truncates_at_max_entries() {
         let dir = std::env::temp_dir().join(format!("tv-buddy-seg-trunc-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -432,6 +524,31 @@ mod tests {
             .unwrap()
             .insert("g/c1".into(), now.saturating_sub(100));
         assert_eq!(index.active_channels(Duration::from_secs(120)), 2);
+    }
+
+    #[test]
+    fn active_channels_caps_map_size() {
+        let index = SegmentIndex::new();
+        for n in 0..MAX_ACTIVITY_CHANNELS + 10 {
+            index.note_channel("g", &format!("c{n}"));
+        }
+        assert_eq!(
+            index.activity.read().unwrap().len(),
+            MAX_ACTIVITY_CHANNELS,
+            "活动表不能超过上限"
+        );
+        // 已有键仍可刷新，不占新位置。
+        index
+            .activity
+            .write()
+            .unwrap()
+            .insert("g/c0".into(), now_epoch().saturating_sub(100));
+        index.note_channel("g", "c0");
+        assert!(index.activity.read().unwrap()["g/c0"] > now_epoch().saturating_sub(100));
+        assert_eq!(index.activity.read().unwrap().len(), MAX_ACTIVITY_CHANNELS);
+        // 达到上限后新键被丢弃。
+        index.note_channel("g", "overflow");
+        assert!(!index.activity.read().unwrap().contains_key("g/overflow"));
     }
 
     #[test]

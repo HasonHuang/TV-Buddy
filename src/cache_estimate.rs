@@ -31,7 +31,9 @@ pub const MB: u64 = 1_000_000;
 pub const FALLBACK_TTL_SECS: u64 = 600;
 /// 无实测数据时的回退磁盘上限（MB）。
 pub const FALLBACK_DISK_MB: u64 = 150;
-/// 临时下限：暂无实测活跃频道数时按 3 个并发频道估。
+/// 工作集公式的并发频道下限。
+///
+/// 实测活跃频道少于该数时按该数估算；这是永久下限，不是临时占位值。
 pub const MIN_CONCURRENT_CHANNELS: u64 = 3;
 
 /// 推荐 TTL 下限（秒）：覆盖重连与回退。
@@ -44,7 +46,7 @@ const EMA_ALPHA: f64 = 0.3;
 const PERSIST_MIN_SECS: u64 = 300;
 /// 估算文件的结构版本；不匹配时丢弃旧文件。
 const SCHEMA_VERSION: u32 = 1;
-/// 工作集余量。
+/// 工作集余量系数。按参与计算的频道数缩放，不写死频道数。
 const WORKING_HEADROOM: f64 = 1.5;
 
 /// 一次媒体清单的窗口参数。

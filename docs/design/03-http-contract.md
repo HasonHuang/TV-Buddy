@@ -346,8 +346,8 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 响应 |
 | --- | --- | --- |
-| `GET` | `/panel/api/cache/stats` | 目标字段：`disk_bytes, m3u8_entries, segment_entries, segment_url_entries, segment_body_bytes, segment_index_bytes, segment_cache_bytes, sub_url_entries, dash_disk_bytes, timeshift_disk_bytes, recording_disk_bytes, livestream_disk_bytes`。附加字段：`disk_path, entries, bytes, playlist_cache_entries, recommend`。只有磁盘后端，响应不含后端字段；`recommend` 字段见 `04-config-and-storage.md` §11.4 |
-| `POST` | `/panel/api/cache/flush` | `{"ok":true,"removed":<文件数>}`；清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash`**（S-CACHE-06）；同时丢弃进程内索引与清单缓存 |
+| `GET` | `/panel/api/cache/stats` | 目标字段：`disk_bytes, m3u8_entries, segment_entries, segment_url_entries, sub_url_entries, dash_disk_bytes, timeshift_disk_bytes, recording_disk_bytes, livestream_disk_bytes`。附加字段：`disk_path, cdn_enabled, entries, bytes, playlist_cache_entries, segment_body_bytes, segment_index_bytes, segment_cache_bytes, recommend`。只有磁盘后端，响应不含后端字段；`recommend` 字段见 `04-config-and-storage.md` §11.4 |
+| `POST` | `/panel/api/cache/flush` | `{"ok":true,"removed":<文件数>}`；清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash`**（S-CACHE-06）；同时丢弃进程内索引、清单缓存与订阅源缓存 |
 | `GET` | `/panel/api/stats` | `{"version","uptime_secs","requests","playlists","segments","segment_hits","upstream_failures","online_window_secs","groups":[{"id","requests"}]}`。`groups` 只含配置中存在的分组；统计键有上限（分组 1024、频道 16384），未知路径只增加总请求数 |
 | `GET` | `/panel/api/metrics/history?range=5m` | `{"range","points":[{"ts","net_rx","net_tx","cpu_host","cpu_proc"}]}`。窗口：`5m`、`10m`、`1h`、`24h`、`7d`；未知值按 `5m`。原始采样 10 秒一行，SQLite 保留 7 天，查询时按窗口聚合 |
 | `GET` | `/panel/api/logs?limit=n` | `{"total","lines":[…]}`；`limit` 上限 500，默认 200；来源为进程内环形缓冲（500 行） |

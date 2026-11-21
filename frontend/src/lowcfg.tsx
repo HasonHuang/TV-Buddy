@@ -76,10 +76,13 @@ export function formatAgo(seconds: number | null): string {
 /** CDN 推荐摘要（缓存状态页）。`onEstimate` 提供立即估算入口。 */
 export function RecommendCard({
   recommend,
+  cdnEnabled,
   onEstimate,
   estimating = false,
 }: {
   recommend: Recommend;
+  /** `cdn.enabled`：关闭时提示 CDN 兜底未启用。推荐值仍可复制。 */
+  cdnEnabled: boolean;
   onEstimate?: () => void;
   estimating?: boolean;
 }) {
@@ -106,6 +109,7 @@ export function RecommendCard({
           {recommend.ttl_source === 'fallback' && (
             <span className="muted"> 尚未实测，先播放一个频道或点「立即估算」</span>
           )}
+          {!cdnEnabled && <span className="muted"> CDN 兜底未启用</span>}
         </div>
         <div className="row">
           {onEstimate ? (

@@ -14,6 +14,8 @@ import { Confirm, Empty, Loading, PageHead, Tip } from './ui';
 
 type CacheStats = {
   disk_path: string;
+  /** `cdn.enabled`：为 false 时 CDN 兜底未启用。 */
+  cdn_enabled: boolean;
   entries: Record<string, number>;
   bytes: number;
   segment_body_bytes: number;
@@ -200,6 +202,7 @@ export function CachePage() {
         <>
           <RecommendCard
             recommend={stats.recommend}
+            cdnEnabled={stats.cdn_enabled}
             onEstimate={() => void estimate()}
             estimating={estimating}
           />
@@ -238,8 +241,16 @@ export function CachePage() {
           </table>
           {entries.length === 0 ? <Empty text="缓存目录为空。" /> : null}
         </div>
-        {message && <div className="msg ok">{message}</div>}
-        {error && <div className="msg err">{error}</div>}
+        {message && (
+          <div className="msg ok" role="status" aria-live="polite">
+            {message}
+          </div>
+        )}
+        {error && (
+          <div className="msg err" role="alert" aria-live="assertive">
+            {error}
+          </div>
+        )}
       </div>
         </>
       )}
@@ -403,7 +414,11 @@ export function StatsPage() {
           )}
         </tbody>
         </table>
-        {error && <div className="msg err">{error}</div>}
+        {error && (
+          <div className="msg err" role="alert" aria-live="assertive">
+            {error}
+          </div>
+        )}
       </div>
         </>
       )}

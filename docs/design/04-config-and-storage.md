@@ -201,7 +201,7 @@ EPG 到期判断用**最近触发时间**，不用“下次触发时间”。
 | 订阅源缓存（U-07 已实现） | `sub_url/<sha256("sub:{id}:{url}")>.json`：`{key,body,stored_at}`；`subs/status.json` 保存 `channels/last_ok/last_try/error`；重启后按源级 TTL 命中 | `src/source_cache.rs`、F-020 |
 | flush | 清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash/`**；同时清进程内切片索引、清单缓存与订阅源缓存 | S-CACHE-06 |
 | 容量上限 | 本实现按 `cache.limit_mb` 的自动或手动值回收切片正文与磁盘索引（§11） | F-015 |
-| 索引 | 启动扫描目录重建内存索引 | 设计决策 |
+| 索引 | 进程内只保留活跃条目；未命中时按需读磁盘索引文件并回填内存；600 秒无活动淘汰 | 设计决策 |
 
 ## 4. 运行时数据
 
@@ -343,7 +343,7 @@ tv-buddy-<version>-linux-<arch>/
 `cache.auto_tune = false` 只停止新采样，不冻结上限：沿用上次实测值，仍按当前
 `statvfs` 计算。
 
-淘汰顺序：超龄 → 超量 LRU（按 mtime 最旧优先）→ 可用空间低于 100 MB 时进入紧急模式
+淘汰顺序：超龄 → 索引子预算（上限的 10%）→ 超量 LRU（按 mtime 最旧优先）→ 可用空间低于 100 MB 时进入紧急模式
 （忽略 `max_age_secs`，删到 `cap / 2`）。不用「按频道整组淘汰」：`segment_path` 的文件名
 经过 `slug()`，标识超 48 字符时被替换为 SHA-256，无法反解回 `gid/cid`；而直播切片的 mtime
 本身就是热度信号。

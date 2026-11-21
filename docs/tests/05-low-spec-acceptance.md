@@ -128,7 +128,7 @@ sudo sh install.sh --version "$TAG"
 TV_BUDDY_INITIAL_PASSWORD='NEWPASS' sudo -E sh install.sh --low-spec
 ```
 
-改单个配置值：
+改单个配置值。下面是示例，本验收流程不要执行：
 
 ```bash
 BIN=/opt/tv-buddy/tv-buddy
@@ -136,6 +136,9 @@ DB=/opt/tv-buddy/tv-buddy.db
 sudo "$BIN" config set cache.limit_mb 120 --db "$DB"
 sudo tv-buddy restart
 ```
+
+`cache.limit_mb 120` 只是演示手动上限。§3.4 起按自动上限（`0`）检查；
+若执行过上面的示例，先按 §3.4 开头的命令恢复到 `0`。
 
 在 `panel` 段内加 `session_ttl`：
 
@@ -203,6 +206,14 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "X-Token: $TOKEN" \
 预期：`200`。面板接受 `X-Token` 与 `Authorization: Bearer`（`src/http/ext.rs:23-38`）。
 
 ### 3.4 读取当前磁盘上限
+
+先把上限恢复为自动，避免 §3.2 的示例值影响断言：
+
+```bash
+sudo "$BIN" config set cache.limit_mb 0 --db "$DB"
+sudo systemctl restart tv-buddy
+sleep 5
+```
 
 ```bash
 curl -s -H "X-Token: $TOKEN" http://127.0.0.1:9900/panel/api/cache/stats

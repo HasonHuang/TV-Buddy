@@ -47,6 +47,7 @@ pub async fn cache_stats(
         }
     }
     let dir_bytes = |name: &str| dir_usage(&state.cache_dir.join(name)).1;
+    let config = state.snapshot();
     let segment_body_bytes = dir_bytes("seg_bytes");
     let segment_index_bytes = dir_bytes("seg_url");
     Json(json!({
@@ -57,7 +58,7 @@ pub async fn cache_stats(
         "segment_url_entries": counts.get("seg_url").copied().unwrap_or(0),
         "segment_body_bytes": segment_body_bytes,
         "segment_index_bytes": segment_index_bytes,
-        "segment_cache_bytes": segment_body_bytes + segment_index_bytes,
+        "segment_cache_bytes": segment_body_bytes.saturating_add(segment_index_bytes),
         "sub_url_entries": counts.get("sub_url").copied().unwrap_or(0),
         "dash_disk_bytes": dir_bytes("dash"),
         "timeshift_disk_bytes": dir_bytes("timeshift") + dir_bytes("dash_timeshift"),
@@ -65,6 +66,7 @@ pub async fn cache_stats(
         "livestream_disk_bytes": dir_bytes("livestream"),
         // 本实现附加字段
         "disk_path": state.cache_dir.display().to_string(),
+        "cdn_enabled": config.cdn.enabled,
         "entries": Value::Object(entries),
         "bytes": disk_bytes,
         "playlist_cache_entries": state.playlist_cache_entries(),
