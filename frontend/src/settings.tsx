@@ -886,11 +886,14 @@ export function SettingsPage({
 
   const limitMb = asNumber(draft ?? {}, 'cache.limit_mb');
   const workingMb = recommend?.working_mb ?? null;
+  const diskTotalMb = recommend?.disk_total_mb ?? null;
   const limitHint =
     limitMb !== 0
-      ? workingMb !== null && limitMb < workingMb
-        ? `低于播放需要 ${formatMB(workingMb)}，换台可能回源变慢。`
-        : '手动值，覆盖自动估算'
+      ? diskTotalMb !== null && limitMb > diskTotalMb
+        ? '超过磁盘总量，容量上限不会触发，只会按过期规则删除。'
+        : workingMb !== null && limitMb < workingMb
+          ? `低于播放需要 ${formatMB(workingMb)}，换台可能回源变慢。`
+          : '手动值，覆盖自动估算'
       : recommend === null
         ? undefined
         : recommend.cap_source === 'auto'
@@ -1239,7 +1242,6 @@ export function SettingsPage({
                       label="过期删除"
                       path="cache.gc.max_age_secs"
                       unit="秒"
-                      tip="切片保留的最长时间，超过后删除。关闭表示不按时间删除。"
                       hint="切片超过该时长后自动删除。关闭表示不按时间删除。"
                     />
                   </div>
