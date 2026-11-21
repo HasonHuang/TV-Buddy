@@ -4,7 +4,7 @@
 
 本验收不证明以下三项。仓库没有对应依据，结果记为「未验证」。
 
-- 1 vCPU 抖动的量化阈值。仓库只写「不抖动」，没有延迟或 CPU 上限（`docs/design/06-low-spec-optimization.md:390`）。
+- 1 vCPU 抖动的量化阈值。仓库只写「不抖动」，没有延迟或 CPU 上限（`docs/design/06-low-spec-optimization.md:412`）。
 - 非回收目录的增长阈值。GC 只扫 `seg_bytes` 与 `seg_url`（`src/cache_gc.rs:33`）。
 - 64 MB 档位的专用配置。仓库只有 128 MB 档位的 `memory_max_mb = 4` 注释（`docs/design/config-low-spec.json`）。
 
@@ -131,14 +131,16 @@ TV_BUDDY_INITIAL_PASSWORD='NEWPASS' sudo -E sh install.sh --low-spec
 改单个配置值：
 
 ```bash
-sudo tv-buddy config set cache.gc.max_disk_mb 120
+BIN=/opt/tv-buddy/tv-buddy
+DB=/opt/tv-buddy/tv-buddy.db
+sudo "$BIN" config set cache.gc.max_disk_mb 120 --db "$DB"
 sudo tv-buddy restart
 ```
 
 在 `panel` 段内加 `session_ttl`：
 
 ```bash
-sudo tv-buddy config set panel.session_ttl 604800
+sudo "$BIN" config set panel.session_ttl 604800 --db "$DB"
 ```
 
 `session_ttl` 默认 86400 秒（`src/config/model.rs`）。S6 要跑 24 小时，会话会在同一时刻过期。
@@ -147,15 +149,15 @@ sudo tv-buddy config set panel.session_ttl 604800
 改分组与频道。这三处必须指向你的真实值：
 
 ```bash
-sudo tv-buddy config set groups.0.id "<分组 id>"
-sudo tv-buddy config set groups.0.name "<分组名>"
-sudo tv-buddy config set groups.0.channels.0.id "<频道 id>"
-sudo tv-buddy config set groups.0.channels.0.name "<频道名>"
-sudo tv-buddy config set groups.0.channels.0.url "<真实 HLS 地址>"
+sudo "$BIN" config set groups.0.id "<分组 id>" --db "$DB"
+sudo "$BIN" config set groups.0.name "<分组名>" --db "$DB"
+sudo "$BIN" config set groups.0.channels.0.id "<频道 id>" --db "$DB"
+sudo "$BIN" config set groups.0.channels.0.name "<频道名>" --db "$DB"
+sudo "$BIN" config set groups.0.channels.0.url "<真实 HLS 地址>" --db "$DB"
 ```
 
 `config set` 只改单个值。分组与频道已存在时，按上面的下标逐项改。
-要整份替换，改写 JSON 文件后执行 `sudo tv-buddy config import <config.json> --force`。
+要整份替换，改写 JSON 文件后执行 `sudo "$BIN" config import <config.json> --force --db "$DB"`。
 
 S4 不需要真实源。S6 必须有真实源，否则 `seg_bytes` 不会增长（`src/http/routes/stream.rs:1278`）。
 
@@ -290,7 +292,7 @@ sudo find /opt/tv-buddy/cache/seg_bytes -maxdepth 1 -name 'fill_*.bin' -delete
 步骤 1：确认上限是自动值：
 
 ```bash
-sudo tv-buddy config get cache.gc.max_disk_mb
+sudo "$BIN" config get cache.gc.max_disk_mb --db "$DB"
 ```
 
 预期：`max_disk_mb = 0`。显式填数时，代码直接返回该值，公式不参与（`src/cache_gc.rs:70-72`）。
@@ -446,7 +448,7 @@ sudo find /opt/tv-buddy/cache/seg_bytes -maxdepth 1 -name 'fill_*.bin' -delete
 ```bash
 free -m
 cat /sys/fs/cgroup/memory.max
-sudo tv-buddy config get cache.gc.enabled
+sudo "$BIN" config get cache.gc.enabled --db "$DB"
 ```
 
 预期：内存与 64 MB 或 128 MB 档一致；`enabled = true`。
@@ -617,19 +619,19 @@ sudo pkill -f /root/s6-sample.sh
 
 ### 3.9 回滚
 
-把三处开关关掉。配置热重载，下一请求生效，不需要重启（`docs/design/06-low-spec-optimization.md:401-402`）：
+把低配参数改回常规值（`docs/design/06-low-spec-optimization.md:423-425`）。下面的 `BIN` 与 `DB` 沿用 3.2 节的定义：
 
 ```bash
-sudo tv-buddy config set cdn.enabled false
-sudo tv-buddy config set cache.gc.enabled false
-sudo tv-buddy config set groups.0.prefetch.enabled false
+sudo "$BIN" config set cache.segments.per_channel_max 0 --db "$DB"
+sudo "$BIN" config set cache.prefetch.concurrency 4 --db "$DB"
+sudo "$BIN" config set cdn.enabled false --db "$DB"
+sudo "$BIN" config set panel.session_ttl 86400 --db "$DB"
+sudo tv-buddy restart
 ```
 
-恢复 `session_ttl` 默认 86400 秒：
-
-```bash
-sudo tv-buddy config set panel.session_ttl 86400
-```
+不要关闭 `cache.gc.enabled`。它是 1 GB 磁盘的硬前提，不属于低配参数。
+`per_channel_max = 0` 表示使用内置上限 4096。`config set` 直接写库，运行中的进程不会自动读取；
+`sudo tv-buddy restart` 后生效。
 
 删除测试数据：
 

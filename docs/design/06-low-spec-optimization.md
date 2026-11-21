@@ -102,21 +102,31 @@ L2（内存滚动预热）取消。它只把 L1 的数据再存一份进内存�
 ### 2.4 验收命令
 
 ```bash
+# 0) 播放凭证。token_enabled=true 且分组不是 open 时必须带
+PLAY='<播放令牌>'
+MANIFEST="https://<域名>/<分组>/<变体>.m3u8?token=$PLAY"
+
 # 1) 清单必须不缓存
-curl -s -o /dev/null -D - "https://<域名>/<分组>/<变体>.m3u8" | grep -iE 'x-cache|cache-control'
+curl -s -o /dev/null -D - "$MANIFEST" | grep -iE 'x-cache|cache-control'
 
 # 2) 切片必须缓存。连续两次，第二次应为 HIT 且出现 Age
 SEG="https://<域名>/<分组>/<变体>/<从清单复制的切片路径>"
 for i in 1 2; do curl -s -o /dev/null -D - "$SEG" | grep -iE '^(x-cache|age|cache-control|content-length)'; done
 
-# 3) 字节未被改写
-curl -s "$SEG" | shasum -a 256
+# 3) 字节未被改写：CDN 两次 + 源站一次
+hash_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi
+}
+CDN1=$(curl -s "$SEG" | hash_stdin | awk '{print $1}')
+CDN2=$(curl -s "$SEG" | hash_stdin | awk '{print $1}')
+ORIGIN=$(curl -s "http://127.0.0.1:9900/<分组>/<变体>/<切片路径>" | hash_stdin | awk '{print $1}')
+printf 'cdn1=%s\ncdn2=%s\norigin=%s\n' "$CDN1" "$CDN2" "$ORIGIN"
 
 # 4) 面板与 API 不被缓存
 curl -s -o /dev/null -D - "https://<域名>/panel/api/status" | grep -iE 'x-cache|cache-control'
 ```
 
-期望结果：清单与面板返回 `BYPASS`。切片第二次返回 `HIT` 并带 `Age`。两次哈希一致。
+期望结果：清单与面板返回 `BYPASS`。切片第二次返回 `HIT` 并带 `Age`。三个哈希一致（CDN 两次 + 源站一次）。切片地址不带 token；只有清单入口需要 token。
 
 ### 2.5 常见失败对照
 
@@ -144,9 +154,9 @@ curl -s -o /dev/null -D - "https://<域名>/panel/api/status" | grep -iE 'x-cach
 - [ ] 8. 回源加请求头 `X-Forwarded-Proto: https`（第 5 项）。
 - [ ] 9. 保存。
 - [ ] 10. 刷新全部缓存（Purge All）。
-- [ ] 11. 按 §2.4 跑四条命令，逐域名记录。
+- [ ] 11. 按 §2.4 跑验收命令，逐域名记录。
 
-| 域名 | 清单 `BYPASS` | 切片第 2 次 `HIT` + `Age` | 两次哈希一致 | 面板 `BYPASS` |
+| 域名 | 清单 `BYPASS` | 切片第 2 次 `HIT` + `Age` | 三个哈希一致 | 面板 `BYPASS` |
 | --- | --- | --- | --- | --- |
 | | [ ] | [ ] | [ ] | [ ] |
 | | [ ] | [ ] | [ ] | [ ] |
@@ -362,12 +372,12 @@ CDN 不下发 `X-Forwarded-Proto` 时补 `public_base`。
 
 | 配置 | 面板位置 | 接口 |
 | --- | --- | --- |
-| 推荐值展示（只读） | **缓存状态页**顶部摘要 | 扩展 `GET /panel/api/cache/stats` |
-| `[cdn]` 编辑 | **系统设置页** →「CDN 缓存」卡片 | `GET/PUT /panel/api/config` |
+| 推荐值展示（只读） | **缓存状态页** →「CDN 推荐值」卡片 | 扩展 `GET /panel/api/cache/stats` |
+| `[cdn]` 编辑 | **系统设置页** →「CDN 兜底」卡片 | `GET/PUT /panel/api/config` |
 | `[cache.gc]` 编辑 | **系统设置页** →「磁盘回收」卡片 | 同上 |
-| `[cache.prefetch]` 编辑 | **系统设置页** →「预取」卡片 | 同上 |
+| `[cache.prefetch]` 编辑 | **系统设置页** →「预载配置」卡片 | 同上 |
 | 分组与频道 `prefetch` | 分组 / 频道编辑对话框 | `PUT /groups/{gid}`、`POST` 或 `PUT /channels[/{cid}]` |
-| 「立即估算」按钮 | 系统设置页的 CDN 卡片 | `POST /panel/api/cdn/estimate` |
+| 「立即估算」按钮 | 缓存状态页 →「CDN 推荐值」卡片右上角 | `POST /panel/api/cdn/estimate` |
 
 `PUT /panel/api/config` 整份替换。前端必须先 GET，再改，再 PUT。
 
@@ -410,8 +420,9 @@ CDN 不下发 `X-Forwarded-Proto` 时补 `public_base`。
 S4 与 S6 需要目标 VPS。本地只覆盖公式与淘汰逻辑：单测复现 §3.3 的四行取值，
 并覆盖超龄、超量、紧急与 `scan_limit` 四类路径。
 
-回滚：`[cdn].enabled = false`、`[cache.gc].enabled = false` 与分组 `prefetch.enabled = false`
-在下一请求生效（配置热重载），不需要重启。
+回滚：`cache.segments.per_channel_max` 改回 `0`，`cache.prefetch.concurrency` 改回 `4`；
+不再使用 CDN 兜底时再把 `[cdn].enabled` 改回 `false`。不要关闭 `[cache.gc].enabled`。
+`config set` 直接写库；重启服务或调用 `POST /panel/api/reload` 后生效。
 
 ---
 

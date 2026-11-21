@@ -294,10 +294,20 @@ docker compose logs -f
 docker compose exec tv-buddy cat /data/cache/admin_initial_credentials.txt
 ```
 
-改端口或初始口令：
+改端口：
 
 ```bash
-TV_BUDDY_PORT=8080 TV_BUDDY_INITIAL_PASSWORD='你的口令' docker compose up -d
+TV_BUDDY_PORT=8080=8080 docker compose up -d
+```
+
+首次启动可用环境变量指定口令：`TV_BUDDY_INITIAL_PASSWORD='你的口令' docker compose up -d`。它只在首次启动、用户表为空时生效。已有数据卷不会改口令。
+要改已有部署的口令，打开面板「用户与设备」，在 `admin` 行点「重置密码」。
+无法打开面板时，在容器内用二进制改库，然后重启：
+
+```bash
+printf '%s\n' '新口令' | docker compose exec -T tv-buddy \
+  /opt/tv-buddy/tv-buddy passwd admin --db /data/tv-buddy.db --stdin
+docker compose restart
 ```
 
 更新镜像：
@@ -317,7 +327,7 @@ docker compose down
 
 用绑定挂载代替命名卷时，目录属主设置见上一节。
 
-镜像不含 ffmpeg 与 python3。需要时在面板安装，或按上一节自行构建。
+镜像不含 ffmpeg 与 python3。ffmpeg / ffprobe 可在面板安装，或构建时加 `--build-arg WITH_FFMPEG=1`。面板不安装 python3；EPG 脚本源需要 Python 时，按 [`docs/design/12-python-scripts.md`](docs/design/12-python-scripts.md) 自建镜像并安装 python3（Alpine 下 `apk add --no-cache python3`）。
 
 低配部署见 [`docs/design/18-low-spec-deployment.md`](docs/design/18-low-spec-deployment.md)。
 

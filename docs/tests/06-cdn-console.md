@@ -63,7 +63,7 @@ VPS 上必须有：
 
 ### 2.5 CDN 控制台
 
-四个域名已接入同一个控制台。四个域名回源到本服务。回源协议与端口由控制台决定。仓库没有 CDN 供应商名称、控制台 URL、控制台 API（`docs/design/06-low-spec-optimization.md:56-60`）。
+四个域名已接入同一个控制台。四个域名回源到本服务。回源协议与端口由控制台决定。仓库没有 CDN 供应商名称、控制台 URL、控制台 API（`docs/design/06-low-spec-optimization.md:57-61`）。
 
 控制台字段名未在仓库出现。本文档用设计文档的字段名。你在控制台里找同义项，并把实际字段名记进记录模板。
 
@@ -234,11 +234,11 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cdn/estimate
 
 | # | 设计字段名 | 设定值 | 依据 |
 | --- | --- | --- | --- |
-| 1 | 缓存过期时间 / 缓存规则 | 媒体路径填推荐 TTL。TTL 填在缓存规则上，不填在不缓存规则上 | `docs/design/06-low-spec-optimization.md:65` |
-| 2 | 是否遵循源站缓存头 | 关闭。改用强制 TTL | `docs/design/06-low-spec-optimization.md:66` |
-| 3 | Set-Cookie | 三选一：关闭 Cookie 注入；忽略 Set-Cookie；缓存带 Cookie 的响应。优先第一条 | `docs/design/06-low-spec-optimization.md:67` |
-| 4 | 图片优化 / 自动 WebP / 内容压缩改写 | 全部关闭。至少对媒体路径关闭 | `docs/design/06-low-spec-optimization.md:68` |
-| 5 | 回源请求头 | 增加 `X-Forwarded-Proto: https` | `docs/design/06-low-spec-optimization.md:69` |
+| 1 | 缓存过期时间 / 缓存规则 | 媒体路径填推荐 TTL。TTL 填在缓存规则上，不填在不缓存规则上 | `docs/design/06-low-spec-optimization.md:66` |
+| 2 | 是否遵循源站缓存头 | 关闭。改用强制 TTL | `docs/design/06-low-spec-optimization.md:67` |
+| 3 | Set-Cookie | 三选一：关闭 Cookie 注入；忽略 Set-Cookie；缓存带 Cookie 的响应。优先第一条 | `docs/design/06-low-spec-optimization.md:68` |
+| 4 | 图片优化 / 自动 WebP / 内容压缩改写 | 全部关闭。至少对媒体路径关闭 | `docs/design/06-low-spec-optimization.md:69` |
+| 5 | 回源请求头 | 增加 `X-Forwarded-Proto: https` | `docs/design/06-low-spec-optimization.md:70` |
 
 另加两项确认：
 
@@ -247,7 +247,7 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cdn/estimate
 | 不缓存 3xx | 开启 |
 | 不缓存非 200 | 开启 |
 
-依据：`docs/design/06-low-spec-optimization.md:71-72`。
+依据：`docs/design/06-low-spec-optimization.md:72-73`。
 
 TTL 取值：
 
@@ -295,9 +295,9 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq -r
 /*/*/*
 ```
 
-依据：`docs/design/06-low-spec-optimization.md:76-86`。
+依据：`docs/design/06-low-spec-optimization.md:77-87`。
 
-不要按扩展名写规则。伪装扩展名在 `jpg`、`png`、`gif`、`bmp`、`webp` 之间轮换（`src/config/model.rs:526-549`、`src/proxy/media.rs:159-162`）。控制台只支持扩展名时，改用路径前缀 `/{gid}/{cid}/`，逐分组配置（`docs/design/06-low-spec-optimization.md:88-89`）。
+不要按扩展名写规则。伪装扩展名在 `jpg`、`png`、`gif`、`bmp`、`webp` 之间轮换（`src/config/model.rs:526-549`、`src/proxy/media.rs:159-162`）。控制台只支持扩展名时，改用路径前缀 `/{gid}/{cid}/`，逐分组配置（`docs/design/06-low-spec-optimization.md:89-90`）。
 
 规则 A 中的 `/metrics` 与 `/share*` 在本实现没有对应路由。保留这两条不影响结果。本实现只有 `/api/share/pull`（`src/http.rs:38`）。
 
@@ -337,7 +337,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq -r
 2. 执行「刷新全部缓存」。控制台可能写作 Purge All。
 3. 四个域名各做一遍。支持「应用到全部域名」时，第 3.6 至 3.8 节只做一次。
 
-依据：`docs/design/06-low-spec-optimization.md:93-99`。
+依据：`docs/design/06-low-spec-optimization.md:94-100`。
 
 ### 3.10 准备验证变量
 
@@ -538,16 +538,16 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/logout" | jq
 | J1 | 面板会话 | `ADMIN` 为非空 UUID | 空值，或登录返回非 200 | `src/http/routes/panel.rs:37-91` |
 | J2 | 推荐值字段 | 14 个键齐全，`ttl_secs` 为整数 | 缺键，或 `ttl_secs` 非整数 | `src/cache_gc.rs:283-333` |
 | J3 | TTL 范围 | `measured` 时 300–900；`fallback` 时 600；`manual` 时为配置值 | 超出范围 | `src/cache_estimate.rs:30-42` |
-| J4 | 清单 BYPASS | CDN 缓存状态为 `BYPASS` | `HIT`、`MISS`、`STALE` | `docs/design/06-low-spec-optimization.md:118` |
-| J5 | 切片第 2 次 | `HIT`，且 `Age` 存在 | 仍为 `MISS` 或 `BYPASS` | `docs/design/06-low-spec-optimization.md:118` |
-| J6 | 切片字节 | 三个 SHA-256 完全相同 | 任一不同 | `docs/design/06-low-spec-optimization.md:112-118` |
-| J7 | 面板接口 | `BYPASS` | 非 `BYPASS` | `docs/design/06-low-spec-optimization.md:115-118` |
-| J8 | 订阅清单 | `BYPASS` | 非 `BYPASS` | `docs/design/06-low-spec-optimization.md:118` |
+| J4 | 清单 BYPASS | CDN 缓存状态为 `BYPASS` | `HIT`、`MISS`、`STALE` | `docs/design/06-low-spec-optimization.md:129` |
+| J5 | 切片第 2 次 | `HIT`，且 `Age` 存在 | 仍为 `MISS` 或 `BYPASS` | `docs/design/06-low-spec-optimization.md:129` |
+| J6 | 切片字节 | 三个 SHA-256 完全相同 | 任一不同 | `docs/design/06-low-spec-optimization.md:116-129` |
+| J7 | 面板接口 | `BYPASS` | 非 `BYPASS` | `docs/design/06-low-spec-optimization.md:125-129` |
+| J8 | 订阅清单 | `BYPASS` | 非 `BYPASS` | `docs/design/06-low-spec-optimization.md:129` |
 | J9 | 清单地址 | 首行以 `https://<CDN 域名>/` 开头 | `http://`，或指向源站 | `src/http/routes/stream.rs:1220-1240` |
 | J10 | 源站头 | `[cdn].enabled=false` 时 `max-age=300`；`true` 时 `max-age=<TTL>` | 值不符 | `src/http/routes/stream.rs:47-70` |
 | J11 | 换台 | 两次 `200`，第二次不是缓存 302 | 第二次 404 或 302 | `src/http/routes/stream.rs:1537-1549` |
 | J12 | TTL 到期 | `TTL+60` 秒后 `MISS`，或 `Age > TTL` | 仍 `HIT` 且 `Age < TTL` | 控制台侧，第 2.6 节 |
-| J13 | 四域名 | 四个域名 J4–J9 全部通过 | 任一域名失败 | `docs/design/06-low-spec-optimization.md:146-150` |
+| J13 | 四域名 | 四个域名 J4–J9 全部通过 | 任一域名失败 | `docs/design/06-low-spec-optimization.md:156-160` |
 
 单项判定只用三种取值：通过、不通过、未验证。未验证必须写缺什么。
 
@@ -695,12 +695,12 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
 
 | 现象 | 先查 | 依据 |
 | --- | --- | --- |
-| 切片仍 `BYPASS` | 规则未生效；未 Purge；Set-Cookie 未关 | `docs/design/06-low-spec-optimization.md:124` |
-| `MISS` 不转 `HIT` | 缓存键含 Cookie 或请求头；TTL 太短 | `docs/design/06-low-spec-optimization.md:125` |
-| `HIT` 但花屏或卡住 | 图片优化改写了字节。比对哈希 | `docs/design/06-low-spec-optimization.md:126` |
-| 清单被缓存 | 规则顺序颠倒。把 A 调到最前 | `docs/design/06-low-spec-optimization.md:127` |
-| 换台 404 | 302 被缓存。关闭 3xx 缓存 | `docs/design/06-low-spec-optimization.md:128` |
-| 清单给 `http://` | 未下发 XFP；或 CDN 改写了 Host | `docs/design/06-low-spec-optimization.md:129` |
+| 切片仍 `BYPASS` | 规则未生效；未 Purge；Set-Cookie 未关 | `docs/design/06-low-spec-optimization.md:135` |
+| `MISS` 不转 `HIT` | 缓存键含 Cookie 或请求头；TTL 太短 | `docs/design/06-low-spec-optimization.md:136` |
+| `HIT` 但花屏或卡住 | 图片优化改写了字节。比对哈希 | `docs/design/06-low-spec-optimization.md:137` |
+| 清单被缓存 | 规则顺序颠倒。把 A 调到最前 | `docs/design/06-low-spec-optimization.md:138` |
+| 换台 404 | 302 被缓存。关闭 3xx 缓存 | `docs/design/06-low-spec-optimization.md:139` |
+| 清单给 `http://` | 未下发 XFP；或 CDN 改写了 Host | `docs/design/06-low-spec-optimization.md:140` |
 | 源站命中返回 `private` | 只能「遵循源站头」的 CDN 不缓存。改用强制 TTL，或开 `[cdn].shared_cache_hits=true` | `src/http/routes/stream.rs:57-70` |
 | 上游失败被缓存成 200 空体 | 开 `[cdn].enabled=true`，设 `empty_status=502` | `src/http/routes/stream.rs:1579-1594` |
 | 订阅清单被缓存 | 源站已发 `Cache-Control: private, no-store`。检查规则 A 是否仍 BYPASS `/sub/*` | `src/http/routes/sub.rs:60-66` |
@@ -712,7 +712,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
 | DASH 轨道清单被缓存 | 四段路径不在 `/*/*/index.txt`。补 BYPASS | `src/dash_hls.rs:998-1000` |
 | 时移切片不缓存 | 四段路径不在 `/*/*/*`。补 CACHE | `src/timeshift.rs:7` |
 | DASH 时移清单被缓存 | 五段路径不在规则 A。补 BYPASS | `src/dash_timeshift.rs:7` |
-| `HIT` 但 `content-length` 变化 | CDN 压缩或转码。关闭内容压缩改写与图片优化 | `docs/design/06-low-spec-optimization.md:68` |
+| `HIT` 但 `content-length` 变化 | CDN 压缩或转码。关闭内容压缩改写与图片优化 | `docs/design/06-low-spec-optimization.md:69` |
 | 源站 `max-age` 不是推荐 TTL | `[cdn].enabled=false`。此时源站用 `[cache.ttl].segment_secs`，默认 300 | `src/http/routes/stream.rs:47-55` |
 | `source` 显示「手动配置」但 TTL 未手填 | 磁盘上限手填也会置 `manual` | `src/cache_gc.rs:290-298` |
 | 估算返回 409 | 已有估算在跑。等待后重试一次 | `src/http/routes/cdn.rs:34-36` |

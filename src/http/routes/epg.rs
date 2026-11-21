@@ -641,7 +641,7 @@ pub async fn translate_mtran(
         return (
             axum::http::StatusCode::BAD_REQUEST,
             Json(json!({
-                "error": "请先填写 MTranServer 地址(字幕机翻只支持本地 MTranServer)"
+                "error": "请先填写 MTranServer 地址"
             })),
         )
             .into_response();

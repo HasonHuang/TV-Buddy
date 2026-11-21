@@ -576,9 +576,7 @@ pub async fn translate_subtitle(
         return Err(ApiError::bad_request("字幕翻译未启用"));
     }
     if cfg.url.is_empty() {
-        return Err(ApiError::bad_request(
-            "请先填写 MTranServer 地址(字幕机翻只支持本地 MTranServer)",
-        ));
+        return Err(ApiError::bad_request("请先填写 MTranServer 地址"));
     }
     let target = cfg.target(body.get("target").and_then(Value::as_str));
     let bytes = assets::read(&config.cache.disk_path, Kind::Subtitle, &file).map_err(|error| {
@@ -706,7 +704,7 @@ pub async fn mtran_test(
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({
-                "error": "请先填写 MTranServer 地址(字幕机翻只支持本地 MTranServer)"
+                "error": "请先填写 MTranServer 地址"
             })),
         )
             .into_response();

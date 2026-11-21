@@ -147,37 +147,51 @@ TTL 与磁盘上限不能写死。片源窗口在 48–100 秒，单片 1.1–9 
 
 | 入口 | 位置 |
 | --- | --- |
-| 推荐 TTL（只读，带复制按钮） | 面板 → 缓存状态页顶部 |
-| 「立即估算」 | 面板 → 系统设置页 →「CDN 缓存」卡片 |
+| 推荐 TTL（只读，带复制按钮） | 面板 → 缓存状态页 →「CDN 推荐值」卡片 |
+| 「立即估算」 | 同一张「CDN 推荐值」卡片右上角 |
 
 「立即估算」探测最多 3 个分组、每组 1 个频道，只执行一次。并发请求返回 409。
 
 也可以直接调用接口：
 
 ```bash
-curl -X POST http://127.0.0.1:9900/panel/api/cdn/estimate
+TOKEN='<面板会话令牌>'
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:9900/panel/api/cdn/estimate
 ```
+
+接口需要面板会话；未登录返回 `401`。
 
 公式与取值示例见 [`06-low-spec-optimization.md`](06-low-spec-optimization.md) §3。
 
 ## 8. 验收
 
 ```bash
+# 0) 播放凭证。token_enabled=true 且分组不是 open 时必须带
+PLAY='<播放令牌>'
+MANIFEST="https://<域名>/<分组>/<变体>.m3u8?token=$PLAY"
+
 # 1) 清单必须不缓存
-curl -s -o /dev/null -D - "https://<域名>/<分组>/<变体>.m3u8" | grep -iE 'x-cache|cache-control'
+curl -s -o /dev/null -D - "$MANIFEST" | grep -iE 'x-cache|cache-control'
 
 # 2) 切片必须缓存。第二次应为 HIT 且带 Age
 SEG="https://<域名>/<分组>/<变体>/<从清单复制的切片路径>"
 for i in 1 2; do curl -s -o /dev/null -D - "$SEG" | grep -iE '^(x-cache|age|cache-control|content-length)'; done
 
-# 3) 字节未被改写
-curl -s "$SEG" | shasum -a 256
+# 3) 字节未被改写：CDN 两次 + 源站一次
+hash_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi
+}
+CDN1=$(curl -s "$SEG" | hash_stdin | awk '{print $1}')
+CDN2=$(curl -s "$SEG" | hash_stdin | awk '{print $1}')
+ORIGIN=$(curl -s "http://127.0.0.1:9900/<分组>/<变体>/<切片路径>" | hash_stdin | awk '{print $1}')
+printf 'cdn1=%s\ncdn2=%s\norigin=%s\n' "$CDN1" "$CDN2" "$ORIGIN"
 
 # 4) 面板与 API 不被缓存
 curl -s -o /dev/null -D - "https://<域名>/panel/api/status" | grep -iE 'x-cache|cache-control'
 ```
 
-期望：清单与面板返回 `BYPASS`。切片第二次返回 `HIT` 并带 `Age`。两次哈希一致。
+期望：清单与面板返回 `BYPASS`。切片第二次返回 `HIT` 并带 `Age`。三个哈希一致（CDN 两次 + 源站一次）。切片地址不带 token；只有清单入口需要 token。`sha256sum` 与 `shasum` 都没有时，先安装 `coreutils` 或 `perl`。
 
 完整验收与记录模板见 [`docs/tests/06-cdn-console.md`](../tests/06-cdn-console.md)。磁盘回收与 24 小时运行验收见 [`docs/tests/05-low-spec-acceptance.md`](../tests/05-low-spec-acceptance.md)。
 
@@ -196,12 +210,26 @@ curl -s -o /dev/null -D - "https://<域名>/panel/api/status" | grep -iE 'x-cach
 
 ## 10. 回滚
 
-关闭三处开关即可。配置热重载，下一请求生效，不需要重启：
+低配 profile 只写入 5 个键（§2）。回滚时把省资源的 2 个键改回常规值，并按需关闭 CDN 兜底：
 
 ```bash
-sudo tv-buddy config set cdn.enabled false
-sudo tv-buddy config set cache.gc.enabled false
-sudo tv-buddy config set groups.0.prefetch.enabled false
+BIN=/opt/tv-buddy/tv-buddy
+DB=/opt/tv-buddy/tv-buddy.db
+sudo "$BIN" config set cache.segments.per_channel_max 0 --db "$DB"
+sudo "$BIN" config set cache.prefetch.concurrency 4 --db "$DB"
+# 不再使用 CDN 兜底时再执行
+sudo "$BIN" config set cdn.enabled false --db "$DB"
+sudo tv-buddy restart
 ```
+
+- `auth.token_enabled` 与 `auth.ip_guard_enabled` 的常规默认值也是 `true`，不需要改。
+- 不要关闭 `cache.gc.enabled`。它是 1 GB 磁盘的硬前提（§4），不属于低配 profile。
+- `groups.0.prefetch.enabled` 只覆盖第一个分组，不能用来回滚全局预取。
+- `per_channel_max = 0` 表示使用内置上限 4096。
+- 不要省略 `--db`。省略时二进制会写当前目录的 `./tv-buddy.db`。
+
+`config set` 直接写数据库，运行中的进程不会自动读取。执行 `sudo tv-buddy restart`，或在面板会话中调用 `POST /panel/api/reload`。面板里改配置则保存后立即生效。
+
+路径按默认安装目录。自定义 `PREFIX` 时替换 `BIN` 与 `DB`。
 
 详见 [`06-low-spec-optimization.md`](06-low-spec-optimization.md) §10。

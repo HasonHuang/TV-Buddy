@@ -127,11 +127,9 @@ readlink -f /usr/local/bin/tv-buddy
 ### 6. 核对配置取值
 
 ```bash
-sudo tv-buddy config get server.bind
-sudo tv-buddy config get panel.enabled
+sudo /opt/tv-buddy/tv-buddy config get server.bind --db /opt/tv-buddy/tv-buddy.db
+sudo /opt/tv-buddy/tv-buddy config get panel.enabled --db /opt/tv-buddy/tv-buddy.db
 ```
-
-预期：`bind = "[::]:9900"`。第二条输出 `无 [panel] 段`。
 
 预期：第一条输出 `[::]:9900`，第二条输出 `true`。账号 `admin` 与随机口令由首次启动创建，登录结果在第 10 步验证。
 
