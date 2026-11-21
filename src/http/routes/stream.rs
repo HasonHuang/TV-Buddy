@@ -44,28 +44,26 @@ const MASTER_CACHE: &str = "no-cache, no-store";
 const DEFAULT_TARGET_DURATION: u64 = 6;
 /// 切片缓存头；`[cache.ttl].segment_secs` 控制时长。
 ///
-/// `[cdn].enabled` 时切到 CDN 模式：TTL 取显式值或实测推荐值，命中路径可按
-/// `shared_cache_hits` 一并转 `public`（`docs/design/06-low-spec-optimization.md` §6）。
-/// 关闭时使用默认缓存头。
+/// `[cdn].enabled` 只控制响应头范围，不再控制 TTL 取值：
+/// `cache.ttl.segment_secs = 0` 时使用实测推荐值，无实测用 600 秒回退。
+/// CDN 开启且命中路径可共享时转 `public`（`docs/design/06-low-spec-optimization.md` §6）。
 fn segment_cache_control(state: &AppState, first: bool) -> String {
     let config = state.snapshot();
-    if !config.cdn.enabled {
-        let secs = config.cache.ttl.segment_secs.max(1);
-        return if first {
-            format!("public, max-age={secs}")
-        } else {
-            format!("private, max-age={secs}")
-        };
-    }
-    let secs = if config.cdn.segment_max_age_secs != 0 {
-        config.cdn.segment_max_age_secs
+    let secs = if config.cache.ttl.segment_secs != 0 {
+        config.cache.ttl.segment_secs
     } else {
         state
             .estimate
             .ttl_secs()
             .unwrap_or(crate::cache_estimate::FALLBACK_TTL_SECS)
     };
-    let scope = if first || config.cdn.shared_cache_hits {
+    let scope = if !config.cdn.enabled {
+        if first {
+            "public"
+        } else {
+            "private"
+        }
+    } else if first || config.cdn.shared_cache_hits {
         "public"
     } else {
         "private"

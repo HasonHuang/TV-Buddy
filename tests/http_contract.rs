@@ -5884,12 +5884,23 @@ async fn prefetch_channel_reenables_disabled_group() {
 #[tokio::test]
 async fn cdn_explicit_ttl_wins() {
     let fixture =
-        fixture_with_extra(r#"{"cdn":{"enabled":true,"segment_max_age_secs":777}}"#).await;
+        fixture_with_extra(r#"{"cache":{"ttl":{"segment_secs":777}},"cdn":{"enabled":true}}"#)
+            .await;
     let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
     let body = response.text().await.expect("读正文");
     let path = segment_path(&body, &fixture.base, 1);
     let response = fetch(&fixture, &path).await;
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header(&response, "cache-control"), "public, max-age=777");
+}
+
+#[tokio::test]
+async fn manual_ttl_applies_when_cdn_disabled() {
+    let fixture = fixture_with_extra(r#"{"cache":{"ttl":{"segment_secs":777}}}"#).await;
+    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let body = response.text().await.expect("读正文");
+    let path = segment_path(&body, &fixture.base, 1);
+    let response = fetch(&fixture, &path).await;
     assert_eq!(header(&response, "cache-control"), "public, max-age=777");
 }
 

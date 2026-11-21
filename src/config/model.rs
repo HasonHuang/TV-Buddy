@@ -496,7 +496,7 @@ impl Default for CacheTtlCfg {
     fn default() -> Self {
         Self {
             sub_url_secs: 1_800,
-            segment_secs: 300,
+            segment_secs: 0,
             refresh_ratio: 0.4,
             fallback_mpd_secs: 8,
             extra: Extra::new(),
