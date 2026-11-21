@@ -207,8 +207,6 @@ jq --arg url "$SRC_URL" --arg res "$RES_SRC_URL" '
   | .quality.rules.min_resolution = ""
   | .quality.rules.max_resolution = ""
   | .quality.rules.resolution_speed_map = {"1280x720": 0.5, "1920x1080": 1000}
-  | .quality.rules.supply = false
-  | .quality.rules.retain = false
   | .quality.rules.host_cache = false
   | .playlist.sync_enabled = false
   | .playlist.sources = [{

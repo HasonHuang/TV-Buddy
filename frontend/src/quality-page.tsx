@@ -125,13 +125,11 @@ function sourcePhaseText(phase: string): string {
 
 const REASON_LABEL: Record<string, string> = {
   pass: '合格',
-  retained: '已保留',
   unreachable: '不可达',
   speed_low: '速率低',
   resolution_low: '分辨率低',
   resolution_high: '分辨率高',
   delay_high: '延迟高',
-  supply: '兜底保留',
   probe_error: '探测错误',
   source_removed: '源已移除',
   source_disabled: '源已停用',
@@ -180,9 +178,6 @@ const OVERRIDE_LABEL: Record<string, string> = {
   min_resolution: '最低分辨率',
   max_resolution: '最高分辨率',
   resolution_speed_map: '分辨率速率表',
-  supply: '兜底',
-  action: '动作',
-  retain: '保留',
   host_cache: 'Host 缓存',
   stale_keep_secs: '失败宽限',
 };

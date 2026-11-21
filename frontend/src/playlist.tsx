@@ -313,15 +313,9 @@ function mapHasValues(map: Record<string, string>): boolean {
   return Object.keys(cleanTargets(map)).length > 0;
 }
 
-/** 与 `PlaylistSource::normalize` 一致：无意义的「丢弃」按「保留」处理。 */
+/** `unlisted_groups` 原样读取。`drop` 是有效配置，不做归一。 */
 function unlistedModeOf(source: Source): 'keep' | 'drop' {
-  if (source.unlisted_groups.trim() !== 'drop') return 'keep';
-  const explicit =
-    source.mode === 'sync' &&
-    (mapHasValues(source.merge_into) || mapHasValues(source.merge_new));
-  if (mapHasKeys(source.group_map)) return 'drop';
-  if (groupModeOf(source) === 'map') return 'drop';
-  return explicit ? 'drop' : 'keep';
+  return source.unlisted_groups.trim() === 'drop' ? 'drop' : 'keep';
 }
 
 /**
@@ -444,7 +438,7 @@ function statusView(status?: Status, warnRatio = 0.2): StatusView | null {
       note: '本地频道已保留',
     };
   }
-  // 旧状态文件可能只有 `last_ok`。两个成功时间都认。
+  // 同步源用 last_sync，聚合源用 last_ok。
   const last = status.last_sync || status.last_ok;
   if (last > 0) {
     return {
@@ -804,23 +798,19 @@ export function PlaylistPage() {
     0,
   );
 
-  // 后端 GroupRules 的可见结果：map 模式 + 空映射 + 丢弃 → 零频道。
+  // 后端 GroupRules 的可见结果：空映射 + 丢弃 + 无显式目标 → 零频道。
   // 显式目标不受「映射外丢弃」影响，所以存在目标时不再提示零频道。
   const draft = drawer?.draft;
   const draftMapEmpty = draft ? !mapHasKeys(draft.group_map) : true;
   const hasExplicitTargets =
     draft?.mode === 'sync' &&
     (mapHasValues(draft.merge_into) || mapHasValues(draft.merge_new));
+  const unlistedDrop = draft !== undefined && unlistedModeOf(draft) === 'drop';
   const showUnlistedGroups =
     draft !== undefined &&
-    (groupModeOf(draft) === 'map' || !draftMapEmpty || hasExplicitTargets);
-  const unlistedDrop = draft !== undefined && unlistedModeOf(draft) === 'drop';
+    (groupModeOf(draft) === 'map' || !draftMapEmpty || hasExplicitTargets || unlistedDrop);
   const dropsAllGroups =
-    draft !== undefined &&
-    groupModeOf(draft) === 'map' &&
-    unlistedDrop &&
-    draftMapEmpty &&
-    !hasExplicitTargets;
+    draft !== undefined && unlistedDrop && draftMapEmpty && !hasExplicitTargets;
   const existingName = useCallback(
     (id: string) => allGroups.find((group) => group.id === id)?.name ?? '（目标分组已删除）',
     [allGroups],

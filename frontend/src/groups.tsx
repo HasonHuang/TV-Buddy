@@ -17,6 +17,7 @@ import {
   putConfig,
   runQuality,
 } from './api';
+import { headersToText, parseHeaders } from './headers';
 import { Icon } from './icons';
 import { modeCode, modeOptions, modeTip } from './modes';
 import { QualityBadges, qualityCounts } from './quality';
@@ -425,19 +426,6 @@ function NetworkBlock({
   );
 }
 
-/** 请求头数组 ↔ 多行文本。 */
-function headersToText(raw: unknown): string {
-  if (!Array.isArray(raw)) return '';
-  return raw.filter((item): item is string => typeof item === 'string').join('\n');
-}
-
-function textToHeaders(value: string): string[] {
-  return value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
-}
-
 export function GroupsPage() {
   const { node, ok, err } = useToast();
   const [groups, setGroups] = useState<Group[]>([]);
@@ -654,7 +642,7 @@ export function GroupsPage() {
       mode: form.mode,
       access: form.access,
       format: form.format,
-      headers: textToHeaders(form.headers),
+      headers: parseHeaders(form.headers),
       proxy: proxyPayload(form.proxy),
       prefetch: prefetchPayload(prefetch),
       offline_on_fail: form.offlineOnFail,
@@ -691,7 +679,7 @@ export function GroupsPage() {
       timeshift_max_gb: form.livestream ? Number(form.timeshiftMaxGb) || 0 : 0,
       // `null` 清空覆盖，回到跟随分组。
       offline_on_fail: form.offlineOnFail === '' ? null : form.offlineOnFail === 'on',
-      headers: textToHeaders(form.headers),
+      headers: parseHeaders(form.headers),
       proxy: proxyPayload(form.proxy),
       prefetch: prefetchPayload(prefetch),
     };

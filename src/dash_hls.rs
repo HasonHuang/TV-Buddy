@@ -903,7 +903,7 @@ const POOL_MAX: usize = 6;
 
 /// 生成一个切片的候选地址顺序。
 ///
-/// - `urls.len() <= 1` 或 `pool_size <= 1`：池关闭，原样返回。这是兼容路径。
+/// - `urls.len() <= 1` 或 `pool_size <= 1`：池关闭，原样返回。
 /// - 否则取前 `len = min(地址数, pool_size, POOL_MAX)` 条作为池。
 ///   视频固定从 `pool[0]` 起步；音频/字幕从 `pool[1..len]` 轮询，`pool[0]` 最后兜底。
 fn choose_urls(urls: &[String], kind: &str, index: usize, pool_size: u32) -> Vec<String> {
@@ -939,7 +939,7 @@ struct Attempt {
 
 /// 生成一次抓取的尝试计划。
 ///
-/// - 池关闭：与旧循环逐项等价。每个地址连续用满 `retry_max+1` 次，
+/// - 池关闭：每个地址连续用满 `retry_max+1` 次，
 ///   最后一次不退避，地址之间不退避。
 /// - 池启用：按成员轮询。首轮每个成员各试一次，失败立即换址，轮末才退避。
 ///   总尝试数 = `max(retry_max+1, 成员数)`，不随成员数相乘膨胀。
@@ -1425,7 +1425,7 @@ mod tests {
             "http://b/1".to_string(),
             "http://c/1".to_string(),
         ];
-        // 未截断时与旧实现逐项相同：视频 [a,b,c]，音频从 pool[1] 起环展开。
+        // 未截断时的轮询顺序：视频 [a,b,c]，音频从 pool[1] 起环展开。
         assert_eq!(
             choose_urls(&urls, "video", 1, 3),
             vec!["http://a/1", "http://b/1", "http://c/1"]
@@ -1543,8 +1543,8 @@ mod tests {
     }
 
     #[test]
-    fn attempt_plan_legacy_matches_old_loop() {
-        // 旧循环：每个地址连续 3 次，最后一次不退避，地址之间不退避。
+    fn attempt_plan_pool_off_tries_each_url() {
+        // 每个地址连续 3 次，最后一次不退避，地址之间不退避。
         let plan = attempt_plan(2, false, 2);
         assert_eq!(
             plan,
@@ -1620,7 +1620,7 @@ mod tests {
     }
 
     #[test]
-    fn attempt_plan_single_member_equals_legacy() {
+    fn attempt_plan_single_member_matches_pool_off() {
         assert_eq!(attempt_plan(1, true, 2), attempt_plan(1, false, 2));
         assert!(attempt_plan(0, true, 8).is_empty());
     }

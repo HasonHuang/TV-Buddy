@@ -135,7 +135,7 @@ EPG 源的 `script` 字段建议写完整文件名，例如 `foo.py`。
 - `resolvers/*.py`
 
 备份范围用 `GET /panel/api/backup?include=all|epg-scripts|resolver`。
-恢复脚本时不会执行脚本。恢复后按原有配置运行。
+恢复脚本时不会执行脚本。恢复后按恢复的配置运行。
 
 ---
 
@@ -342,7 +342,7 @@ EPG 源的关键字段：
 | `output_files` | 标准输出为空时读取的文件名列表 |
 | `timeout_secs` | 本源的超时。0 表示用全局值 |
 | `tz_shift_mins` | 节目时间平移，单位分钟 |
-| `refresh_secs` / `cron` | 采集节奏 |
+| `refresh_secs` | 采集节奏。0 表示随全局采集 |
 | `enabled` | 源开关 |
 
 全局开关：

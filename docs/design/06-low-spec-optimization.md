@@ -319,7 +319,7 @@ cap     = clamp( min(working, budget), 50 MB, total × 0.7 )
 LRU 等价且更简单。
 
 磁盘索引 `seg_url/*.json` 同样要有上限。`[cache.segments].per_channel_max = 0` 时用内置
-**4096** 条，大于 0 时按配置。超出后按 `Entry.at`（登记时间）丢最旧。旧格式条目没有 `at`
+**4096** 条，大于 0 时按配置。超出后按 `Entry.at`（登记时间）丢最旧。条目缺少 `at`
 时按 0 处理，优先淘汰。
 
 不要用文件名后缀判断新旧。该后缀是 `sha256(上游 URL)` 的前 32 位十六进制，是哈希不是序号。

@@ -1350,8 +1350,8 @@ export function SettingsPage({
                     <BoolPick
                       label="启用 CDN 兜底"
                       path="cdn.enabled"
-                      tip="关闭时，响应头与状态码保持旧版行为。"
-                      hint="关闭时保持旧版行为"
+                      tip="关闭时，响应头与状态码使用默认值。"
+                      hint="关闭时使用默认行为"
                     />
                     <BoolPick
                       label="被动实测"
@@ -2067,9 +2067,16 @@ function RawCard({ draft, onSaved }: { draft: Cfg; onSaved: (next: Cfg) => void 
     if (!edited) return;
     setBusy(true);
     try {
-      const parsed = JSON.parse(text) as Cfg;
-      const revision = await putConfig(parsed);
-      onSaved({ ...parsed, revision });
+      const parsed = JSON.parse(text) as unknown;
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('配置必须是 JSON 对象');
+      }
+      const config = parsed as Cfg;
+      // 原始编辑器可能删掉 `revision`。用当前草稿的值补上，避免无谓的 409。
+      const payload =
+        typeof config.revision === 'number' ? config : { ...config, revision: draft.revision };
+      const revision = await putConfig(payload);
+      onSaved({ ...payload, revision });
       setEdited(false);
       setRaw(null);
       ok('配置已保存');

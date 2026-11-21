@@ -350,27 +350,19 @@ pub(crate) fn find_target_group(
         });
     }
     if planned.target.starts_with("new:") {
-        // 新组身份只认标记。首次同步不复用 source_group 匹配的旧组，
-        // 否则旧频道留在原位，合并后的顺序不再按上游条目。
+        // 新组身份只认标记。首次同步不复用按 source_group 匹配的分组，
+        // 否则频道留在原位，合并后的顺序不再按上游条目。
         return groups.iter().position(|group| {
             group.origin == "sync"
                 && group.source_id == source.id
                 && sync_marker(group, SYNC_TARGET_KEY) == planned.target
         });
     }
-    // 先按身份标记找，避免旧同名分组抢先命中导致分组 ID 漂移。
-    let by_marker = groups.iter().position(|group| {
+    // 按身份标记找，避免同名分组抢先命中导致分组 ID 漂移。
+    groups.iter().position(|group| {
         group.origin == "sync"
             && group.source_id == source.id
             && sync_marker(group, SYNC_TARGET_KEY) == planned.target
-    });
-    by_marker.or_else(|| {
-        groups.iter().position(|group| {
-            group.origin == "sync"
-                && group.source_id == source.id
-                && (group.source_group == planned.original
-                    || (group.source_group.is_empty() && group.name == planned.name))
-        })
     })
 }
 
@@ -398,11 +390,8 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
                 // 不写同步标记，避免多个源共用同一组时互相覆盖。
                 if !explicit {
                     // 配置改名只作用于未被管理员改过名的分组。
-                    // 旧分组没有基线：记下当前计划名，但不覆盖现有名称。
                     let baseline = sync_marker(&groups[idx], SYNC_NAME_KEY).to_string();
-                    if baseline.is_empty() {
-                        set_sync_marker(&mut groups[idx], SYNC_NAME_KEY, &name);
-                    } else if groups[idx].name == baseline && groups[idx].name != name {
+                    if groups[idx].name == baseline && groups[idx].name != name {
                         groups[idx].name = name.clone();
                         set_sync_marker(&mut groups[idx], SYNC_NAME_KEY, &name);
                     }
@@ -462,7 +451,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         .channels
         .iter()
         .enumerate()
-        .map(|(idx, channel)| (canonical_key(&channel.key), idx))
+        .map(|(idx, channel)| (channel.key.clone(), idx))
         .collect();
     let mut existing_keys: HashSet<String> = HashSet::new();
     let mut remove_keys: HashSet<String> = HashSet::new();
@@ -493,19 +482,19 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         let channel = &mut groups[gidx].channels[cidx];
         let Some(pidx) = *pair else {
             if channel.sync_follow {
-                remove_keys.insert(canonical_key(&channel.source_key));
+                remove_keys.insert(channel.source_key.clone());
             } else {
                 stats.skipped_removals += 1;
             }
             continue;
         };
         let planned = &plan.channels[pidx];
-        // 把旧拼写或旧序号迁移到计划键。后续同步按规范键精确匹配。
+        // 键变化时同步到计划键。后续同步按计划键精确匹配。
         let old_key = std::mem::replace(&mut channel.source_key, planned.key.clone());
         if old_key != planned.key {
             stats.migrations.push((old_key, planned.key.clone()));
         }
-        let planned_key = canonical_key(&planned.key);
+        let planned_key = planned.key.clone();
         existing_keys.insert(planned_key.clone());
         if !channel.sync_follow {
             continue;
@@ -523,8 +512,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         for group in &mut groups {
             let before = group.channels.len();
             group.channels.retain(|channel| {
-                !(channel.source_id == source.id
-                    && remove_keys.contains(&canonical_key(&channel.source_key)))
+                !(channel.source_id == source.id && remove_keys.contains(&channel.source_key))
             });
             stats.removed += before - group.channels.len();
         }
@@ -536,9 +524,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         for group in &mut groups {
             let mut kept = Vec::with_capacity(group.channels.len());
             for channel in group.channels.drain(..) {
-                if channel.source_id == source.id
-                    && move_keys.contains(&canonical_key(&channel.source_key))
-                {
+                if channel.source_id == source.id && move_keys.contains(&channel.source_key) {
                     moved.push(channel);
                 } else {
                     kept.push(channel);
@@ -549,12 +535,12 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         // 多个来源分组合并到同一目标时，按计划顺序落位。
         moved.sort_by_key(|channel| {
             plan_index
-                .get(&canonical_key(&channel.source_key))
+                .get(&channel.source_key)
                 .copied()
                 .unwrap_or(usize::MAX)
         });
         for mut channel in moved {
-            let Some(&pidx) = plan_index.get(&canonical_key(&channel.source_key)) else {
+            let Some(&pidx) = plan_index.get(&channel.source_key) else {
                 continue;
             };
             let planned = &plan.channels[pidx];
@@ -580,7 +566,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
 
     // 阶段五：新增计划内、当前不存在的频道。
     for planned in &plan.channels {
-        if existing_keys.contains(&canonical_key(&planned.key)) {
+        if existing_keys.contains(&planned.key) {
             continue;
         }
         let Some(&gidx) = target_index.get(&planned.target) else {
@@ -716,9 +702,7 @@ pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
             config.groups.iter().position(|group| {
                 group.origin == "sync"
                     && group.source_id == source.id
-                    && (sync_marker(group, SYNC_TARGET_KEY) == planned_group.target
-                        || group.source_group == planned_group.original
-                        || (group.source_group.is_empty() && group.name == planned_group.name))
+                    && sync_marker(group, SYNC_TARGET_KEY) == planned_group.target
             })
         };
         match existing {
@@ -747,9 +731,6 @@ pub fn diff(config: &Config, source: &PlaylistSource, plan: &Plan) -> Diff {
         let planned_group = plan.groups.iter().any(|planned| {
             (!planned.merge_id.is_empty() && planned.merge_id == group.id)
                 || sync_marker(group, SYNC_TARGET_KEY) == planned.target
-                || (!planned.target.starts_with("new:")
-                    && (planned.original == group.source_group
-                        || (group.source_group.is_empty() && group.name == planned.name)))
         });
         if planned_group {
             continue;
@@ -924,7 +905,7 @@ fn source_channel_snapshot(config: &Config, source_id: &str) -> Vec<SourceChanne
         for channel in &group.channels {
             if channel.source_id == source_id && !channel.source_key.is_empty() {
                 items.push(SourceChannelSnapshot {
-                    key: canonical_key(&channel.source_key),
+                    key: channel.source_key.clone(),
                     gid: group.id.clone(),
                     cid: channel.id.clone(),
                     name: channel.name.clone(),
@@ -946,26 +927,25 @@ fn source_channel_keys(config: &Config, source_id: &str) -> HashSet<String> {
                 .channels
                 .iter()
                 .filter(|channel| channel.source_id == source_id && !channel.source_key.is_empty())
-                .map(|channel| canonical_key(&channel.source_key))
+                .map(|channel| channel.source_key.clone())
         })
         .collect()
 }
 
 /// 频道是否仍在源中。键迁移也算保留。
 ///
-/// 只比较 `(gid, cid)` 会把移组当成删除；只比较键会把旧键迁移当成删除。
+/// 只比较 `(gid, cid)` 会把移组当成删除；只比较键会把键迁移当成删除。
 fn source_channel_survived(
     key: &str,
     after: &HashSet<String>,
     migrations: &[(String, String)],
 ) -> bool {
-    let old = canonical_key(key);
-    if after.contains(&old) {
+    if after.contains(key) {
         return true;
     }
     migrations
         .iter()
-        .any(|(from, to)| canonical_key(from) == old && after.contains(&canonical_key(to)))
+        .any(|(from, to)| from == key && after.contains(to))
 }
 
 /// 同步一个源。调用方应已持有全局同步锁。
@@ -1167,14 +1147,12 @@ pub async fn sync_locked(
             if result.scope != "sync" || (!result.gid.is_empty() && !result.cid.is_empty()) {
                 continue;
             }
-            let key = canonical_key(&result.source_key);
+            let key = result.source_key.clone();
             let found = config.groups.iter().find_map(|group| {
                 group
                     .channels
                     .iter()
-                    .find(|channel| {
-                        channel.source_id == id && canonical_key(&channel.source_key) == key
-                    })
+                    .find(|channel| channel.source_id == id && channel.source_key == key)
                     .map(|channel| (group, channel))
             });
             if let Some((group, channel)) = found {
@@ -1228,11 +1206,9 @@ pub async fn sync_locked(
     // 键迁移后把旧结果行搬到新键，避免结果页出现重复或过期准入。
     for (old, new) in &stats.migrations {
         let new_key = format!("sync:{id}:{new}");
-        for old_candidate in [old.clone(), canonical_key(old)] {
-            let old_key = format!("sync:{id}:{old_candidate}");
-            if let Err(error) = migrate_result_key(&state.quality_store, &old_key, &new_key, new) {
-                tracing::warn!(source = id, %error, "迁移旧结果失败");
-            }
+        let old_key = format!("sync:{id}:{old}");
+        if let Err(error) = migrate_result_key(&state.quality_store, &old_key, &new_key, new) {
+            tracing::warn!(source = id, %error, "迁移结果失败");
         }
     }
     let shrink_permille = if existing == 0 {
@@ -1789,39 +1765,16 @@ fn key_suffix(url: &str) -> String {
     hex::encode(&digest[..4])
 }
 
-/// 匹配用的规范键。`name:` 键忽略大小写；`id:` 已小写；`url:` 保持原样。
+/// 重复键去掉 `#<8 位 hex>` 后缀。
 ///
-/// 旧版本按原样保存 `name:` 键。这里归一后，升级不会误删或重复频道。
-pub(crate) fn canonical_key(key: &str) -> String {
-    if key.starts_with("name:") {
-        return key.to_lowercase();
-    }
-    if let Some(url) = key.strip_prefix("url:") {
-        if url.contains("://") {
-            // 旧版本把完整地址写进稳定键。归一为摘要，升级后仍能配对。
-            return format!("url:{}", url_digest(url));
+/// 后缀由 URL 生成。上游地址变化时后缀跟着变，用基键配对可保留频道身份。
+fn key_base(key: &str) -> &str {
+    if let Some((head, tail)) = key.rsplit_once('#') {
+        if tail.len() == 8 && tail.chars().all(|ch| ch.is_ascii_hexdigit()) {
+            return head;
         }
     }
-    key.to_string()
-}
-
-/// 键族：去掉 `#` 后缀。
-///
-/// 旧版本用 `#2` 区分重复键，新版本用 `#<hash>`。首次同步按键族配对，
-/// 把旧键迁移到新键。只在精确匹配失败时使用。
-fn key_family(key: &str) -> String {
-    let canonical = canonical_key(key);
-    if let Some((head, tail)) = canonical.rsplit_once('#') {
-        if !tail.is_empty()
-            && tail.len() <= 12
-            && tail
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
-        {
-            return head.to_string();
-        }
-    }
-    canonical
+    key
 }
 
 /// 已物化频道的最小匹配信息。
@@ -1840,18 +1793,17 @@ fn pair_channels(existing: &[ExistingRef<'_>], plan: &Plan) -> Vec<Option<usize>
     let mut index: HashMap<String, usize> = HashMap::new();
     let mut families: HashMap<String, Vec<usize>> = HashMap::new();
     for (idx, channel) in plan.channels.iter().enumerate() {
-        let canonical = canonical_key(&channel.key);
         families
-            .entry(key_family(&canonical))
+            .entry(key_base(&channel.key).to_string())
             .or_default()
             .push(idx);
-        index.insert(canonical, idx);
+        index.insert(channel.key.clone(), idx);
     }
 
     let mut pairs = vec![None; existing.len()];
     let mut matched: HashSet<usize> = HashSet::new();
     for (slot, item) in existing.iter().enumerate() {
-        if let Some(&idx) = index.get(&canonical_key(item.key)) {
+        if let Some(&idx) = index.get(item.key) {
             if matched.insert(idx) {
                 pairs[slot] = Some(idx);
             }
@@ -1861,8 +1813,8 @@ fn pair_channels(existing: &[ExistingRef<'_>], plan: &Plan) -> Vec<Option<usize>
         if pairs[slot].is_some() {
             continue;
         }
-        let family = key_family(&canonical_key(existing[slot].key));
-        let Some(candidates) = families.get(&family) else {
+        let family = key_base(existing[slot].key);
+        let Some(candidates) = families.get(family) else {
             continue;
         };
         let item = existing[slot];
@@ -1879,8 +1831,8 @@ fn pair_channels(existing: &[ExistingRef<'_>], plan: &Plan) -> Vec<Option<usize>
         if pairs[slot].is_some() {
             continue;
         }
-        let family = key_family(&canonical_key(existing[slot].key));
-        let Some(candidates) = families.get(&family) else {
+        let family = key_base(existing[slot].key);
+        let Some(candidates) = families.get(family) else {
             continue;
         };
         if let Some(&idx) = candidates.iter().find(|&&idx| !matched.contains(&idx)) {
@@ -1893,7 +1845,7 @@ fn pair_channels(existing: &[ExistingRef<'_>], plan: &Plan) -> Vec<Option<usize>
 
 /// 给门控与 apply 共用的现有频道配对。
 ///
-/// 键族、规范键与名称+URL 的配对逻辑只能有一份。否则重复键变化或旧 key 迁移时，
+/// 键族、基键与名称+URL 的配对逻辑只能有一份。否则重复键变化或键迁移时，
 /// 门控会把已准入频道当成新候选，apply 却仍按旧频道更新。
 pub(crate) fn pair_source_channels<'a>(
     config: &'a Config,
@@ -1968,14 +1920,17 @@ fn split_header(raw: &str) -> Option<(&str, &str)> {
 
 fn entry_headers(entry: &Entry) -> Vec<Value> {
     let mut headers = Vec::new();
+    let mut push = |name: &str, value: &str| {
+        headers.push(serde_json::json!({ "name": name, "value": value }));
+    };
     if let Some(value) = trim_opt(entry.user_agent.as_deref()) {
-        headers.push(Value::String(format!("User-Agent: {value}")));
+        push("User-Agent", &value);
     }
     if let Some(value) = trim_opt(entry.referer.as_deref()) {
-        headers.push(Value::String(format!("Referer: {value}")));
+        push("Referer", &value);
     }
     for (name, value) in &entry.headers {
-        headers.push(Value::String(format!("{name}: {value}")));
+        push(name, value);
     }
     headers
 }
@@ -2755,6 +2710,21 @@ mod tests {
     }
 
     #[test]
+    fn diff_reports_group_identity_change_as_add_and_remove() {
+        let mut config = config_with_source();
+        let source = source();
+        let entries = urls(&[("c1", "新闻", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+
+        let mut merged = source.clone();
+        merged.group_mode = "merge".into();
+        merged.merge_group = "全部".into();
+        let changed = diff(&config, &merged, &plan(&config, &merged, &entries));
+        assert_eq!(changed.groups_add, 1);
+        assert_eq!(changed.groups_remove, 1);
+    }
+
+    #[test]
     fn stable_key_prefers_tvg_id_then_name_then_url() {
         let with_id = entry("名字", "组", "abc", "http://up/1");
         assert_eq!(stable_key(&with_id, "组"), "id:abc");
@@ -2768,14 +2738,10 @@ mod tests {
     }
 
     #[test]
-    fn canonical_key_hashes_legacy_url_keys() {
-        let legacy = canonical_key("url:http://up/1.m3u8");
-        assert!(!legacy.contains("http"), "{legacy}");
-        let unnamed = Entry {
-            url: "http://up/1.m3u8".into(),
-            ..Entry::default()
-        };
-        assert_eq!(legacy, canonical_key(&stable_key(&unnamed, "组")));
+    fn key_base_strips_hash_suffix_only() {
+        assert_eq!(key_base("id:same#0123abcd"), "id:same");
+        assert_eq!(key_base("id:same#2"), "id:same#2");
+        assert_eq!(key_base("id:same"), "id:same");
     }
 
     #[test]
@@ -3062,33 +3028,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_mixed_case_name_key_still_matches() {
-        let mut config = config_with_source();
-        let source = source();
-        let entries = vec![Entry {
-            name: "CCTV-1".into(),
-            group_title: Some("CCTV".into()),
-            url: "http://up/1".into(),
-            ..Entry::default()
-        }];
-        run(&mut config, &source, &entries);
-        // 模拟旧版本按原样写入的键。
-        config.groups[0].channels[0].source_key = "name:CCTV\u{1f}CCTV-1".into();
-
-        let stats = run(&mut config, &source, &entries);
-        assert_eq!(config.groups[0].channels.len(), 1, "旧键不应产生重复");
-        assert_eq!(
-            (
-                stats.added,
-                stats.updated,
-                stats.removed,
-                stats.skipped_removals
-            ),
-            (0, 0, 0, 0)
-        );
-    }
-
-    #[test]
     fn name_key_ignores_case() {
         let upper = Entry {
             name: "CCTV-1".into(),
@@ -3248,69 +3187,6 @@ mod tests {
             !source_channel_survived("id:gone", &after, &[]),
             "源不再提供该键时算移除"
         );
-    }
-
-    #[test]
-    fn moving_legacy_channel_keeps_public_id() {
-        let mut config = config_with_source();
-        let source = source();
-        let entries = vec![Entry {
-            name: "CCTV-1".into(),
-            group_title: Some("新闻".into()),
-            url: "http://up/1.m3u8".into(),
-            ..Entry::default()
-        }];
-        run(&mut config, &source, &entries);
-        let id = config.groups[0].channels[0].id.clone();
-        // 模拟旧版本保留大小写的 name 键。
-        config.groups[0].channels[0].source_key = "name:新闻\u{1f}CCTV-1".into();
-        config.groups.push(Group {
-            id: "g".into(),
-            name: "共享".into(),
-            ..Group::default()
-        });
-
-        let mut merged = source.clone();
-        merged.merge_into.insert("新闻".into(), "g".into());
-        run(&mut config, &merged, &entries);
-        let channel = config
-            .groups
-            .iter()
-            .flat_map(|group| group.channels.iter())
-            .find(|channel| channel.url == "http://up/1.m3u8")
-            .expect("频道应仍在配置里");
-        assert_eq!(channel.id, id, "移组不应改变公开播放地址");
-    }
-
-    #[test]
-    fn legacy_case_variant_keys_do_not_duplicate() {
-        let mut config = config_with_source();
-        let source = source();
-        let entries = vec![
-            Entry {
-                name: "CCTV-1".into(),
-                group_title: Some("央视".into()),
-                url: "http://up/1.m3u8".into(),
-                ..Entry::default()
-            },
-            Entry {
-                name: "cctv-1".into(),
-                group_title: Some("央视".into()),
-                url: "http://up/2.m3u8".into(),
-                ..Entry::default()
-            },
-        ];
-        run(&mut config, &source, &entries);
-        assert_eq!(config.groups[0].channels.len(), 2);
-        // 旧版本按原样保存大小写不同的两条键。
-        config.groups[0].channels[0].source_key = "name:央视\u{1f}CCTV-1".into();
-        config.groups[0].channels[1].source_key = "name:央视\u{1f}cctv-1".into();
-
-        run(&mut config, &source, &entries);
-        let channels = &config.groups[0].channels;
-        assert_eq!(channels.len(), 2, "升级后不应追加第三条频道");
-        let urls: HashSet<&str> = channels.iter().map(|c| c.url.as_str()).collect();
-        assert_eq!(urls.len(), 2, "两条 URL 都不应丢失");
     }
 
     #[test]

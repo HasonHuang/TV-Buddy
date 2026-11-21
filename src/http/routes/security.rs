@@ -97,9 +97,6 @@ pub async fn ip_ban(
         "secs": applied,
         "max_seconds": MAX_BAN_SECS,
         "default_seconds": DEFAULT_BAN_SECS,
-        // 单条封禁的旧字段。
-        "ip": targets.first().cloned().unwrap_or_default(),
-        "seconds": applied,
     })))
 }
 

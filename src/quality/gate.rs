@@ -420,11 +420,6 @@ fn header_pairs(headers: &[serde_json::Value]) -> Vec<(String, String)> {
     headers
         .iter()
         .filter_map(|value| {
-            if let Some(text) = value.as_str() {
-                let (name, value) = text.split_once(':')?;
-                let name = name.trim();
-                return (!name.is_empty()).then(|| (name.to_string(), value.trim().to_string()));
-            }
             let table = value.as_object()?;
             let name = table.get("name")?.as_str()?.trim();
             let value = table.get("value")?.as_str()?.trim();
@@ -1085,7 +1080,8 @@ mod tests {
     #[test]
     fn gate_candidate_merges_group_headers() {
         let mut config = config_with_existing(&["c1"]);
-        config.groups[0].headers = vec![serde_json::json!("Referer: https://example.test/")];
+        config.groups[0].headers =
+            vec![serde_json::json!({ "name": "Referer", "value": "https://example.test/" })];
         config.groups[0]
             .extra
             .insert("user_agent".into(), serde_json::json!("GateUA/1.0"));
@@ -1259,14 +1255,14 @@ mod tests {
 
     #[test]
     fn duplicate_count_change_pairs_existing_channel() {
-        let config = config_with_existing(&["id:same#abcd"]);
+        let config = config_with_existing(&["id:same#abcd1234"]);
         let mut plan = plan_with(&["id:same"]);
         plan.channels[0].url = "http://up/new.m3u8".into();
         let targets = select_targets(&config, &source(), &plan, None, 10);
         assert!(targets.new.is_empty(), "重复数变化不得当成新候选");
         assert_eq!(targets.url_changed.len(), 1, "应识别为 URL 变化");
         assert_eq!(targets.url_changed[0].gid, "g");
-        assert_eq!(targets.url_changed[0].cid, "id:same#abcd");
+        assert_eq!(targets.url_changed[0].cid, "id:same#abcd1234");
         assert!(targets.url_changed[0].is_url_change);
     }
 

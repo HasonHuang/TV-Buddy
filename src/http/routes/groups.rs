@@ -542,19 +542,21 @@ pub async fn import_m3u(
             );
         }
         if let Some(value) = &entry.user_agent {
-            channel
-                .headers
-                .push(serde_json::Value::String(format!("User-Agent: {value}")));
+            channel.headers.push(serde_json::json!({
+                "name": "User-Agent",
+                "value": value
+            }));
         }
         if let Some(value) = &entry.referer {
-            channel
-                .headers
-                .push(serde_json::Value::String(format!("Referer: {value}")));
+            channel.headers.push(serde_json::json!({
+                "name": "Referer",
+                "value": value
+            }));
         }
         for (key, value) in &entry.headers {
             channel
                 .headers
-                .push(serde_json::Value::String(format!("{key}: {value}")));
+                .push(serde_json::json!({ "name": key, "value": value }));
         }
         draft.channels.push(channel);
     }

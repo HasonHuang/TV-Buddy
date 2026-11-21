@@ -532,12 +532,18 @@ async fn fixture_with_options(
                 "name": "代理组",
                 "mode": "proxy",
                 "access": "public",
-                "headers": ["X-Group: group", "X-Both: group"],
+                "headers": [
+                    { "name": "X-Group", "value": "group" },
+                    { "name": "X-Both", "value": "group" }
+                ],
                 "channels": [{
                     "id": "c1",
                     "name": "媒体清单频道",
                     "url": live,
-                    "headers": ["X-Token: abc123", "X-Both: channel"]
+                    "headers": [
+                        { "name": "X-Token", "value": "abc123" },
+                        { "name": "X-Both", "value": "channel" }
+                    ]
                 }]
             },
             {
@@ -604,13 +610,7 @@ async fn fixture_with_options(
             "keep_days": 3,
             "future_days": 1,
             "keep_yesterday": false,
-            "match_by_name": true,
-            "sources": [{
-                "id": "s1",
-                "name": "本地源",
-                "kind": "xml",
-                "url": format!("{upstream}/epg.xml")
-            }]
+            "match_by_name": true
         });
     } else {
         // 默认值已改为开启；关闭 EPG 的夹具必须显式写回。
@@ -627,6 +627,22 @@ async fn fixture_with_options(
 
     let state =
         Arc::new(AppState::new(db_path, cfg, Arc::new(RingBuffer::default())).expect("建状态"));
+    if epg_enabled {
+        state
+            .epg_store
+            .save_source(tv_buddy::epg_store::Source {
+                id: "s1".into(),
+                name: "本地源".into(),
+                kind: "xml".into(),
+                enabled: true,
+                urls: vec![tv_buddy::epg_store::SourceUrl {
+                    url: format!("{upstream}/epg.xml"),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .expect("建 EPG 源");
+    }
     // 契约测试固定用 admin/admin 登录。
     tv_buddy::users::ensure_admin(&state.users, "admin").expect("初始管理员");
     let base = serve(http::router(state.clone())).await;
@@ -2372,6 +2388,7 @@ async fn m3u_import_creates_groups_and_channels() {
 
     let text = "#EXTM3U\n\
         #EXTINF:-1 tvg-id=\"m1\" tvg-name=\"频道一\" group-title=\"导入A\",频道一\n\
+        #EXTVLCOPT:http-user-agent=ImportUA/1.0\n\
         http://up/1.m3u8\n\
         #EXTINF:-1 group-title=\"导入A\",频道二\n\
         http://up/2.m3u8\n\
@@ -2410,6 +2427,10 @@ async fn m3u_import_creates_groups_and_channels() {
     assert_eq!(group_a["channels"].as_array().expect("频道").len(), 2);
     assert_eq!(group_a["channels"][0]["id"], "m1");
     assert_eq!(group_a["channels"][0]["name"], "频道一");
+    assert_eq!(
+        group_a["channels"][0]["headers"][0],
+        serde_json::json!({ "name": "User-Agent", "value": "ImportUA/1.0" })
+    );
     let group_d = groups
         .iter()
         .find(|group| group["id"] == "D")
@@ -4136,7 +4157,7 @@ async fn dash_pool_falls_back_and_remembers_success() {
     assert_eq!(POOL_A_HITS.load(Ordering::SeqCst), 1, "应记住 B");
     assert_eq!(POOL_B_HITS.load(Ordering::SeqCst), 2);
 
-    // 池关闭：回到旧行为，A 用满 retry_max+1 次再换 B。
+    // 池关闭：每个地址用满 retry_max+1 次再换下一个。
     POOL_A_HITS.store(0, Ordering::SeqCst);
     POOL_B_HITS.store(0, Ordering::SeqCst);
     let single = fixture_with_extra(
@@ -4846,11 +4867,26 @@ async fn schedule_crud_and_livestream_toggle() {
 
 #[tokio::test]
 async fn epg_script_source_runs_python_and_merges_output() {
-    let fixture = fixture_with_all(
-        true,
-        r#"{"epg":{"sources":[{"id":"s2","name":"脚本源","kind":"script","script":"gen.py","timeout_secs":30}]}}"#,
-    )
-    .await;
+    let fixture = fixture_with(true).await;
+    for source in fixture.state.epg_store.sources() {
+        fixture
+            .state
+            .epg_store
+            .delete_source(&source.id)
+            .expect("删默认源");
+    }
+    fixture
+        .state
+        .epg_store
+        .save_source(tv_buddy::epg_store::Source {
+            name: "脚本源".into(),
+            kind: "script".into(),
+            enabled: true,
+            script: "gen.py".into(),
+            timeout_secs: 30,
+            ..Default::default()
+        })
+        .expect("建脚本源");
 
     let scripts = fixture.dir.join("cache/epg/scripts");
     std::fs::create_dir_all(&scripts).expect("建脚本目录");
@@ -4880,11 +4916,25 @@ print(f'''<?xml version="1.0" encoding="UTF-8"?>
 
 #[tokio::test]
 async fn epg_script_source_reports_missing_script() {
-    let fixture = fixture_with_all(
-        false,
-        r#"{"epg":{"enabled":true,"sources":[{"id":"s2","name":"缺失脚本","kind":"script","script":"missing.py"}]}}"#,
-    )
-    .await;
+    let fixture = fixture_with(true).await;
+    for source in fixture.state.epg_store.sources() {
+        fixture
+            .state
+            .epg_store
+            .delete_source(&source.id)
+            .expect("删默认源");
+    }
+    fixture
+        .state
+        .epg_store
+        .save_source(tv_buddy::epg_store::Source {
+            name: "缺失脚本".into(),
+            kind: "script".into(),
+            enabled: true,
+            script: "missing.py".into(),
+            ..Default::default()
+        })
+        .expect("建脚本源");
 
     let error = epg::refresh(&fixture.state).await.expect_err("应失败");
     assert!(
@@ -5923,7 +5973,7 @@ async fn cdn_dont_cache_empty_keeps_200() {
 }
 
 #[tokio::test]
-async fn cdn_disabled_matches_legacy() {
+async fn cdn_disabled_uses_default_headers() {
     let fixture = fixture().await;
     let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
     let body = response.text().await.expect("读正文");
@@ -5939,7 +5989,7 @@ async fn cdn_disabled_matches_legacy() {
         "private, max-age=300",
         "`[cdn]` 默认关闭时命中路径仍为 private"
     );
-    // 空体仍是 200（旧行为）。
+    // 空体仍是 200（默认行为）。
     let response = fetch(
         &fixture,
         &format!("/badseg/c1.m3u8?token={}", fixture.token),
@@ -6253,7 +6303,7 @@ async fn epg_config_sources_bindings_and_rules() {
     let auth = format!("Bearer {session}");
     let client = &fixture.client;
 
-    // 旧配置里的源在启动时导入新表。
+    // 启动时已建好的源出现在列表里。
     let sources: serde_json::Value = client
         .get(format!("{}/panel/api/epg/sources", fixture.base))
         .header("authorization", auth.clone())

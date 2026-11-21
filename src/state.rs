@@ -139,7 +139,7 @@ impl AppState {
             config_store.save(&config)?;
         }
         // `save` 可能补了密钥；以库里的版本进快照。
-        let mut config = config_store.load()?.unwrap_or(config);
+        let config = config_store.load()?.unwrap_or(config);
         if !config.auth.token_enabled {
             tracing::warn!("auth.token_enabled=false：播放地址不校验令牌。建议在面板安全页开启。");
         }
@@ -148,26 +148,6 @@ impl AppState {
         let quality_store = crate::quality::store::QualityStore::new(conn.clone());
         let epg_store = crate::epg_store::Store::attach(conn.clone())?;
         let epg = crate::epg::EpgState::load(&cache_dir);
-        // 旧配置里的 `[[epg.sources]]` 逐条导入。成功的从配置移除，失败的保留。
-        match epg_store.import_config_sources(&config.epg.sources) {
-            Ok(imported) if !imported.is_empty() => {
-                // 只移除已进表的源。失败的源保留，下次启动再试。
-                let mut imported = imported;
-                imported.sort_unstable();
-                for index in imported.into_iter().rev() {
-                    config.epg.sources.remove(index);
-                }
-                match config_store.save(&config) {
-                    Ok(revision) => config.revision = revision,
-                    Err(error) => tracing::warn!(%error, "清理旧 EPG 源配置失败"),
-                }
-            }
-            Ok(_) => {}
-            Err(error) => tracing::warn!(%error, "导入旧 EPG 源失败"),
-        }
-        if let Err(error) = epg_store.import_legacy_mappings(&cache_dir) {
-            tracing::warn!(%error, "导入旧 EPG 映射失败");
-        }
         let offset_hours = config.server.timezone_offset_hours as i64;
         ensure_cache_dirs(&cache_dir);
         let segments = SegmentIndex::new();
@@ -316,7 +296,7 @@ impl AppState {
 
     /// 从数据库重读并替换快照。写锁内完成，避免与保存交错。
     ///
-    /// 返回 `Ok(false)` 表示库里没有配置。此时保留旧快照。
+    /// 返回 `Ok(false)` 表示库里没有配置。此时保留当前快照。
     pub fn reload_from_db(&self) -> anyhow::Result<bool> {
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         match self.config_store.load()? {
@@ -499,16 +479,19 @@ impl AppState {
     pub fn save_config(&self, mut config: Config, expected: Option<u64>) -> anyhow::Result<u64> {
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         config.normalize();
-        let current = self
-            .config_store
-            .load()?
-            .map(|from_db| from_db.revision)
-            .unwrap_or(0);
-        if let Some(expected) = expected.filter(|value| *value != 0) {
-            if expected != current {
-                return Err(anyhow::Error::new(crate::config::StaleRevision(current)));
-            }
-        }
+        crate::sign::ensure_secret(&mut config);
+        let revision = self.config_store.save_if_revision(&config, expected)?;
+        config.revision = revision;
+        self.replace(config);
+        Ok(revision)
+    }
+
+    /// 整份替换配置，跳过 `revision` 校验。用于备份恢复等显式覆盖操作。
+    ///
+    /// 与 [`AppState::save_config`] 共用写锁。写入后返回新版本并替换快照。
+    pub fn replace_config(&self, mut config: Config) -> anyhow::Result<u64> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        config.normalize();
         crate::sign::ensure_secret(&mut config);
         let revision = self.config_store.save(&config)?;
         config.revision = revision;

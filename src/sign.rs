@@ -22,7 +22,7 @@ pub const WINDOW_MAX: u64 = 3600;
 
 /// 是否启用切片签名。
 ///
-/// 令牌总开关关闭时不签名，保持旧行为。
+/// 令牌总开关关闭时不签名。
 /// 密钥缺失或无效时也按关闭处理，避免签不出名却拒绝所有切片。
 pub fn enabled(config: &Config) -> bool {
     config.auth.token_enabled && config.auth.slice_sign_enabled && secret_bytes(config).is_some()

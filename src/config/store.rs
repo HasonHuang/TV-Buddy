@@ -4,7 +4,7 @@
 //! 与用户表同一套文档模式，改动只需一次 UPSERT。
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use super::model::Config;
 use crate::{
@@ -44,6 +44,25 @@ impl ConfigStore {
     /// 在调用方的事务里写配置。语义与 [`ConfigStore::save`] 相同。
     pub fn save_tx(&self, tx: &Transaction<'_>, config: &Config) -> Result<u64> {
         save_conn(tx, config)
+    }
+
+    /// 按 `revision` 条件保存。
+    ///
+    /// 在 `IMMEDIATE` 事务里读版本并写入，跨进程写者不会插在检查与写入之间。
+    /// `expected` 为空或与库内值不同时返回 [`crate::config::StaleRevision`]。
+    pub fn save_if_revision(&self, config: &Config, expected: Option<u64>) -> Result<u64> {
+        let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = load_conn(&tx)?.map(|from_db| from_db.revision).unwrap_or(0);
+        let Some(expected) = expected else {
+            return Err(anyhow::Error::new(crate::config::StaleRevision(current)));
+        };
+        if expected != current {
+            return Err(anyhow::Error::new(crate::config::StaleRevision(current)));
+        }
+        let revision = save_conn(&tx, config)?;
+        tx.commit()?;
+        Ok(revision)
     }
 
     /// 恢复默认配置。用户不受影响。
@@ -157,33 +176,57 @@ mod tests {
     }
 
     #[test]
-    fn save_increments_revision_and_normalizes_open() {
+    fn save_increments_revision() {
         let (store, dir) = temp_store("revision");
         let mut config = Config::default();
         config.groups.push(super::super::model::Group {
             id: "g".into(),
-            access: "open".into(),
+            access: "public".into(),
             ..Default::default()
         });
         assert_eq!(store.save(&config).expect("首次保存"), 1);
 
         let loaded = store.load().expect("读取").expect("有配置");
         assert_eq!(loaded.revision, 1);
-        assert_eq!(loaded.groups[0].access, "public", "load 应归一 open");
+        assert_eq!(loaded.groups[0].access, "public");
 
         assert_eq!(store.save(&loaded).expect("再次保存"), 2);
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn legacy_config_without_revision_loads() {
-        let dir = std::env::temp_dir().join("tv-buddy-config-legacy");
+    fn save_if_revision_rejects_stale_tokens() {
+        let (store, dir) = temp_store("cas");
+        let config = Config::default();
+        assert_eq!(store.save(&config).expect("首次保存"), 1);
+
+        let stale = store
+            .save_if_revision(&config, Some(0))
+            .expect_err("旧版本应拒绝");
+        assert_eq!(
+            stale
+                .downcast_ref::<crate::config::StaleRevision>()
+                .map(|e| e.0),
+            Some(1)
+        );
+
+        assert!(store.save_if_revision(&config, None).is_err());
+        assert_eq!(
+            store.save_if_revision(&config, Some(1)).expect("当前版本"),
+            2
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn config_without_revision_loads_as_zero() {
+        let dir = std::env::temp_dir().join("tv-buddy-config-no-revision");
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("tv-buddy.db");
         let conn = crate::db::connect(&path).expect("打开库");
         let raw = serde_json::json!({
             "server": { "bind": "127.0.0.1:9000" },
-            "groups": [{ "id": "g", "name": "旧组", "mode": "proxy", "access": "open" }]
+            "groups": [{ "id": "g", "name": "组", "mode": "proxy", "access": "public" }]
         });
         conn.lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -191,12 +234,11 @@ mod tests {
                 "INSERT INTO settings (key, value, updated_at_ms) VALUES (?1, ?2, 0)",
                 params![CONFIG_KEY, raw.to_string()],
             )
-            .expect("写入旧配置");
+            .expect("写入配置");
         let store = ConfigStore::new(conn);
 
         let loaded = store.load().expect("读取").expect("有配置");
         assert_eq!(loaded.revision, 0);
-        assert_eq!(loaded.groups[0].access, "public");
         assert_eq!(store.save(&loaded).expect("保存"), 1);
         let _ = std::fs::remove_dir_all(dir);
     }

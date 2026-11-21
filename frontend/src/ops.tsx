@@ -330,7 +330,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
           </button>
         </div>
       ) : (
-        <p className="msg ok">播放凭证已开启。旧版的「开放」分组不再生成免验证的播放地址。</p>
+        <p className="msg ok">播放凭证已开启。所有分组都要求有效凭证。</p>
       )}
       {passthroughGroups.length > 0 && (
         <div className="msg warn">
@@ -894,7 +894,7 @@ export function BackupPage({
           恢复
         </div>
         <p className="muted">
-          恢复会覆盖当前配置。旧配置会另存为备份文件，内容有问题时不会覆盖当前数据。
+          恢复会覆盖当前配置。当前配置会另存为备份文件，内容有问题时不会覆盖现有数据。
           恢复成功后配置立即重新读取。
         </p>
         <label className="ghost file-pick" title="选择 .tar.gz 备份包">
@@ -918,7 +918,7 @@ export function BackupPage({
       {pending ? (
         <Confirm
           title="恢复备份？"
-          text={`备份包「${pending.name}」会覆盖当前配置与同名资源。旧配置会另存为备份文件。`}
+          text={`备份包「${pending.name}」会覆盖当前配置与同名资源。当前配置会另存为备份文件。`}
           confirmText="恢复备份"
           busy={busy}
           onCancel={() => {

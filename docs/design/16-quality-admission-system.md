@@ -78,12 +78,9 @@
 | `result_retention_days` | u64 | `7` | 0 = 不自动清理。 |
 | `gate_time_budget_secs` | u64 | `300` | 单轮墙钟上限。同步门控与周期/手动校验共用。0 = 不限制。 |
 
-### 3.2 迁移
+### 3.2 判定范围
 
-- 保留 `interval_secs` 字段，避免旧配置解析失败，但新调度不再读取。
-- 新配置默认 `interval_hours=6`。旧配置首次保存后写入新字段。质量控制尚未发布，不做秒到小时的自动换算。
-- `rules.action`、`rules.retain`、`rules.supply` 保留解析，但不再控制准入。
-- `quick_target`、`sort_by`、`defer_during_playback`、`filter_ad` 保留解析，但新引擎不读取。
+- `interval_hours=6` 表示默认调度周期。
 - `rules.stale_keep_secs` 只控制手工频道下线宽限。
 - 手工频道失败处理使用现有 `offline_on_fail`：
   - `false` = 保留。
@@ -349,7 +346,7 @@ CREATE TABLE IF NOT EXISTS quality_meta (
 - 同步频道失败时已由任务提交移出，分组中只应存在合格频道。保留防御性检查：结果与 URL 哈希不匹配时不隐藏。
 - 手工频道质量启用时读 `QualityState`；质量停用时读 `Health`。
 - 两条路径不得同时生效，避免重复隐藏。
-- `retain`、`rules.action` 不再参与新判定。
+- 判定只看可达性与阈值。
 
 ## 6 调度
 
@@ -624,6 +621,5 @@ sync_lock → admission_lock → config.write_lock → SharedConn
 | 配置与结果跨表事务 | 给 `ConfigStore` 增加事务内读取与保存方法。`mutate_admission` 在同一个 `SharedConn` 事务里写 `settings`、`quality_results`、`quality_meta`。不用降级方案。 |
 | 移出后空同步分组 | 质量移出不删分组。下一次完整同步的 `apply` 阶段六会删除空同步分组。分组页暂时显示 0 个频道。 |
 | 源停用/删除与运行中任务竞争 | 提交前复核：频道仍存在、`source_id` 未变、URL 哈希未变、源仍启用、源门控仍开启。不满足则跳过移出，记录 `skipped` / `source_changed`。 |
-| 旧 `rules.action`、`retain`、`supply` 字段 | 保留解析，避免旧配置失效；新引擎不读取。规则页只显示新字段，旧字段留在「其余字段」JSON。 |
 | 结果表增长 | 每个稳定键只保留一行。已准入行持续更新；非准入行超过保留期删除。启动时与每天各清理一次。 |
 | 低配环境探测耗时 | 保留预算、并发与进度；`gate_time_budget_secs` 同时限制门控与周期/手动校验，默认 300 秒。超时后未处理频道留到下一轮；门控未判定候选不进入计划，源状态标记截断。 |

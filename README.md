@@ -204,7 +204,6 @@ sudo ./install.sh
 | `--no-service` | 不注册 systemd/OpenRC 服务 |
 | `--no-link` | 不创建命令软链 |
 | `--no-start` | 安装后不启动服务 |
-| `--start` | 安装后启动服务（默认行为，保留以兼容旧用法） |
 | `--low-spec` | 写入低配参数：省内存、省 CPU。不询问 |
 | `--no-low-spec` | 不写入低配参数。不询问 |
 | `--nginx` | 安装 NGINX 并写入反向代理配置。不询问 |
@@ -358,7 +357,7 @@ docker run -d --name tv-buddy -p 9900:9900 -v tv-buddy-data:/data \
 
 ```bash
 sudo tv-buddy url     # 打印面板地址与初始口令文件的绝对路径
-sudo tv-buddy start   # 启动服务（未加 --start 时）
+sudo tv-buddy start   # 启动服务（安装后默认已启动）
 ```
 
 打开面板：

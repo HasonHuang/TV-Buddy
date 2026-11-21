@@ -70,14 +70,12 @@ pub async fn restore(
         }
     }
     state
-        .save_config(restored.clone(), None)
+        .replace_config(restored.clone())
         .map_err(|error| ApiError::internal(format!("写入配置失败: {error:#}")))?;
-    if let Some(epg) = epg {
-        state
-            .epg_store
-            .replace_all(epg)
-            .map_err(|error| ApiError::internal(format!("写入 EPG 配置失败: {error:#}")))?;
-    }
+    state
+        .epg_store
+        .replace_all(epg)
+        .map_err(|error| ApiError::internal(format!("写入 EPG 配置失败: {error:#}")))?;
     Ok(Json(json!({
         "ok": true,
         "config_reloaded": true,

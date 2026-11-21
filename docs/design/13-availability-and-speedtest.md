@@ -39,21 +39,15 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 | iptv-api 行为 | 本项目设计 | 说明 |
 | --- | --- | --- |
 | `open_speed_test` | `quality.enabled` | 总开关。默认关闭。 |
-| `speed_test_mode`：`quick` / `full` / `manual` | `run_mode`：`quick` / `full`；`interval_secs=0` 表示只手动触发 | 不单独设 `manual` 枚举。 |
-| `speed_test_target`、`output_urls_limit` | `quick_target`、`keep_candidates` | 快速模式达到目标后停止。 |
+| `speed_test_mode`：`quick` / `full` / `manual` | `probe_mode` + `schedule` | 探测档位与调度分开配置。不单独设 `manual` 枚举。 |
 | `open_filter_speed`、`min_speed` | `rules.min_speed_mib` | 低于阈值判 `speed_low`。 |
 | `resolution_speed_map` | `rules.resolution_speed_map` | 按分辨率取对应最低速率。 |
 | `open_filter_resolution`、`min_resolution`、`max_resolution` | `rules.min_resolution`、`rules.max_resolution` | 分辨率未知时放行。与参考实现一致。 |
-| `open_filter_ad` | `rules.filter_ad` | 短循环与广告关键字。 |
-| `open_supply` | `rules.supply` | 全部不合格时保留可连通的最优项。 |
-| `sort_by` | `rules.sort_by` | 空值保持配置顺序。 |
-| 白名单不测速、始终保留 | `rules.retain` | 本项目仍测速，只保证不隐藏。 |
 | `speed_test_filter_host` | `rules.host_cache` | 同一 Host 复用测量值。可达性仍逐频道判断。 |
 | `utils/frozen.py` 连续失败冻结 | `consecutive_fails` + `next_check_at` | 失败退避，成功后清零。 |
 | `channel_repository` 候选、测量、输出快照 | `quality_results`、`quality_history`、`quality_pins` | 只存结果，不改配置。 |
 | `open_auto_disable_source` | 源自动停用 | 运行时标记，不写 `enabled`。 |
 | 分辨率未知仍可合格 | 同 | 避免把无法探测当成不合格。 |
-| `supply` 绕过阈值但不绕过连通 | 同 | 不可连通的频道不保留。 |
 
 本项目与参考实现的差异：
 
@@ -284,7 +278,9 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
   "quality": {
     "enabled": false,
     "probe_mode": "reachability",
-    "interval_secs": 900,
+    "schedule": "interval",
+    "interval_hours": 6,
+    "cron": "0 */6 * * *",
     "timeout_secs": 10,
     "concurrency": 2,
     "probe_concurrency": 1,
@@ -302,14 +298,10 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
     "history_mode": "changes",
     "history_keep_days": 7,
     "stale_keep_secs": 1800,
-    "quick_target": 1,
     "auto_disable_after_fails": 3,
     "cleanup_fail_threshold": 3,
-    "sort_by": [],
-    "filter_ad": false,
     "ffprobe": false,
     "probe_passthrough": false,
-    "defer_during_playback": true,
     "rules": {
       "min_speed_mib": 0.0,
       "fallback_speed_mib": 0.0,
@@ -321,9 +313,6 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
       "ip_family": "any",
       "require_video": false,
       "require_audio": false,
-      "supply": false,
-      "action": "hide",
-      "retain": false,
       "dedupe": "off",
       "keep_candidates": 1,
       "host_cache": true
@@ -336,7 +325,9 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 | --- | --- | --- | --- |
 | `enabled` | bool | `false` | 校验总开关。关闭时不做周期探测、不隐藏、不触发源副作用。 |
 | `probe_mode` | string | `reachability` | 探测档位：`reachability` / `playlist` / `speed` / `full`。 |
-| `interval_secs` | u64 | `900` | 周期。下限 60。`0` 表示只手动运行。 |
+| `schedule` | string | `interval` | `interval` 或 `cron`。 |
+| `interval_hours` | u64 | `6` | 周期小时数。范围 1–8760。 |
+| `cron` | string | `0 */6 * * *` | 5 段 cron 表达式。 |
 | `timeout_secs` | u64 | `10` | 单频道总超时。 |
 | `concurrency` | u32 | `2` | 网络并发。范围 1–32。 |
 | `probe_concurrency` | u32 | `1` | `ffprobe` 并发与采集上限。范围 1–4。 |
@@ -354,15 +345,11 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 | `history_mode` | string | `changes` | `off` / `changes` / `hourly` / `all`。见 §6.2。 |
 | `history_keep_days` | u64 | `7` | 历史保留天数。 |
 | `stale_keep_secs` | u64 | `1800` | 连续失败后保留可见的宽限。默认两倍周期，避免单次抖动下线。`0` 表示立即隐藏。 |
-| `quick_target` | u32 | `1` | 快速模式的候选组目标合格数。见 §5.1。 |
 | `auto_disable_after_fails` | u32 | `3` | 源连续抓取失败多少次后自动停用。`0` 表示关闭。 |
 | `cleanup_fail_threshold` | u32 | `3` | 清理失效频道所需连续 `unreachable` 次数。 |
-| `sort_by` | array | `[]` | `speed` / `delay` / `resolution`。空值保持配置顺序。 |
-| `filter_ad` | bool | `false` | 识别短循环与广告占位。 |
 | `ffprobe` | bool | `false` | 启用分辨率识别。只在 `full` 档、清单无完整分辨率时运行。关闭时是硬上限。 |
 | `probe_passthrough` | bool | `false` | 是否探测 `passthrough` 分组。 |
-| `defer_during_playback` | bool | `true` | 有在线播放时降低并发或延后本轮。 |
-| `rules.*` | object | 见下 | 判定阈值与动作。 |
+| `rules.*` | object | 见下 | 判定阈值。 |
 
 `rules` 字段：
 
@@ -378,9 +365,6 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 | `ip_family` | string | `any` | `any` / `ipv4` / `ipv6`。 |
 | `require_video` | bool | `false` | 必须探测到视频轨道。 |
 | `require_audio` | bool | `false` | 必须探测到音频轨道。 |
-| `supply` | bool | `false` | 全部不合格时保留可连通的最优项。 |
-| `action` | string | `hide` | `hide` / `mark` / `off`。 |
-| `retain` | bool | `false` | 永不隐藏。仍记录结果。 |
 | `dedupe` | string | `off` | `off` / `tvg_id` / `name`。同组去重。 |
 | `keep_candidates` | u32 | `1` | 去重后每个频道保留的候选数。 |
 | `host_cache` | bool | `true` | 复用同一 Host 的**测量值**，不复用可达性判定。见 §5.8。 |
@@ -397,8 +381,7 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
         "id": "src-a",
         "quality": {
           "enabled": true,
-          "min_speed_mib": 1.0,
-          "action": "hide"
+          "min_speed_mib": 1.0
         }
       }
     ]
@@ -414,7 +397,7 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
         {
           "id": "c1",
           "quality": {
-            "retain": true
+            "max_delay_ms": 2000
           }
         }
       ]
@@ -431,11 +414,11 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 | `min_speed_mib`、`fallback_speed_mib`、`max_delay_ms`、`min_fps` | 源 / 分组 / 频道 | 数值阈值。 |
 | `min_resolution`、`max_resolution`、`resolution_speed_map` | 源 / 分组 / 频道 | 分辨率阈值。 |
 | `ip_family`、`require_video`、`require_audio` | 源 / 分组 / 频道 | 轨道与协议要求。 |
-| `supply`、`action`、`retain`、`dedupe`、`keep_candidates`、`host_cache` | 源 / 分组 / 频道 | 行为开关。 |
+| `dedupe`、`keep_candidates`、`host_cache` | 源 / 分组 / 频道 | 行为开关。 |
 | `stale_keep_secs` | 源 / 分组 / 频道 | 失败宽限。 |
 | `auto_disable_after_fails` | 源 | 源自动停用阈值。`0` 表示关闭。 |
 
-调度参数（`interval_secs`、`concurrency`、`budget_mb_per_run` 等）只放全局。这样避免每个分组各跑一套调度。
+调度参数（`schedule`、`interval_hours`、`cron`、`concurrency`、`budget_mb_per_run` 等）只放全局。这样避免每个分组各跑一套调度。
 
 ### 4.3 有效规则解析
 
@@ -477,12 +460,11 @@ effective.enabled =
 - 当前配置地址的 `url_hash` 与最近结果不一致时，该结果按 `unknown` 处理。旧结果不参与隐藏判定。
 - 地址变化后，新地址在首次探测前保持可见。
 
-### 4.4 判定结果与动作
+### 4.4 判定结果与隐藏
 
 | 结果 | 含义 | 默认是否隐藏 |
 | --- | --- | --- |
 | `pass` | 全部规则通过 | 否 |
-| `retained` | `retain=true`。不判阈值 | 否 |
 | `unreachable` | 连接失败、非 2xx、正文为空、超时 | 是。宽限后隐藏 |
 | `speed_low` | 速率低于阈值 | 是 |
 | `resolution_low` | 分辨率低于下限 | 是 |
@@ -492,31 +474,20 @@ effective.enabled =
 | `track_missing` | 缺少要求的视频或音频轨道 | 是 |
 | `ip_mismatch` | 协议族不符合要求 | 是 |
 | `ad` | 识别为短循环或广告占位 | 是 |
-| `supply` | 不合格，但作为兜底保留 | 否 |
 | `probe_error` | 探测程序错误、清单解析失败 | **否**。按未知处理 |
 | `unknown` | 没有结果或结果已过期 | 否 |
 
-动作语义：
-
-| `action` | 订阅清单 | 面板 | 典型用途 |
-| --- | --- | --- | --- |
-| `hide` | 隐藏不合格频道 | 显示状态与原因 | 默认 |
-| `mark` | 全部保留 | 显示状态与原因 | 先观察，不改变输出 |
-| `off` | 全部保留 | 可看历史结果 | 局部停用 |
-
 补充规则：
 
-- `retain=true` 优先于 `hide`。但结果照常记录。参考实现的白名单完全不测速；本项目保留测速，便于发现源站问题。
-- `supply=true` 时，若同一候选组全部失败，保留一个可连通的最优项，结果记为 `supply`。完全不可连通的项不保留。
 - 分辨率未知时，不因分辨率规则隐藏。与参考实现一致。
 - `ffprobe` 失败、超时或输出无法解析时，分辨率保持未知。判定使用兜底速率。不记 `probe_error`。
 - `probe_error` 不隐藏。连续 3 次 `probe_error` 时，面板标黄，提醒管理员检查解析器或探测地址。
 - `probe_error` 不计入连续失败，也不设置 `first_fail_at`。避免解析器缺陷让后续真实失败提前触发下线。
 - `stale_keep_secs` 从**连续失败的第一次失败时间**（`first_fail_at`）开始计算。`unreachable` 与阈值失败都算失败。重复失败不重置起点。成功一次即清零。
-  - 默认 `interval_secs=900`、`stale_keep_secs=1800` 时，需要连续两次失败，才会在第二次失败后 900 秒隐藏。
+  - 默认 `interval_hours=6`、`stale_keep_secs=1800` 时，需要连续两次失败，才会在第二次失败后 900 秒隐藏。
   - 单次失败不会隐藏。下一轮探测成功即恢复。
-  - 想更快隐藏时，把 `stale_keep_secs` 设为小于 `interval_secs`。此时单次失败也会在下一次探测前隐藏。
-  - 没有 `first_fail_at` 时用 `checked_at`。旧数据迁移时按此处理。
+  - 想更快隐藏时，把 `stale_keep_secs` 设为小于探测间隔。此时单次失败也会在下一次探测前隐藏。
+  - 没有 `first_fail_at` 时用 `checked_at`。
 - 结果超过 2 个周期未更新时标 `stale`。`stale` 只影响显示，不改变隐藏判定。隐藏仍按 `first_fail_at`。
 - `ffprobe=false` 时，依赖 `ffprobe` 的规则（`min_fps`、`require_video`、`require_audio`）不执行。结果带 `skipped_rules` 列表，面板显示警告。其他规则照常判定。
 
@@ -535,23 +506,22 @@ effective.enabled =
 
 | 质量结果 | `Health.Entry.ok` | `Health.Entry.error` |
 | --- | --- | --- |
-| `pass`、`supply`、`retained` | `true` | `null` |
+| `pass` | `true` | `null` |
 | 阈值失败（`speed_low`、`resolution_*`、`delay_high`、`fps_low`、`track_missing`、`ip_mismatch`、`ad`） | `true` | `null` |
 | `unreachable` | `false` | 原因文本 |
 | `probe_error` | 保持上一次值 | 原因文本 |
 
 说明：
 
-- `Health` 只表示可达性。阈值失败不改变 `ok`。这样 `offline_on_fail` 的旧语义不变。
-- 质量规则的下线由质量状态与 `action` 决定，不经过 `Health`。
+- `Health` 只表示可达性。阈值失败不改变 `ok`。`offline_on_fail` 语义不变。
+- 质量规则的下线由质量状态决定，不经过 `Health`。
 - `[health].enabled=false` 时，`offline_on_fail` 不生效。质量规则仍按自己的开关工作。
 - 两个开关都开启时，质量调度器取代健康循环。避免同一频道每轮探测两次。
-- `interval_secs=0` 表示只手动运行。此时健康循环继续工作，保证仍有周期可达性数据。
-- 质量关闭时，健康循环恢复原行为。
+- 质量关闭时，健康循环恢复运行。
 
-兼容规则：
+行为约定：
 
-- 新字段都有默认值。旧配置加载后 `quality.enabled=false`。
+- 新字段都有默认值。`quality.enabled` 默认 `false`。
 - `offline_on_fail` 与质量规则同时生效时，任一判定为隐藏即隐藏。
 - `quality.enabled=false` 时，`quality` 覆盖对象被忽略。避免半开状态。
 - 规则修改立即影响订阅渲染。渲染使用「当前规则 + 最近结果」。测量值等下一轮探测更新。
@@ -570,7 +540,6 @@ effective.enabled =
 档位按 `probe_mode` 选择。规则需要某档数据时，自动提升到该档：
 
 - 设置 `min_speed_mib`、`fallback_speed_mib`（大于 0）或 `resolution_speed_map` → 至少 `speed`。
-- 设置 `filter_ad` → 至少 `playlist`。
 - 设置 `min_fps`、`require_video`、`require_audio` → 至少 `full`。
 
 `ffprobe=false` 是硬上限。它为 `false` 时，即使规则要求 `full`，也不运行 `ffprobe`。`probe_mode=full` 按 `speed` 执行。相关规则记入 `skipped_rules`，面板显示警告。
@@ -581,13 +550,6 @@ effective.enabled =
 | --- | --- | --- |
 | `probe_mode` | `reachability` / `playlist` / `speed` / `full` | 决定一次探测做多深。全局设置。 |
 | 手动 `run_mode` | `quick` / `full` | 决定候选组测到什么时候停止。 |
-| `manual` | `interval_secs=0` | 不自动运行，只接受手动触发。不单独设枚举。 |
-
-`quick_target` 的语义：
-
-- 去重关闭且一频道一地址时，`quick` 与 `full` 没有区别。每个频道只有一个候选，目标数 1 已满足。
-- 去重开启时，按候选组生效。`quick` 达到 `quick_target` 个合格项后停止该组剩余候选。`full` 测完所有候选。
-- 该字段不控制单轮频道总数。单轮上限用 `max_channels_per_run`，流量上限用 `budget_mb_per_run`。
 
 ### 5.2 地址解析
 
@@ -760,11 +722,10 @@ delay_ms  = 首字节时间 - 请求开始时间
 内存只保留订阅渲染需要的紧凑结果。完整字段留在 SQLite，面板按需查询。
 
 ```rust
-#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Reason {
-    Pass, Retained, Unreachable, SpeedLow, ResolutionLow,
-    ResolutionHigh, DelayHigh, FpsLow, TrackMissing,
-    IpMismatch, Ad, Supply, ProbeError, Unknown,
+    Pass, Unreachable, SpeedLow, ResolutionLow,
+    ResolutionHigh, DelayHigh, ProbeError, #[default] Unknown,
 }
 
 pub struct Entry {
@@ -924,11 +885,9 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 2. 分组为 `passthrough` 且 `probe_passthrough=false` → 不隐藏。
 3. 管理员固定 `keep` → 不隐藏。
 4. 管理员固定 `hide` → 隐藏。
-5. `retain=true` → 不隐藏。
-6. 有效 `action != hide` → 不隐藏。
-7. 没有结果、结果与当前 `url_hash` 不一致、`probe_error` → 不隐藏。
-8. 结果为 `pass` 或 `supply` → 不隐藏。
-9. 结果为失败，且 `now - first_fail_at >= stale_keep_secs` → 隐藏。没有 `first_fail_at` 时用 `checked_at`。
+5. 没有结果、结果与当前 `url_hash` 不一致、`probe_error` → 不隐藏。
+6. 结果为 `pass` → 不隐藏。
+7. 结果为失败，且 `now - first_fail_at >= stale_keep_secs` → 隐藏。没有 `first_fail_at` 时用 `checked_at`。
 
 `render_user`、`render_user_group`、`user_view` 共用该判定。避免两处规则漂移。
 
@@ -960,10 +919,10 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 - 清理只删除满足全部条件的同步频道：
   - `sync_follow=true`。
   - 连续 `unreachable` 次数达到 `cleanup_fail_threshold`（默认 3）。
-  - 不属于 `retain`，也没有管理员 `keep` 固定。
+  - 没有管理员 `keep` 固定。
 - `probe_error`、`speed_low` 等非可达性失败**不**计入清理阈值。避免把解析器缺陷或阈值调整当成频道失效。
 - 写入源 `exclude` 时复用 `subscription::exclude_channels`。键按现有优先级生成：`id:` → `idname:` → `url:`。
-- 手工频道、固定频道、`retain` 频道不进入清理候选。
+- 手工频道、固定频道不进入清理候选。
 - 清理不可自动执行。每次都必须经过预览与确认。
 
 ### 7.3 源可用性
@@ -985,11 +944,8 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
    - `name` 去空白、转小写，并统一全角与半角字符。
    - 没有 `tvg_id` 时回退到 `name`。
 2. 每个候选组独立测速。
-3. 按 `sort_by` 排序。默认 `speed`。没有测量值或并列时，保持配置顺序。
-4. 保留前 `keep_candidates` 个合格项。其余隐藏。
-5. `retain` 或管理员 `keep` 的频道不参与淘汰，始终保留。
-6. 全部失败且 `supply=true` 时，保留可连通的最优项，标记 `supply`。
-7. 没有合格项且 `supply=false` 时，全部按失败处理。
+3. 保留前 `keep_candidates` 个合格项。其余隐藏。
+4. 管理员 `keep` 的频道不参与淘汰，始终保留。
 
 注意：
 
@@ -1057,7 +1013,6 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
     "max_delay_ms": 3000,
     "min_resolution": "1280x720",
     "max_resolution": "3840x2160",
-    "action": "hide",
     "stale_keep_secs": 1800
   },
   "ffprobe": {
@@ -1159,7 +1114,6 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 - 单轮流量预算、单轮频道上限。
 - 失败宽限。
 - 全局阈值：最低速率、最大延迟、最低/最高分辨率、分辨率速率映射、最低帧率。
-- 默认动作：隐藏 / 标记 / 关闭。
 - 广告过滤、`ffprobe`、同 Host 缓存、播放繁忙时延后。
 - `ffprobe` 安装状态。
 - 「立即校验全部」按钮与进度。
@@ -1186,7 +1140,7 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
   - 延迟：`120ms`。
   - 速率：`2.4 MiB/s`。
   - 分辨率：`1080p`。
-  - 结果：`合格` / `速率低` / `不可达` / `探测错误` / `已保留`。
+  - 结果：`合格` / `速率低` / `不可达` / `探测错误`。
 - 悬停显示完整结果：状态码、采样量、编码、最近校验时间、原因。
 - 操作：单频道「立即校验」、「固定保留」、「固定隐藏」。
 - 隐藏频道仍显示。加「已隐藏」徽章与原因，便于恢复。
@@ -1195,7 +1149,6 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 
 - 新增「质量规则」区。
 - 每个字段有「继承」开关。显示继承值。
-- 动作三选一：继承 / 隐藏 / 标记 / 关闭。
 
 ### 9.3 订阅源页
 
@@ -1207,7 +1160,7 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 
 源抽屉：
 
-- 新增「质量规则」分区：启用、动作、阈值、保留策略。
+- 新增「质量规则」分区：启用、阈值、保留策略。
 - 显示有效规则与来源层级。
 - 「测试该源」按钮。只测该源的频道。
 - 自动停用设置：连续失败阈值。默认关闭。
@@ -1235,11 +1188,10 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
   1. 选择 `quality.enabled` 的分组与频道。
   2. 跳过 `next_check_at > now` 的频道。
   3. 跳过 `quality.enabled=false` 的范围、归档组、`probe_passthrough=false` 的直通组。
-  4. `retain` 频道照常探测，但永不隐藏。
-  5. 按 `next_check_at` 升序排序，保证公平轮转。
-  6. 应用 `max_channels_per_run`。
-  7. 执行探测。
-  8. 更新结果、源状态、下一轮时间。
+  4. 按 `next_check_at` 升序排序，保证公平轮转。
+  5. 应用 `max_channels_per_run`。
+  6. 执行探测。
+  7. 更新结果、源状态、下一轮时间。
 - 手动任务：
   - 已有校验任务时返回 `409 run_active`。不排队等待前一个校验任务。
   - 可选择 `force` 忽略退避。
@@ -1248,9 +1200,7 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
   - 同步进行时，周期校验推迟一轮。
   - 手动校验在同步期间进入队列。队列长度 1。同步结束后自动开始。
   - 同步结束后若队列中有任务，先执行手动任务，再恢复周期调度。
-  - `interval_secs=0` 时不自动运行。手动任务不受影响。
 - 录制与播放：
-  - `defer_during_playback=true` 且在线观众大于 0 时，并发降为 1。
   - 有录制任务运行时，周期校验延后。手动校验照常，但并发降为 1。
 
 ### 10.2 退避
@@ -1275,7 +1225,7 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 | --- | --- | --- |
 | `enabled` | false | 默认不增加负载。 |
 | `probe_mode` | `reachability` | 与现有健康探测等价。 |
-| `interval_secs` | 900 | 15 分钟。 |
+| `interval_hours` | 6 | 6 小时一轮；也可改用 cron。 |
 | `concurrency` | 2 | 128 MB 机器可用。 |
 | `probe_concurrency` | 1 | `ffprobe` 并发与采集上限。 |
 | `ffprobe` | false | 需要画质筛选时再开。 |
@@ -1289,11 +1239,10 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 | `max_channels_per_run` | 0 | 由预算与超时自然限制。 |
 | `stale_keep_secs` | 1800 | 两次失败后才下线，避免抖动。 |
 | `sample_bytes_kb` | 4096 | 单流 4 MiB。 |
-| `defer_during_playback` | true | 避免抢带宽。 |
 
 建议：
 
-- 首次启用先用 `reachability` 或 `mark` 动作观察一周。
+- 首次启用先用 `reachability` 观察一周。
 - 需要测速时，把周期设为夜间低频，例如 6 小时一次。
 - 大清单使用 `max_channels_per_run` 分批轮转。不要一次测完。
 - 不把 `budget_mb_per_run` 设得过大。测速流量会进入服务器出网账单。
@@ -1461,7 +1410,7 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 | --- | --- |
 | 规则解析 | 频道 > 分组 > 源 > 全局的逐字段覆盖。三态 `enabled`。 |
 | 判定 | 每个 `reason` 的边界。分辨率未知放行。`max_resolution` 包含上限。`resolution_speed_map` 覆盖 `min_speed_mib`；未命中时用兜底速率。 |
-| 动作 | `hide` / `mark` / `off` / `retain` / `supply` / 固定保留。 |
+| 隐藏 | 不合格频道隐藏 / 固定保留 / 固定隐藏。 |
 | 宽限 | `first_fail_at` 固定。重复失败不重置。超过 `stale_keep_secs` 隐藏。成功后清零并恢复。 |
 | 退避 | 连续失败后的 `next_check_at`。成功清零。 |
 | 地址 | `url_hash` 不一致时旧结果按 `unknown`。新地址首次探测前可见。 |
@@ -1504,22 +1453,21 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 
 ### 12.3 冒烟脚本
 
-旧 `scripts/smoke-quality.sh` 已由质量准入验收脚本取代：
+`scripts/smoke-quality.sh` 已由质量准入验收脚本取代：
 
 - `scripts/smoke-quality-admission.sh`
 - 场景见 [`15-quality-admission-function.md`](15-quality-admission-function.md) §13。
 
-## 13 兼容与迁移
+## 13 行为与恢复
 
 | 项 | 处理 |
 | --- | --- |
-| 旧配置 | 新字段都有默认值。`quality.enabled=false`。 |
-| 旧 `[health]` | 保持不变。质量关闭时按原逻辑运行。 |
+| `quality.enabled` | 默认 `false`。 |
+| `[health]` | 保持不变。质量关闭时按原逻辑运行。 |
 | `offline_on_fail` | 保持不变。与质量规则叠加。 |
 | `/panel/api/health` | 原字段不变。新增字段为附加项。 |
 | 订阅清单 | 质量关闭时字节级不变。 |
 | 备份 | 配置进备份。结果表不进备份，恢复后重新探测。 |
-| 降级 | 旧二进制忽略 `quality` 段，写入 `extra`，保存时保留。 |
 | 删除频道 | 配置变更后清理对应结果。避免孤儿记录。 |
 | 地址变更 | 新地址使用新 `url_hash`。旧结果保留到清理周期。 |
 | 时钟 | 用 Unix 秒。重启与休眠后仍可比较。 |
@@ -1539,7 +1487,7 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 | 编号 | 决策点 | 结论 | 状态 |
 | --- | --- | --- | --- |
 | Q1 | 是否新建 `[quality]` | 是。`[health]` 保持轻量 | 已定（用户选择方案 B） |
-| Q2 | 默认动作 | `hide` + 1800 秒宽限（两倍周期）。沿用「只影响清单」的既有下线语义 | 已定 |
+| Q2 | 默认处理 | 隐藏 + 1800 秒宽限（两倍周期）。沿用「只影响清单」的既有下线语义 | 已定 |
 | Q3 | 默认开启 | 否 | 已定 |
 | Q4 | `probe_error` 是否隐藏 | 否。按未知处理 | 已定 |
 | Q5 | 源自动停用是否改写配置 | 否。运行时标记，可一键恢复 | 已定 |

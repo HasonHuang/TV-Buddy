@@ -147,9 +147,6 @@ fn has_override(value: &QualityOverride) -> bool {
         || value.min_resolution.is_some()
         || value.max_resolution.is_some()
         || value.resolution_speed_map.is_some()
-        || value.supply.is_some()
-        || value.action.is_some()
-        || value.retain.is_some()
         || value.host_cache.is_some()
         || value.stale_keep_secs.is_some()
 }

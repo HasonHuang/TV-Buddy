@@ -47,10 +47,6 @@ PY
     printf '  "cache": { "disk_path": "%s/cache" },\n' "$WORK"
     printf '%s\n' '  "epg": {'
     printf '%s\n' '    "enabled": true, "keep_days": 3, "future_days": 1, "keep_yesterday": false,'
-    printf '%s\n' '    "sources": ['
-    printf '%s\n' '      { "id": "s1", "name": "本地源", "kind": "xml",'
-    printf '        "url": "http://127.0.0.1:%s/epg.xml" }\n' "$UP"
-    printf '%s\n' '    ],'
     printf '%s\n' '    "translate": {'
     printf '%s\n' '      "enabled": true, "target": "zh-cn", "source": "auto",'
     printf '      "url": "%s"' "$URL"
@@ -113,6 +109,14 @@ PTOK=$(curl -fsS --max-time 10 -X POST -H "Authorization: Bearer $SESSION" \
     -H 'Content-Type: application/json' --data '{}' \
     "http://127.0.0.1:$PORT/panel/api/users/$ADMIN_ID/tokens" |
     python3 -c 'import json,sys; print(json.load(sys.stdin)["token"]["token"])')
+
+# 建 EPG 源并触发采集。
+curl -fsS --max-time 10 -X POST -H "Authorization: Bearer $SESSION" \
+    -H 'Content-Type: application/json' \
+    --data '{"id":"s1","name":"本地源","kind":"xml","enabled":true,"urls":[{"url":"http://127.0.0.1:'"$UP"'/epg.xml","priority":0}]}' \
+    "http://127.0.0.1:$PORT/panel/api/epg/sources" >/dev/null
+curl -sS --max-time 90 -X POST -H "Authorization: Bearer $SESSION" \
+    "http://127.0.0.1:$PORT/panel/api/epg/refresh" >/dev/null || true
 
 echo "==> MTranServer 自检：$URL"
 curl -sS --max-time 90 -X POST "http://127.0.0.1:$PORT/subtitle/mtran/test" \

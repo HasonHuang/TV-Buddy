@@ -1,9 +1,7 @@
-//! 翻译服务客户端：兼容 MTranServer v5 与旧批量接口。
+//! 翻译服务客户端：MTranServer v5 协议。
 //!
-//! 批量请求：`POST <base>/translate/batch`。
-//! - v5 正文：`{from, to, texts}`，响应 `{results}`。
-//! - 旧接口正文：`{texts, source_lang, target_lang}`。
-//! - 单条接口：`POST <base>/translate`，正文 `{from, to, text}`，响应 `{result}`。
+//! 批量请求：`POST <base>/translate/batch`，正文 `{from, to, texts}`，响应 `{results}`。
+//! 单条请求：`POST <base>/translate`，正文 `{from, to, text}`，响应 `{result}`。
 //!
 //! 批量失败时回退单条接口，便于只开放 `/translate` 的代理。
 //! 响应接受 `results`/`translations`/`texts`/`result`/`text`/`data`。
@@ -59,7 +57,6 @@ pub async fn batch(
 
 /// 带 Token 的批量翻译。
 ///
-/// 先按 MTranServer v5 形状请求；400/422 时再试旧形状。
 /// 批量端点不可用或响应无法解析时，逐条请求 `/translate`。
 pub async fn batch_with_token(
     client: &reqwest::Client,
@@ -77,13 +74,11 @@ pub async fn batch_with_token(
         bail!("翻译服务地址为空");
     }
 
-    // 同时带 v5 与旧字段。多数实现会忽略多余字段。
+    // MTranServer v5 形状。
     let body = json!({
         "from": source,
         "to": target,
         "texts": texts,
-        "source_lang": source,
-        "target_lang": target,
     });
     let response = post_json(client, &url, token, &body).await?;
     let status = response.status();
@@ -92,22 +87,6 @@ pub async fn batch_with_token(
             return Ok(values);
         }
         return single_batch(client, base, source, target, texts, token).await;
-    }
-
-    if status == reqwest::StatusCode::BAD_REQUEST
-        || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
-    {
-        let legacy = json!({
-            "texts": texts,
-            "source_lang": source,
-            "target_lang": target,
-        });
-        let response = post_json(client, &url, token, &legacy).await?;
-        if response.status().is_success() {
-            if let Ok(values) = decode(response, texts).await {
-                return Ok(values);
-            }
-        }
     }
 
     if matches!(
@@ -147,8 +126,6 @@ async fn single_batch(
             "from": source,
             "to": target,
             "text": text,
-            "source_lang": source,
-            "target_lang": target,
         });
         let response = post_json(client, &url, token, &body).await?;
         if !response.status().is_success() {

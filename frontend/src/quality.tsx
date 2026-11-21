@@ -9,13 +9,11 @@ import { Badge, HoverTip } from './ui';
 
 const REASON_LABEL: Record<QualityReason, string> = {
   pass: '合格',
-  retained: '已保留',
   unreachable: '不可达',
   speed_low: '速率低',
   resolution_low: '分辨率低',
   resolution_high: '分辨率高',
   delay_high: '延迟高',
-  supply: '兜底保留',
   probe_error: '探测错误',
   source_removed: '源已移除',
   source_disabled: '源已停用',
@@ -59,9 +57,6 @@ function resultTone(reason: QualityReason): string {
   switch (reason) {
     case 'pass':
       return 'ok';
-    case 'retained':
-    case 'supply':
-      return 'info';
     case 'unreachable':
     case 'speed_low':
     case 'resolution_low':

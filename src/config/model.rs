@@ -37,7 +37,7 @@ pub struct Config {
     pub features: FeaturesCfg,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<Group>,
-    /// 并发令牌。每次保存自增。旧配置缺失时为 0。
+    /// 并发令牌。每次保存自增。缺失时为 0。
     pub revision: u64,
     /// 未建模的段与键。
     #[serde(flatten)]
@@ -55,15 +55,9 @@ impl Config {
         self.groups.iter_mut().find(|group| group.id == gid)
     }
 
-    /// 规范化旧取值。
-    ///
-    /// `open` 不再免令牌。`hidden` 与 `public` 行为相同。
-    /// 加载与保存时都改为 `public`。
+    /// 补齐默认值。
     pub fn normalize(&mut self) {
         for group in &mut self.groups {
-            if group.access == "open" || group.access == "hidden" {
-                group.access = "public".to_string();
-            }
             if group.origin.trim().is_empty() {
                 group.origin = "manual".to_string();
             }
@@ -252,7 +246,7 @@ impl Default for PanelCfg {
 
 /// `[cdn]`——外部 CDN 侧兜底。
 ///
-/// 默认全关：`enabled=false` 时所有响应头与状态码逐字节等于旧行为，
+/// 默认全关：`enabled=false` 时使用默认响应头与状态码，
 /// 便于先配 CDN 面板再逐项打开（`docs/design/06-low-spec-optimization.md` §6）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -903,8 +897,6 @@ pub struct QualityCfg {
     pub enabled: bool,
     /// `reachability` / `playlist` / `speed` / `full`。
     pub probe_mode: String,
-    /// 0 表示只手动运行。
-    pub interval_secs: u64,
     /// `interval` 或 `cron`。
     pub schedule: String,
     /// 周期小时数。1–8760。
@@ -943,11 +935,7 @@ pub struct QualityCfg {
     pub budget_mb_per_run: u64,
     pub max_channels_per_run: u64,
     pub stale_keep_secs: u64,
-    pub quick_target: u32,
-    pub sort_by: Vec<String>,
-    pub filter_ad: bool,
     pub probe_passthrough: bool,
-    pub defer_during_playback: bool,
     pub rules: QualityRules,
     #[serde(flatten)]
     pub extra: Extra,
@@ -958,7 +946,6 @@ impl Default for QualityCfg {
         Self {
             enabled: false,
             probe_mode: "reachability".into(),
-            interval_secs: 900,
             schedule: "interval".into(),
             interval_hours: 6,
             cron: "0 */6 * * *".into(),
@@ -983,11 +970,7 @@ impl Default for QualityCfg {
             budget_mb_per_run: 64,
             max_channels_per_run: 0,
             stale_keep_secs: 1800,
-            quick_target: 1,
-            sort_by: Vec::new(),
-            filter_ad: false,
             probe_passthrough: false,
-            defer_during_playback: true,
             rules: QualityRules::default(),
             extra: Extra::new(),
         }
@@ -1005,10 +988,6 @@ pub struct QualityRules {
     pub min_resolution: String,
     pub max_resolution: String,
     pub resolution_speed_map: BTreeMap<String, f64>,
-    pub supply: bool,
-    /// `hide` / `mark` / `off`。
-    pub action: String,
-    pub retain: bool,
     pub host_cache: bool,
     #[serde(flatten)]
     pub extra: Extra,
@@ -1023,9 +1002,6 @@ impl Default for QualityRules {
             min_resolution: String::new(),
             max_resolution: String::new(),
             resolution_speed_map: BTreeMap::new(),
-            supply: false,
-            action: "hide".into(),
-            retain: false,
             host_cache: false,
             extra: Extra::new(),
         }
@@ -1043,9 +1019,6 @@ pub struct QualityOverride {
     pub min_resolution: Option<String>,
     pub max_resolution: Option<String>,
     pub resolution_speed_map: Option<BTreeMap<String, f64>>,
-    pub supply: Option<bool>,
-    pub action: Option<String>,
-    pub retain: Option<bool>,
     pub host_cache: Option<bool>,
     pub stale_keep_secs: Option<u64>,
     #[serde(flatten)]
@@ -1062,9 +1035,9 @@ pub struct QualityOverride {
 pub struct ProxyCfg {
     pub kind: String,
     pub addr: String,
-    #[serde(rename = "username", alias = "user")]
+    #[serde(rename = "username")]
     pub user: Option<String>,
-    #[serde(rename = "password", alias = "pass")]
+    #[serde(rename = "password")]
     pub pass: Option<String>,
 }
 
@@ -1130,8 +1103,6 @@ pub struct Group {
     /// `proxy` / `remux` / `dash` / `redirect` / `rewrite` / `passthrough`。
     pub mode: String,
     /// `public` / `archived`。
-    ///
-    /// 旧值 `open` 与 `hidden` 在加载与保存时归一为 `public`。
     pub access: String,
     /// `hls` / `mpd`。
     pub format: String,
@@ -1292,8 +1263,6 @@ pub struct EpgCfg {
     pub script_timeout_secs: u64,
     pub record_pad_before_secs: u64,
     pub record_pad_after_secs: u64,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub sources: Vec<EpgSource>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -1313,44 +1282,6 @@ impl Default for EpgCfg {
             script_timeout_secs: 300,
             record_pad_before_secs: 60,
             record_pad_after_secs: 180,
-            sources: Vec::new(),
-            extra: Extra::new(),
-        }
-    }
-}
-
-/// `[[epg.sources]]`——采集源。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct EpgSource {
-    pub id: String,
-    pub name: String,
-    /// `xml`（按 `url` 拉 XMLTV）或 `script`（跑 Python，需外部依赖）。
-    pub kind: String,
-    pub enabled: bool,
-    pub url: String,
-    pub script: String,
-    pub output_files: Vec<String>,
-    pub cron: String,
-    pub timeout_secs: u64,
-    pub tz_shift_mins: i64,
-    #[serde(flatten)]
-    pub extra: Extra,
-}
-
-impl Default for EpgSource {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: "新源".into(),
-            kind: "xml".into(),
-            enabled: true,
-            url: String::new(),
-            script: String::new(),
-            output_files: Vec::new(),
-            cron: String::new(),
-            timeout_secs: 0,
-            tz_shift_mins: 0,
             extra: Extra::new(),
         }
     }
@@ -1429,7 +1360,6 @@ pub struct PlaylistSource {
     /// `merge` 模式的目标分组名；空值表示保留原名。
     pub merge_group: String,
     /// 未出现在 `group_map` 的分组：`drop` 或 `keep`（默认）。
-    /// 旧配置在映射为空、模式不是 `map` 且没有显式目标时，会把 `drop` 归一为 `keep`。
     pub unlisted_groups: String,
     /// 频道名白名单；支持 `group:` / `id:` / `url:` 前缀。
     pub include: Vec<String>,
@@ -1493,17 +1423,6 @@ impl PlaylistSource {
                 .collect();
         }
         if self.unlisted_groups.trim().is_empty() {
-            self.unlisted_groups = "keep".to_string();
-        }
-        // 旧默认值 drop + 空映射只会得到零频道。保留原名与合并模式改为 keep。
-        // 显式目标只用于托管同步；聚合源忽略它们，不能靠它们保留 drop。
-        let explicit =
-            self.mode == "sync" && (!self.merge_into.is_empty() || !self.merge_new.is_empty());
-        if self.unlisted_groups == "drop"
-            && self.group_map.is_empty()
-            && self.group_mode.trim() != "map"
-            && !explicit
-        {
             self.unlisted_groups = "keep".to_string();
         }
     }
@@ -1606,30 +1525,6 @@ mod tests {
     fn ip_guard_is_on_by_default() {
         assert!(AuthCfg::default().ip_guard_enabled);
         assert!(Config::default().auth.ip_guard_enabled);
-    }
-
-    #[test]
-    fn normalize_maps_legacy_access_to_public() {
-        let mut config = Config::default();
-        config.groups.push(Group {
-            id: "open".into(),
-            access: "open".into(),
-            ..Group::default()
-        });
-        config.groups.push(Group {
-            id: "hidden".into(),
-            access: "hidden".into(),
-            ..Group::default()
-        });
-        config.groups.push(Group {
-            id: "archived".into(),
-            access: "archived".into(),
-            ..Group::default()
-        });
-        config.normalize();
-        assert_eq!(config.groups[0].access, "public");
-        assert_eq!(config.groups[1].access, "public", "hidden 已移除");
-        assert_eq!(config.groups[2].access, "archived", "归档不变");
     }
 
     #[test]
@@ -2067,33 +1962,14 @@ mod tests {
     }
 
     #[test]
-    fn normalize_keeps_all_when_unlisted_drop_with_empty_map() {
-        let mut source = PlaylistSource::default();
-        source.group_mode = "keep".into();
-        source.unlisted_groups = "drop".into();
+    fn normalize_keeps_explicit_unlisted_drop() {
+        let mut source = PlaylistSource {
+            group_mode: "keep".into(),
+            unlisted_groups: "drop".into(),
+            ..PlaylistSource::default()
+        };
         source.normalize();
-        assert_eq!(source.unlisted_groups, "keep");
-
-        let mut mapped = PlaylistSource::default();
-        mapped.group_mode = "map".into();
-        mapped.unlisted_groups = "drop".into();
-        mapped.normalize();
-        assert_eq!(mapped.unlisted_groups, "drop");
-
-        // 托管源有显式目标时，drop 表示只导入这些目标。
-        let mut explicit = PlaylistSource::default();
-        explicit.mode = "sync".into();
-        explicit.unlisted_groups = "drop".into();
-        explicit.merge_new.insert("新闻".into(), "合集".into());
-        explicit.normalize();
-        assert_eq!(explicit.unlisted_groups, "drop");
-
-        // 聚合源忽略显式目标，残留目标不能保留 drop。
-        let mut legacy = PlaylistSource::default();
-        legacy.unlisted_groups = "drop".into();
-        legacy.merge_new.insert("新闻".into(), "合集".into());
-        legacy.normalize();
-        assert_eq!(legacy.unlisted_groups, "keep");
+        assert_eq!(source.unlisted_groups, "drop");
     }
 
     #[test]
@@ -2105,10 +1981,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_source_without_sync_keys_gets_defaults() {
+    fn source_without_optional_keys_gets_defaults() {
         let raw = serde_json::json!({
             "playlist": {
-                "sources": [{ "id": "s1", "name": "旧源", "url": "http://up/a.m3u" }]
+                "sources": [{ "id": "s1", "name": "源", "url": "http://up/a.m3u" }]
             }
         });
         let config: Config = serde_json::from_value(raw).expect("解析");
@@ -2140,10 +2016,7 @@ mod tests {
         let config = Config::default();
         assert!(!config.quality.enabled);
         assert_eq!(config.quality.probe_mode, "reachability");
-        assert_eq!(config.quality.interval_secs, 900);
         assert_eq!(config.quality.stale_keep_secs, 1800);
-        assert_eq!(config.quality.rules.action, "hide");
-        assert!(!config.quality.rules.retain);
         assert!(!config.quality.rules.host_cache, "Host 缓存默认关闭");
 
         let mut config = Config::default();
@@ -2153,13 +2026,12 @@ mod tests {
             id: "g".into(),
             quality: Some(QualityOverride {
                 min_speed_mib: Some(2.0),
-                retain: Some(true),
                 ..QualityOverride::default()
             }),
             channels: vec![Channel {
                 id: "c".into(),
                 quality: Some(QualityOverride {
-                    action: Some("mark".into()),
+                    min_speed_mib: Some(3.0),
                     ..QualityOverride::default()
                 }),
                 ..Channel::default()
@@ -2181,8 +2053,8 @@ mod tests {
             decoded.groups[0].channels[0]
                 .quality
                 .as_ref()
-                .and_then(|q| q.action.as_deref()),
-            Some("mark")
+                .and_then(|q| q.min_speed_mib),
+            Some(3.0)
         );
     }
 }

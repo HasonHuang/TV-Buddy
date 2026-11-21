@@ -95,9 +95,6 @@ fn validate_quality(quality: &crate::config::model::QualityCfg) -> anyhow::Resul
     ) {
         bail!("quality.probe_mode 不支持 {}", quality.probe_mode);
     }
-    if quality.interval_secs != 0 && quality.interval_secs < 60 {
-        bail!("quality.interval_secs 必须为 0 或至少 60");
-    }
     if !matches!(quality.schedule.as_str(), "interval" | "cron") {
         bail!("quality.schedule 只能是 interval 或 cron");
     }
@@ -158,14 +155,6 @@ fn validate_quality(quality: &crate::config::model::QualityCfg) -> anyhow::Resul
     if quality.stale_keep_secs > 86_400 {
         bail!("quality.stale_keep_secs 不能超过 86400");
     }
-    if !(1..=16).contains(&quality.quick_target) {
-        bail!("quality.quick_target 必须在 1–16 之间");
-    }
-    for item in &quality.sort_by {
-        if !matches!(item.as_str(), "speed" | "delay" | "resolution") {
-            bail!("quality.sort_by 不支持 {item}");
-        }
-    }
     validate_quality_rules(&quality.rules, "quality.rules")
 }
 
@@ -173,9 +162,6 @@ fn validate_quality_rules(
     rules: &crate::config::model::QualityRules,
     label: &str,
 ) -> anyhow::Result<()> {
-    if !matches!(rules.action.as_str(), "hide" | "mark" | "off") {
-        bail!("{label}.action 不支持 {}", rules.action);
-    }
     if !rules.min_speed_mib.is_finite() || rules.min_speed_mib < 0.0 {
         bail!("{label}.min_speed_mib 必须是非负数");
     }
@@ -204,11 +190,6 @@ fn validate_quality_override(
     quality: &crate::config::model::QualityOverride,
     label: &str,
 ) -> anyhow::Result<()> {
-    if let Some(action) = &quality.action {
-        if !matches!(action.as_str(), "hide" | "mark" | "off") {
-            bail!("{label}.action 不支持 {action}");
-        }
-    }
     if let Some(speed) = quality.min_speed_mib {
         if !speed.is_finite() || speed < 0.0 {
             bail!("{label}.min_speed_mib 必须是非负数");
@@ -574,10 +555,6 @@ mod tests {
     fn quality_rejects_bad_values() {
         let mut config = Config::default();
         config.quality.probe_mode = "turbo".into();
-        assert!(validate(&config).is_err());
-
-        let mut config = Config::default();
-        config.quality.interval_secs = 5;
         assert!(validate(&config).is_err());
 
         let mut config = Config::default();

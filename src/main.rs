@@ -10,7 +10,7 @@ use tv_buddy::{cli, config, db, epg, http, logging, state};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 子命令（导入旧配置、读写配置值、改口令）不启动服务。
+    // 子命令（导入配置、读写配置值、改口令）不启动服务。
     if let Some(code) = cli::run_if_subcommand()? {
         std::process::exit(code);
     }

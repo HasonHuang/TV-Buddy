@@ -48,15 +48,7 @@ cat > "$CFG" <<JSON
     "enabled": true,
     "keep_days": 3,
     "future_days": 1,
-    "keep_yesterday": false,
-    "sources": [
-      {
-        "id": "s1",
-        "name": "本地源",
-        "kind": "xml",
-        "url": "http://127.0.0.1:$UP/epg.xml"
-      }
-    ]
+    "keep_yesterday": false
   },
   "groups": [
     {
@@ -116,6 +108,12 @@ PTOK=$(curl -s -X POST -H "$A" -H 'content-type: application/json' -d '{}' \
   "$B/panel/api/users/$ADMIN_ID/tokens" |
   python3 -c 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
 SUB="$B/sub/$PTOK"
+
+# 建一个采集源。启动后不再从配置导入源，必须走面板接口。
+curl -s -o /dev/null -X POST -H "$A" -H 'content-type: application/json' \
+  -d '{"id":"s1","name":"本地源","kind":"xml","enabled":true,"urls":[{"url":"http://127.0.0.1:'"$UP"'/epg.xml","priority":0}]}' \
+  "$B/panel/api/epg/sources"
+curl -s -o /dev/null -X POST -H "$A" "$B/panel/api/epg/refresh"
 
 check "公开 EPG XML 已删除" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/epg.xml")"
 check "公开 EPG 页已删除" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/epg")"
@@ -212,7 +210,7 @@ check "MTran 不可达时报告失败" "False" \
 
 # --- EPG 配置：源、绑定、关键字规则 ---
 curl -s -o /dev/null -X POST -H "$A" "$B/panel/api/epg/refresh"
-check "旧配置源已导入新表" "1" \
+check "源已写库" "1" \
   "$(curl -s -H "$A" "$B/panel/api/epg/sources" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if len(d)==1 and d[0]["name"]=="本地源" else 0)')"
 check "自动绑定已写入" "1" \
   "$(curl -s -H "$A" "$B/panel/api/epg/bindings" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if any(i["origin"]=="auto" for i in d["items"]) else 0)')"

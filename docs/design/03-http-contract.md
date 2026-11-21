@@ -21,7 +21,7 @@
 | 面板错误体 | `{"error":"<文本>"}` | F-013 §5 |
 | 播放失败 | `302` 跳占位视频；**不用错误体** | S-DIS-15、F-004 |
 | 面板兜底 | `/panel/api/*` 未匹配 → `404` JSON；其余未匹配 → `302` 占位 | S-EP-08 |
-| 播放令牌 | 路径：`/l/<token>/<gid>/<cid>.<ext>`；旧查询参数 `?token=` 仍接受；`?t=` 无效 | S-URL-06 |
+| 播放令牌 | 路径：`/l/<token>/<gid>/<cid>.<ext>`；查询参数 `?token=` 也接受；`?t=` 无效 | S-URL-06 |
 | 切片签名 | 路径：`/<gid>/<cid>/l/<exp>/<sig>/<name>`；同一时间窗内全用户相同 | 设计决策（CDN 共享缓存） |
 | 前端资源前缀 | `/__assets/*` | S-EP-16 |
 | 系统时区 | 回看时间戳按 `server.timezone_offset_hours` 解析 | S-URL-05 |
@@ -57,7 +57,7 @@
 | GET | `/l/:token/:gid/:file` | 路径令牌 | `200` 清单；令牌无效 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
 | GET | `/:gid/:cid/l/:exp/:sig/*path` | 签名 | `200` 切片/子清单；签名错或过期 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
 | GET | `/{gid}/{cid}.{ext}` | 按 token 开关 | `200` 清单 / `302` 占位 | M2 | S-EP-03 |
-| GET | `/{gid}/{cid}/index.m3u8` | 同上 | 同上（兼容旧路径） | M2 | F-012 §3 |
+| GET | `/{gid}/{cid}/index.m3u8` | 同上 | 同上（路径别名） | M2 | F-012 §3 |
 | GET | `/{gid}/{cid}/video/index.txt` | 无 | `200` `text/plain` 媒体清单（仅主清单上游）；否则 `302 error_url` | M2 | F-004、F-018 |
 | GET | `/{gid}/{cid}/<P>_<S>.<ext>` | 无 | `200` 切片 | M2 | S-DIS-04 |
 | GET | `/{gid}/{cid}/timeshift/{filename}` | 按 token 开关 | `200` 本地回看 | P1 | F-014 |
@@ -109,7 +109,7 @@ GET /{gid}/{cid}/video/index.txt
          正文 = 最佳变体的媒体清单；切片改写为绝对伪装地址
 
 GET /{gid}/{cid}/index.m3u8
-  → 与入口同义（兼容别名）
+  → 与入口同义（路径别名）
 GET /{gid}/{cid}/<P>_<S>.<ext>
   → 200  切片；忽略 Range（返回全量）
          首次写入 public, max-age=300；命中缓存 private, max-age=300
@@ -221,8 +221,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | `public` | 授权即含 | 授权即含 | 按 Token 开关 | ✅ |
 | `archived` | ❌ 一律排除 | ❌ `404` | ❌ `302` 占位 | ❌ 排除 |
 
-> 旧值 `open` 与 `hidden` 在加载与保存时归一为 `public`。
-> 全局订阅已停用，`hidden` 不再有单独行为。
+> 全局订阅已停用。`access` 只区分 `public` 与 `archived`。
 
 ### 5.4 订阅聚合
 
@@ -271,8 +270,8 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | POST | `/panel/api/logout` | — | `{"ok":true}` |
 | GET | `/panel/api/status` | — | 目标字段：`uptime_secs, cache_backend, active_sessions, online_viewers, group_count, channel_count, version, mem_rss_mb, cpu_seconds, disk_cache_mb, recording_mb, low_resource_mode, poll_interval_secs, traffic_in_bytes, traffic_out_bytes, whole_file_{committed,budget,peak,hits,fallbacks}, entry_exts{gid → ext}, cpu_cores`。附加字段：`name, bind, log_level, timezone_offset_hours, cache_disk_path, host_cpu_percent, mem_total_mb, load_avg, disk_total_mb, disk_free_mb, host_net_rx_bytes, host_net_tx_bytes, group_modes`。`traffic_in_bytes` 恒 0（S-BUG-01）。附加的主机指标只读 `/proc` 与 `statvfs`，读不到时输出 0 |
 | GET | `/panel/api/config` | — | 全量配置 JSON |
-| PUT | `/panel/api/config` | 全量配置 | `{"ok":true}`；非法 → `400` |
-| POST | `/panel/api/reload` | — | `{"ok":true}`；读取或保存失败 → `500`（保留旧快照） |
+| PUT | `/panel/api/config` | 全量配置 | `{"ok":true,"revision":<n>}`；非法 → `400`；缺 `revision` 或版本不符 → `409 stale_revision` |
+| POST | `/panel/api/reload` | — | `{"ok":true}`；读取或保存失败 → `500`（保留当前快照） |
 
 登录锁：窗口内失败数达到 `auth_fail_free_per_window + auth_fail_ban_threshold` 后，后续登录返回 `429`。默认窗口 60 秒、免费 15 次、阈值 6、锁定 300 秒。既有 Bearer 会话不受影响。
 
@@ -315,7 +314,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | 分组 id | `group-title` 去掉非 ASCII 字母数字与 `_`/`-`；结果为空 → `g-<6hex>` |
 | 频道 id | 有 `tvg-id` 用 `tvg-id`；否则 `g-<6hex>`（不幂等，与目标一致）。组内重复时追加 `-2`、`-3` |
 | 无 `group-title` | 落到分组 `Default` |
-| 属性保留 | `tvg_id`/`tvg_name`/`tvg_logo`/`group_title` 存入频道 `extra`；订阅渲染时 `logo` 优先、回退 `tvg_logo`；`#EXTVLCOPT`、`#EXTHTTP` 与行内 `http-user-agent`/`http-referer` 转为 `channel.headers` 字符串 |
+| 属性保留 | `tvg_id`/`tvg_name`/`tvg_logo`/`group_title` 存入频道 `extra`；订阅渲染时 `logo` 优先、回退 `tvg_logo`；`#EXTVLCOPT`、`#EXTHTTP` 与行内 `http-user-agent`/`http-referer` 转为 `channel.headers` 的 `{name,value}` 对象 |
 | 响应 | `{"ok":true,"parsed_groups","parsed_channels","added_groups","merged_channels","replaced_groups","skipped_groups","group_mode"}` |
 
 > `channel.headers` 在**代理/改写/串流（dash、remux）取上游清单与切片**时附加。302 模式（redirect、passthrough）由客户端直连上游，无法附加。空 `text` 或未解析到频道 → `400`。
@@ -353,7 +352,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | `GET` | `/panel/api/logs?limit=n` | `{"total","lines":[…]}`；`limit` 上限 500，默认 200；来源为进程内环形缓冲（500 行） |
 | `POST` | `/panel/api/reload` | 立即重读配置；返回 `{"ok":true}`；读取或保存失败返回 `500` |
 
-热重载：只监视配置文件本身；解析失败保留旧快照并记 `error` 日志（`design/04` §2）。冷却中的频道在配置重载后立即解除冷却（S-MODE-17）。
+热重载：只监视配置文件本身；解析失败保留当前快照并记 `error` 日志（`design/04` §2）。冷却中的频道在配置重载后立即解除冷却（S-MODE-17）。
 
 ### 6.5 EPG（P1 已实现）
 
@@ -403,7 +402,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | --- | --- |
 | 源类型 | `kind = "xml"`：按 `url` 拉 XMLTV。`kind = "script"`：执行 `<cache>/epg/scripts/<script>`（`python_bin`，默认 `python3`；cwd 为脚本目录，stdout 即 XMLTV；为空时读 `output_files`）。`allow_scripts = false` 时拒绝脚本源 |
 | 源缓存 | 每次抓取/执行后写 `<cache>/epg/raw/<source_id>.xml`；`regenerate` 与单源定时任务只读该缓存 |
-| 定时 | `[epg].cron` 与源级 `cron` 均按标准 5 字段解析；源级空表示仅随全局采集。到期按最近一次触发时间判定：全局用上次尝试时间，源用上次结束时间。非法全局表达式回退 4 小时；非法源级表达式不采集 |
+| 定时 | `[epg].cron` 控制全局采集；源 `refresh_secs > 0` 时按自己的间隔刷新，`0` 表示随全局采集。源按最近一次开始时间判定。非法全局表达式回退 4 小时 |
 | 超时 | 源级 `timeout_secs > 0` 优先，否则用 `[epg].script_timeout_secs`；均限制在 5–3600 秒 |
 | 时间偏移 | `source.tz_shift_mins` 在解析后平移 `start`/`stop`，单位分钟，正数向后 |
 | 时间窗 | 保留 `stop >= 现在 - keep_days` 且 `start <= 现在 + future_days`；`keep_yesterday = true` 时下界不晚于昨天 0 点 |
@@ -414,14 +413,14 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | 输出 | `<cache>/epg/epg.xml` 与 `epg.xml.gz`；根节点 `generator-info-name="tv-buddy"`；保留 `programme` 的 `start`/`stop`/`channel` |
 | 语言 | 文本节点缺 `xml:lang` 时补 `lang="zh"`；显式语言保留 |
 | 原样保留 | `icon`、`credits` 等未建模子节点按原片段输出 |
-| 手工映射 | 存 `epg_bindings` 表（`origin = manual`）。首次启动从旧 `<cache>/epg/mappings.json` 导入；自动绑定不算已迁移，旧映射优先 |
-| 调度 | 启动即采集一次；之后每分钟检查 `[epg].cron` 与源级 `cron`。全局到期只抓 `refresh_secs = 0` 且无源 `cron` 的源；单源到期只刷新该源再用 raw 缓存重生成。源改动遇到采集进行中时等待结束再重生成 |
+| 手工映射 | 存 `epg_bindings` 表（`origin = manual`）。自动匹配写 `origin = auto`，手工映射优先 |
+| 调度 | 启动即采集一次；之后每分钟检查 `[epg].cron` 与源 `refresh_secs`。全局到期只抓 `refresh_secs = 0` 的源；单源到期只刷新该源再用 raw 缓存重生成。源改动遇到采集进行中时等待结束再重生成 |
 
 > `/epg/api/*` 形状按目标 v0.8.2 抓包对齐（F-023）。公开频道读取 `<cache>/epg/viewer.json` 快照；节目与搜索按请求解析 `epg.xml`。
 > 关闭 EPG → `404 {"error":"EPG 功能已关闭"}`；关闭公开查看器 → `404 {"error":"公开节目单查看器已关闭"}`。三个公开端点共享宽松 CORS。
 > 额外频道不进入公开频道表；只有已匹配本地频道可出现，且允许 `programme_count=0`。
 >
-| 翻译 | 读 `[epg.translate]`：`enabled`、`url`（或 `engine="mtran"` 时的 `mtran_url`）、`token`/`mtran_token`、`source`/`mtran_source`、`target`/`targets`、`translation_first`、`mtran_batch`。采集后把节目文本批量发到 MTranServer v5 `/translate/batch`（`{from,to,texts}` → `{results}`），兼容旧 `{texts,source_lang,target_lang}`；`/translate/batch` 不可用时回退单条 `/translate`。译文按目标语言追加为 `lang="<target>"` 的文本节点；`translation_first = true` 时排在原文前。结果缓存在 `<cache>/epg/.translate/cache.json`，命中不发请求 |
+| 翻译 | 读 `[epg.translate]`：`enabled`、`url`（或 `engine="mtran"` 时的 `mtran_url`）、`token`/`mtran_token`、`source`/`mtran_source`、`target`/`targets`、`translation_first`、`mtran_batch`。采集后把节目文本批量发到 MTranServer v5 `/translate/batch`（`{from,to,texts}` → `{results}`）；`/translate/batch` 不可用时回退单条 `/translate`。译文按目标语言追加为 `lang="<target>"` 的文本节点；`translation_first = true` 时排在原文前。结果缓存在 `<cache>/epg/.translate/cache.json`，命中不发请求 |
 | 翻译接口 | `GET /epg/translate/{status,models}` 报告引擎与目标语言；`POST /epg/translate/{run,probe,mtran/test,clear,clear-engine}`。面板别名在相同路径前加 `/panel/api`。`run/probe` 需面板会话；未启用或未配地址 → `400`。`clear*` 清空缓存 |
 
 ### 6.6 备份与恢复（P1 已实现）
@@ -430,11 +429,11 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | --- | --- |
 | 备份请求 | `GET /panel/api/backup?include=all\|epg-scripts\|resolver`；其它值回退 `all` |
 | 备份响应 | `200 application/gzip`；`Content-Disposition: attachment; filename="tv-buddy-backup-YYYYmmdd-HHMMSS.tar.gz"`（UTC） |
-| 包内布局 | `tv-buddy-backup/config.json`、`logos/*`、`epg/scripts/*.py`、`epg/epg_map.json`、`resolvers/*.py`、`manifest.json`（`generator`/`version`/`created`/`scope`） |
+| 包内布局 | `tv-buddy-backup/config.json`、`tv-buddy-backup/epg.json`、`logos/*`、`epg/scripts/*.py`、`epg/epg_map.json`、`resolvers/*.py`、`manifest.json`（`generator`/`version`/`created`/`scope`）。`config.json` 与 `epg.json` 只在 `scope=all` 时写入 |
 | 恢复请求 | `POST /panel/api/restore`，`Content-Type: application/gzip`，体为 tar.gz 原文；上限 64 MiB |
-| 恢复步骤 | 解包 → 解析并**校验** `config.json` → 当前配置另存 `tv-buddy.db.bak.json` → 写库 → 恢复台标 → 替换快照（立即解除看门狗冷却） |
+| 恢复步骤 | 解包 → 解析并**校验** `config.json` 与 `epg.json` → 恢复台标 → 当前配置另存 `tv-buddy.db.bak.json` 与 `tv-buddy.db.bak.epg.json` → 写库 → 替换配置与 EPG 快照（立即解除看门狗冷却） |
 | 恢复响应 | `{"ok":true,"config_reloaded":true,"report":{"files":[…],"skipped":[…]},"groups":N}` |
-| 失败 | 无 `config.json`、配置不合法、非 gzip → `400`；未登录 → `401` |
+| 失败 | 无 `config.json`、无 `epg.json`、配置或 EPG 不合法、非 gzip → `400`；未登录 → `401` |
 
 > 台标以外的脚本类文件（`epg/scripts`、`resolvers`）只备份，不在恢复时执行。
 
@@ -669,7 +668,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 规则：
 
 - `source.id` 命中 `[playlist].sources` 时，未提供的字段用配置补齐。
-- `group_map` 是选择集：键命中即选中；未列出的分组按 `unlisted_groups` 处理：`drop` 或 `keep`（默认）。本实现把「映射为空、模式不是 `map`、没有显式目标、值为 `drop`」的旧配置在加载时归一为 `keep`，避免零频道。目标默认值为 `drop`。
+- `group_map` 是选择集：键命中即选中；未列出的分组按 `unlisted_groups` 处理：`drop` 或 `keep`（默认）。
 - `group_mode`：`keep`（默认/未知值）保留原名；`map` 使用映射值，空值保留原名；`merge` 在 `merge_group` 非空时统一分组。
 - `merge_into`：上游分组名 → 已有分组 id。它优先于 `merge_new`，且命中的分组不参与「映射外丢弃」。
 - `merge_new`：上游分组名 → 新组名。命中的分组不参与「映射外丢弃」；新组名参与 `group:` 过滤。只有 `mode=sync` 时使用；聚合预检忽略这两个字段，与聚合清单一致。
@@ -707,13 +706,13 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 项 | 规则 |
 | --- | --- |
-| 字段 | `[[groups]]` 或 `[[groups.channels]]` 的 `proxy{kind,addr,username,password}`；兼容旧 `user/pass` |
+| 字段 | `[[groups]]` 或 `[[groups.channels]]` 的 `proxy{kind,addr,username,password}` |
 | 地址 | `addr` 可省略协议；按 `kind` 补 `http://`、`https://`、`socks5://` |
 | 优先级 | 频道级 > 分组级 > 直连；频道 `addr=""` 时直连，不回退分组 |
 | 支持 | `http`、`https`、`socks4`、`socks4a`、`socks5`、`socks5h`；有用户名时 basic auth |
 | 失败 | 已配置代理不可用时**不回退**分组或直连；由上层转 `error_url` |
 | 头合并 | 分组 `headers` + 频道 `headers`；同名（忽略大小写）频道覆盖分组 |
-| 头形状 | 接受目标 `{name,value}` 对象与旧的 `"Name: value"` 字符串 |
+| 头形状 | `headers` 的每项是 `{name,value}` 对象 |
 | UA | 默认 Chrome/124；`user_agent` 频道覆盖分组；分组显式 `User-Agent` 头优先 |
 | 生效范围 | 清单、切片、回看、Remux、录制、DASH 回看 |
 | 客户端缓存 | 键为规范化 URL + `username` + `password`，配置热重载后按新键重建 |

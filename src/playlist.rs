@@ -667,45 +667,6 @@ mod tests {
     }
 
     #[test]
-    fn retain_and_action_do_not_block_manual_hide() {
-        let now = crate::schedule::now_epoch();
-        let old = Some(now - 3600);
-
-        let mut config = config_with(vec![group("g1", "public", "proxy")]);
-        config.quality.enabled = true;
-        config.groups[0].offline_on_fail = true;
-        config.groups[0].channels[0].quality = Some(crate::config::model::QualityOverride {
-            retain: Some(true),
-            ..Default::default()
-        });
-        let state = quality_with(Reason::Unreachable, now, old);
-        let body = render_user(
-            &config,
-            &admin(),
-            "http://host",
-            "tok",
-            Some(&Health::new()),
-            Some(&state),
-        );
-        assert!(!body.contains("C1"), "retain 不再阻止手工下线: {body}");
-
-        let mut config = config_with(vec![group("g1", "public", "proxy")]);
-        config.quality.enabled = true;
-        config.groups[0].offline_on_fail = true;
-        config.quality.rules.action = "mark".into();
-        let state = quality_with(Reason::Unreachable, now, old);
-        let body = render_user(
-            &config,
-            &admin(),
-            "http://host",
-            "tok",
-            Some(&Health::new()),
-            Some(&state),
-        );
-        assert!(!body.contains("C1"), "action 不再阻止手工下线: {body}");
-    }
-
-    #[test]
     fn passthrough_without_probe_stays_visible() {
         let mut config = config_with(vec![group("g1", "public", "passthrough")]);
         config.quality.enabled = true;

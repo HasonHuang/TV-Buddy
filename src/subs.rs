@@ -29,17 +29,9 @@ pub struct PreviewSource {
 }
 
 impl PreviewSource {
-    /// 与 `PlaylistSource::normalize` 的未列出分组规则保持一致。
+    /// 只补默认值。`drop` 是有效配置，不做归一。
     pub fn normalize(&mut self) {
         if self.unlisted_groups.trim().is_empty() {
-            self.unlisted_groups = "keep".to_string();
-        }
-        if self.unlisted_groups == "drop"
-            && self.group_map.is_empty()
-            && self.group_mode.trim() != "map"
-            && self.merge_into.is_empty()
-            && self.merge_new.is_empty()
-        {
             self.unlisted_groups = "keep".to_string();
         }
     }
@@ -103,7 +95,7 @@ impl GroupRules<'_> {
 
 /// 聚合源最近一次抓取状态。
 ///
-/// 旧 `subs/status.json` 没有新字段，靠 `#[serde(default)]` 兼容。
+/// 字段都有 `#[serde(default)]`，缺字段时按默认值解析。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SourceStatus {
@@ -693,18 +685,15 @@ mod tests {
     }
 
     #[test]
-    fn preview_source_normalizes_like_saved_source() {
+    fn preview_source_only_fills_empty_unlisted_mode() {
         let mut source = PreviewSource::default();
-        source.group_mode = "keep".into();
         source.unlisted_groups = "drop".into();
         source.normalize();
-        assert_eq!(source.unlisted_groups, "keep");
+        assert_eq!(source.unlisted_groups, "drop");
 
-        let mut mapped = PreviewSource::default();
-        mapped.group_mode = "map".into();
-        mapped.unlisted_groups = "drop".into();
-        mapped.normalize();
-        assert_eq!(mapped.unlisted_groups, "drop");
+        let mut empty = PreviewSource::default();
+        empty.normalize();
+        assert_eq!(empty.unlisted_groups, "keep");
     }
 
     #[test]

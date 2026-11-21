@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from './api';
+import { type Header, headersToText, parseHeaders } from './headers';
 import { ScriptManagerModal } from './scripts';
 import { Badge, Confirm, Empty, Field, Loading, Modal, Select, Switch, Tip, useToast } from './ui';
-
-type Header = { name: string; value: string };
 
 type SourceUrl = {
   url: string;
@@ -27,7 +26,6 @@ type Source = {
   output_files: string[];
   timeout_secs: number;
   tz_shift_mins: number;
-  cron: string;
   last_fetch_started_at_ms?: number | null;
   last_fetch_finished_at_ms?: number | null;
   last_fetch_ok?: boolean;
@@ -137,23 +135,6 @@ function dateOf(ms?: number | null): string {
   return new Date(ms).toLocaleString();
 }
 
-function headersText(headers: Header[]): string {
-  return headers.map((header) => `${header.name}: ${header.value}`).join('\n');
-}
-
-function parseHeaders(text: string): Header[] {
-  return text
-    .split('\n')
-    .map((line) => {
-      const index = line.indexOf(':');
-      if (index < 0) return null;
-      const name = line.slice(0, index).trim();
-      const value = line.slice(index + 1).trim();
-      return name && value ? { name, value } : null;
-    })
-    .filter((item): item is Header => item !== null);
-}
-
 function toSourcePayload(source: Source): Source {
   return {
     id: source.id,
@@ -172,7 +153,6 @@ function toSourcePayload(source: Source): Source {
     output_files: source.output_files,
     timeout_secs: Number(source.timeout_secs) || 0,
     tz_shift_mins: Number(source.tz_shift_mins) || 0,
-    cron: source.cron,
   };
 }
 
@@ -197,7 +177,6 @@ type SourceForm = {
   output_files: string;
   timeout_secs: string;
   tz_shift_mins: string;
-  cron: string;
 };
 
 function emptyUrl(): UrlForm {
@@ -218,7 +197,6 @@ function formOf(source?: Source): SourceForm {
       output_files: '',
       timeout_secs: '0',
       tz_shift_mins: '0',
-      cron: '',
     };
   }
   return {
@@ -232,7 +210,7 @@ function formOf(source?: Source): SourceForm {
             url: url.url,
             priority: String(url.priority ?? 0),
             user_agent: url.user_agent ?? '',
-            headers: headersText(url.headers ?? []),
+            headers: headersToText(url.headers ?? []),
           }))
         : [emptyUrl()],
     refresh_mins: String(Math.round((source.refresh_secs || 0) / 60)),
@@ -241,7 +219,6 @@ function formOf(source?: Source): SourceForm {
     output_files: (source.output_files ?? []).join(', '),
     timeout_secs: String(source.timeout_secs ?? 0),
     tz_shift_mins: String(source.tz_shift_mins ?? 0),
-    cron: source.cron ?? '',
   };
 }
 
@@ -268,7 +245,6 @@ function payloadOf(form: SourceForm): Source {
       .filter(Boolean),
     timeout_secs: Math.max(0, Number(form.timeout_secs) || 0),
     tz_shift_mins: Number(form.tz_shift_mins) || 0,
-    cron: form.cron.trim(),
   };
 }
 
@@ -490,7 +466,7 @@ function SourceModal({
         )}
 
         <div className="fields">
-          <Field label="刷新间隔（分钟）" tip="0 表示沿用 cron 或全局采集节奏。">
+          <Field label="刷新间隔（分钟）" tip="0 表示沿用全局采集节奏。">
             <input
               type="number"
               value={form.refresh_mins}
@@ -509,13 +485,6 @@ function SourceModal({
               type="number"
               value={form.tz_shift_mins}
               onChange={(event) => set('tz_shift_mins', event.target.value)}
-            />
-          </Field>
-          <Field label="旧 cron" tip="仅旧配置使用。非空时按 cron 调度。">
-            <input
-              value={form.cron}
-              onChange={(event) => set('cron', event.target.value)}
-              placeholder="留空不用"
             />
           </Field>
         </div>
@@ -705,7 +674,7 @@ export function EpgSourcesTab() {
                   </div>
                 </td>
                 <td>{source.priority ?? 0}</td>
-                <td>{source.refresh_secs > 0 ? `${Math.round(source.refresh_secs / 60)}m` : source.cron || '全局'}</td>
+                <td>{source.refresh_secs > 0 ? `${Math.round(source.refresh_secs / 60)}m` : '全局'}</td>
                 <td>
                   {source.last_fetch_started_at_ms ? (
                     <div>

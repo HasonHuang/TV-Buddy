@@ -143,7 +143,7 @@ pub fn spawn(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
             let config = state.snapshot();
-            if config.quality.enabled && config.quality.interval_secs > 0 {
+            if config.quality.enabled {
                 drop(config);
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 continue;
@@ -156,8 +156,8 @@ pub fn spawn(state: Arc<AppState>) {
             let timeout = Duration::from_secs(config.health.timeout_secs.max(1));
             let concurrency = config.health.concurrency.clamp(1, 32) as usize;
             let interval = Duration::from_secs(config.health.interval_secs.max(10));
-            // 只有启用「探测失败下线」的频道才解析脚本。其余频道保持旧行为：
-            // 直接探测 `channel.url`，不额外运行 python3。
+            // 只有启用「探测失败下线」的频道才解析脚本。其余频道直接探测
+            // `channel.url`，不额外运行 python3。
             let targets: Vec<(String, String, String, Option<Channel>)> = config
                 .groups
                 .iter()

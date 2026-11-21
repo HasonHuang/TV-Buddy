@@ -1324,7 +1324,7 @@ fn effective_candidates<'a>(
 
 /// 源是否使用全局 cron 采集。
 fn uses_global_schedule(source: &crate::epg_store::Source) -> bool {
-    source.enabled && source.refresh_secs == 0 && source.cron.trim().is_empty()
+    source.enabled && source.refresh_secs == 0
 }
 
 /// 启用中的源，按优先级升序。同优先级保持表内顺序。
@@ -2278,32 +2278,18 @@ pub fn spawn(state: Arc<AppState>) {
             }
             let sources = state.epg_store.sources();
             for source in sources.iter().filter(|source| source.enabled) {
-                let (last, last_finished) = state
+                let last = state
                     .epg
                     .source_status
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
                     .get(&source.id)
-                    .map_or((None, None), |status| {
-                        (
-                            status
-                                .last_fetch_started_at_ms
-                                .or(status.last_fetch_finished_at_ms),
-                            status
-                                .last_fetch_finished_at_ms
-                                .or(status.last_fetch_started_at_ms),
-                        )
+                    .and_then(|status| {
+                        status
+                            .last_fetch_started_at_ms
+                            .or(status.last_fetch_finished_at_ms)
                     });
-                let due = if source.refresh_secs > 0 {
-                    last.is_none_or(|at| {
-                        at + source.refresh_secs.saturating_mul(1_000) as i64 <= now * 1_000
-                    })
-                } else if !source.cron.trim().is_empty() {
-                    // cron 用结束时间，避免跨过边界的采集刚结束又触发一次。
-                    source_cron_due(&source.cron, now, offset, last_finished)
-                } else {
-                    false
-                };
+                let due = source_refresh_due(source.refresh_secs, last, now);
                 if !due {
                     continue;
                 }
@@ -2652,17 +2638,15 @@ fn global_schedule_due(expr: &str, now: i64, offset_hours: i64, last_run: i64) -
     }
 }
 
-/// 源级 cron 是否到期。
-///
-/// `last_run_ms` 是最近一次采集结束时间（缺失时用开始时间）。
-/// 没有记录时按到期处理。表达式非法时不采集。
-fn source_cron_due(expr: &str, now: i64, offset_hours: i64, last_run_ms: Option<i64>) -> bool {
-    let Ok(prev) = cron_prev(expr, now, offset_hours) else {
+/// 源是否按自己的间隔到期。超大间隔按长期处理，避免 u64→i64 变负。
+fn source_refresh_due(refresh_secs: u64, last_ms: Option<i64>, now: i64) -> bool {
+    if refresh_secs == 0 {
         return false;
-    };
-    last_run_ms
-        .map(|at| at.div_euclid(1_000))
-        .is_none_or(|at| at < prev)
+    }
+    let interval_ms = i64::try_from(refresh_secs)
+        .unwrap_or(i64::MAX / 1_000)
+        .saturating_mul(1_000);
+    last_ms.is_none_or(|at| at.saturating_add(interval_ms) <= now.saturating_mul(1_000))
 }
 
 /// 当前 Unix 秒。
@@ -3992,20 +3976,27 @@ mod tests {
     }
 
     #[test]
+    fn source_refresh_due_handles_huge_intervals() {
+        let now = 1_700_000_000;
+        assert!(!source_refresh_due(0, None, now));
+        assert!(source_refresh_due(60, None, now));
+        assert!(source_refresh_due(60, Some((now - 60) * 1_000), now));
+        assert!(!source_refresh_due(60, Some((now - 59) * 1_000), now));
+        assert!(!source_refresh_due(u64::MAX, Some(0), now));
+        assert!(!source_refresh_due(u64::MAX, Some(now * 1_000), now));
+    }
+
+    #[test]
     fn global_schedule_only_uses_default_sources() {
         let mut source = crate::epg_store::Source {
             enabled: true,
             refresh_secs: 0,
-            cron: String::new(),
             ..crate::epg_store::Source::default()
         };
         assert!(uses_global_schedule(&source));
         source.refresh_secs = 3_600;
         assert!(!uses_global_schedule(&source), "显式间隔不跟全局 cron");
         source.refresh_secs = 0;
-        source.cron = "0 3 * * *".into();
-        assert!(!uses_global_schedule(&source), "源 cron 不跟全局 cron");
-        source.cron.clear();
         source.enabled = false;
         assert!(!uses_global_schedule(&source), "停用源不采集");
     }
@@ -4053,15 +4044,6 @@ mod tests {
         // 非法表达式回退到 4 小时。
         assert!(global_schedule_due("bad", now, 0, now - 4 * 3_600 - 1));
         assert!(!global_schedule_due("bad", now, 0, now - 3_600));
-
-        assert!(source_cron_due(
-            "0 */4 * * *",
-            now,
-            0,
-            Some((prev - 1) * 1_000)
-        ));
-        assert!(!source_cron_due("0 */4 * * *", now, 0, Some(prev * 1_000)));
-        assert!(!source_cron_due("bad", now, 0, None), "非法表达式不采集");
     }
 
     #[test]

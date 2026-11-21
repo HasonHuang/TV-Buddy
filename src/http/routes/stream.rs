@@ -46,7 +46,7 @@ const DEFAULT_TARGET_DURATION: u64 = 6;
 ///
 /// `[cdn].enabled` 时切到 CDN 模式：TTL 取显式值或实测推荐值，命中路径可按
 /// `shared_cache_hits` 一并转 `public`（`docs/design/06-low-spec-optimization.md` §6）。
-/// 关闭时输出与旧行为逐字节一致。
+/// 关闭时使用默认缓存头。
 fn segment_cache_control(state: &AppState, first: bool) -> String {
     let config = state.snapshot();
     if !config.cdn.enabled {
@@ -546,7 +546,7 @@ async fn serve_rest(
     match rest {
         // 变体媒体清单：只有上游是主清单时存在（S-PROXY-07）。
         "video/index.txt" => variant_playlist(state, gid, cid, &self_base(config, headers)).await,
-        // 兼容别名：与入口同义（目标实测：`redirect` / `rewrite` 两条路径结果一致）。
+        // 同义别名：与入口一致（目标实测：`redirect` / `rewrite` 两条路径结果一致）。
         "index.m3u8" => {
             let query: HashMap<String, String> = raw_query
                 .map(|raw| {
@@ -1810,8 +1810,7 @@ fn insert_header(response: &mut Response, name: header::HeaderName, value: &str)
 
 /// 上游自定义头：分组头与频道头合并，频道覆盖同名分组头。
 ///
-/// 目标配置把 `headers` 存为 `[{name,value}]`；本实现同时接受旧的
-/// `"名称: 值"` 字符串。`user_agent` 是独立字段，显式同名头优先。
+/// `headers` 的每项是 `{name, value}` 对象。`user_agent` 是独立字段，显式同名头优先。
 pub(crate) fn channel_headers(state: &AppState, gid: &str, cid: &str) -> Vec<(String, String)> {
     let config = state.snapshot();
     let Some((group, _)) = resolve(&config, gid, cid) else {
@@ -1862,14 +1861,6 @@ pub(crate) fn merge_upstream_headers(
 }
 
 fn header_pair(value: &serde_json::Value) -> Option<(String, String)> {
-    if let Some(text) = value.as_str() {
-        let (name, value) = text.split_once(':')?;
-        let name = name.trim();
-        if name.is_empty() {
-            return None;
-        }
-        return Some((name.to_string(), value.trim().to_string()));
-    }
     let table = value.as_object()?;
     let name = table.get("name")?.as_str()?.trim();
     let value = table.get("value")?.as_str()?.trim();
@@ -2042,20 +2033,17 @@ mod tests {
     }
 
     #[test]
-    fn accepts_legacy_header_strings() {
+    fn ignores_malformed_header_entries() {
         let merged = merge_upstream_headers(
-            &[serde_json::Value::String("X-Token: abc".into())],
+            &[
+                serde_json::Value::String("X-Token: abc".into()),
+                serde_json::json!({ "name": "Referer", "value": "http://ref/" }),
+            ],
             None,
-            &[serde_json::Value::String("Referer: http://ref/".into())],
+            &[],
             None,
         );
-        assert_eq!(
-            merged,
-            vec![
-                ("X-Token".into(), "abc".into()),
-                ("Referer".into(), "http://ref/".into()),
-            ]
-        );
+        assert_eq!(merged, vec![("Referer".into(), "http://ref/".into())]);
     }
 
     fn template_mpd() -> &'static str {

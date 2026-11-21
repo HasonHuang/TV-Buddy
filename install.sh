@@ -57,7 +57,6 @@ usage() {
   --nginx            安装 NGINX 并写入反向代理配置，不询问
   --no-nginx         不安装 NGINX，不询问
   --no-start         安装后不启动服务（默认会启动）
-  --start            安装后启动服务（默认行为，保留以兼容旧用法）
   -h, --help         显示本帮助
 
 环境变量：
@@ -88,7 +87,7 @@ ensure_tmp() {
 }
 
 # 安装前询问是否使用低配参数。`--low-spec` 与 `--no-low-spec` 跳过询问。
-# 无交互终端时默认不使用，保持自动化安装的旧行为。
+# 无交互终端时默认不使用。
 ask_low_spec() {
     [ -z "$LOW_SPEC" ] || return 0
 
@@ -128,7 +127,7 @@ ask_low_spec() {
 }
 
 # 安装前询问是否安装 NGINX。`--nginx` 与 `--no-nginx` 跳过询问。
-# 无交互终端时默认不安装，保持自动化安装的旧行为。
+# 无交互终端时默认不安装。
 ask_nginx() {
     [ -z "$DO_NGINX" ] || return 0
 
@@ -187,10 +186,6 @@ while [ "$#" -gt 0 ]; do
             ;;
         --no-link)
             DO_LINK=0
-            shift
-            ;;
-        --start)
-            DO_START=1
             shift
             ;;
         --no-start)

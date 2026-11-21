@@ -46,8 +46,7 @@
 | `[health]`/`[stats]` | `enabled`、`interval_secs`、`online_window_secs` | 健康与指标 |
 | `[assets]` | `map`（原始 URL → 本地 HLS 入口） | 占位/错误视频转换 |
 | `[epg]` | `enabled`、`cron`、`public_viewer_enabled`、`keep_days`、`future_days`、`keep_yesterday`、`match_by_name`、`allow_scripts`、`python_bin`、`script_timeout_secs`、`record_pad_before_secs`、`record_pad_after_secs` | 节目单采集与浏览。`enabled` 默认开启，只控制采集与浏览接口，不控制侧栏入口；`public_viewer_enabled` 兼容保留 |
-| `[[epg.sources]]` | 仅旧配置。启动时导入 `epg_sources` 表，然后清空 | 节目单源迁移 |
-| `epg_sources` | `id`、`name`、`kind`、`enabled`、`urls[]{url,priority,user_agent,headers}`、`refresh_secs`、`priority`、`script`、`output_files`、`timeout_secs`、`tz_shift_mins`、`cron` | 面板管理。保存即生效 |
+| `epg_sources` | `id`、`name`、`kind`、`enabled`、`urls[]{url,priority,user_agent,headers}`、`refresh_secs`、`priority`、`script`、`output_files`、`timeout_secs`、`tz_shift_mins` | 面板管理。保存即生效 |
 | `epg_bindings` | `gid`、`cid`、`source_id`、`raw_channel_id`、`origin`、`upstream_display_name` | 频道绑定。`origin` 为 `auto` 或 `manual` |
 | `epg_rules` | `name`、`gid`、`cid`、`condition`、`action`、`lead_secs`、`tail_secs`、`output_dir`、`name_template`、`enabled` | 关键字规则 |
 | `[epg.translate]` | `enabled`、`url`/`mtran_url`、`token`/`mtran_token`、`source`、`target(s)`、`mtran_batch` | EPG 机翻 |
@@ -93,7 +92,7 @@
 | `merge_into` | 空 | 上游分组名 → 已有分组 id |
 | `merge_new` | 空 | 上游分组名 → 新组名。同名合并为一组 |
 
-`merge_into` 优先于 `merge_new`。两者只在托管源（`mode=sync`）生效，聚合源忽略。`unlisted_groups` 默认 `keep`。旧配置的空映射 `drop` 在没有有效显式目标时归一为 `keep`。见 `07` `D-007`。
+`merge_into` 优先于 `merge_new`。两者只在托管源（`mode=sync`）生效，聚合源忽略。`unlisted_groups` 默认 `keep`。见 `07` `D-007`。
 
 ### 1.3 分组与频道的来源字段
 
@@ -116,14 +115,13 @@
 ### 1.4 归一与并发
 
 - `Config::normalize()` 在加载、保存、`save_config`、`mutate` 前运行。
-  - `group.access == "open"` 改为 `public`。
   - `group.origin` 为空时补 `manual`。
   - 源 `mode`、`schedule`、`playback_mode`、`format` 为空时补默认值。
 - `Config.revision` 是并发令牌。
   - 唯一自增点：`ConfigStore::save`。
-  - `PUT /panel/api/config` 从请求体读 `revision`。
-  - 与库内值不同时返回 `409`，`code=stale_revision`，并附当前 `revision`。
-  - 不带 `revision`（0）时不校验，兼容旧客户端。
+  - `PUT /panel/api/config` 必须从请求体读 `revision`。
+  - 缺失 `revision` 或与库内值不同时返回 `409`，`code=stale_revision`，并附当前 `revision`。
+  - 校验与写入在同一个 `IMMEDIATE` 事务内完成，跨进程写者不能插在两者之间。
 - 专用端点走 `state.mutate`，只改自己的字段，不要求 `revision`。
 
 ## 2. 热重载矩阵
@@ -144,11 +142,11 @@
 | `[playlist]`/`[[playlist.sources]]` | 立即；源正文按源级 TTL 复用 | F-020 |
 | `[panel]` | `enabled` 立即（拒绝新登录）；`session_ttl` 需重启 | 设计决策 |
 
-EPG cron 的到期判断用**最近触发时间**，不用“下次触发时间”。
+EPG 到期判断用**最近触发时间**，不用“下次触发时间”。
 
 - 全局 cron 用上次全局采集尝试时间。
-- 源级 cron 用上次采集结束时间。
-- 表达式非法时：全局回退 4 小时，源级不采集。
+- 源 `refresh_secs` 用上次采集开始时间。
+- 全局表达式非法时回退 4 小时。
 
 实现：没有文件可监视，也没有热重载线程。三条路径：
 
@@ -310,7 +308,7 @@ tv-buddy-<version>-linux-<arch>/
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `enabled` | `false` | 关闭时切片响应头与空体状态码与旧版逐字节一致 |
+| `enabled` | `false` | 关闭时使用默认切片响应头与空体状态码 |
 | `auto_tune` | `true` | 被动实测：累计分组窗口参数与切片体积，供推荐 TTL / 磁盘上限 |
 | `segment_max_age_secs` | `0` | 切片 `max-age`；`0` = 用实测推荐值（无数据时 600s） |
 | `shared_cache_hits` | `false` | 开：命中路径也标 `public`（给只能「遵循源站头」的 CDN） |

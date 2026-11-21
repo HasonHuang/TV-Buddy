@@ -127,13 +127,11 @@ export async function copyText(text: string): Promise<boolean> {
 /** 质量判定原因。与后端结果记录的 `reason` 一致。 */
 export type QualityReason =
   | 'pass'
-  | 'retained'
   | 'unreachable'
   | 'speed_low'
   | 'resolution_low'
   | 'resolution_high'
   | 'delay_high'
-  | 'supply'
   | 'probe_error'
   | 'source_removed'
   | 'source_disabled'
@@ -267,7 +265,6 @@ export type QualityEffective = {
     max_delay_ms: number;
     min_resolution_px: number | null;
     max_resolution_px: number | null;
-    supply: boolean;
     host_cache: boolean;
   };
   source_layer: 'channel' | 'group' | 'source' | 'global' | string;

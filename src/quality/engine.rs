@@ -1215,12 +1215,12 @@ mod tests {
         group
             .extra
             .insert("user_agent".into(), json!("GroupUA/1.0"));
-        group.headers = vec![json!("X-Group: yes")];
+        group.headers = vec![json!({ "name": "X-Group", "value": "yes" })];
         let mut channel = Channel::default();
         channel
             .extra
             .insert("user_agent".into(), json!("ChannelUA/2.0"));
-        channel.headers = vec![json!("X-Channel: yes")];
+        channel.headers = vec![json!({ "name": "X-Channel", "value": "yes" })];
         let headers = candidate_headers(&group, &channel);
         assert!(headers.iter().any(
             |(name, value)| name.eq_ignore_ascii_case("user-agent") && value == "ChannelUA/2.0"

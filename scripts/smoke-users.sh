@@ -55,13 +55,7 @@ cat > "$CFG" <<JSON
     "keep_days": 3,
     "future_days": 365,
     "keep_yesterday": false,
-    "match_by_name": false,
-    "sources": [{
-      "id": "s1",
-      "name": "本地源",
-      "kind": "xml",
-      "url": "http://127.0.0.1:$UP/epg.xml"
-    }]
+    "match_by_name": false
   },
   "groups": [
     {
@@ -115,6 +109,11 @@ AT=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 A=(-H "Authorization: Bearer $AT" -H 'Content-Type: application/json')
 check "管理员登录" "admin" "$(curl -s "${A[@]}" "$B/panel/api/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["user"]["role"])')"
+
+# 建 EPG 源。启动后不再从配置导入源，必须走面板接口。
+curl -s -X POST "${A[@]}" \
+  -d '{"id":"s1","name":"本地源","kind":"xml","enabled":true,"urls":[{"url":"http://127.0.0.1:'"$UP"'/epg.xml","priority":0}]}' \
+  "$B/panel/api/epg/sources" >/dev/null
 
 # --- 建普通用户：只看 ga，且只勾 alpha ---
 BODY='{"username":"viewer","password":"viewer123","role":"user","allowed_group_ids":["ga"],"channel_filter_enabled":true,"allowed_channel_ids":["ga/alpha"],"web_ui_access":true}'

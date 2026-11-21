@@ -325,7 +325,6 @@ pub async fn effective(
             "max_delay_ms": rules.max_delay_ms,
             "min_resolution_px": rules.min_resolution_px,
             "max_resolution_px": rules.max_resolution_px,
-            "supply": rules.supply,
             "host_cache": rules.host_cache,
         },
         "source_layer": source_layer(&config, group, channel),

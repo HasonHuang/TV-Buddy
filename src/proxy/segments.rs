@@ -20,7 +20,7 @@ pub struct Entry {
     pub url: String,
     /// 伪装扩展名。
     pub ext: String,
-    /// 登记时间（Unix 秒）。用于磁盘索引按新旧截断；旧文件缺省为 0。
+    /// 登记时间（Unix 秒）。用于磁盘索引按新旧截断；缺失时为 0。
     #[serde(default)]
     pub at: u64,
 }
@@ -206,7 +206,7 @@ pub fn save_index(
         );
     }
     if max_entries > 0 && merged.len() > max_entries {
-        // 最旧优先丢弃；`at` 相同（旧格式）时按 suffix 兜底，保证结果确定。
+        // 最旧优先丢弃；`at` 相同时按 suffix 兜底，保证结果确定。
         let mut ordered: Vec<(&String, u64)> =
             merged.iter().map(|(key, entry)| (key, entry.at)).collect();
         ordered.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(b.0)));
@@ -335,7 +335,7 @@ mod tests {
             "最新的条目必须保留（丢最旧，不能丢刚登记的）"
         );
         assert!(!stored.contains_key("a000"));
-        // 不带上限时保持原行为（合并全量）。
+        // 不带上限时合并全量。
         save_index(&dir, "g", "c", &first, 0);
         assert_eq!(load_index(&dir, "g", "c").len(), 100);
         let _ = std::fs::remove_dir_all(&dir);

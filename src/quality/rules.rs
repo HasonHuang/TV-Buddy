@@ -4,41 +4,15 @@ use std::collections::BTreeMap;
 
 use crate::config::model::{Channel, Config, Group, QualityOverride};
 
-/// 判定后的动作。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action {
-    Hide,
-    Mark,
-    Off,
-}
-
-impl Action {
-    pub fn parse(value: &str) -> Self {
-        match value.trim() {
-            "mark" => Self::Mark,
-            "off" => Self::Off,
-            _ => Self::Hide,
-        }
-    }
-}
-
-impl Default for Action {
-    fn default() -> Self {
-        Self::Hide
-    }
-}
-
 /// 判定原因。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Reason {
     Pass,
-    Retained,
     Unreachable,
     SpeedLow,
     ResolutionLow,
     ResolutionHigh,
     DelayHigh,
-    Supply,
     ProbeError,
     #[default]
     Unknown,
@@ -48,13 +22,11 @@ impl Reason {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Pass => "pass",
-            Self::Retained => "retained",
             Self::Unreachable => "unreachable",
             Self::SpeedLow => "speed_low",
             Self::ResolutionLow => "resolution_low",
             Self::ResolutionHigh => "resolution_high",
             Self::DelayHigh => "delay_high",
-            Self::Supply => "supply",
             Self::ProbeError => "probe_error",
             Self::Unknown => "unknown",
         }
@@ -64,13 +36,11 @@ impl Reason {
     pub fn parse(value: &str) -> Self {
         match value.trim() {
             "pass" => Self::Pass,
-            "retained" => Self::Retained,
             "unreachable" => Self::Unreachable,
             "speed_low" => Self::SpeedLow,
             "resolution_low" => Self::ResolutionLow,
             "resolution_high" => Self::ResolutionHigh,
             "delay_high" => Self::DelayHigh,
-            "supply" => Self::Supply,
             "probe_error" => Self::ProbeError,
             _ => Self::Unknown,
         }
@@ -109,8 +79,6 @@ impl Default for Measurement {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectiveRules {
     pub enabled: bool,
-    pub action: Action,
-    pub retain: bool,
     pub min_speed_mib: f64,
     /// 分辨率未知或映射未命中时的速率。0 表示使用 `min_speed_mib`。
     pub fallback_speed_mib: f64,
@@ -118,7 +86,6 @@ pub struct EffectiveRules {
     pub min_resolution_px: Option<u32>,
     pub max_resolution_px: Option<u32>,
     pub resolution_speed_map: BTreeMap<u32, f64>,
-    pub supply: bool,
     pub host_cache: bool,
     pub stale_keep_secs: u64,
 }
@@ -127,15 +94,12 @@ impl Default for EffectiveRules {
     fn default() -> Self {
         Self {
             enabled: false,
-            action: Action::Hide,
-            retain: false,
             min_speed_mib: 0.0,
             fallback_speed_mib: 0.0,
             max_delay_ms: 0,
             min_resolution_px: None,
             max_resolution_px: None,
             resolution_speed_map: BTreeMap::new(),
-            supply: false,
             host_cache: false,
             stale_keep_secs: 0,
         }
@@ -204,14 +168,6 @@ pub fn effective_rules(config: &Config, group: &Group, channel: &Channel) -> Eff
 
     EffectiveRules {
         enabled,
-        action: Action::parse(
-            &pick(channel_q, group_q, source_q, |quality| {
-                quality.action.clone()
-            })
-            .unwrap_or_else(|| rules.action.clone()),
-        ),
-        retain: pick(channel_q, group_q, source_q, |quality| quality.retain)
-            .unwrap_or(rules.retain),
         min_speed_mib: pick(channel_q, group_q, source_q, |quality| {
             quality.min_speed_mib
         })
@@ -237,8 +193,6 @@ pub fn effective_rules(config: &Config, group: &Group, channel: &Channel) -> Eff
         })
         .map(|map| map_to_px(&map))
         .unwrap_or_else(|| map_to_px(&rules.resolution_speed_map)),
-        supply: pick(channel_q, group_q, source_q, |quality| quality.supply)
-            .unwrap_or(rules.supply),
         host_cache: pick(channel_q, group_q, source_q, |quality| quality.host_cache)
             .unwrap_or(rules.host_cache),
         stale_keep_secs: pick(channel_q, group_q, source_q, |quality| {
@@ -495,15 +449,12 @@ mod tests {
     fn verdict_covers_thresholds_and_unknown_resolution() {
         let rules = EffectiveRules {
             enabled: true,
-            action: Action::Hide,
-            retain: false,
             min_speed_mib: 1.0,
             fallback_speed_mib: 0.0,
             max_delay_ms: 3000,
             min_resolution_px: Some(1280 * 720),
             max_resolution_px: Some(1920 * 1080),
             resolution_speed_map: BTreeMap::new(),
-            supply: false,
             host_cache: true,
             stale_keep_secs: 1800,
         };
@@ -562,39 +513,6 @@ mod tests {
             error: Some("timeout".into()),
         };
         assert_eq!(evaluate(&rules, &down).reason, Reason::Unreachable);
-    }
-
-    #[test]
-    fn supply_does_not_bypass_thresholds() {
-        let rules = EffectiveRules {
-            enabled: true,
-            action: Action::Hide,
-            retain: false,
-            min_speed_mib: 1.0,
-            fallback_speed_mib: 0.0,
-            max_delay_ms: 0,
-            min_resolution_px: None,
-            max_resolution_px: None,
-            resolution_speed_map: BTreeMap::new(),
-            supply: true,
-            host_cache: false,
-            stale_keep_secs: 1800,
-        };
-        let slow = Measurement {
-            reachable: true,
-            probe_error: false,
-            http_status: Some(200),
-            delay_ms: Some(10),
-            speed_mib: Some(0.1),
-            width: None,
-            height: None,
-            error: None,
-        };
-        assert_eq!(
-            evaluate(&rules, &slow).reason,
-            Reason::SpeedLow,
-            "supply 不再绕过阈值"
-        );
     }
 
     #[test]
@@ -668,7 +586,7 @@ mod tests {
         assert_eq!(
             evaluate(&rules, &measurement).reason,
             Reason::SpeedLow,
-            "兜底为 0 时回退到 min_speed，证明上一条不是旧行为"
+            "兜底为 0 时回退到 min_speed"
         );
     }
 
@@ -704,45 +622,5 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(evaluate(&rules, &measurement).reason, Reason::ResolutionLow);
-    }
-
-    #[test]
-    fn retain_does_not_bypass_thresholds() {
-        let rules = EffectiveRules {
-            enabled: true,
-            action: Action::Hide,
-            retain: true,
-            min_speed_mib: 1.0,
-            fallback_speed_mib: 0.0,
-            max_delay_ms: 0,
-            min_resolution_px: None,
-            max_resolution_px: None,
-            resolution_speed_map: BTreeMap::new(),
-            supply: false,
-            host_cache: true,
-            stale_keep_secs: 1800,
-        };
-        let slow = Measurement {
-            reachable: true,
-            probe_error: false,
-            http_status: Some(200),
-            delay_ms: Some(10),
-            speed_mib: Some(0.1),
-            width: None,
-            height: None,
-            error: None,
-        };
-        assert_eq!(evaluate(&rules, &slow).reason, Reason::SpeedLow);
-        let down = Measurement {
-            reachable: false,
-            probe_error: false,
-            http_status: None,
-            delay_ms: None,
-            speed_mib: None,
-            width: None,
-            height: None,
-            error: Some("x".into()),
-        };
-        assert_eq!(evaluate(&rules, &down).reason, Reason::Unreachable);
     }
 }

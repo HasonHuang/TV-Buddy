@@ -534,7 +534,10 @@ cmd_install() {
         fail "找不到 install.sh；请从发布包运行 ./install.sh"
     }
     info "运行安装脚本：$installer"
-    sh "$installer" "$@"
+    if ! sh "$installer" "$@"; then
+        warn "安装脚本失败"
+        return 1
+    fi
     info "安装脚本完成"
     if [ -x "$CLI_LINK" ]; then
         info "命令：$CLI_LINK"
@@ -889,7 +892,7 @@ main_menu() {
         if ! is_installed; then
             case "$opt" in
                 1)
-                    if ( cmd_install --start ); then
+                    if ( cmd_install ); then
                         if [ -x "$CLI_LINK" ]; then
                             info "安装完成，打开已安装菜单"
                             exec "$CLI_LINK" menu

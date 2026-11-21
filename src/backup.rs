@@ -120,9 +120,9 @@ pub fn file_name() -> String {
 
 /// 解包并校验备份：返回配置、EPG 配置与报告，最后落盘台标。
 ///
-/// 包内必须有 `config.json`。旧备份没有 `epg.json` 时 EPG 配置返回 `None`。
+/// 包内必须有 `config.json` 与 `epg.json`。
 /// 返回的配置由调用方写入数据库并替换快照。
-pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Option<EpgSnapshot>, Report)> {
+pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, EpgSnapshot, Report)> {
     let mut decoder = flate2::read::GzDecoder::new(data);
     let mut raw = Vec::new();
     decoder.read_to_end(&mut raw).context("解压失败")?;
@@ -169,6 +169,11 @@ pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Option<EpgSnapsh
     config.normalize();
     crate::config::validate(&config).context("备份配置不合法")?;
 
+    let Some(text) = epg_json else {
+        bail!("备份中没有 epg.json");
+    };
+    let epg = serde_json::from_str::<EpgSnapshot>(&text).context("备份 EPG 配置不合法")?;
+
     for (name, bytes) in &logos {
         let base = name.rsplit_once('.').map(|(base, _)| base).unwrap_or(name);
         let ext = name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
@@ -176,13 +181,6 @@ pub fn restore(cache_dir: &str, data: &[u8]) -> Result<(Config, Option<EpgSnapsh
             report.skipped.push(format!("logos/{name}: {error:#}"));
         }
     }
-
-    let epg = match epg_json {
-        Some(text) => {
-            Some(serde_json::from_str::<EpgSnapshot>(&text).context("备份 EPG 配置不合法")?)
-        }
-        None => None,
-    };
 
     Ok((config, epg, report))
 }
@@ -276,7 +274,7 @@ mod tests {
             .iter()
             .any(|file| file.ends_with("config.json")));
         assert!(report.files.iter().any(|file| file.ends_with("epg.json")));
-        assert!(epg.is_some());
+        assert!(epg.sources.is_empty());
         assert!(report
             .files
             .iter()

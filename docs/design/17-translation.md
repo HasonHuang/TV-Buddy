@@ -15,14 +15,13 @@
 
 缓存命中时不发请求。清缓存接口删除对应内容。
 
-## 2. 协议兼容
+## 2. 协议
 
-客户端支持 MTranServer v5 与旧批量接口。
+客户端使用 MTranServer v5 协议。
 
 | 步骤 | 请求 | 正文 | 响应 |
 | --- | --- | --- | --- |
-| 批量 v5 | `POST <base>/translate/batch` | `{from, to, texts}` | `{results}` |
-| 批量旧接口 | 同路径。400 或 422 后重试 | `{texts, source_lang, target_lang}` | `results`、`translations`、`texts`、`result`、`text`、`data` 之一 |
+| 批量 | `POST <base>/translate/batch` | `{from, to, texts}` | `{results}` |
 | 单条回退 | `POST <base>/translate` | `{from, to, text}` | `{result}` |
 
 规则：
