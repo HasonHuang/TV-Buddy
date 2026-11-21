@@ -13,6 +13,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -152,6 +153,7 @@ function AutoNum({
   const value = asNumber(draft, path);
   const manual = value !== 0;
   const current = autoValue ?? fallback;
+  const hintId = useId();
   return (
     <div className="field">
       <label>
@@ -162,6 +164,7 @@ function AutoNum({
         <Select
           compact
           ariaLabel={`${label}取值方式`}
+          describedBy={hintId}
           value={manual ? 'manual' : 'auto'}
           options={[
             { value: 'auto', label: '自动' },
@@ -172,13 +175,14 @@ function AutoNum({
         <NumberInput
           min={min}
           ariaLabel={label}
+          describedBy={hintId}
           value={manual ? value : current}
           disabled={!manual}
           onChange={(next) => update(path, next)}
         />
         {unit ? <span className="field-unit">{unit}</span> : null}
       </div>
-      <div className="hint">
+      <div className="hint" id={hintId}>
         {hint ?? (manual ? '手动值，覆盖自动估算' : `自动（当前 ${current}）`)}
       </div>
     </div>
@@ -191,6 +195,7 @@ function ToggleNum({
   path,
   unit,
   tip,
+  hint,
   enabledValue = 1800,
   min = 60,
 }: {
@@ -198,12 +203,14 @@ function ToggleNum({
   path: string;
   unit?: string;
   tip?: string;
+  hint?: string;
   enabledValue?: number;
   min?: number;
 }) {
   const { draft, update } = useDraft();
   const value = asNumber(draft, path);
   const on = value !== 0;
+  const hintId = useId();
   return (
     <div className="field">
       <label>
@@ -214,6 +221,7 @@ function ToggleNum({
         <Select
           compact
           ariaLabel={`${label}开关`}
+          describedBy={hint ? hintId : undefined}
           value={on ? 'on' : 'off'}
           options={[
             { value: 'on', label: '开启' },
@@ -224,12 +232,18 @@ function ToggleNum({
         <NumberInput
           min={min}
           ariaLabel={label}
+          describedBy={hint ? hintId : undefined}
           value={on ? value : enabledValue}
           disabled={!on}
           onChange={(next) => update(path, next)}
         />
         {unit ? <span className="field-unit">{unit}</span> : null}
       </div>
+      {hint ? (
+        <div className="hint" id={hintId}>
+          {hint}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -870,12 +884,18 @@ export function SettingsPage({
     }
   };
 
+  const limitMb = asNumber(draft ?? {}, 'cache.limit_mb');
+  const workingMb = recommend?.working_mb ?? null;
   const limitHint =
-    recommend === null
-      ? undefined
-      : recommend.cap_source === 'manual'
-        ? '手动值，覆盖自动估算'
-        : `自动 ${formatMB(recommend.disk_cap_mb)} · ${LIMIT_LABEL[recommend.limited_by]}`;
+    limitMb !== 0
+      ? workingMb !== null && limitMb < workingMb
+        ? `低于播放需要 ${formatMB(workingMb)}，换台可能回源变慢。`
+        : '手动值，覆盖自动估算'
+      : recommend === null
+        ? undefined
+        : recommend.cap_source === 'auto'
+          ? `自动 ${formatMB(recommend.disk_cap_mb)} · ${LIMIT_LABEL[recommend.limited_by]}`
+          : '保存后按播放需要与磁盘空间自动计算';
   const catchupHint = CATCHUP_HINTS[asText(draft ?? {}, 'server.catchup_tpl')] ?? '';
   const shareOn = asBool(draft ?? {}, 'share.enabled');
   const shareRole = asText(draft ?? {}, 'share.role') === 'follower' ? 'follower' : 'master';
@@ -1220,6 +1240,7 @@ export function SettingsPage({
                       path="cache.gc.max_age_secs"
                       unit="秒"
                       tip="切片保留的最长时间，超过后删除。关闭表示不按时间删除。"
+                      hint="切片超过该时长后自动删除。关闭表示不按时间删除。"
                     />
                   </div>
                   {recommend ? (

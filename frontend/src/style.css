@@ -5372,6 +5372,12 @@ pre code {
     padding: 16px 14px 40px;
   }
 
+  /* 手机上的折叠标题保持 44px 触控高度。 */
+  details.block > summary {
+    min-height: 44px;
+    padding: 6px 0;
+  }
+
   .settings-page .page-head.sticky {
     margin: -16px -14px 14px;
     padding: 12px 14px;

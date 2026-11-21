@@ -416,6 +416,7 @@ export function Select({
   onChange,
   disabled,
   ariaLabel,
+  describedBy,
   placeholder = '请选择',
   className = '',
   align = 'left',
@@ -430,6 +431,8 @@ export function Select({
   onChange: (next: string) => void;
   disabled?: boolean;
   ariaLabel?: string;
+  /** 提示文本元素的 id，关联 `aria-describedby`。 */
+  describedBy?: string;
   placeholder?: string;
   className?: string;
   /** 菜单相对按钮的对齐方向。右侧字段用 `right`，避免贴边溢出。 */
@@ -722,6 +725,7 @@ export function Select({
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={ariaLabel}
+        aria-describedby={describedBy}
         title={title}
         disabled={disabled}
         onClick={() => (open ? close(true) : openMenu())}
@@ -909,6 +913,7 @@ export function NumberInput({
   max,
   step,
   ariaLabel,
+  describedBy,
   title,
   placeholder,
   disabled,
@@ -920,6 +925,8 @@ export function NumberInput({
   max?: number;
   step?: number;
   ariaLabel?: string;
+  /** 提示文本元素的 id，关联 `aria-describedby`。 */
+  describedBy?: string;
   title?: string;
   placeholder?: string;
   disabled?: boolean;
@@ -948,6 +955,7 @@ export function NumberInput({
       step={step}
       value={text}
       aria-label={ariaLabel}
+      aria-describedby={describedBy}
       title={title}
       placeholder={placeholder}
       disabled={disabled}
