@@ -339,9 +339,7 @@ pub async fn disable_source(
             state.quality.forget(&gid, &cid);
         }
     }
-    state
-        .sources
-        .update_status(&id, |status| clear_gate(status));
+    state.sources.update_status(&id, clear_gate);
     Ok(Json(json!({ "ok": true, "keep_channels": keep_channels })))
 }
 
@@ -489,9 +487,7 @@ pub async fn delete_source(
             Ok((results, delete_keys))
         })
         .map_err(map_internal)?;
-    state
-        .sources
-        .update_status(&id, |status| clear_gate(status));
+    state.sources.update_status(&id, clear_gate);
     Ok(Json(json!({
         "ok": true,
         "channels": detached,

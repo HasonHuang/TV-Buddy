@@ -36,8 +36,14 @@ impl RingBuffer {
         lines.iter().skip(skip).cloned().collect()
     }
 
+    /// 当前日志行数。
     pub fn len(&self) -> usize {
         self.lines.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    /// 当前没有日志行。
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -127,6 +133,32 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogWriter {
     }
 }
 
+/// 日志文件名（`design/04` §5）。
+pub const LOG_FILE: &str = "tv-buddy.log";
+
+/// 日志文件与数据库同目录。
+pub fn log_path_for(db_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let dir = db_path.parent()?;
+    if dir.as_os_str().is_empty() {
+        Some(std::path::PathBuf::from(LOG_FILE))
+    } else {
+        Some(dir.join(LOG_FILE))
+    }
+}
+
+/// 按 `[server].log_level` 初始化日志：标准输出 + 文件 + 环形缓冲。
+pub fn init(level: &str, log_path: Option<&std::path::Path>, ring: std::sync::Arc<RingBuffer>) {
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(format!("tv_buddy={level},tower_http={level}")));
+    let writer = LogWriter::new(ring, log_path.map(|path| path.to_path_buf()));
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(writer))
+        .init();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,30 +189,4 @@ mod tests {
         assert_eq!(ring.tail(1), vec!["hello".to_string()]);
         let _ = std::fs::remove_dir_all(&dir);
     }
-}
-
-/// 日志文件名（`design/04` §5）。
-pub const LOG_FILE: &str = "tv-buddy.log";
-
-/// 日志文件与数据库同目录。
-pub fn log_path_for(db_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let dir = db_path.parent()?;
-    if dir.as_os_str().is_empty() {
-        Some(std::path::PathBuf::from(LOG_FILE))
-    } else {
-        Some(dir.join(LOG_FILE))
-    }
-}
-
-/// 按 `[server].log_level` 初始化日志：标准输出 + 文件 + 环形缓冲。
-pub fn init(level: &str, log_path: Option<&std::path::Path>, ring: std::sync::Arc<RingBuffer>) {
-    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("tv_buddy={level},tower_http={level}")));
-    let writer = LogWriter::new(ring, log_path.map(|path| path.to_path_buf()));
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer().with_writer(writer))
-        .init();
 }

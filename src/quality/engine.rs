@@ -83,6 +83,8 @@ pub struct EngineDecision {
 }
 
 /// 选出到期目标。
+// 处理器签名由路由参数决定。
+#[allow(clippy::too_many_arguments)]
 pub fn due_targets(
     config: &Config,
     results: &QualityStore,
@@ -1001,7 +1003,12 @@ mod tests {
             bytes: 0,
             duration_ms: 0,
         };
-        let decision = decide(&[outcome.clone()], false, &Guard::default(), &probe());
+        let decision = decide(
+            std::slice::from_ref(&outcome),
+            false,
+            &Guard::default(),
+            &probe(),
+        );
         assert_eq!(decision.results[0].action, "kept", "宽限内不隐藏");
         assert_eq!(decision.hidden, 0);
         assert!(decision.manual_entries.is_empty(), "宽限内不写失败状态");

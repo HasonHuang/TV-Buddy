@@ -99,6 +99,11 @@ impl SessionStore {
             .unwrap_or_else(|e| e.into_inner())
             .len()
     }
+
+    /// 当前没有会话。
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[cfg(test)]

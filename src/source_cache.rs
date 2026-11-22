@@ -129,6 +129,11 @@ impl SourceCache {
             .len()
     }
 
+    /// 当前没有正文条目。
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// 清空正文缓存；状态保留。
     pub fn clear(&self) {
         let _guard = self

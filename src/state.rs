@@ -413,11 +413,11 @@ impl AppState {
             if let Some(addr) = proxy.url() {
                 let user = proxy.username().unwrap_or("");
                 let pass = proxy.password().unwrap_or("");
-                let built = reqwest::Proxy::all(&addr).and_then(|mut candidate| {
+                let built = reqwest::Proxy::all(&addr).map(|mut candidate| {
                     if !user.is_empty() {
                         candidate = candidate.basic_auth(user, pass);
                     }
-                    Ok(candidate)
+                    candidate
                 });
                 match built {
                     Ok(candidate) => builder = builder.proxy(candidate),
@@ -641,6 +641,16 @@ fn channel_keys_of(config: &Config) -> HashSet<String> {
     keys
 }
 
+/// 建立缓存子目录。失败只记日志（后续写缓存会再报错）。
+fn ensure_cache_dirs(root: &std::path::Path) {
+    for name in ["m3u8", "seg_url", "seg_bytes", "sub_url", "dash"] {
+        let dir = root.join(name);
+        if let Err(err) = std::fs::create_dir_all(&dir) {
+            tracing::warn!(dir = %dir.display(), error = %err, "创建缓存目录失败");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -810,15 +820,5 @@ mod tests {
     fn ffprobe_version_marker_is_required() {
         assert!(ffprobe_version_ok(b"ffprobe version 6.1"));
         assert!(!ffprobe_version_ok(b"ffmpeg version 6.1"));
-    }
-}
-
-/// 建立缓存子目录。失败只记日志（后续写缓存会再报错）。
-fn ensure_cache_dirs(root: &std::path::Path) {
-    for name in ["m3u8", "seg_url", "seg_bytes", "sub_url", "dash"] {
-        let dir = root.join(name);
-        if let Err(err) = std::fs::create_dir_all(&dir) {
-            tracing::warn!(dir = %dir.display(), error = %err, "创建缓存目录失败");
-        }
     }
 }

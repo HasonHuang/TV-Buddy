@@ -336,20 +336,17 @@ impl UserStore {
         let maybe = {
             let mut list = self.tokens.write().unwrap_or_else(|e| e.into_inner());
             match list.iter_mut().find(|item| item.token == token) {
-                Some(item) => {
-                    // 同一秒内不重复刷。
+                // 同一秒内不重复刷。
+                Some(item)
                     if item
                         .last_seen_at_ms
                         .map(|at| now - at >= 1000)
-                        .unwrap_or(true)
-                    {
-                        item.last_seen_at_ms = Some(now);
-                        true
-                    } else {
-                        false
-                    }
+                        .unwrap_or(true) =>
+                {
+                    item.last_seen_at_ms = Some(now);
+                    true
                 }
-                None => false,
+                _ => false,
             }
         };
         if maybe {

@@ -250,6 +250,91 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// 重命名台标：保留原扩展名；目标已存在时报错。
+pub fn rename(cache_dir: &str, file: &str, name: &str) -> Result<Entry> {
+    let file = sanitize(file).context("文件名不合法")?;
+    let Some((_, ext)) = file.rsplit_once('.') else {
+        bail!("缺少扩展名");
+    };
+    let ext = check_ext(ext).context("扩展名不在白名单")?;
+    let name = sanitize(name).context("文件名不合法")?;
+    let directory = dir(cache_dir);
+    let source = directory.join(&file);
+    if !source.is_file() {
+        bail!("文件不存在");
+    }
+    let target_name = format!("{name}.{ext}");
+    let target = directory.join(&target_name);
+    if target == source {
+        return Ok(Entry {
+            name,
+            has_original: orig_dir(cache_dir).join(&target_name).is_file(),
+            animated: is_animated(&target),
+            file: target_name.clone(),
+            ext,
+            bytes: fs::metadata(&source).map(|meta| meta.len()).unwrap_or(0),
+            mtime: 0,
+            url: paths::static_path(&format!("/logo/{target_name}")),
+        });
+    }
+    if target.exists() {
+        bail!("目标已存在");
+    }
+    fs::rename(&source, &target).with_context(|| format!("重命名 {}", source.display()))?;
+    let original = orig_dir(cache_dir).join(&file);
+    if original.is_file() {
+        let target_original = orig_dir(cache_dir).join(&target_name);
+        let _ = fs::rename(original, target_original);
+    }
+    let meta = fs::metadata(&target).ok();
+    Ok(Entry {
+        url: paths::static_path(&format!("/logo/{target_name}")),
+        has_original: orig_dir(cache_dir).join(&target_name).is_file(),
+        animated: is_animated(&target),
+        file: target_name,
+        name,
+        ext,
+        bytes: meta.as_ref().map(|meta| meta.len()).unwrap_or(0),
+        mtime: meta
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|value| value.as_secs())
+            .unwrap_or(0),
+    })
+}
+
+/// 名称相似度（0.0–1.0）：字符集合的 Jaccard 系数，忽略大小写与非字母数字。
+pub fn similarity(name: &str, stem: &str) -> f64 {
+    let left = normalize(name);
+    let right = normalize(stem);
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    if left == right {
+        return 1.0;
+    }
+    if left.contains(&right) || right.contains(&left) {
+        return 0.9;
+    }
+    let a: std::collections::HashSet<char> = left.chars().collect();
+    let b: std::collections::HashSet<char> = right.chars().collect();
+    let inter = a.intersection(&b).count() as f64;
+    let union = a.union(&b).count() as f64;
+    if union == 0.0 {
+        0.0
+    } else {
+        inter / union
+    }
+}
+
+fn normalize(value: &str) -> String {
+    value
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,89 +454,4 @@ mod tests {
         assert!(!restore(&cache, "missing.png").expect("无备份"));
         let _ = fs::remove_dir_all(&root);
     }
-}
-
-/// 重命名台标：保留原扩展名；目标已存在时报错。
-pub fn rename(cache_dir: &str, file: &str, name: &str) -> Result<Entry> {
-    let file = sanitize(file).context("文件名不合法")?;
-    let Some((_, ext)) = file.rsplit_once('.') else {
-        bail!("缺少扩展名");
-    };
-    let ext = check_ext(ext).context("扩展名不在白名单")?;
-    let name = sanitize(name).context("文件名不合法")?;
-    let directory = dir(cache_dir);
-    let source = directory.join(&file);
-    if !source.is_file() {
-        bail!("文件不存在");
-    }
-    let target_name = format!("{name}.{ext}");
-    let target = directory.join(&target_name);
-    if target == source {
-        return Ok(Entry {
-            name,
-            has_original: orig_dir(cache_dir).join(&target_name).is_file(),
-            animated: is_animated(&target),
-            file: target_name.clone(),
-            ext,
-            bytes: fs::metadata(&source).map(|meta| meta.len()).unwrap_or(0),
-            mtime: 0,
-            url: paths::static_path(&format!("/logo/{target_name}")),
-        });
-    }
-    if target.exists() {
-        bail!("目标已存在");
-    }
-    fs::rename(&source, &target).with_context(|| format!("重命名 {}", source.display()))?;
-    let original = orig_dir(cache_dir).join(&file);
-    if original.is_file() {
-        let target_original = orig_dir(cache_dir).join(&target_name);
-        let _ = fs::rename(original, target_original);
-    }
-    let meta = fs::metadata(&target).ok();
-    Ok(Entry {
-        url: paths::static_path(&format!("/logo/{target_name}")),
-        has_original: orig_dir(cache_dir).join(&target_name).is_file(),
-        animated: is_animated(&target),
-        file: target_name,
-        name,
-        ext,
-        bytes: meta.as_ref().map(|meta| meta.len()).unwrap_or(0),
-        mtime: meta
-            .and_then(|meta| meta.modified().ok())
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|value| value.as_secs())
-            .unwrap_or(0),
-    })
-}
-
-/// 名称相似度（0.0–1.0）：字符集合的 Jaccard 系数，忽略大小写与非字母数字。
-pub fn similarity(name: &str, stem: &str) -> f64 {
-    let left = normalize(name);
-    let right = normalize(stem);
-    if left.is_empty() || right.is_empty() {
-        return 0.0;
-    }
-    if left == right {
-        return 1.0;
-    }
-    if left.contains(&right) || right.contains(&left) {
-        return 0.9;
-    }
-    let a: std::collections::HashSet<char> = left.chars().collect();
-    let b: std::collections::HashSet<char> = right.chars().collect();
-    let inter = a.intersection(&b).count() as f64;
-    let union = a.union(&b).count() as f64;
-    if union == 0.0 {
-        0.0
-    } else {
-        inter / union
-    }
-}
-
-fn normalize(value: &str) -> String {
-    value
-        .to_lowercase()
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect()
 }

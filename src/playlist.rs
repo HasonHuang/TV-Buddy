@@ -72,6 +72,8 @@ pub fn render_user_group(
 }
 
 /// 把分组内用户可见且未下线的频道追加到清单。
+// 处理器签名由路由参数决定。
+#[allow(clippy::too_many_arguments)]
 fn push_group(
     body: &mut String,
     config: &Config,

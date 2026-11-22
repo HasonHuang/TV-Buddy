@@ -523,8 +523,10 @@ mod tests {
 
     #[test]
     fn normalize_keeps_drop_with_explicit_target() {
-        let mut source = PreviewSource::default();
-        source.unlisted_groups = "drop".into();
+        let mut source = PreviewSource {
+            unlisted_groups: "drop".into(),
+            ..PreviewSource::default()
+        };
         source.merge_new.insert("新闻".into(), "合集".into());
         source.normalize();
         assert_eq!(source.unlisted_groups, "drop");
@@ -686,8 +688,10 @@ mod tests {
 
     #[test]
     fn preview_source_only_fills_empty_unlisted_mode() {
-        let mut source = PreviewSource::default();
-        source.unlisted_groups = "drop".into();
+        let mut source = PreviewSource {
+            unlisted_groups: "drop".into(),
+            ..PreviewSource::default()
+        };
         source.normalize();
         assert_eq!(source.unlisted_groups, "drop");
 

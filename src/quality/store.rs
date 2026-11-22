@@ -116,13 +116,13 @@ impl QualityStore {
             params_from_iter(values.iter()),
             |row| row.get(0),
         )?;
-        let mut query = format!(
+        let query = format!(
             "SELECT {COLUMNS} FROM quality_results {where_sql} ORDER BY checked_at DESC, key ASC LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
         page_values.push(Value::Integer(limit as i64));
         page_values.push(Value::Integer(filter.offset as i64));
-        let mut statement = conn.prepare(&mut query)?;
+        let mut statement = conn.prepare(&query)?;
         let items = statement
             .query_map(params_from_iter(page_values.iter()), row_to_result)?
             .collect::<rusqlite::Result<Vec<_>>>()?;

@@ -48,7 +48,7 @@ impl Reason {
 }
 
 /// 一次测量的可用数据。没有测到的项为 `None`。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Measurement {
     pub reachable: bool,
     pub probe_error: bool,
@@ -58,21 +58,6 @@ pub struct Measurement {
     pub width: Option<u16>,
     pub height: Option<u16>,
     pub error: Option<String>,
-}
-
-impl Default for Measurement {
-    fn default() -> Self {
-        Self {
-            reachable: false,
-            probe_error: false,
-            http_status: None,
-            delay_ms: None,
-            speed_mib: None,
-            width: None,
-            height: None,
-            error: None,
-        }
-    }
 }
 
 /// 逐字段继承后的有效规则。
@@ -253,12 +238,10 @@ pub fn evaluate(rules: &EffectiveRules, measurement: &Measurement) -> Verdict {
         }
     }
 
-    if reason.is_none() {
-        if rules.max_delay_ms > 0 {
-            if let Some(delay) = measurement.delay_ms {
-                if u64::from(delay) > rules.max_delay_ms {
-                    reason = Some(Reason::DelayHigh);
-                }
+    if reason.is_none() && rules.max_delay_ms > 0 {
+        if let Some(delay) = measurement.delay_ms {
+            if u64::from(delay) > rules.max_delay_ms {
+                reason = Some(Reason::DelayHigh);
             }
         }
     }

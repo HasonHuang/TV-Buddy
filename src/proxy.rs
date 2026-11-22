@@ -68,4 +68,9 @@ impl TtlCache {
     pub fn len(&self) -> usize {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
+
+    /// 当前没有条目。
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }

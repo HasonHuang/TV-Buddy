@@ -268,10 +268,7 @@ pub fn best_variant(body: &str, base: &str) -> Option<(String, String)> {
             continue;
         };
         let bandwidth = bandwidth_of(&current);
-        if best
-            .as_ref()
-            .map_or(true, |(known, _, _)| bandwidth > *known)
-        {
+        if best.as_ref().is_none_or(|(known, _, _)| bandwidth > *known) {
             best = Some((bandwidth, current, url));
         }
     }
@@ -292,6 +289,8 @@ fn bandwidth_of(attrs: &str) -> u64 {
 /// `base` 是清单自身的绝对 URL，用于解析相对地址。
 /// `self_base` 是本服务的对外基址（`http://主机:端口`），用于拼绝对伪装地址。
 /// `disguise` 关闭时切片地址改写为上游绝对地址。
+// 处理器签名由路由参数决定。
+#[allow(clippy::too_many_arguments)]
 pub fn rewrite_media(
     body: &str,
     base: &str,

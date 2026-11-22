@@ -3721,20 +3721,28 @@ mod tests {
     #[test]
     fn channel_targets_use_tvg_id_and_normalized_name() {
         let mut config = Config::default();
-        let mut group = crate::config::model::Group::default();
-        group.id = "g".into();
-        let mut first = crate::config::model::Channel::default();
-        first.id = "e1".into();
-        first.name = "CCTV-1 综合".into();
+        let mut group = crate::config::model::Group {
+            id: "g".into(),
+            ..crate::config::model::Group::default()
+        };
+        let mut first = crate::config::model::Channel {
+            id: "e1".into(),
+            name: "CCTV-1 综合".into(),
+            ..crate::config::model::Channel::default()
+        };
         first
             .extra
             .insert("tvg_id".into(), serde_json::Value::String("CCTV1".into()));
-        let mut second = crate::config::model::Channel::default();
-        second.id = "e2".into();
-        second.name = " cctv-3　综艺 ".into();
-        let mut third = crate::config::model::Channel::default();
-        third.id = "E3".into();
-        third.name = "E3".into();
+        let second = crate::config::model::Channel {
+            id: "e2".into(),
+            name: " cctv-3　综艺 ".into(),
+            ..crate::config::model::Channel::default()
+        };
+        let third = crate::config::model::Channel {
+            id: "E3".into(),
+            name: "E3".into(),
+            ..crate::config::model::Channel::default()
+        };
         group.channels = vec![first, second, third];
         config.groups.push(group);
 
@@ -3749,22 +3757,32 @@ mod tests {
     #[test]
     fn match_source_prefers_tvg_then_name_and_first_owner_wins() {
         let mut config = Config::default();
-        let mut group = crate::config::model::Group::default();
-        group.id = "g".into();
-        let mut e1 = crate::config::model::Channel::default();
-        e1.id = "e1".into();
-        e1.name = "CCTV-1 综合".into();
+        let mut group = crate::config::model::Group {
+            id: "g".into(),
+            ..crate::config::model::Group::default()
+        };
+        let mut e1 = crate::config::model::Channel {
+            id: "e1".into(),
+            name: "CCTV-1 综合".into(),
+            ..crate::config::model::Channel::default()
+        };
         e1.extra
             .insert("tvg_id".into(), serde_json::Value::String("cctv1".into()));
-        let mut e2 = crate::config::model::Channel::default();
-        e2.id = "e2".into();
-        e2.name = "cctv-1 综合".into();
-        let mut e3 = crate::config::model::Channel::default();
-        e3.id = "e3".into();
-        e3.name = "CCTV-3 综艺".into();
-        let mut e4 = crate::config::model::Channel::default();
-        e4.id = "e4".into();
-        e4.name = "CCTV-1 综合".into();
+        let e2 = crate::config::model::Channel {
+            id: "e2".into(),
+            name: "cctv-1 综合".into(),
+            ..crate::config::model::Channel::default()
+        };
+        let e3 = crate::config::model::Channel {
+            id: "e3".into(),
+            name: "CCTV-3 综艺".into(),
+            ..crate::config::model::Channel::default()
+        };
+        let mut e4 = crate::config::model::Channel {
+            id: "e4".into(),
+            name: "CCTV-1 综合".into(),
+            ..crate::config::model::Channel::default()
+        };
         e4.extra
             .insert("tvg_id".into(), serde_json::Value::String("missing".into()));
         group.channels = vec![e1, e2, e3, e4];
@@ -3892,11 +3910,15 @@ mod tests {
     #[test]
     fn manual_mapping_channel_is_used() {
         let mut config = Config::default();
-        let mut group = crate::config::model::Group::default();
-        group.id = "g".into();
-        let mut channel = crate::config::model::Channel::default();
-        channel.id = "e6".into();
-        channel.name = "本地频道".into();
+        let mut group = crate::config::model::Group {
+            id: "g".into(),
+            ..crate::config::model::Group::default()
+        };
+        let channel = crate::config::model::Channel {
+            id: "e6".into(),
+            name: "本地频道".into(),
+            ..crate::config::model::Channel::default()
+        };
         group.channels = vec![channel];
         config.groups.push(group);
         let targets = channel_targets(&config);
@@ -3956,11 +3978,15 @@ mod tests {
     #[test]
     fn matches_channel_id_equal_to_channel_name() {
         let mut config = Config::default();
-        let mut group = crate::config::model::Group::default();
-        group.id = "g".into();
-        let mut channel = crate::config::model::Channel::default();
-        channel.id = "c1".into();
-        channel.name = "CCTV1".into();
+        let mut group = crate::config::model::Group {
+            id: "g".into(),
+            ..crate::config::model::Group::default()
+        };
+        let channel = crate::config::model::Channel {
+            id: "c1".into(),
+            name: "CCTV1".into(),
+            ..crate::config::model::Channel::default()
+        };
         group.channels = vec![channel];
         config.groups.push(group);
         let targets = channel_targets(&config);

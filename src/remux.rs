@@ -686,7 +686,7 @@ mod tests {
             let mut pes = vec![0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x80, 0x80, 0x05];
             pes.extend_from_slice(&pts_bytes(pts));
             pes.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x65]);
-            pes.extend(std::iter::repeat(0x88).take(40));
+            pes.extend(std::iter::repeat_n(0x88, 40));
             parser.push(&packet(0x101, true, &pes), &session);
         }
         assert!(session.playlist("").is_some(), "应有切片");
@@ -708,7 +708,7 @@ mod tests {
             (pts >> 22) as u8,
             0x01 | (((pts >> 15) as u8 & 0x7f) << 1),
             (pts >> 7) as u8,
-            0x01 | (((pts as u8 & 0x7f) as u8) << 1),
+            0x01 | ((pts as u8 & 0x7f) << 1),
         ]);
         pes.extend_from_slice(&[0, 0, 0, 1, 0x65, 0x88]);
         let (parsed, key) = video_pes(&pes, false).expect("PES");

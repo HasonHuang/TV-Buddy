@@ -577,7 +577,7 @@ fn build_template_segments(
                         })
                     });
                 match end_time {
-                    Some(end) if end > time => (end - time).div_ceil(entry.d).max(1).min(10_000),
+                    Some(end) if end > time => (end - time).div_ceil(entry.d).clamp(1, 10_000),
                     _ => 1,
                 }
             } else {

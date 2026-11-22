@@ -2116,8 +2116,10 @@ mod tests {
 
     #[test]
     fn normalize_removes_control_chars_from_group_prefix() {
-        let mut source = PlaylistSource::default();
-        source.group_prefix = "我的\n · ".into();
+        let mut source = PlaylistSource {
+            group_prefix: "我的\n · ".into(),
+            ..PlaylistSource::default()
+        };
         source.normalize();
         assert_eq!(source.group_prefix, "我的 · ");
     }

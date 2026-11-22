@@ -809,12 +809,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("schedule-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("建目录");
         let store = Store::load(&dir, 8);
-        let mut task = Task::default();
-        task.name = "测试".into();
-        task.group_id = "g".into();
-        task.channel_id = "c".into();
-        task.start_time = "2026-10-20T00:00:00".into();
-        task.end_time = "2026-10-20T00:01:00".into();
+        let task = Task {
+            name: "测试".into(),
+            group_id: "g".into(),
+            channel_id: "c".into(),
+            start_time: "2026-10-20T00:00:00".into(),
+            end_time: "2026-10-20T00:01:00".into(),
+            ..Task::default()
+        };
         let id = store.add(task).expect("新增");
         assert_eq!(store.list().len(), 1);
         store
