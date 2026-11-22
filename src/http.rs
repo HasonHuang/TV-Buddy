@@ -19,81 +19,31 @@ use crate::{paths, state::AppState};
 /// 组装路由表。
 ///
 /// M0：面板与公开页。M1：分组/频道接口与订阅导出。
-/// 播放面（`/{gid}/{cid}.{ext}`、切片）在 M2 接入。
+/// 播放面（`/api/play` 清单、`/media` 切片）在 M2 接入。
 /// 旧路径改写层在内层路由之外。它先运行，然后内层做路由匹配。
 pub fn router(state: Arc<AppState>) -> Router {
     let inner = Router::new()
         // 公开面
-        .route("/health", get(routes::public::health))
         .route("/api/health", get(routes::public::health))
         .route("/", get(routes::public::home))
-        .route("/logo/:file", get(routes::logo::file))
-        .route("/unban/whoami", get(routes::public::whoami))
         .route("/api/unban/whoami", get(routes::public::whoami))
         .route("/api/unban", post(routes::public::unban))
         .route("/api/share/pull", get(routes::share::pull))
-        .route("/subs/status", get(routes::subs::status))
-        .route("/subs/groups", post(routes::subs::groups))
-        .route("/subs/preview", post(routes::subs::preview))
-        // 旧的非面板管理路径保留到 Task 10。新位置在面板前缀下。
-        .route("/subtitle/mtran/test", post(routes::media::mtran_test))
-        .route(
-            "/subtitle/translate/clear",
-            post(routes::media::translate_clear),
-        )
-        .route("/epg/translate/status", get(routes::epg::translate_status))
-        .route("/epg/translate/models", get(routes::epg::translate_models))
-        .route("/epg/translate/run", post(routes::epg::translate_run))
-        .route("/epg/translate/probe", post(routes::epg::translate_probe))
-        .route(
-            "/epg/translate/mtran/test",
-            post(routes::epg::translate_mtran),
-        )
-        .route(
-            "/epg/translate/clear",
-            post(routes::epg::translate_clear_results),
-        )
-        .route(
-            "/epg/translate/clear-engine",
-            post(routes::epg::translate_clear),
-        )
-        // 全局订阅已停用。保留路由是为了给出明确原因，而不是落进播放通配路由。
+        // 全局订阅已停用。保留路由是为了给出明确原因，而不是落进兜底。
         .route("/playlist.m3u", get(routes::sub::gone))
         .route("/:gid/playlist.m3u", get(routes::sub::gone))
         // 用户订阅入口。令牌见 `tv-buddy.db` 的 access_tokens 表。
-        // 旧 `/sub/...` 保留到 Task 10，两套路径的响应必须一致。
-        .route("/sub/:token/playlist.m3u", get(routes::sub::playlist))
         .route("/api/sub/:token/playlist.m3u", get(routes::sub::playlist))
         // 单个分组的订阅。分组范围仍受令牌所属用户的可见性限制。
-        .route(
-            "/sub/:token/:gid/playlist.m3u",
-            get(routes::sub::group_playlist),
-        )
         .route(
             "/api/sub/:token/:gid/playlist.m3u",
             get(routes::sub::group_playlist),
         )
-        .route("/sub/:token/epg.xml", get(routes::sub::epg))
         .route("/api/sub/:token/epg.xml", get(routes::sub::epg))
-        .route("/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
         .route("/api/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
-        // 面板接口：旧前缀与新前缀使用同一套处理器，未知路径固定 404 JSON。
-        .nest("/panel/api", panel_api_routes())
+        // 面板接口挂载在新前缀下。旧 `/panel/api` 由改写层提供。
         .nest(paths::PANEL_API, panel_api_routes())
-        // 播放链路（M2）
-        // 旧订阅条目入口：`/l/<token>/<gid>/<cid>.m3u8`。保留到 Task 10。
-        // 新条目入口在 `/api/play/token/...`，见下方播放路由。
-        .route("/l/:token/:gid/:file", get(routes::stream::token_entry))
-        .route(
-            "/l/:token/:gid/:cid/*path",
-            get(routes::stream::token_alias),
-        )
-        // 时间窗签名切片：`/{gid}/{cid}/l/{exp}/{sig}/...`。
-        .route("/:gid/:cid/l/:exp/:sig/*path", get(routes::stream::signed))
-        .route("/:gid/:file", get(routes::stream::entry))
-        .route("/:gid/:cid/*path", get(routes::stream::wildcard))
-        // 新播放前缀：清单只走 `/api/play`，媒体数据只走 `/media`。
-        // 旧路径保留到 Task 10，两套路径的响应必须一致。
+        // 播放链路（M2）。清单只走 `/api/play`，媒体数据只走 `/media`。
         .route("/api/play/:gid/:file", get(routes::stream::entry))
         .route(
             "/api/play/:gid/:cid/*path",
@@ -126,15 +76,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/static/panel/*path", get(static_assets::asset))
         .route("/static/logo/:file", get(routes::logo::file))
         .route("/static/assets/*path", get(routes::media::served))
-        // 旧前缀在本大版本内继续可用，响应与新前缀一致。
-        .route("/panel", get(static_assets::panel_page))
-        .route("/panel/", get(static_assets::panel_page))
-        .route(
-            "/unban",
-            get(static_assets::unban_page).post(routes::public::unban),
-        )
-        .route("/__assets/*path", get(static_assets::asset))
-        .route("/assets/*path", get(routes::media::served))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             routes::admin::count_request,
@@ -156,11 +97,10 @@ pub fn router(state: Arc<AppState>) -> Router {
     legacy::wrap(inner)
 }
 
-/// 面板 API 路由。挂载在 `/panel/api` 与 `/api/panel`。
+/// 面板 API 路由。挂载在 `/api/panel`。旧 `/panel/api` 由改写层提供。
 ///
 /// 路径都是相对子路径。未知路径返回 JSON 404。兜底同时登记为通配路由与
-/// 嵌套 fallback：播放通配路由（`/:gid/:cid/*path`）会匹配未知面板路径，
-/// 只登记 fallback 时请求到不了这里。
+/// 嵌套 fallback：外层兜底可能先于嵌套 fallback 生效，通配路由保证 JSON 404。
 fn panel_api_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/login", post(routes::panel::login))

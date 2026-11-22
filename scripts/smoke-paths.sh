@@ -25,7 +25,7 @@ trap 'kill "$PID" 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"'
 
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 100); do
-    curl -fsS "$B/health" >/dev/null 2>&1 && break
+    curl -fsS "$B/api/health" >/dev/null 2>&1 && break
     sleep 0.1
 done
 
@@ -56,7 +56,9 @@ check /api/unban/whoami 401
 check_method POST /api/unban 401
 # `/api/unban` 只有 POST；页面入口是 `/page/unban`。
 check_method GET /api/unban 405
-# 旧路径迁移期内仍可用，且响应一致。
+# 旧路径迁移期内仍可用，响应由改写层提供。它们与新路径一致。
 check /health 200
+check /panel 200
+check /unban 200
 check /unban/whoami 401
 check_method POST /unban 401

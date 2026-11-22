@@ -154,10 +154,9 @@ fn rewrite_playback(path: &str) -> Option<String> {
     match parts.as_slice() {
         // `/<gid>/playlist.m3u` 是固定指路，不改写。
         [gid, file] if !gid.is_empty() && *file == SUBSCRIPTION_FILE => None,
-        // `/<gid>/<file>`：只有入口文件名改写。
-        [gid, file] if !gid.is_empty() && is_entry_file(file) => {
-            Some(paths::play(&format!("/{gid}/{file}")))
-        }
+        // `/<gid>/<file>`：旧入口路径。入口扩展名白名单由处理器判定，
+        // 非入口扩展名也要到达处理器并返回旧的占位 302。
+        [gid, file] if !gid.is_empty() => Some(paths::play(&format!("/{gid}/{file}"))),
         // 签名切片：`/<gid>/<cid>/l/<exp>/<sig>/<rest>`。
         [gid, cid, "l", exp, sig, rest @ ..]
             if !gid.is_empty()
@@ -185,19 +184,6 @@ fn rewrite_playback(path: &str) -> Option<String> {
             Some(format!("{base}/{gid}/{cid}/{rest}"))
         }
         _ => None,
-    }
-}
-
-/// 第二段是否为入口文件名。
-///
-/// 入口文件名的扩展名为 `m3u8`、`mpd`、`txt`，或没有扩展名。
-fn is_entry_file(file: &str) -> bool {
-    if file.is_empty() {
-        return false;
-    }
-    match file.rsplit_once('.') {
-        None => true,
-        Some((stem, ext)) => !stem.is_empty() && matches!(ext, "m3u8" | "mpd" | "txt"),
     }
 }
 
@@ -288,6 +274,15 @@ mod tests {
         assert_eq!(
             rewrite(&get, "/g/c.m3u8").as_deref(),
             Some("/api/play/g/c.m3u8")
+        );
+        // 非入口扩展名也改写。扩展名白名单由处理器判定，旧响应保持不变。
+        assert_eq!(
+            rewrite(&get, "/g/c.mp4").as_deref(),
+            Some("/api/play/g/c.mp4")
+        );
+        assert_eq!(
+            rewrite(&get, "/g/c.ts").as_deref(),
+            Some("/api/play/g/c.ts")
         );
         assert_eq!(
             rewrite(&get, "/g/c/video/index.txt").as_deref(),

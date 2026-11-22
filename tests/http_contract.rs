@@ -1593,6 +1593,162 @@ async fn panel_api_old_and_new_prefixes_agree() {
     }
 }
 
+/// 绝对地址原样使用，其余路径拼上夹具基址。
+fn fixture_url(fixture: &Fixture, path: &str) -> String {
+    if path.starts_with("http://") || path.starts_with("https://") {
+        path.to_string()
+    } else {
+        format!("{}{path}", fixture.base)
+    }
+}
+
+/// 带可选会话头请求一个路径或绝对地址。
+async fn get_with_session(fixture: &Fixture, path: &str, session: Option<&str>) -> HttpResponse {
+    let mut request = fixture.client.get(fixture_url(fixture, path));
+    if let Some(session) = session {
+        request = request.bearer_auth(session);
+    }
+    request.send().await.expect("发请求")
+}
+
+/// 断言旧路径与新路径的响应一致：状态码、`cache-control` 与正文。
+async fn assert_legacy_matches_new(fixture: &Fixture, old: &str, new: &str, session: Option<&str>) {
+    let old_response = get_with_session(fixture, old, session).await;
+    let new_response = get_with_session(fixture, new, session).await;
+    assert_eq!(
+        old_response.status(),
+        new_response.status(),
+        "{old} vs {new}"
+    );
+    assert_eq!(
+        header(&old_response, "cache-control"),
+        header(&new_response, "cache-control"),
+        "{old} vs {new}"
+    );
+    assert_eq!(
+        old_response.bytes().await.expect("旧正文"),
+        new_response.bytes().await.expect("新正文"),
+        "{old} vs {new}"
+    );
+}
+
+/// 旧路径只由改写层提供，响应必须与新路径一致。
+#[tokio::test]
+async fn legacy_paths_match_new_paths() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+
+    // 公开路径：无会话。
+    assert_legacy_matches_new(&fixture, "/health", "/api/health", None).await;
+    assert_legacy_matches_new(&fixture, "/panel", "/page/panel", None).await;
+
+    // 订阅与播放入口。
+    let sub_old = fixture.sub(&fixture.token, "m3u8");
+    let sub_new = format!("/api/sub/{}/m3u8", fixture.token);
+    assert_legacy_matches_new(&fixture, &sub_old, &sub_new, None).await;
+
+    let entry_old = format!("/pm/c1.m3u8?token={}", fixture.token);
+    let entry_new = format!("/api/play/pm/c1.m3u8?token={}", fixture.token);
+    assert_legacy_matches_new(&fixture, &entry_old, &entry_new, None).await;
+
+    // 非入口扩展名的旧入口形状也由改写层提供，仍返回旧的占位 302。
+    let bad_entry_old = format!("/pt/c1.mp4?token={}", fixture.token);
+    let bad_entry_new = format!("/api/play/pt/c1.mp4?token={}", fixture.token);
+    assert_legacy_matches_new(&fixture, &bad_entry_old, &bad_entry_new, None).await;
+
+    // 面板状态：带会话。正文含运行时数值，两次请求之间会变化；
+    // 归零这些字段后再比较其余正文，避免秒级边界与后台统计造成抖动。
+    let old_status = get_with_session(&fixture, "/panel/api/status", Some(&session)).await;
+    let new_status = get_with_session(&fixture, "/api/panel/status", Some(&session)).await;
+    assert_eq!(old_status.status(), new_status.status());
+    assert_eq!(
+        header(&old_status, "cache-control"),
+        header(&new_status, "cache-control")
+    );
+    let mut old_body: serde_json::Value =
+        serde_json::from_str(&old_status.text().await.expect("旧正文")).expect("旧 JSON");
+    let mut new_body: serde_json::Value =
+        serde_json::from_str(&new_status.text().await.expect("新正文")).expect("新 JSON");
+    for key in [
+        "uptime_secs",
+        "mem_rss_mb",
+        "cpu_seconds",
+        "host_cpu_percent",
+        "load_avg",
+        "disk_free_mb",
+        "host_net_rx_bytes",
+        "host_net_tx_bytes",
+        "traffic_out_bytes",
+    ] {
+        if let Some(value) = old_body.get_mut(key) {
+            *value = json!(0);
+        }
+        if let Some(value) = new_body.get_mut(key) {
+            *value = json!(0);
+        }
+    }
+    assert_eq!(old_body, new_body, "/panel/api/status vs /api/panel/status");
+
+    // 从主清单沿变体取第一个 `/media/` 切片。
+    let master = get_with_session(
+        &fixture,
+        &format!("/pm/c1.m3u8?token={}", fixture.token),
+        None,
+    )
+    .await
+    .text()
+    .await
+    .expect("主清单");
+    let variant = master
+        .lines()
+        .find(|line| line.contains("/api/play/pm/c1/video/index.txt"))
+        .expect("变体地址");
+    let media_list = fixture
+        .client
+        .get(variant)
+        .send()
+        .await
+        .expect("变体请求")
+        .text()
+        .await
+        .expect("媒体清单");
+    let media_url = media_list
+        .lines()
+        .find(|line| line.contains("/media/"))
+        .expect("切片地址")
+        .to_string();
+    let old_media_url = media_url.replacen("/media/", "/", 1);
+
+    // 预热：首包 `public`，命中包 `private`。命中后两条路径的头才一致。
+    let warm = fixture
+        .client
+        .get(&media_url)
+        .send()
+        .await
+        .expect("预热切片");
+    assert_eq!(warm.status(), StatusCode::OK);
+    let _ = warm.bytes().await.expect("预热正文");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let probe = fixture
+            .client
+            .get(&media_url)
+            .send()
+            .await
+            .expect("探测切片");
+        assert_eq!(probe.status(), StatusCode::OK);
+        let hit = header(&probe, "cache-control").starts_with("private");
+        let _ = probe.bytes().await.expect("探测正文");
+        if hit {
+            break;
+        }
+        assert!(Instant::now() < deadline, "切片未在限期内写入缓存");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert_legacy_matches_new(&fixture, &old_media_url, &media_url, None).await;
+}
+
 #[tokio::test]
 async fn epg_disabled_returns_404() {
     let fixture = fixture().await;
