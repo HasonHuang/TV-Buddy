@@ -944,7 +944,11 @@ function RulesTab({
             />
           </Field>
           {scheduleMode === 'interval' ? (
-            <Field label="间隔小时" hint="1–8760">
+            <Field
+              label="间隔小时"
+              tip="每 N 小时运行一轮。周期越长，发现失败越慢，消耗流量越少。"
+              hint="1–8760"
+            >
               <NumberInput
                 min={1}
                 max={8760}
@@ -953,7 +957,11 @@ function RulesTab({
               />
             </Field>
           ) : (
-            <Field label="cron 表达式" hint="分 时 日 月 周，按服务器时区">
+            <Field
+              label="cron 表达式"
+              tip="按 5 段 cron 运行，使用服务器时区。适合只在夜间校验。"
+              hint="分 时 日 月 周，按服务器时区"
+            >
               <input
                 value={asText(draft, 'quality.cron')}
                 onChange={(event) => update('quality.cron', event.target.value)}
@@ -961,7 +969,10 @@ function RulesTab({
               />
             </Field>
           )}
-          <Field label="下次运行预览">
+          <Field
+            label="下次运行预览"
+            tip="按当前调度计算未来 3 次运行时间。不会保存配置。"
+          >
             <button
               className="ghost"
               onClick={() => void previewSchedule()}
@@ -970,35 +981,63 @@ function RulesTab({
               {busy === 'preview' ? '计算中…' : '预览未来 3 次'}
             </button>
           </Field>
-          <Field label="探测档位" tip="档位越高，耗时与流量越多。" hint={probeHint}>
+          <Field
+            label="探测档位"
+            tip="决定每次探测做多深。档位越高，耗时与流量越多。规则需要更深的数据时，会自动提升档位。完整档是最高一档：先测速，再按需识别分辨率。"
+            hint={probeHint}
+          >
             <Select
               ariaLabel="探测档位"
               value={asText(draft, 'quality.probe_mode')}
               compact
               options={[
-                { value: 'reachability', label: '连通', desc: '只检查能否建立连接。' },
-                { value: 'playlist', label: '清单', desc: '读取清单并请求首个切片。' },
-                { value: 'speed', label: '测速', desc: '下载样本并测量速率。' },
-                { value: 'full', label: '完整', desc: '测速，并按需识别分辨率。' },
+                {
+                  value: 'reachability',
+                  label: '连通',
+                  desc: '只检查能否建立连接。开销最小，适合首次观察或长期巡检。',
+                },
+                {
+                  value: 'playlist',
+                  label: '清单',
+                  desc: '读取清单并请求首个切片。用于发现坏清单和不可达切片。',
+                },
+                {
+                  value: 'speed',
+                  label: '测速',
+                  desc: '下载样本并测量速率。需要按速率筛选时选它。',
+                },
+                {
+                  value: 'full',
+                  label: '完整',
+                  desc: '测速，再用 ffprobe 从切片开头识别分辨率。清单缺少分辨率、又设了分辨率规则时选它。需要启用 ffprobe。',
+                },
               ]}
               onChange={(next) => update('quality.probe_mode', next)}
             />
           </Field>
-          <Field label="校验超时" hint="秒">
+          <Field label="校验超时" tip="单次请求的超时。超时按失败处理。" hint="秒">
             <NumberInput
               min={1}
               value={asNumber(draft, 'quality.timeout_secs')}
               onChange={(value) => update('quality.timeout_secs', value)}
             />
           </Field>
-          <Field label="测速超时" hint="秒">
+          <Field
+            label="测速超时"
+            tip="单个切片或连续流的测速超时。超时停止采样。"
+            hint="秒"
+          >
             <NumberInput
               min={1}
               value={asNumber(draft, 'quality.speed_timeout_secs')}
               onChange={(value) => update('quality.speed_timeout_secs', value)}
             />
           </Field>
-          <Field label="校验并发" hint="1–32">
+          <Field
+            label="校验并发"
+            tip="同时探测的频道数。数值越大越快，但更占带宽和内存。"
+            hint="1–32"
+          >
             <NumberInput
               min={1}
               max={32}
@@ -1006,28 +1045,44 @@ function RulesTab({
               onChange={(value) => update('quality.concurrency', value)}
             />
           </Field>
-          <Field label="单轮流量预算" hint="MB，0 = 不限制">
+          <Field
+            label="单轮流量预算"
+            tip="一轮最多下载多少 MB。接近上限时停止本轮，剩余频道留到下一轮。"
+            hint="MB，0 = 不限制"
+          >
             <NumberInput
               min={0}
               value={asNumber(draft, 'quality.budget_mb_per_run')}
               onChange={(value) => update('quality.budget_mb_per_run', value)}
             />
           </Field>
-          <Field label="单轮频道上限" hint="0 = 不限制">
+          <Field
+            label="单轮频道上限"
+            tip="一轮最多探测多少个频道。超出部分留到下一轮。"
+            hint="0 = 不限制"
+          >
             <NumberInput
               min={0}
               value={asNumber(draft, 'quality.max_channels_per_run')}
               onChange={(value) => update('quality.max_channels_per_run', value)}
             />
           </Field>
-          <Field label="单轮时限" hint="秒，门控与校验共用；0 = 不限制">
+          <Field
+            label="单轮时限"
+            tip="一轮的墙钟上限。门控、周期和手动校验共用；超时后剩余频道留到下一轮。"
+            hint="秒，门控与校验共用；0 = 不限制"
+          >
             <NumberInput
               min={0}
               value={asNumber(draft, 'quality.gate_time_budget_secs')}
               onChange={(value) => update('quality.gate_time_budget_secs', value)}
             />
           </Field>
-          <Field label="测速采样时长" hint="秒">
+          <Field
+            label="测速采样时长"
+            tip="每个切片的测速采样时长。时间越长，速率越稳定，流量越多。"
+            hint="秒"
+          >
             <NumberInput
               min={0.1}
               step={0.5}
@@ -1059,7 +1114,11 @@ function RulesTab({
         </div>
         <div className="quality-rules-grid">
           <h3 className="quality-section-title">速率与延迟</h3>
-          <Field label="最低速率" hint="MiB/s，0 = 不限制">
+          <Field
+            label="最低速率"
+            tip="实测速率低于该值时判不合格。需要测速档才能得到速率。"
+            hint="MiB/s，0 = 不限制"
+          >
             <NumberInput
               min={0}
               step={0.1}
@@ -1067,7 +1126,11 @@ function RulesTab({
               onChange={(value) => update('quality.rules.min_speed_mib', value)}
             />
           </Field>
-          <Field label="兜底速率" hint="MiB/s，无法识别分辨率，或速率表未命中时使用；0 = 用最低速率">
+          <Field
+            label="兜底速率"
+            tip="分辨率未知或速率表未命中时使用的阈值。设置它会让档位至少升到测速。"
+            hint="MiB/s，无法识别分辨率，或速率表未命中时使用；0 = 用最低速率"
+          >
             <NumberInput
               min={0}
               step={0.1}
@@ -1075,7 +1138,11 @@ function RulesTab({
               onChange={(value) => update('quality.rules.fallback_speed_mib', value)}
             />
           </Field>
-          <Field label="最大延迟" hint="毫秒，0 = 不限制">
+          <Field
+            label="最大延迟"
+            tip="首字节延迟超过该值时判不合格。"
+            hint="毫秒，0 = 不限制"
+          >
             <NumberInput
               min={0}
               value={asNumber(draft, 'quality.rules.max_delay_ms')}
@@ -1083,14 +1150,22 @@ function RulesTab({
             />
           </Field>
           <h3 className="quality-section-title">分辨率</h3>
-          <Field label="最低分辨率" hint="如 1280x720，留空不限制">
+          <Field
+            label="最低分辨率"
+            tip="实际分辨率低于该值时判不合格。需要完整档并启用 ffprobe 才能识别。"
+            hint="如 1280x720，留空不限制"
+          >
             <input
               value={asText(draft, 'quality.rules.min_resolution')}
               onChange={(event) => update('quality.rules.min_resolution', event.target.value)}
               placeholder="1280x720"
             />
           </Field>
-          <Field label="最高分辨率" hint="如 3840x2160，留空不限制">
+          <Field
+            label="最高分辨率"
+            tip="实际分辨率高于该值时判不合格。需要完整档并启用 ffprobe 才能识别。"
+            hint="如 3840x2160，留空不限制"
+          >
             <input
               value={asText(draft, 'quality.rules.max_resolution')}
               onChange={(event) => update('quality.rules.max_resolution', event.target.value)}
@@ -1106,6 +1181,7 @@ function RulesTab({
           </Field>
           <Field
             label="分辨率速率要求"
+            tip="按实际分辨率取不超过它的最高档。表未命中或分辨率未知时用兜底速率。"
             hint="按实际分辨率取不超过它的最高档；未命中时用兜底速率；空行不保存"
             className="quality-field-wide"
           >
@@ -1179,7 +1255,11 @@ function RulesTab({
             </button>
           </Field>
           <h3 className="quality-section-title">其他</h3>
-          <Field label="手工下线宽限" hint="秒，0 = 立即下线">
+          <Field
+            label="手工下线宽限"
+            tip="只对开启「探测失败下线」的手工频道生效。失败后超过该时长才从订阅隐藏。同步源频道立即移出。"
+            hint="秒，0 = 立即下线"
+          >
             <NumberInput
               min={0}
               value={asNumber(draft, 'quality.stale_keep_secs')}
@@ -1192,18 +1272,25 @@ function RulesTab({
         <div className="card-head">
           <div className="card-head-text">
             <h2>分辨率探测</h2>
-            <span className="muted">完整档读取切片开头，用 ffprobe 识别分辨率</span>
+            <span className="muted">只在完整档生效；读取切片开头，用 ffprobe 识别分辨率</span>
           </div>
         </div>
         <div className="fields">
-          <Field label="启用分辨率识别" tip="只在完整档生效。未安装 ffprobe 时使用兜底速率。">
+          <Field
+            label="启用分辨率识别"
+            tip="只在完整档生效。需要机器上已安装 ffprobe。关闭或未安装时，分辨率保持未知，判定使用兜底速率。"
+          >
             <Switch
               checked={asBool(draft, 'quality.ffprobe')}
               onChange={(next) => update('quality.ffprobe', next)}
               label="启用分辨率识别"
             />
           </Field>
-          <Field label="单次超时" hint="秒，1–30">
+          <Field
+            label="单次超时"
+            tip="一次 ffprobe 识别的总超时。超时后结束进程，分辨率保持未知，不记探测错误。"
+            hint="秒，1–30"
+          >
             <NumberInput
               min={1}
               max={30}
@@ -1211,7 +1298,11 @@ function RulesTab({
               onChange={(value) => update('quality.ffprobe_timeout_secs', value)}
             />
           </Field>
-          <Field label="并发" hint="1–4">
+          <Field
+            label="并发"
+            tip="同时采集切片并运行 ffprobe 的数量。许可不足时本轮跳过识别，不排队等待。"
+            hint="1–4"
+          >
             <NumberInput
               min={1}
               max={4}
@@ -1219,14 +1310,22 @@ function RulesTab({
               onChange={(value) => update('quality.probe_concurrency', value)}
             />
           </Field>
-          <Field label="单轮上限" hint="0 = 不限制">
+          <Field
+            label="单轮上限"
+            tip="一次校验运行最多尝试多少次 ffprobe。失败的尝试也计数。达到上限后，其余频道跳过识别。"
+            hint="0 = 不限制"
+          >
             <NumberInput
               min={0}
               value={asNumber(draft, 'quality.max_ffprobe_per_run')}
               onChange={(value) => update('quality.max_ffprobe_per_run', value)}
             />
           </Field>
-          <Field label="最低测速门槛" hint="MiB/s，0 = 不限制">
+          <Field
+            label="最低测速门槛"
+            tip="实测速率达到该值才运行 ffprobe。低于门槛不识别，避免慢源额外消耗流量。"
+            hint="MiB/s，0 = 不限制"
+          >
             <NumberInput
               min={0}
               step={0.1}
@@ -1234,7 +1333,11 @@ function RulesTab({
               onChange={(value) => update('quality.ffprobe_min_speed_mib', value)}
             />
           </Field>
-          <Field label="采样大小" hint="KiB，读取切片开头。64–2048">
+          <Field
+            label="采样大小"
+            tip="从切片开头最多采集并送给 ffprobe 的字节数。字节经标准输入传入，不下载整段切片。"
+            hint="KiB，64–2048"
+          >
             <NumberInput
               min={64}
               max={2048}
@@ -1258,14 +1361,21 @@ function RulesTab({
           </div>
         </div>
         <div className="fields">
-          <Field label="启用安全阀">
+          <Field
+            label="启用安全阀"
+            tip="一轮移出过多时暂停成员变更，防止批量误删。"
+          >
             <Switch
               checked={asBool(draft, 'quality.guard_enabled')}
               onChange={(next) => update('quality.guard_enabled', next)}
               label="启用安全阀"
             />
           </Field>
-          <Field label="最大移出比例" hint="0 到 1，如 0.5 表示 50%">
+          <Field
+            label="最大移出比例"
+            tip="移出数 ÷ 已测数达到该比例时触发安全阀。"
+            hint="0 到 1，如 0.5 表示 50%"
+          >
             <NumberInput
               min={0.01}
               max={1}
@@ -1274,14 +1384,22 @@ function RulesTab({
               onChange={(value) => update('quality.max_remove_ratio', value)}
             />
           </Field>
-          <Field label="最小移出个数" hint="移出数量低于该值不触发">
+          <Field
+            label="最小移出个数"
+            tip="移出数低于该值不触发。小范围会按已测数自适应下调。"
+            hint="移出数量低于该值不触发"
+          >
             <NumberInput
               min={1}
               value={asNumber(draft, 'quality.min_remove_count')}
               onChange={(value) => update('quality.min_remove_count', value)}
             />
           </Field>
-          <Field label="结果保留天数" hint="0 = 不自动清理">
+          <Field
+            label="结果保留天数"
+            tip="非准入结果保留多久。0 = 不自动清理。"
+            hint="0 = 不自动清理"
+          >
             <NumberInput
               min={0}
               max={3650}

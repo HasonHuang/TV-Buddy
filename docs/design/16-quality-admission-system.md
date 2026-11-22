@@ -84,7 +84,7 @@
 - `rules.stale_keep_secs` 只控制手工频道下线宽限。
 - 手工频道失败处理使用现有 `offline_on_fail`：
   - `false` = 保留。
-  - `true` = 超过宽限后下线。宽限读 `stale_keep_secs`，默认 1800 秒；0 表示立即。
+  - `true` = 超过宽限后下线。宽限读 `stale_keep_secs`，默认 0（立即）；正数从首次失败起计时。
 - 同步源门控关闭使用现有 `source.quality.enabled=false`。
 
 ### 3.3 有效规则

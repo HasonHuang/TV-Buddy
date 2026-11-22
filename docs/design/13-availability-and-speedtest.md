@@ -293,11 +293,11 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
     "max_playlist_kb": 2048,
     "budget_mb_per_run": 64,
     "max_channels_per_run": 0,
-    "max_ffprobe_per_run": 0,
-    "ffprobe_min_speed_mib": 0.0,
+    "max_ffprobe_per_run": 32,
+    "ffprobe_min_speed_mib": 0.5,
     "history_mode": "changes",
     "history_keep_days": 7,
-    "stale_keep_secs": 1800,
+    "stale_keep_secs": 0,
     "auto_disable_after_fails": 3,
     "cleanup_fail_threshold": 3,
     "ffprobe": false,
@@ -340,11 +340,11 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 | `max_playlist_kb` | u64 | `2048` | 清单正文上限。 |
 | `budget_mb_per_run` | u64 | `64` | 单轮总下载预算。`0` 表示不限。 |
 | `max_channels_per_run` | u64 | `0` | 单轮频道上限。`0` 表示全部。 |
-| `max_ffprobe_per_run` | u64 | `0` | 单轮 `ffprobe` 次数上限。`0` 表示不限。 |
-| `ffprobe_min_speed_mib` | f64 | `0.0` | 速率达到该值才运行 `ffprobe`。`0` 表示不设门槛。 |
-| `history_mode` | string | `changes` | `off` / `changes` / `hourly` / `all`。见 §6.2。 |
-| `history_keep_days` | u64 | `7` | 历史保留天数。 |
-| `stale_keep_secs` | u64 | `1800` | 连续失败后保留可见的宽限。默认两倍周期，避免单次抖动下线。`0` 表示立即隐藏。 |
+| `max_ffprobe_per_run` | u64 | `32` | 单轮 `ffprobe` 尝试上限。失败的尝试也计数。`0` 表示不限。 |
+| `ffprobe_min_speed_mib` | f64 | `0.5` | 速率达到该值才运行 `ffprobe`。低于门槛时用兜底速率判定。`0` 表示不设门槛。 |
+| `history_mode` | string | 未实现 | 设计值 `off` / `changes` / `hourly` / `all`。当前版本按稳定键覆盖，不写历史。 |
+| `history_keep_days` | u64 | 未实现 | 历史保留天数。当前版本使用 `result_retention_days` 清理结果。 |
+| `stale_keep_secs` | u64 | `0` | 手工频道失败后的下线宽限。从首次失败起计时。`0` 表示立即隐藏。 |
 | `auto_disable_after_fails` | u32 | `3` | 源连续抓取失败多少次后自动停用。`0` 表示关闭。 |
 | `cleanup_fail_threshold` | u32 | `3` | 清理失效频道所需连续 `unreachable` 次数。 |
 | `ffprobe` | bool | `false` | 启用分辨率识别。只在 `full` 档、清单无完整分辨率时运行。关闭时是硬上限。 |
@@ -484,9 +484,9 @@ effective.enabled =
 - `probe_error` 不隐藏。连续 3 次 `probe_error` 时，面板标黄，提醒管理员检查解析器或探测地址。
 - `probe_error` 不计入连续失败，也不设置 `first_fail_at`。避免解析器缺陷让后续真实失败提前触发下线。
 - `stale_keep_secs` 从**连续失败的第一次失败时间**（`first_fail_at`）开始计算。`unreachable` 与阈值失败都算失败。重复失败不重置起点。成功一次即清零。
-  - 默认 `interval_hours=6`、`stale_keep_secs=1800` 时，需要连续两次失败，才会在第二次失败后 900 秒隐藏。
-  - 单次失败不会隐藏。下一轮探测成功即恢复。
-  - 想更快隐藏时，把 `stale_keep_secs` 设为小于探测间隔。此时单次失败也会在下一次探测前隐藏。
+  - 默认 `stale_keep_secs=0`：首次失败后立即隐藏。
+  - 设为正数时，从首次失败起计时，超过宽限才隐藏。宽限小于探测间隔时，下一轮失败即隐藏。
+  - 想避免单次抖动下线时，把 `stale_keep_secs` 设为不小于探测间隔。
   - 没有 `first_fail_at` 时用 `checked_at`。
 - 结果超过 2 个周期未更新时标 `stale`。`stale` 只影响显示，不改变隐藏判定。隐藏仍按 `first_fail_at`。
 - `ffprobe=false` 时，依赖 `ffprobe` 的规则（`min_fps`、`require_video`、`require_audio`）不执行。结果带 `skipped_rules` 列表，面板显示警告。其他规则照常判定。
@@ -1013,7 +1013,7 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
     "max_delay_ms": 3000,
     "min_resolution": "1280x720",
     "max_resolution": "3840x2160",
-    "stale_keep_secs": 1800
+    "stale_keep_secs": 0
   },
   "ffprobe": {
     "installed": false,
@@ -1233,11 +1233,10 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 | `ffprobe_min_speed_mib` | 0.5 | 速率低于此值不启动进程。 |
 | `ffprobe_timeout_secs` | 5 | 单次进程超时。范围 1–30。 |
 | `ffprobe_sample_kb` | 512 | 送给 `ffprobe` 的字节上限。范围 64–2048。 |
-| `sample_segments` | 1 | 低配只采样 1 个切片。 |
-| `history_mode` | `changes` | 只在状态变化时写历史。 |
+| `sample_segments` | 2 | HLS 每次采样的切片数。低配可设为 1。 |
 | `budget_mb_per_run` | 64 | 限制单轮下载。 |
 | `max_channels_per_run` | 0 | 由预算与超时自然限制。 |
-| `stale_keep_secs` | 1800 | 两次失败后才下线，避免抖动。 |
+| `stale_keep_secs` | 0 | 默认立即隐藏。设为正数可避免单次抖动下线。 |
 | `sample_bytes_kb` | 4096 | 单流 4 MiB。 |
 
 建议：
@@ -1281,7 +1280,7 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 
 `ffprobe` 的额外门槛：
 
-- `ffprobe_min_speed_mib` 默认 `0.0`。启用测速筛选时建议设为最低速率，例如 `0.5`。
+- `ffprobe_min_speed_mib` 默认 `0.5`。低于门槛时不启动进程，判定使用兜底速率。
 - 清单已有完整分辨率时，不启动进程。
 - 达到 `max_ffprobe_per_run` 后停止启动新进程。已完成的结果保留。
 
@@ -1487,7 +1486,7 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 | 编号 | 决策点 | 结论 | 状态 |
 | --- | --- | --- | --- |
 | Q1 | 是否新建 `[quality]` | 是。`[health]` 保持轻量 | 已定（用户选择方案 B） |
-| Q2 | 默认处理 | 隐藏 + 1800 秒宽限（两倍周期）。沿用「只影响清单」的既有下线语义 | 已定 |
+| Q2 | 默认处理 | 隐藏 + 0 秒宽限（立即）。沿用「只影响清单」的既有下线语义 | 已定 |
 | Q3 | 默认开启 | 否 | 已定 |
 | Q4 | `probe_error` 是否隐藏 | 否。按未知处理 | 已定 |
 | Q5 | 源自动停用是否改写配置 | 否。运行时标记，可一键恢复 | 已定 |

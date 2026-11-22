@@ -906,22 +906,22 @@ pub struct QualityCfg {
     pub min_remove_count: u64,
     /// 非准入结果保留天数。0 表示不自动清理。
     pub result_retention_days: u64,
-    /// 同步门控墙钟上限（秒）。0 表示不限制。
+    /// 单轮墙钟上限（秒）。门控与周期/手动校验共用。0 表示不限制。
     pub gate_time_budget_secs: u64,
     pub timeout_secs: u64,
     pub concurrency: u32,
     pub speed_timeout_secs: u64,
-    /// 启用 ffprobe 分辨率识别。
+    /// 启用 ffprobe 分辨率识别。只在完整档生效。
     pub ffprobe: bool,
-    /// 单次 ffprobe 进程超时（秒）。1–30。
+    /// 单次 ffprobe 进程超时（秒）。1–30。超时后分辨率保持未知。
     pub ffprobe_timeout_secs: u64,
-    /// ffprobe 并发与采集上限。1–4。
+    /// ffprobe 并发许可数。1–4。许可不足时本轮跳过识别，不排队。
     pub probe_concurrency: u32,
-    /// 单轮 ffprobe 上限。0 表示不限。
+    /// 单轮 ffprobe 尝试上限。0 表示不限。失败的尝试也计数。
     pub max_ffprobe_per_run: u64,
-    /// 达到该速率才运行 ffprobe。
+    /// 达到该速率才运行 ffprobe。低于门槛时用兜底速率判定。
     pub ffprobe_min_speed_mib: f64,
-    /// 送给 ffprobe 的最大字节数（KB）。64–2048。
+    /// 送给 ffprobe 的最大字节数（KB）。64–2048。字节经标准输入传入。
     pub ffprobe_sample_kb: u64,
     pub sample_bytes_kb: u64,
     pub sample_secs: f64,
@@ -955,8 +955,8 @@ impl Default for QualityCfg {
             ffprobe: false,
             ffprobe_timeout_secs: 5,
             probe_concurrency: 1,
-            max_ffprobe_per_run: 0,
-            ffprobe_min_speed_mib: 0.0,
+            max_ffprobe_per_run: 32,
+            ffprobe_min_speed_mib: 0.5,
             ffprobe_sample_kb: 512,
             sample_bytes_kb: 4096,
             sample_secs: 2.0,
@@ -964,7 +964,7 @@ impl Default for QualityCfg {
             max_playlist_kb: 2048,
             budget_mb_per_run: 64,
             max_channels_per_run: 0,
-            stale_keep_secs: 1800,
+            stale_keep_secs: 0,
             probe_passthrough: false,
             rules: QualityRules::default(),
             extra: Extra::new(),
@@ -2113,7 +2113,7 @@ mod tests {
         let config = Config::default();
         assert!(!config.quality.enabled);
         assert_eq!(config.quality.probe_mode, "reachability");
-        assert_eq!(config.quality.stale_keep_secs, 1800);
+        assert_eq!(config.quality.stale_keep_secs, 0, "默认立即下线");
         assert!(!config.quality.rules.host_cache, "Host 缓存默认关闭");
 
         let mut config = Config::default();
