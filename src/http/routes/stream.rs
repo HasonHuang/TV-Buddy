@@ -28,7 +28,7 @@ use crate::{
         Config,
     },
     http::ext::client_ip_with_peer,
-    proxy,
+    paths, proxy,
     state::AppState,
 };
 
@@ -446,6 +446,7 @@ pub async fn wildcard(
         raw_query.as_deref(),
         None,
         false,
+        Placement::Legacy,
     )
     .await
 }
@@ -478,8 +479,144 @@ pub async fn signed(
         raw_query.as_deref(),
         None,
         true,
+        Placement::Legacy,
     )
     .await
+}
+
+/// `GET /api/play/{gid}/{cid}/*path`：只提供清单。
+pub async fn play_wildcard(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((gid, cid, rest)): Path<(String, String, String)>,
+    RawQuery(raw_query): RawQuery,
+) -> Response {
+    let rest = rest.trim_start_matches('/').to_string();
+    let config = state.snapshot();
+    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
+        return response;
+    }
+    serve_rest(
+        &state,
+        &config,
+        &headers,
+        &gid,
+        &cid,
+        &rest,
+        raw_query.as_deref(),
+        None,
+        false,
+        Placement::Play,
+    )
+    .await
+}
+
+/// `GET /media/{gid}/{cid}/*path`：只提供媒体数据。
+pub async fn media_wildcard(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((gid, cid, rest)): Path<(String, String, String)>,
+    RawQuery(raw_query): RawQuery,
+) -> Response {
+    let rest = rest.trim_start_matches('/').to_string();
+    let config = state.snapshot();
+    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
+        return response;
+    }
+    serve_rest(
+        &state,
+        &config,
+        &headers,
+        &gid,
+        &cid,
+        &rest,
+        raw_query.as_deref(),
+        None,
+        false,
+        Placement::Media,
+    )
+    .await
+}
+
+/// `GET /api/play/{gid}/{cid}/l/{exp}/{sig}/*path`：签名清单。
+pub async fn signed_play(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((gid, cid, exp, sig, rest)): Path<(String, String, String, String, String)>,
+    RawQuery(raw_query): RawQuery,
+) -> Response {
+    let config = state.snapshot();
+    if !crate::sign::verify(&config, &gid, &cid, &exp, &sig) {
+        return redirect_asset(&config, &config.auth.token_failure_url);
+    }
+    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
+        return response;
+    }
+    let rest = rest.trim_start_matches('/').to_string();
+    serve_rest(
+        &state,
+        &config,
+        &headers,
+        &gid,
+        &cid,
+        &rest,
+        raw_query.as_deref(),
+        None,
+        true,
+        Placement::Play,
+    )
+    .await
+}
+
+/// `GET /media/{gid}/{cid}/l/{exp}/{sig}/*path`：签名媒体数据。
+pub async fn signed_media(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((gid, cid, exp, sig, rest)): Path<(String, String, String, String, String)>,
+    RawQuery(raw_query): RawQuery,
+) -> Response {
+    let config = state.snapshot();
+    if !crate::sign::verify(&config, &gid, &cid, &exp, &sig) {
+        return redirect_asset(&config, &config.auth.token_failure_url);
+    }
+    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
+        return response;
+    }
+    let rest = rest.trim_start_matches('/').to_string();
+    serve_rest(
+        &state,
+        &config,
+        &headers,
+        &gid,
+        &cid,
+        &rest,
+        raw_query.as_deref(),
+        None,
+        true,
+        Placement::Media,
+    )
+    .await
+}
+
+/// 路径面：`/api/play` 只给清单，`/media` 只给媒体数据，旧路径两者都给。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Placement {
+    Play,
+    Media,
+    Legacy,
+}
+
+/// 路径面是否允许这个子路径。
+fn placement_allows(placement: Placement, rest: &str) -> bool {
+    match placement {
+        Placement::Play => paths::is_manifest_rest(rest),
+        Placement::Media => !paths::is_manifest_rest(rest),
+        Placement::Legacy => true,
+    }
 }
 
 /// 通配子路径的实际分发。
@@ -496,7 +633,11 @@ async fn serve_rest(
     raw_query: Option<&str>,
     token: Option<&str>,
     authorized: bool,
+    placement: Placement,
 ) -> Response {
+    if !placement_allows(placement, rest) {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
     // 签名开启后，本地切片一律要求带签名。入口别名 `index.m3u8` 除外：
     // 它自己会做令牌校验。
     let resolved = resolve(config, gid, cid);
@@ -1938,11 +2079,20 @@ pub(crate) async fn fetch_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        format_utc, media_cache_control, merge_upstream_headers, mpd_base_token,
+        format_utc, media_cache_control, merge_upstream_headers, mpd_base_token, placement_allows,
         rewrite_minimum_update_period, rewrite_mpd_base_urls, rewrite_publish_time,
-        trim_mpd_window,
+        trim_mpd_window, Placement,
     };
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+    #[test]
+    fn placement_rejects_manifests_under_media_and_segments_under_play() {
+        assert!(!placement_allows(Placement::Media, "index.m3u8"));
+        assert!(!placement_allows(Placement::Play, "seg_000000000000.png"));
+        assert!(placement_allows(Placement::Play, "video/index.txt"));
+        assert!(placement_allows(Placement::Media, "timeshift/a.ts"));
+        assert!(placement_allows(Placement::Legacy, "index.m3u8"));
+    }
 
     #[test]
     fn media_cache_control_matches_vod_and_live_targets() {

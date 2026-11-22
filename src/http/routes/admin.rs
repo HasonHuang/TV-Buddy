@@ -254,15 +254,30 @@ fn count_out(state: Arc<AppState>, response: axum::response::Response) -> axum::
     axum::response::Response::from_parts(parts, Body::new(counted))
 }
 
+/// 把播放路径还原为计数用的 `{gid}/{cid}/...` 形状。
+///
+/// `/media` 与 `/api/play` 去掉前缀。`/api/play/token/...` 是令牌入口，
+/// 与旧 `/l/...` 一样不归组。其他路径只去掉前导 `/`。
+fn stats_rest(path: &str) -> Option<&str> {
+    if let Some(rest) = path.strip_prefix("/media/") {
+        return Some(rest);
+    }
+    if let Some(rest) = path.strip_prefix("/api/play/") {
+        return (!rest.starts_with("token/")).then_some(rest);
+    }
+    let rest = path.trim_start_matches('/');
+    (!rest.is_empty()).then_some(rest)
+}
+
 /// 从路径取分组 id。面板、静态资源与公开文件不算。
 fn group_of(path: &str) -> Option<String> {
-    let first = path.trim_start_matches('/').split('/').next()?;
+    let first = stats_rest(path)?.split('/').next()?;
     if first.is_empty() || first.contains('.') {
         return None;
     }
     if matches!(
         first,
-        "panel" | "__assets" | "epg" | "logo" | "unban" | "api" | "health"
+        "panel" | "__assets" | "epg" | "logo" | "unban" | "api" | "health" | "static" | "page"
     ) {
         return None;
     }
@@ -271,11 +286,57 @@ fn group_of(path: &str) -> Option<String> {
 
 /// 取路径前两段组成频道键 `gid/cid`。非频道路径返回 `None`。
 fn channel_of(path: &str, gid: &str) -> Option<String> {
-    let mut parts = path.trim_start_matches('/').splitn(3, '/');
+    let mut parts = stats_rest(path)?.splitn(3, '/');
     parts.next()?;
     let cid = parts.next()?;
     if cid.is_empty() || cid.contains('.') {
         return None;
     }
     Some(format!("{gid}/{cid}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{channel_of, group_of};
+
+    #[test]
+    fn stats_parse_new_playback_paths() {
+        assert_eq!(group_of("/media/g1/c1/seg.png").as_deref(), Some("g1"));
+        assert_eq!(
+            channel_of("/media/g1/c1/seg.png", "g1").as_deref(),
+            Some("g1/c1")
+        );
+        assert_eq!(
+            group_of("/api/play/g1/c1/index.m3u8").as_deref(),
+            Some("g1")
+        );
+        assert_eq!(
+            channel_of("/api/play/g1/c1/index.m3u8", "g1").as_deref(),
+            Some("g1/c1")
+        );
+        assert_eq!(group_of("/api/play/g1/c1.m3u8").as_deref(), Some("g1"));
+        assert_eq!(channel_of("/api/play/g1/c1.m3u8", "g1"), None);
+        assert_eq!(group_of("/api/play/token/tk/g1/c1/index.m3u8"), None);
+    }
+
+    #[test]
+    fn stats_skip_reserved_prefixes() {
+        for path in [
+            "/api/sub/t/playlist.m3u",
+            "/static/panel/x.js",
+            "/page/panel",
+            "/api/panel/config",
+            "/api/health",
+            "/api/unban",
+            "/",
+        ] {
+            assert_eq!(group_of(path), None, "{path}");
+        }
+    }
+
+    #[test]
+    fn stats_keep_legacy_paths() {
+        assert_eq!(group_of("/g1/c1/seg.png").as_deref(), Some("g1"));
+        assert_eq!(channel_of("/g1/c1/seg.png", "g1").as_deref(), Some("g1/c1"));
+    }
 }

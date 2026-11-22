@@ -54,7 +54,8 @@ cat > "$CFG" <<JSON
   },
   "auth": {
     "token_enabled": false,
-    "token_failure_url": "http://placeholder.test/Failure.mp4"
+    "token_failure_url": "http://placeholder.test/Failure.mp4",
+    "ip_guard_enabled": false
   },
   "cache": {
     "disk_path": "$CACHE",
@@ -281,6 +282,12 @@ PLAYTOKEN=$(curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: appl
   -d '{}' "$B/panel/api/users/$ADMIN_ID/tokens" |
   python3 -c 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
 check "设备令牌长度" "12" "${#PLAYTOKEN}"
+
+# --- 新前缀播放面：清单走 /api/play，切片走 /media ---
+check "新路径入口 200" "200" "$(status "$B/api/play/p1/c1.m3u8?token=$PLAYTOKEN")"
+check "/media 清单 404" "404" "$(status "$B/media/p1/c1/index.m3u8")"
+check "/api/play 切片 404" "404" "$(status "$B/api/play/p1/c1/seg_000000000000.png")"
+
 check "无 Token 入口 302" "302" "$(status "$B/p1/c1.m3u8")"
 check "无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/p1/c1.m3u8")"
 check "带 Token 入口 200" "200" "$(status "$B/p1/c1.m3u8?token=$PLAYTOKEN")"

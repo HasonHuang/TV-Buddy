@@ -81,6 +81,33 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/:gid/:cid/l/:exp/:sig/*path", get(routes::stream::signed))
         .route("/:gid/:file", get(routes::stream::entry))
         .route("/:gid/:cid/*path", get(routes::stream::wildcard))
+        // 新播放前缀：清单只走 `/api/play`，媒体数据只走 `/media`。
+        // 旧路径保留到 Task 10，两套路径的响应必须一致。
+        .route("/api/play/:gid/:file", get(routes::stream::entry))
+        .route(
+            "/api/play/:gid/:cid/*path",
+            get(routes::stream::play_wildcard),
+        )
+        .route(
+            "/api/play/:gid/:cid/l/:exp/:sig/*path",
+            get(routes::stream::signed_play),
+        )
+        .route(
+            "/api/play/token/:token/:gid/:file",
+            get(routes::stream::token_entry),
+        )
+        .route(
+            "/api/play/token/:token/:gid/:cid/*path",
+            get(routes::stream::token_alias),
+        )
+        .route(
+            "/media/:gid/:cid/*path",
+            get(routes::stream::media_wildcard),
+        )
+        .route(
+            "/media/:gid/:cid/l/:exp/:sig/*path",
+            get(routes::stream::signed_media),
+        )
         // 内嵌页面（免登录）
         .route("/page/panel", get(static_assets::panel_page))
         .route("/page/panel/", get(static_assets::panel_page))
