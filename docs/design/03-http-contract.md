@@ -70,7 +70,7 @@
 | GET | `/epg.xml`、`/epg.xml.gz` | — | 已删除公开路由，`404`。改用 `/api/sub/<令牌>/epg.xml[.gz]` | ✅ v2026.16 | 安全收紧 |
 | GET | `/epg/api/{channels,programmes/:channel,search}` | — | 已删除公开路由，`404`。改用 `/api/panel/epg/*` | ✅ v2026.16 | 安全收紧 |
 | GET | `/logo` | — | 已删除公开页面，`404`。改用面板「台标管理」 | ✅ v2026.16 | 安全收紧 |
-| GET | `/static/logo/<file>` | 无 | `200` 图片 + `public, max-age=86400`；缺文件、越界名、非白名单扩展 → `404` | ✅ P1 | F-011 §6 |
+| GET | `/static/logo/<file>` | 无 | `200` 图片 + `public, max-age=3600`；缺文件、越界名、非白名单扩展 → `404` | ✅ P1 | F-011 §6 |
 | GET | `/logo/api/list` | — | 已删除公开接口，`404`。改用 `/api/panel/logo/list` | ✅ v2026.16 | 安全收紧 |
 | GET | `/page/unban` | 无 | `200` `text/html`；封禁期也可访问。无会话时页面提示先登录 | ✅ P3 | S-EP-07 |
 | POST | `/api/unban` | 登录会话 | `200` `{"msg","ok"}`；未登录 `401`；未封禁、配额用完、IP 管控关闭均为 `ok:false` | ✅ v2026.16 | S-AUTH-07 |

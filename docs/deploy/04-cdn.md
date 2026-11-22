@@ -358,7 +358,7 @@ for i in 1 2; do
 done
 ```
 
-期望：第二次请求返回 `HIT` 并带 `Age`。源站台标头为 `public, max-age=86400`。控制台使用强制 TTL 时，以控制台 TTL 为准。
+期望：第二次请求返回 `HIT` 并带 `Age`。源站台标头为 `public, max-age=3600`。控制台使用强制 TTL 时，以控制台 TTL 为准。
 
 完整验收流程见 [`../tests/06-cdn-console.md`](../tests/06-cdn-console.md)。
 
