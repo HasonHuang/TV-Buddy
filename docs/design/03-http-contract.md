@@ -46,6 +46,8 @@
 
 | 方法 | 路径 | 鉴权 | 响应 | 阶段 | 依据 |
 | --- | --- | --- | --- | --- | --- |
+| GET | `/playlist.m3u` | 无 | `404` 文本，指路 `/api/sub/<令牌>/playlist.m3u` | ✅ | 设计决策（订阅只从用户令牌进入） |
+| GET | `/{gid}/playlist.m3u` | 无 | `404` 文本，同上 | ✅ | 设计决策 |
 | GET | `/api/panel/subs/status` | 管理员会话 | `200` JSON 源列表；未登录 `401`；非管理员 `403` | ✅ v2026.16 | S-GAP-07 |
 | POST | `/api/panel/subs/groups` | 管理员会话 | `200` JSON 分组；非 http(s) → `400`；抓取失败 → `502` | ✅ v2026.16 | S-GAP-07 |
 | POST | `/api/panel/subs/preview` | 管理员会话 | `200` JSON 预检 | ✅ v2026.16 | S-GAP-07 |
@@ -397,13 +399,13 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 
 ### 6.5 EPG（P1 已实现）
 
-证据：F-008、F-010（S-EP-05、S-EP-12、S-EPG-07）。本实现覆盖公开三件、状态/刷新、手工映射与匹配报告。
+证据：F-008、F-010（S-EP-05、S-EP-12、S-EPG-07）。本实现覆盖用户节目单、状态/刷新、手工映射与匹配报告。
 
 | 方法 | 路径 | 鉴权 | 行为 |
 | --- | --- | --- | --- |
-| `GET` | `/epg.xml` | 无 | `200 application/xml; charset=utf-8`；`[epg].enabled = false` 或尚未生成 → `404` |
-| `GET` | `/epg.xml.gz` | 无 | `200 application/gzip`（gzip 魔数 `1f 8b`）；同上 `404` |
-| `GET` | `/epg` | 无 | `200 text/html`（内嵌浏览页）；`epg.enabled = false` 或 `public_viewer_enabled = false` → `404` |
+| `GET` | `/epg.xml` | — | 已删除公开路由，`404`。用户节目单为 `/api/sub/<令牌>/epg.xml` |
+| `GET` | `/epg.xml.gz` | — | 已删除公开路由，`404`。用户节目单为 `/api/sub/<令牌>/epg.xml.gz` |
+| `GET` | `/epg` | — | 已删除公开页面，`404`。改用面板「节目指南」 |
 | `GET` | `/api/panel/epg/status` | Bearer | `{"enabled","running","sources","channels","programmes","kept","keep_days","future_days","last_success","last_error"}` |
 | `POST` | `/api/panel/epg/refresh` | Bearer | 同步采集一次；`{"ok":true,"msg":"采集完成","channels","programmes"}`；失败 → `500` + 原因 |
 | `POST` | `/api/panel/epg/regenerate` | Bearer | 只读 `<cache>/epg/raw/` 重新匹配并生成，不重新下载；`{"ok":true,"channels","programmes"}` |
@@ -433,9 +435,9 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | `GET` | `/api/panel/epg/viewer-channels` | Bearer | `{"channels":[…]}`；频道对象同公开表，无 `generated_at`/`total`/`tz_offset_hours` |
 | `GET` | `/api/panel/epg/source-channels/{id}?q=&offset=&limit=` | Bearer | `{"items":[{"id","display_names","source_id","source_name"}],"total"}`；`id=__all__` 跨源 |
 | `GET` | `/api/panel/epg/tz-preview/{id}?shift=` | Bearer | `{"ok":true,"items":[{"raw","current","shifted"}]}`；`shift` 单位为分钟 |
-| `GET` | `/epg/api/channels` | 无 | `{"channels":[{"icon","id","kind","last_stop","name","programme_count","source_id","source_name"}],"generated_at","total","tz_offset_hours"}`；`cache-control: public, max-age=300` |
-| `GET` | `/epg/api/programmes/{channel}` | 无 | `{"channel","programmes":[{"desc","start","stop","title"}],"tz_offset_hours"}`；`start`/`stop` 为 Unix 秒；路径大小写敏感；`max-age=120` |
-| `GET` | `/epg/api/search?q=` | 无 | `{"channels":[…],"programmes":[{"channel","channel_name","start","stop","title"}],"tz_offset_hours"}`；只搜频道 ID/名称与节目标题；按 `start` 升序；最多 200 条；`max-age=30` |
+| `GET` | `/epg/api/channels` | — | 已删除公开路由，`404`。改用 `/api/panel/epg/viewer-channels` |
+| `GET` | `/epg/api/programmes/{channel}` | — | 已删除公开路由，`404`。改用 `/api/panel/epg/programmes/{channel}` |
+| `GET` | `/epg/api/search?q=` | — | 已删除公开路由，`404`。改用 `/api/panel/epg/search?q=` |
 
 采集规则（F-008 观测值）：
 
@@ -457,8 +459,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | 手工映射 | 存 `epg_bindings` 表（`origin = manual`）。自动匹配写 `origin = auto`，手工映射优先 |
 | 调度 | 启动即采集一次；之后每分钟检查 `[epg].cron` 与源 `refresh_secs`。全局到期只抓 `refresh_secs = 0` 的源；单源到期只刷新该源再用 raw 缓存重生成。源改动遇到采集进行中时等待结束再重生成 |
 
-> `/epg/api/*` 形状按目标 v0.8.2 抓包对齐（F-023）。公开频道读取 `<cache>/epg/viewer.json` 快照；节目与搜索按请求解析 `epg.xml`。
-> 关闭 EPG → `404 {"error":"EPG 功能已关闭"}`；关闭公开查看器 → `404 {"error":"公开节目单查看器已关闭"}`。三个公开端点共享宽松 CORS。
+> `/epg/api/*` 形状按目标 v0.8.2 抓包对齐（F-023）。这些公开端点已在 v2026.16 删除，返回 `404`。面板接口保留同等数据。
 > 额外频道不进入公开频道表；只有已匹配本地频道可出现，且允许 `programme_count=0`。
 >
 | 翻译 | 读 `[epg.translate]`：`enabled`、`url`（或 `engine="mtran"` 时的 `mtran_url`）、`token`/`mtran_token`、`source`/`mtran_source`、`target`/`targets`、`translation_first`、`mtran_batch`。采集后把节目文本批量发到 MTranServer v5 `/translate/batch`（`{from,to,texts}` → `{results}`）；`/translate/batch` 不可用时回退单条 `/translate`。译文按目标语言追加为 `lang="<target>"` 的文本节点；`translation_first = true` 时排在原文前。结果缓存在 `<cache>/epg/.translate/cache.json`，命中不发请求 |
@@ -495,8 +496,8 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 项 | 规则 |
 | --- | --- |
-| 记账 | 非 `/page/panel`、非 `/page/unban`、非 `/api/panel`、非 `/api/unban` 路径按 `X-Forwarded-For` 末项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略 |
-| 拦截 | 封禁期内 → `403` 纯文本 `banned`；面板与解封路径不拦截（避免管理员或用户自锁）。旧路径同样豁免 |
+| 记账 | `/page/*`、`/static/panel/*`、`/api/panel/*`、`/api/unban/*` 与旧 `/panel*`、`/unban*` 不记账。其余路径按 `X-Forwarded-For` 末项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略 |
+| 拦截 | 封禁期内 → `403` 纯文本 `banned`；上述豁免路径不拦截（避免管理员或用户自锁） |
 | 容量 | 最多保留 10 000 个地址，超出后忽略新地址 |
 | 未实现 | 按 IP 的会话上限与自动限流 |
 
@@ -732,7 +733,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | 项 | 规则 |
 | --- | --- |
 | 入口 | `GET /page/unban` 免登录；封禁期也可访问 |
-| 提交 | `POST /api/unban` 免登录；只解封调用方地址 |
+| 提交 | `POST /api/unban` 需要登录会话；未登录 `401`。只解封调用方地址 |
 | 配额 | 每个 IP 每月最多 3 次；成功解封才消耗 |
 | 未封禁 | `200` `{"msg":"你的 IP 当前未被封禁","ok":false}` |
 | 成功 | `200` `{"msg":"解封成功","ok":true}` |

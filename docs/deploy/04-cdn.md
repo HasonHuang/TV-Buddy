@@ -147,9 +147,10 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 ```text
 /api/*
 /page/*
-/l/*
 /logo/api/*
 ```
+
+`/l/*` 属于规则 A 的补充（§6.3）。它必须排在规则 B 之前。`/logo/api/*` 也在规则 A 补充中。
 
 新增规则，缓存：
 
@@ -198,6 +199,7 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 | 路径形状 | 规则 |
 | --- | --- |
 | `/api/share/*` | `/api/share/*` |
+| `/l/*` | `/l/*` |
 | `/logo/api/*` | `/logo/api/*` |
 | `/__assets/*` | `/__assets/*` |
 | `/subtitle/*` | `/subtitle/*` |
@@ -214,10 +216,13 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 | `/{gid}/{cid}/timeshift/<16位十六进制>.<ext>` | `/*/*/timeshift/*` |
 | `/{gid}/{cid}/{track}/<文件名>` | `/*/*/*/*` |
 | `/{gid}/{cid}/dash-timeshift/{track}/<文件名>` | `/*/*/dash-timeshift/*/*` |
+| `/{gid}/{cid}/l/<exp>/<sig>/<文件名>` | `/*/*/l/*/*/*` |
 | `/assets/*` | `/assets/*` |
 | `/logo/*` | `/logo/*` |
 
-`/*/*/*/*` 会匹配四段路径。规则 A 的 `/api/*`、`/page/*`、`/panel*` 与 `/epg*` 先行命中。顺序不能反。
+`/*/*/l/*/*/*` 匹配旧的签名切片。控制台不支持多段通配符时，不要加这条规则。这些路径会落到兜底不缓存规则。功能正常，但不缓存。
+
+`/*/*/*/*` 会匹配四段路径。规则 A、规则 A 补充与新增不缓存规则（`/api/*`、`/page/*` 等）先行命中。顺序不能反。
 
 ### 6.4 不要按扩展名写规则
 
@@ -353,7 +358,7 @@ for i in 1 2; do
 done
 ```
 
-期望：第二次请求返回 `HIT` 并带 `Age`。台标响应头为 `public, max-age=86400`。
+期望：第二次请求返回 `HIT` 并带 `Age`。源站台标头为 `public, max-age=86400`。控制台使用强制 TTL 时，以控制台 TTL 为准。
 
 完整验收流程见 [`../tests/06-cdn-console.md`](../tests/06-cdn-console.md)。
 
@@ -369,7 +374,7 @@ done
 | 清单仍给 `http://` | 缺少 `X-Forwarded-Proto` | 回源加 `X-Forwarded-Proto: https`，或设置 `public_base` |
 | 切片 404 | 切片路径被缓存成了旧清单地址 | Purge。确认规则 A 不缓存清单 |
 | 回源 502 | CDN 回源地址或端口错误 | 检查源站域名、端口、防火墙 |
-| 面板被缓存 | 规则 A 缺少 `/page/*` 或 `/api/*` | 补规则 A |
+| 面板被缓存 | 不缓存规则缺少 `/page/*` 或 `/api/*` | 补不缓存规则 |
 | 新切片一直 `BYPASS` | 缺少 `/media/*` 缓存规则 | 补缓存规则。确认兜底规则在最后 |
 | 缓存命中率低 | 每个 POP 各自 Miss，或伪装路径未命中 | 检查规则覆盖。多 POP 场景属正常 |
 

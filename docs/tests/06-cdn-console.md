@@ -316,9 +316,10 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq -r
 ```text
 /api/*
 /page/*
-/l/*
 /logo/api/*
 ```
+
+`/l/*` 属于 §3.8 的规则 A 补充。它必须排在规则 B 之前。`/logo/api/*` 也在规则 A 补充中。
 
 新增规则，缓存：
 
@@ -370,10 +371,11 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq -r
 
 | 路径形状 | 源码 | 规则 |
 | --- | --- | --- |
-| `/api/share/pull` | `src/http.rs:38` | `/api/share/*` |
-| `/logo/api/*` | `src/http.rs:35` | `/logo/api/*` |
-| `/__assets/*` | `src/http.rs:59` | `/__assets/*` |
-| `/subtitle/*` | `src/http.rs:171-175` | `/subtitle/*` |
+| `/api/share/pull` | `src/http.rs:31` | `/api/share/*` |
+| `/l/*` | `src/http/legacy.rs:94` | `/l/*` |
+| `/logo/api/*` | `src/http/legacy.rs:97` | `/logo/api/*` |
+| `/__assets/*` | `src/http/legacy.rs:100` | `/__assets/*` |
+| `/subtitle/*` | `src/http/legacy.rs:88` | `/subtitle/*` |
 | `/{gid}/{cid}/{track}/index.txt` | `src/dash_hls.rs:998-1000` | `/*/*/*/index.txt` |
 | `/{gid}/{cid}/{track}/index.m3u8` | `src/dash_hls.rs:998-1000` | `/*/*/*/index.m3u8` |
 | `/{gid}/{cid}/dash-timeshift/{track}/playlist` | `src/dash_timeshift.rs:7` | `/*/*/dash-timeshift/*/playlist` |
@@ -387,10 +389,13 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq -r
 | `/{gid}/{cid}/timeshift/<16位十六进制>.<ext>` | `src/timeshift.rs:7` | `/*/*/timeshift/*` |
 | `/{gid}/{cid}/{track}/<文件名>` | `src/dash_hls.rs:860-871` | `/*/*/*/*` |
 | `/{gid}/{cid}/dash-timeshift/{track}/<文件名>` | `src/dash_timeshift.rs:7` | `/*/*/dash-timeshift/*/*` |
-| `/assets/*` | `src/http.rs:60` | `/assets/*` |
-| `/logo/*` | `src/http.rs:36` | `/logo/*` |
+| `/{gid}/{cid}/l/<exp>/<sig>/<文件名>` | `src/http/legacy.rs:161-175` | `/*/*/l/*/*/*` |
+| `/assets/*` | `src/http/legacy.rs:103` | `/assets/*` |
+| `/logo/*` | `src/http/legacy.rs:97` | `/logo/*` |
 
-`/*/*/*/*` 会匹配四段路径。规则 A 的 `/api/*`、`/page/*`、`/panel*` 与 `/epg*` 先行命中。顺序不能反。
+`/*/*/l/*/*/*` 匹配旧的签名切片。控制台不支持多段通配符时，不要加这条规则。这些路径会落到兜底不缓存规则。功能正常，但不缓存。
+
+`/*/*/*/*` 会匹配四段路径。规则 A、规则 A 补充与新增不缓存规则（`/api/*`、`/page/*` 等）先行命中。顺序不能反。
 
 ### 3.9 保存并刷新
 
@@ -571,7 +576,10 @@ curl -sS -o /dev/null -D - "$CDN/api/sub/<令牌>/playlist.m3u" | sed -n '1,25p'
 面板静态资源：
 
 ```bash
-curl -sS -o /dev/null -D - "$CDN/static/panel/panel.js" | sed -n '1,25p'
+for i in 1 2; do
+  echo "--- request $i"
+  curl -sS -o /dev/null -D - "$CDN/static/panel/panel.js" | sed -n '1,25p'
+done
 ```
 
 预期：按缓存规则处理。第一次 `MISS`，第二次 `HIT`。源站给 `public, max-age=31536000, immutable`（`src/http/static_assets.rs:49-55`）。文件名以实际构建产物为准。
@@ -778,16 +786,16 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/config" \
 | 清单给 `http://` | 未下发 XFP；或 CDN 改写了 Host | `docs/design/06-low-spec-optimization.md:140` |
 | 源站命中返回 `private` | 只能「遵循源站头」的 CDN 不缓存。改用强制 TTL，或开 `[cdn].shared_cache_hits=true` | `src/http/routes/stream.rs:57-70` |
 | 上游失败被缓存成 200 空体 | 开 `[cdn].enabled=true`，设 `empty_status=502` | `src/http/routes/stream.rs:1579-1594` |
-| 订阅清单被缓存 | 源站已发 `Cache-Control: private, no-store`。检查规则 A 是否仍 BYPASS `/api/sub/*`（旧 `/sub/*`） | `src/http/routes/sub.rs:60-66` |
+| 订阅清单被缓存 | 源站已发 `Cache-Control: private, no-store`。检查不缓存规则是否仍 BYPASS `/api/sub/*`（旧 `/sub/*`） | `src/http/routes/sub.rs:60-66` |
 | 切片 URL 每 5 分钟变一次 | 正常。时间窗签名会让路径变。缓存键必须包含 URI 路径 | `src/sign.rs` |
 | 切片返回 `302` | 签名过期或密钥被改。播放器重拉清单即恢复 | `src/http/routes/stream.rs` |
 | 两个用户拿到不同切片 URL | 时间窗不同或密钥不同。检查系统时钟与 `slice_sign_window_secs` | `src/sign.rs` |
 | 面板 JS/CSS 不缓存 | `/static/panel/*` 不在缓存规则。补 CACHE | `src/http/static_assets.rs:49-55` |
-| 面板页面被缓存 | `/page/*` 不在规则 A。补 BYPASS | `src/http/static_assets.rs:31-39` |
-| `/api/panel/*` 被缓存 | `/api/*` 不在规则 A。补 BYPASS | `src/http.rs:45` |
+| 面板页面被缓存 | `/page/*` 不在不缓存规则。补 BYPASS | `src/http/static_assets.rs:31-39` |
+| `/api/panel/*` 被缓存 | `/api/*` 不在不缓存规则。补 BYPASS | `src/http.rs:45` |
 | DASH 轨道清单被缓存 | 四段路径不在 `/*/*/index.txt`。补 BYPASS | `src/dash_hls.rs:998-1000` |
 | 时移切片不缓存 | `/media/{gid}/{cid}/timeshift/*` 不在缓存规则。补 CACHE | `src/timeshift.rs:7` |
-| DASH 时移清单被缓存 | `/api/play/{gid}/{cid}/dash-timeshift/*` 不在规则 A。补 BYPASS | `src/dash_timeshift.rs:7` |
+| DASH 时移清单被缓存 | `/api/play/{gid}/{cid}/dash-timeshift/*` 不在不缓存规则。补 BYPASS | `src/dash_timeshift.rs:7` |
 | `HIT` 但 `content-length` 变化 | CDN 压缩或转码。关闭内容压缩改写与图片优化 | `docs/design/06-low-spec-optimization.md:69` |
 | 源站 `max-age` 不是推荐 TTL | 检查 `[cache.ttl].segment_secs`。`0` 时用实测值，无实测 600 | `src/http/routes/stream.rs` 的 `segment_ttl_secs` |
 | `ttl_source` 显示「手动配置」但 TTL 未手填 | 检查 `cache.ttl.segment_secs`。磁盘上限手填只影响 `cap_source` | `src/cache_gc.rs` 的 `recommendation` |
