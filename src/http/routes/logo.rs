@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::{
     http::{error::ApiError, ext::PanelAuth},
-    logo,
+    logo, paths,
     state::AppState,
 };
 
@@ -29,7 +29,9 @@ fn list_body(cache: &str) -> Value {
     })
 }
 
-/// `GET /logo/<file>`——公开取图，`public, max-age=86400`。
+/// `GET /static/logo/<file>`（旧 `/logo/<file>`）——公开取图。
+///
+/// 文件名不带哈希，缓存窗口要短：`public, max-age=3600`。
 pub async fn file(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
     let Some(file) = logo::sanitize(&name) else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
@@ -52,7 +54,7 @@ pub async fn file(State(state): State<Arc<AppState>>, Path(name): Path<String>) 
     let mut response = ([(header::CONTENT_TYPE, mime)], body).into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=86400"),
+        HeaderValue::from_static("public, max-age=3600"),
     );
     response
 }
@@ -173,6 +175,15 @@ fn channel_logo(channel: &crate::config::model::Channel) -> Option<String> {
         .map(str::to_string)
 }
 
+/// 从频道台标值提取文件名。
+///
+/// 旧 `/logo/a.png` 与新 `/static/logo/a.png` 都返回 `Some("a.png")`。
+/// 外部 URL 返回 `None`。
+fn logo_file(value: &str) -> Option<String> {
+    let normalized = paths::normalize_asset_url(value);
+    normalized.strip_prefix("/static/logo/").map(str::to_string)
+}
+
 /// `GET /panel/api/logo/match-report`——缺台标、坏引用与未使用。
 pub async fn match_report(
     PanelAuth(_): PanelAuth,
@@ -198,9 +209,9 @@ pub async fn match_report(
                 }));
                 continue;
             };
-            if let Some(file) = value.strip_prefix("/logo/") {
-                if files.contains(file) {
-                    used.insert(file.to_string());
+            if let Some(file) = logo_file(&value) {
+                if files.contains(file.as_str()) {
+                    used.insert(file);
                 } else {
                     broken.push(json!({
                         "gid": group.id,
@@ -273,7 +284,7 @@ pub async fn apply(
                 .ok_or_else(|| anyhow::anyhow!("Channel not found"))?;
             channel.extra.insert(
                 "logo".into(),
-                serde_json::Value::String(format!("/logo/{safe}")),
+                serde_json::Value::String(paths::static_path(&format!("/logo/{safe}"))),
             );
             Ok(())
         })
@@ -289,7 +300,7 @@ pub async fn apply(
         "ok": true,
         "gid": gid,
         "cid": cid,
-        "logo": format!("/logo/{safe}"),
+        "logo": paths::static_path(&format!("/logo/{safe}")),
     })))
 }
 
@@ -448,4 +459,18 @@ fn extra_u64(config: &crate::config::Config, key: &str, default: u64) -> u64 {
         .and_then(serde_json::Value::as_i64)
         .map(|value| value.max(0) as u64)
         .unwrap_or(default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logo_file_accepts_old_and_new_prefixes() {
+        assert_eq!(logo_file("/logo/a.png").as_deref(), Some("a.png"));
+        assert_eq!(logo_file("/static/logo/a.png").as_deref(), Some("a.png"));
+        assert_eq!(logo_file("https://cdn.example/logo/a.png"), None);
+        assert_eq!(logo_file("/static/assets/a.png"), None);
+        assert_eq!(logo_file(""), None);
+    }
 }

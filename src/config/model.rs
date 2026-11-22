@@ -132,7 +132,9 @@ impl Config {
     }
 
     /// 查本地 HLS 入口。
-    pub fn asset_local(&self, url: &str) -> Option<&str> {
+    ///
+    /// 旧 `/assets/*` 值归一化为新 `/static/assets/*` 前缀。
+    pub fn asset_local(&self, url: &str) -> Option<String> {
         self.extra
             .get("assets")
             .and_then(Value::as_object)
@@ -140,6 +142,7 @@ impl Config {
             .and_then(Value::as_object)
             .and_then(|map| map.get(url))
             .and_then(Value::as_str)
+            .map(crate::paths::normalize_asset_url)
     }
 
     /// 频道的有效上游代理：频道级优先，其次分组级。
@@ -1520,6 +1523,25 @@ mod tests {
     fn ip_guard_is_on_by_default() {
         assert!(AuthCfg::default().ip_guard_enabled);
         assert!(Config::default().auth.ip_guard_enabled);
+    }
+
+    #[test]
+    fn asset_local_normalizes_legacy_prefix() {
+        let raw = serde_json::json!({
+            "assets": {
+                "map": {
+                    "http://upstream/placeholder.mp4": "/assets/convert/x/index.m3u8"
+                }
+            }
+        });
+        let config: Config = serde_json::from_value(raw).expect("解析");
+        assert_eq!(
+            config
+                .asset_local("http://upstream/placeholder.mp4")
+                .as_deref(),
+            Some("/static/assets/convert/x/index.m3u8")
+        );
+        assert_eq!(config.asset_local("http://missing"), None);
     }
 
     #[test]

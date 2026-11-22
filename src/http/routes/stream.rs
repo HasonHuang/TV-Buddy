@@ -1713,7 +1713,8 @@ fn placeholder(config: &Config) -> Response {
 }
 
 fn redirect_asset(config: &Config, url: &str) -> Response {
-    redirect(config.asset_local(url).unwrap_or(url))
+    let target = config.asset_local(url).unwrap_or_else(|| url.to_string());
+    redirect(&target)
 }
 
 /// 手写 302（axum 的 `Redirect::temporary` 是 307）。

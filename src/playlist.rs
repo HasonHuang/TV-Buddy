@@ -15,6 +15,7 @@ use crate::{
         Config,
     },
     health::Health,
+    paths,
     quality::{
         rules::{effective_rules, Reason},
         state::{url_hash, QualityState},
@@ -253,6 +254,7 @@ fn push_entry(
     let logo = string_field(channel, "logo")
         .or_else(|| string_field(channel, "tvg_logo"))
         .unwrap_or_default();
+    let logo = paths::normalize_asset_url(&logo);
     let group_title = if group.name.is_empty() {
         group.id.clone()
     } else {
@@ -390,6 +392,24 @@ mod tests {
         let body = render_user(&config, &admin(), "http://host", "tok", None, None);
         assert!(body.contains("http://upstream/x.m3u8"));
         assert!(!body.contains("/g5/c1"));
+    }
+
+    #[test]
+    fn channel_logo_uses_static_prefix() {
+        let mut config = config_with(vec![group("g1", "public", "proxy")]);
+        config.groups[0].channels[0].extra.insert(
+            "logo".into(),
+            serde_json::Value::String("/logo/a.png".into()),
+        );
+        let body = render_user(&config, &admin(), "http://host", "tok", None, None);
+        assert!(body.contains("tvg-logo=\"/static/logo/a.png\""));
+
+        config.groups[0].channels[0].extra.insert(
+            "logo".into(),
+            serde_json::Value::String("https://cdn.example/a.png".into()),
+        );
+        let body = render_user(&config, &admin(), "http://host", "tok", None, None);
+        assert!(body.contains("tvg-logo=\"https://cdn.example/a.png\""));
     }
 
     #[test]

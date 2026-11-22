@@ -2617,15 +2617,19 @@ async fn logo_library_upload_serve_and_delete() {
     let list: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     assert_eq!(list["count"], 1);
-    assert_eq!(list["logos"][0]["url"], "/logo/cctv1.png");
+    assert_eq!(list["logos"][0]["url"], "/static/logo/cctv1.png");
 
-    // 公开取图。
+    // 公开取图：新旧前缀都可用，响应一致。
     let response = fetch(&fixture, "/logo/cctv1.png").await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(header(&response, "content-type"), "image/png");
-    assert_eq!(header(&response, "cache-control"), "public, max-age=86400");
+    assert_eq!(header(&response, "cache-control"), "public, max-age=3600");
     let bytes = response.bytes().await.expect("读字节");
     assert_eq!(&bytes[..4], &[0x89, 0x50, 0x4e, 0x47], "应为 PNG 魔数");
+    let response = fetch(&fixture, "/static/logo/cctv1.png").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header(&response, "content-type"), "image/png");
+    assert_eq!(header(&response, "cache-control"), "public, max-age=3600");
 
     // 缺文件与越界名 → 404。
     for path in [
@@ -2761,10 +2765,13 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
 
     let response = fetch(&fixture, "/assets/convert/demo/index.m3u8").await;
     assert_eq!(response.status(), StatusCode::OK);
+    let response = fetch(&fixture, "/static/assets/convert/demo/index.m3u8").await;
+    assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         header(&response, "content-type"),
         "application/vnd.apple.mpegurl"
     );
+    assert_eq!(header(&response, "cache-control"), "public, max-age=86400");
 
     let response = fixture
         .client
@@ -2778,6 +2785,12 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         fetch(&fixture, "/assets/convert/demo/index.m3u8")
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        fetch(&fixture, "/static/assets/convert/demo/index.m3u8")
             .await
             .status(),
         StatusCode::NOT_FOUND
@@ -3643,7 +3656,7 @@ async fn logo_rename_apply_and_match_report() {
         .await
         .expect("读正文");
     assert!(
-        playlist.contains("tvg-logo=\"/logo/cctv1.png\""),
+        playlist.contains("tvg-logo=\"/static/logo/cctv1.png\""),
         "{playlist}"
     );
 

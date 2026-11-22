@@ -19,6 +19,8 @@ type Entry = {
   ext: string;
   bytes: number;
   mtime: number;
+  /** 后端归一化后的公开地址；存在时优先使用。 */
+  url?: string;
 };
 
 type Kind = 'assets' | 'subtitle';
@@ -77,12 +79,12 @@ type TranslationInfo = {
   cached: number;
 };
 
-/** 配置里指向 `/assets/<文件名>` 的地址集合（递归扫所有字符串）。 */
+/** 配置里指向 `/assets/` 或 `/static/assets/` 的地址集合（递归扫所有字符串）。 */
 function referencedNames(config: unknown): Set<string> {
   const names = new Set<string>();
   const visit = (node: unknown): void => {
     if (typeof node === 'string') {
-      const match = /\/assets\/([^/?#"]+)/.exec(node);
+      const match = /\/(?:static\/)?assets\/([^/?#"]+)/.exec(node);
       if (match) names.add(decodeURIComponent(match[1]));
       return;
     }
@@ -187,8 +189,10 @@ function Library({
     }
   }
 
-  async function copyLink(name: string) {
-    const url = `${location.origin}/assets/${encodeURIComponent(name)}`;
+  async function copyLink(entry: Entry) {
+    const url = entry.url
+      ? new URL(entry.url, location.origin).toString()
+      : `${location.origin}/static/assets/${encodeURIComponent(entry.file)}`;
     setMessage((await copyText(url)) ? `已复制 ${url}` : '复制失败，请手动复制');
   }
 
@@ -312,7 +316,7 @@ function Library({
                     <button
                       className="icon-btn"
                       title="复制这个素材的公网地址"
-                      onClick={() => void copyLink(file.file)}
+                      onClick={() => void copyLink(file)}
                     >
                       复制地址
                     </button>

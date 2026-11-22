@@ -24,6 +24,7 @@ use crate::{
         error::ApiError,
         ext::{PanelAuth, PanelUser},
     },
+    paths,
     state::AppState,
     subtitle, translate,
 };
@@ -838,7 +839,7 @@ pub async fn convert(
             stderr.trim().chars().take(500).collect::<String>()
         )));
     }
-    let local = format!("/assets/convert/{digest}/index.m3u8");
+    let local = paths::static_path(&format!("/assets/convert/{digest}/index.m3u8"));
     set_asset_map(&state, &url, Some(&local))
         .map_err(|error| ApiError::internal(format!("写配置失败: {error:#}")))?;
     Ok(Json(json!({
@@ -976,11 +977,11 @@ fn set_asset_map(state: &Arc<AppState>, url: &str, local: Option<&str>) -> anyho
 
 async fn remove_asset_url(state: &Arc<AppState>, url: &str) -> Result<Json<Value>, ApiError> {
     let config = state.snapshot();
-    let local = config.asset_local(url).map(str::to_string);
+    let local = config.asset_local(url);
     set_asset_map(state, url, None)
         .map_err(|error| ApiError::internal(format!("写配置失败: {error:#}")))?;
-    if let Some(local) = local {
-        if let Some(relative) = local.strip_prefix("/assets/") {
+    if let Some(local) = local.as_deref() {
+        if let Some(relative) = local.strip_prefix("/static/assets/") {
             let path = FsPath::new(&config.cache.disk_path)
                 .join("assets")
                 .join(relative);
@@ -992,7 +993,7 @@ async fn remove_asset_url(state: &Arc<AppState>, url: &str) -> Result<Json<Value
     Ok(Json(json!({ "ok": true, "removed": 1 })))
 }
 
-/// `GET /assets/*path`——公开读取本地 HLS 入口与切片。
+/// `GET /static/assets/*path`（旧 `/assets/*path`）——公开读取本地 HLS 入口与切片。
 pub async fn served(State(state): State<Arc<AppState>>, Path(path): Path<String>) -> Response {
     let cache = state.snapshot().cache.disk_path.clone();
     let mut full = FsPath::new(&cache).join("assets");
@@ -1019,7 +1020,7 @@ pub async fn served(State(state): State<Arc<AppState>>, Path(path): Path<String>
     let mut response = ([(header::CONTENT_TYPE, mime)], bytes).into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=3600"),
+        HeaderValue::from_static("public, max-age=86400"),
     );
     response
 }

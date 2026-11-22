@@ -225,8 +225,8 @@ code "${A[@]}" "$B/panel/api/groups/ga/export" >/dev/null
 check "DASH 组外的全轨道不显示（mode）" "proxy" "$(jget 'd["mode"]')"
 
 # --- 前端已内嵌 A9/A10 的入口文案（ASCII needle，esbuild 会转义中文） ---
-PAGE=$(curl -s -H "Authorization: Bearer $T" "$B/panel")
-ASSET=$(printf '%s' "$PAGE" | grep -o '/__assets/assets/panel-[A-Za-z0-9_.-]*\.js' | head -n1)
+PAGE=$(curl -s -H "Authorization: Bearer $T" "$B/page/panel")
+ASSET=$(printf '%s' "$PAGE" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]*\.js' | head -n1)
 check "面板页引用 panel 资源" "yes" "$([ -n "$ASSET" ] && echo yes || echo no)"
 JS=$(curl -s "$B$ASSET")
 needle() {

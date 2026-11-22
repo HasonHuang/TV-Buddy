@@ -1,6 +1,6 @@
 //! 台标库：本地文件列表、写入、删除。
 //!
-//! 文件放在 `<cache>/logos/`（F-011 §6）。公开取图走 `/logo/<file>`。
+//! 文件放在 `<cache>/logos/`（F-011 §6）。公开取图走 `/static/logo/<file>`。
 //! 只接受白名单扩展名；文件名去掉路径成分。
 
 use std::{
@@ -11,6 +11,8 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
+
+use crate::paths;
 
 /// 允许的图片扩展名。
 pub const ALLOWED_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "bmp", "avif"];
@@ -110,7 +112,7 @@ pub fn list(cache_dir: &str) -> Vec<Entry> {
                 ext,
                 bytes: meta.len(),
                 mtime,
-                url: format!("/logo/{file}"),
+                url: paths::static_path(&format!("/logo/{file}")),
             })
         })
         .collect();
@@ -137,7 +139,7 @@ pub fn write(cache_dir: &str, name: &str, ext: &str, data: &[u8]) -> Result<Entr
         .map(|value| value.as_secs())
         .unwrap_or(0);
     Ok(Entry {
-        url: format!("/logo/{file}"),
+        url: paths::static_path(&format!("/logo/{file}")),
         has_original: false,
         animated: false,
         file,
@@ -325,7 +327,7 @@ mod tests {
         let cache = dir.to_string_lossy().to_string();
         let entry = write(&cache, "台标 1", "png", b"data").expect("应写入");
         assert_eq!(entry.file, "台标_1.png");
-        assert_eq!(entry.url, "/logo/台标_1.png");
+        assert_eq!(entry.url, "/static/logo/台标_1.png");
         let entries = list(&cache);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].bytes, 4);
@@ -393,7 +395,7 @@ pub fn rename(cache_dir: &str, file: &str, name: &str) -> Result<Entry> {
             ext,
             bytes: fs::metadata(&source).map(|meta| meta.len()).unwrap_or(0),
             mtime: 0,
-            url: format!("/logo/{target_name}"),
+            url: paths::static_path(&format!("/logo/{target_name}")),
         });
     }
     if target.exists() {
@@ -407,7 +409,7 @@ pub fn rename(cache_dir: &str, file: &str, name: &str) -> Result<Entry> {
     }
     let meta = fs::metadata(&target).ok();
     Ok(Entry {
-        url: format!("/logo/{target_name}"),
+        url: paths::static_path(&format!("/logo/{target_name}")),
         has_original: orig_dir(cache_dir).join(&target_name).is_file(),
         animated: is_animated(&target),
         file: target_name,

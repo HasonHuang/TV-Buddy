@@ -70,8 +70,9 @@ check "上传落库" "cctv1.png" "$(python3 -c 'import json,sys;print(json.load(
 
 check "取图 200" "200" "$(curl -s -o "$WORK/logo.png" -w '%{http_code}' "$B/logo/cctv1.png")"
 check "取图类型" "image/png" "$(header "$B/logo/cctv1.png" content-type)"
-check "取图缓存头" "public, max-age=86400" "$(header "$B/logo/cctv1.png" cache-control)"
+check "取图缓存头" "public, max-age=3600" "$(header "$B/logo/cctv1.png" cache-control)"
 check "取图魔数" "89504e47" "$(od -An -tx1 -N4 "$WORK/logo.png" | tr -d ' ')"
+check "新前缀取图 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$B/static/logo/cctv1.png")"
 check "列表计数" "1" "$(curl -s -H "$A" "$B/panel/api/logo/list" | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])')"
 check "缺文件 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/missing.png")"
 check "越界名 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/..%2F..%2Fconfig.json")"
@@ -103,7 +104,7 @@ check "应用台标 200" "200" "$APPLY"
 PTOK=$(curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/me" \
   | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
 check "订阅含台标" "1" \
-  "$(curl -s "$B/sub/$PTOK/playlist.m3u" | grep -c 'tvg-logo="/logo/cctv1.png"' || true)"
+  "$(curl -s "$B/sub/$PTOK/playlist.m3u" | grep -c 'tvg-logo="/static/logo/cctv1.png"' || true)"
 
 # 匹配报告：hunan.png 未使用。
 curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/logo/match-report" > "$WORK/report.json"
@@ -165,7 +166,7 @@ check "还原回原图大小" "70" \
     python3 -c 'import json,sys;print(next(l["bytes"] for l in json.load(sys.stdin)["logos"] if l["file"]=="anim.png"))')"
 
 # --- 前端接线（A2）：动效与浏览器侧转码参数已内嵌在面板包 ---
-ASSET=$(curl -s "$B/panel" | grep -oE '/__assets/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+ASSET=$(curl -s "$B/page/panel" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
 check "面板引用入口资源" "yes" "$([ -n "$ASSET" ] && echo yes || echo no)"
 LJS=$(curl -s "$B$ASSET")
 for needle in 'logo/animate' 'logo/restore' 'toBlob' 'image/webp'; do

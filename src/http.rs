@@ -56,6 +56,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/:gid/:file", get(routes::stream::entry))
         .route("/:gid/:cid/*path", get(routes::stream::wildcard))
         // 内嵌页面（免登录）
+        .route("/page/panel", get(static_assets::panel_page))
+        .route("/page/panel/", get(static_assets::panel_page))
+        .route("/page/unban", get(static_assets::unban_page))
+        .route("/static/panel/*path", get(static_assets::asset))
+        .route("/static/logo/:file", get(routes::logo::file))
+        .route("/static/assets/*path", get(routes::media::served))
+        // 旧前缀在本大版本内继续可用，响应与新前缀一致。
         .route("/panel", get(static_assets::panel_page))
         .route("/panel/", get(static_assets::panel_page))
         .route(

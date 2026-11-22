@@ -381,7 +381,7 @@ export function LogosPage() {
         <>
       <div className="card">
         <p className="muted">
-          共 {logos.length} 个台标。公开地址形如 <code className="mono">/logo/&lt;文件名&gt;</code>。
+          共 {logos.length} 个台标。公开地址形如 <code className="mono">/static/logo/&lt;文件名&gt;</code>。
         </p>
         {authed && (
           <div

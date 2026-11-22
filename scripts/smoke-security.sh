@@ -142,7 +142,7 @@ check "开启 IP 管控后 /unban/whoami 可用" "True" \
     python3 -c 'import json,sys;print(json.load(sys.stdin).get("enabled"))')"
 
 # 前端已内嵌访问控制卡片（ASCII needle：esbuild 会转义中文）。
-ASSET=$(curl -s "$B/panel" | grep -oE '/__assets/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+ASSET=$(curl -s "$B/page/panel" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
 PJS=$(curl -s "$B$ASSET")
 for needle in 'auth_fail_window_secs' 'auth_fail_ban_escalate_window_secs' \
   'max_sessions_per_ip' 'violation_decay_secs' 'ip_guard_enabled'; do

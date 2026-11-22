@@ -75,8 +75,8 @@ done
 echo "/health = ok"
 
 # 内嵌前端：面板页引用的脚本必须含新分区。
-page=$(wget -qO- http://127.0.0.1:9900/panel)
-asset=$(printf "%s" "$page" | grep -o "/__assets/[^\"]*panel-[^\"]*\.js" | head -1)
+page=$(wget -qO- http://127.0.0.1:9900/page/panel)
+asset=$(printf "%s" "$page" | grep -o "/static/panel/[^\"]*panel-[^\"]*\.js" | head -1)
 [ -n "$asset" ] || { echo "面板缺少脚本引用"; kill $pid 2>/dev/null || true; exit 1; }
 wget -qO /tmp/panel.js "http://127.0.0.1:9900$asset"
 grep -q "security/token" /tmp/panel.js || { echo "面板资源不含安全分区"; kill $pid 2>/dev/null || true; exit 1; }

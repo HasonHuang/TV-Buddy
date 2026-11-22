@@ -219,7 +219,7 @@ check "配置里不再有旧口令键" "0" "$(grep -c 'password_sha256' "$WORK/c
 # 5) 面板资源已内嵌：新设置页的字符串出现在下发的前端包里。
 #
 # 只查 ASCII 串：esbuild 默认把非 ASCII 转成 \uXXXX，中文串查不到。
-ASSET=$(curl -s "$B/panel" | grep -oE '/__assets/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+ASSET=$(curl -s "$B/page/panel" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
 check "面板 HTML 引用入口 js" "yes" "$([ -n "$ASSET" ] && echo yes || echo no)"
 BUNDLE=$(curl -s "$B$ASSET")
 for needle in \
@@ -231,7 +231,7 @@ for needle in \
   'cache.ttl.segment_secs' \
   'cache.segments.per_channel_max' \
   'share.follower_urls' \
-  '/assets/' \
+  '/static/assets/' \
   'cache.dash.watchdog_rebuild_stagger_ms' \
   'DraftCtx' \
   '/subs/groups' \

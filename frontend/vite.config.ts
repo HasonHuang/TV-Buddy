@@ -1,10 +1,10 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-// 产物前缀与目标一致：/__assets/*（S-EP-16）。
+// 产物前缀与新路径一致：/static/panel/*（S-EP-16）。
 // 多页入口：面板、自助解封（F-003）。
 export default defineConfig({
-  base: '/__assets/',
+  base: '/static/panel/',
   plugins: [react()],
   build: {
     outDir: 'dist',

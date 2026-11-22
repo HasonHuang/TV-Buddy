@@ -237,7 +237,7 @@ check "删除规则 200" "200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "$A" "$B/panel/api/epg/rules/$RULE_ID")"
 
 # 前端已内嵌这两张卡片（ASCII needle）。
-ASSET=$(curl -s -H "$A" "$B/panel" | grep -oE '/__assets/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+ASSET=$(curl -s -H "$A" "$B/page/panel" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
 PJS=$(curl -s "$B$ASSET")
 for needle in 'epg/cron-preview' 'epg/translate/run' 'epg/translate/clear-engine' \
   'epg/translate/mtran/test' 'mtran_max_per_round' 'epg/sources' 'epg/bindings' 'epg/rules'; do

@@ -2107,7 +2107,7 @@ export function GroupsPage() {
             <Field label="频道台标地址" tip="播放器列表里显示的台标地址。可以填站内路径或外部图片地址。">
               <input
                 value={channelForm.form.logo}
-                placeholder="/logo/x.png 或 https://…"
+                placeholder="/static/logo/x.png 或 https://…"
                 onChange={(event) =>
                   setChannelForm({
                     ...channelForm,
