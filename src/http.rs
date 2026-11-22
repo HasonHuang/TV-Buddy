@@ -13,7 +13,7 @@ use axum::{
     Router,
 };
 
-use crate::state::AppState;
+use crate::{paths, state::AppState};
 
 /// 组装路由表。
 ///
@@ -30,6 +30,28 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/subs/status", get(routes::subs::status))
         .route("/subs/groups", post(routes::subs::groups))
         .route("/subs/preview", post(routes::subs::preview))
+        // 旧的非面板管理路径保留到 Task 10。新位置在面板前缀下。
+        .route("/subtitle/mtran/test", post(routes::media::mtran_test))
+        .route(
+            "/subtitle/translate/clear",
+            post(routes::media::translate_clear),
+        )
+        .route("/epg/translate/status", get(routes::epg::translate_status))
+        .route("/epg/translate/models", get(routes::epg::translate_models))
+        .route("/epg/translate/run", post(routes::epg::translate_run))
+        .route("/epg/translate/probe", post(routes::epg::translate_probe))
+        .route(
+            "/epg/translate/mtran/test",
+            post(routes::epg::translate_mtran),
+        )
+        .route(
+            "/epg/translate/clear",
+            post(routes::epg::translate_clear_results),
+        )
+        .route(
+            "/epg/translate/clear-engine",
+            post(routes::epg::translate_clear),
+        )
         // 全局订阅已停用。保留路由是为了给出明确原因，而不是落进播放通配路由。
         .route("/playlist.m3u", get(routes::sub::gone))
         .route("/:gid/playlist.m3u", get(routes::sub::gone))
@@ -42,8 +64,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/sub/:token/epg.xml", get(routes::sub::epg))
         .route("/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
-        // 面板接口：未知路径固定 404 JSON，先于播放通配路由匹配。
-        .route("/panel/api/*rest", any(routes::panel::api_missing))
+        // 面板接口：旧前缀与新前缀使用同一套处理器，未知路径固定 404 JSON。
+        .nest("/panel/api", panel_api_routes())
+        .nest(paths::PANEL_API, panel_api_routes())
         // 播放链路（M2）
         // 订阅条目的路径令牌入口：`/l/<token>/<gid>/<cid>.m3u8`。
         .route("/l/:token/:gid/:file", get(routes::stream::token_entry))
@@ -71,387 +94,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/__assets/*path", get(static_assets::asset))
         .route("/assets/*path", get(routes::media::served))
-        // 面板接口（需要会话）
-        .route("/panel/api/login", post(routes::panel::login))
-        // 用户与设备（对齐 mpd-hls 的 /users）
-        .route(
-            "/panel/api/users",
-            get(routes::users::list).post(routes::users::create),
-        )
-        .route(
-            "/panel/api/users/channel-options",
-            get(routes::users::channel_options),
-        )
-        .route(
-            "/panel/api/users/:id",
-            put(routes::users::update).delete(routes::users::remove),
-        )
-        .route(
-            "/panel/api/users/:id/password",
-            put(routes::users::set_password),
-        )
-        .route(
-            "/panel/api/users/:id/tokens",
-            get(routes::users::list_tokens).post(routes::users::create_token),
-        )
-        .route(
-            "/panel/api/users/:id/tokens/:token",
-            put(routes::users::update_token).delete(routes::users::revoke_token),
-        )
-        .route("/panel/api/me", get(routes::users::me))
-        .route("/panel/api/logout", post(routes::panel::logout))
-        .route("/panel/api/status", get(routes::panel::status))
-        .route("/panel/api/health", get(routes::dash::health))
-        .route("/panel/api/quality/status", get(routes::quality::status))
-        .route("/panel/api/quality/results", get(routes::quality::results))
-        .route("/panel/api/quality/sources", get(routes::quality::sources))
-        .route(
-            "/panel/api/quality/effective",
-            get(routes::quality::effective),
-        )
-        .route(
-            "/panel/api/quality/schedule/preview",
-            post(routes::quality::schedule_preview),
-        )
-        .route("/panel/api/quality/run", post(routes::quality::run))
-        .route(
-            "/panel/api/quality/runs/:run_id",
-            get(routes::quality::run_status),
-        )
-        .route("/panel/api/quality/cancel", post(routes::quality::cancel))
-        .route("/panel/api/quality/preview", post(routes::quality::preview))
-        .route("/panel/api/subs/status", get(routes::subs::panel_status))
-        .route("/panel/api/subs/groups", post(routes::subs::panel_groups))
-        .route("/panel/api/subs/preview", post(routes::subs::panel_preview))
-        .route("/panel/api/subs/sync", post(routes::subs::panel_sync))
-        .route(
-            "/panel/api/subs/:id/content",
-            delete(routes::subs::panel_content),
-        )
-        .route(
-            "/panel/api/schedule",
-            get(routes::schedule::list).post(routes::schedule::create),
-        )
-        .route(
-            "/panel/api/schedule/from-epg",
-            post(routes::schedule::from_epg),
-        )
-        .route(
-            "/panel/api/schedule/download/*filename",
-            get(routes::schedule::download),
-        )
-        .route(
-            "/panel/api/schedule/:idx",
-            put(routes::schedule::update).delete(routes::schedule::remove),
-        )
-        .route(
-            "/panel/api/schedule/:idx/stop",
-            post(routes::schedule::stop),
-        )
-        .route(
-            "/panel/api/livestream",
-            get(routes::schedule::livestream_list),
-        )
-        .route(
-            "/panel/api/livestream/:gid/:cid/:action",
-            post(routes::schedule::livestream_switch),
-        )
-        .route(
-            "/panel/api/playlist",
-            get(routes::playlist::get).put(routes::playlist::update),
-        )
-        .route(
-            "/panel/api/playlist/settings",
-            put(routes::playlist::update_settings),
-        )
-        .route(
-            "/panel/api/playlist/sources",
-            post(routes::playlist::create_source),
-        )
-        .route(
-            "/panel/api/playlist/sources/:id",
-            put(routes::playlist::update_source).delete(routes::playlist::delete_source),
-        )
-        .route(
-            "/panel/api/playlist/sources/:id/disable",
-            post(routes::playlist::disable_source),
-        )
-        .route(
-            "/panel/api/playlist/sources/:id/enable",
-            post(routes::playlist::enable_source),
-        )
-        .route("/panel/api/dash/status", get(routes::dash::status))
-        .route(
-            "/panel/api/dash/tracks/:gid/:cid",
-            get(routes::dash::tracks),
-        )
-        .route("/panel/api/dash/scan-url", post(routes::dash::scan_url))
-        .route(
-            "/panel/api/dash-timeshift/status",
-            get(routes::dash::timeshift_status),
-        )
-        .route(
-            "/panel/api/config",
-            get(routes::panel::get_config).put(routes::panel::put_config),
-        )
-        .route("/panel/api/reload", post(routes::panel::reload))
-        .route("/panel/api/cache/stats", get(routes::admin::cache_stats))
-        .route("/panel/api/cache/flush", post(routes::admin::cache_flush))
-        .route("/panel/api/cdn/estimate", post(routes::cdn::estimate))
-        .route("/panel/api/stats", get(routes::admin::stats))
-        .route(
-            "/panel/api/metrics/history",
-            get(routes::admin::metrics_history),
-        )
-        .route("/panel/api/logs", get(routes::admin::logs))
-        .route("/panel/api/link-info", get(routes::security::link_info))
-        .route(
-            "/panel/api/security/ip/stats",
-            get(routes::security::ip_stats),
-        )
-        .route("/panel/api/security/ip/ban", post(routes::security::ip_ban))
-        .route(
-            "/panel/api/security/ip/unban",
-            post(routes::security::ip_unban),
-        )
-        .route(
-            "/panel/api/security/ip/unban-batch",
-            post(routes::security::ip_unban),
-        )
-        .route("/panel/api/backup", get(routes::backup::backup))
-        .route(
-            "/panel/api/restore",
-            post(routes::backup::restore)
-                .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
-        )
-        .route(
-            "/panel/api/assets/ffmpeg-status",
-            get(routes::media::ffmpeg_status),
-        )
-        .route(
-            "/panel/api/tools/ffmpeg/install",
-            post(routes::media::ffmpeg_install),
-        )
-        .route(
-            "/panel/api/tools/ffmpeg/remove",
-            post(routes::media::ffmpeg_remove),
-        )
-        .route("/panel/api/assets/list", get(routes::media::list))
-        .route("/panel/api/assets/convert", post(routes::media::convert))
-        .route(
-            "/panel/api/assets/candidates",
-            get(routes::media::candidates),
-        )
-        .route("/panel/api/assets/upload", post(routes::media::upload))
-        .route("/panel/api/assets/remove", post(routes::media::remove))
-        .route("/panel/api/assets/raw/:file", get(routes::media::raw))
-        .route("/panel/api/subtitle/list", get(routes::media::list))
-        .route("/panel/api/subtitle/upload", post(routes::media::upload))
-        .route("/panel/api/subtitle/remove", post(routes::media::remove))
-        .route("/panel/api/subtitle/raw/:file", get(routes::media::raw))
-        .route(
-            "/panel/api/subtitle/translate/status",
-            get(routes::media::translate_status),
-        )
-        .route(
-            "/panel/api/subtitle/translate",
-            post(routes::media::translate_subtitle),
-        )
-        .route(
-            "/panel/api/subtitle/translate/raw/:name",
-            get(routes::media::translate_raw),
-        )
-        .route("/subtitle/mtran/test", post(routes::media::mtran_test))
-        .route(
-            "/subtitle/translate/clear",
-            post(routes::media::translate_clear),
-        )
-        .route("/epg/translate/status", get(routes::epg::translate_status))
-        .route("/epg/translate/models", get(routes::epg::translate_models))
-        .route("/epg/translate/run", post(routes::epg::translate_run))
-        .route("/epg/translate/probe", post(routes::epg::translate_probe))
-        .route(
-            "/epg/translate/mtran/test",
-            post(routes::epg::translate_mtran),
-        )
-        .route(
-            "/epg/translate/clear",
-            post(routes::epg::translate_clear_results),
-        )
-        .route(
-            "/epg/translate/clear-engine",
-            post(routes::epg::translate_clear),
-        )
-        .route(
-            "/panel/api/resolver/scripts",
-            get(routes::media::resolver_list),
-        )
-        .route(
-            "/panel/api/resolver/script",
-            post(routes::media::resolver_save),
-        )
-        .route(
-            "/panel/api/resolver/remove",
-            post(routes::media::resolver_remove),
-        )
-        .route("/panel/api/logo/list", get(routes::logo::panel_list))
-        .route("/panel/api/logo/upload", post(routes::logo::upload))
-        .route("/panel/api/logo/delete", post(routes::logo::delete))
-        .route("/panel/api/logo/rename", post(routes::logo::rename))
-        .route("/panel/api/logo/restore", post(routes::logo::restore))
-        .route("/panel/api/logo/animate", post(routes::logo::animate))
-        .route(
-            "/panel/api/logo/match-report",
-            get(routes::logo::match_report),
-        )
-        .route("/panel/api/logo/apply", post(routes::logo::apply))
-        .route("/panel/api/logo/suggest", post(routes::logo::suggest))
-        // 面板把 `api()` 的路径拼在 `/panel/api` 后，EPG 翻译端点也要有面板别名。
-        .route(
-            "/panel/api/epg/translate/status",
-            get(routes::epg::translate_status),
-        )
-        .route(
-            "/panel/api/epg/translate/models",
-            get(routes::epg::translate_models),
-        )
-        .route(
-            "/panel/api/epg/translate/run",
-            post(routes::epg::translate_run),
-        )
-        .route(
-            "/panel/api/epg/translate/probe",
-            post(routes::epg::translate_probe),
-        )
-        .route(
-            "/panel/api/epg/translate/mtran/test",
-            post(routes::epg::translate_mtran),
-        )
-        .route(
-            "/panel/api/epg/translate/clear",
-            post(routes::epg::translate_clear_results),
-        )
-        .route(
-            "/panel/api/epg/translate/clear-engine",
-            post(routes::epg::translate_clear),
-        )
-        .route(
-            "/panel/api/subtitle/translate/clear",
-            post(routes::media::translate_clear),
-        )
-        .route(
-            "/panel/api/subtitle/mtran/test",
-            post(routes::media::mtran_test),
-        )
-        .route("/panel/api/epg/status", get(routes::epg::status))
-        .route("/panel/api/epg/refresh", post(routes::epg::refresh))
-        .route("/panel/api/epg/regenerate", post(routes::epg::regenerate))
-        .route("/panel/api/epg/mappings", get(routes::epg::mappings))
-        .route("/panel/api/epg/mapping", post(routes::epg::mapping))
-        .route(
-            "/panel/api/epg/sources",
-            get(routes::epg::sources).post(routes::epg::source_save),
-        )
-        .route(
-            "/panel/api/epg/sources/:id",
-            delete(routes::epg::source_delete),
-        )
-        .route(
-            "/panel/api/epg/sources/:id/refresh",
-            post(routes::epg::source_refresh),
-        )
-        .route("/panel/api/epg/bindings", get(routes::epg::bindings))
-        .route(
-            "/panel/api/epg/bindings/:gid/:cid",
-            put(routes::epg::binding_set).delete(routes::epg::binding_delete),
-        )
-        .route(
-            "/panel/api/epg/bindings/:gid/:cid/copy",
-            post(routes::epg::binding_copy),
-        )
-        .route(
-            "/panel/api/epg/rules",
-            get(routes::epg::rules).post(routes::epg::rule_save),
-        )
-        .route(
-            "/panel/api/epg/rules/preview",
-            post(routes::epg::rule_preview),
-        )
-        .route("/panel/api/epg/rules/:id", delete(routes::epg::rule_delete))
-        .route("/panel/api/epg/extra", post(routes::epg::extra))
-        .route("/panel/api/epg/scripts", get(routes::epg::scripts_list))
-        .route("/panel/api/epg/script", post(routes::epg::script_save))
-        .route(
-            "/panel/api/epg/script-delete",
-            post(routes::epg::script_delete),
-        )
-        .route(
-            "/panel/api/epg/cron-preview",
-            post(routes::epg::cron_preview),
-        )
-        .route(
-            "/panel/api/epg/programmes/:channel",
-            get(routes::epg::programmes),
-        )
-        .route(
-            "/panel/api/epg/suggest/:gid/:cid",
-            get(routes::epg::suggest),
-        )
-        .route("/panel/api/epg/search", get(routes::epg::search))
-        .route(
-            "/panel/api/epg/viewer-channels",
-            get(routes::epg::viewer_channels),
-        )
-        .route(
-            "/panel/api/epg/source-channels/:id",
-            get(routes::epg::source_channels),
-        )
-        .route(
-            "/panel/api/epg/tz-preview/:id",
-            get(routes::epg::tz_preview),
-        )
-        .route(
-            "/panel/api/epg/match-report",
-            get(routes::epg::match_report),
-        )
-        .route("/panel/api/groups", post(routes::groups::create_group))
-        .route("/panel/api/groups/export", get(routes::groups::export_all))
-        .route(
-            "/panel/api/groups/import",
-            post(routes::groups::import_groups),
-        )
-        .route(
-            "/panel/api/groups/import/force",
-            post(routes::groups::import_groups_force),
-        )
-        .route(
-            "/panel/api/groups/import/m3u",
-            post(routes::groups::import_m3u),
-        )
-        .route(
-            "/panel/api/groups/:gid",
-            put(routes::groups::update_group).delete(routes::groups::delete_group),
-        )
-        .route(
-            "/panel/api/groups/:gid/export",
-            get(routes::groups::export_group),
-        )
-        .route(
-            "/panel/api/groups/:gid/channels",
-            post(routes::groups::create_channel),
-        )
-        .route(
-            "/panel/api/groups/:gid/channels/:cid",
-            put(routes::groups::update_channel).delete(routes::groups::delete_channel),
-        )
-        .route(
-            "/panel/api/groups/:gid/detach",
-            post(routes::groups::detach_group),
-        )
-        .route(
-            "/panel/api/groups/:gid/channels/:cid/detach",
-            post(routes::groups::detach_channel),
-        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             routes::admin::count_request,
@@ -470,4 +112,254 @@ pub fn router(state: Arc<AppState>) -> Router {
             guard::admin_gate,
         ))
         .with_state(state)
+}
+
+/// 面板 API 路由。挂载在 `/panel/api` 与 `/api/panel`。
+///
+/// 路径都是相对子路径。未知路径返回 JSON 404。兜底同时登记为通配路由与
+/// 嵌套 fallback：播放通配路由（`/:gid/:cid/*path`）会匹配未知面板路径，
+/// 只登记 fallback 时请求到不了这里。
+fn panel_api_routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/login", post(routes::panel::login))
+        // 用户与设备（对齐 mpd-hls 的 /users）
+        .route(
+            "/users",
+            get(routes::users::list).post(routes::users::create),
+        )
+        .route(
+            "/users/channel-options",
+            get(routes::users::channel_options),
+        )
+        .route(
+            "/users/:id",
+            put(routes::users::update).delete(routes::users::remove),
+        )
+        .route("/users/:id/password", put(routes::users::set_password))
+        .route(
+            "/users/:id/tokens",
+            get(routes::users::list_tokens).post(routes::users::create_token),
+        )
+        .route(
+            "/users/:id/tokens/:token",
+            put(routes::users::update_token).delete(routes::users::revoke_token),
+        )
+        .route("/me", get(routes::users::me))
+        .route("/logout", post(routes::panel::logout))
+        .route("/status", get(routes::panel::status))
+        .route("/health", get(routes::dash::health))
+        .route("/quality/status", get(routes::quality::status))
+        .route("/quality/results", get(routes::quality::results))
+        .route("/quality/sources", get(routes::quality::sources))
+        .route("/quality/effective", get(routes::quality::effective))
+        .route(
+            "/quality/schedule/preview",
+            post(routes::quality::schedule_preview),
+        )
+        .route("/quality/run", post(routes::quality::run))
+        .route("/quality/runs/:run_id", get(routes::quality::run_status))
+        .route("/quality/cancel", post(routes::quality::cancel))
+        .route("/quality/preview", post(routes::quality::preview))
+        .route("/subs/status", get(routes::subs::panel_status))
+        .route("/subs/groups", post(routes::subs::panel_groups))
+        .route("/subs/preview", post(routes::subs::panel_preview))
+        .route("/subs/sync", post(routes::subs::panel_sync))
+        .route("/subs/:id/content", delete(routes::subs::panel_content))
+        .route(
+            "/schedule",
+            get(routes::schedule::list).post(routes::schedule::create),
+        )
+        .route("/schedule/from-epg", post(routes::schedule::from_epg))
+        .route(
+            "/schedule/download/*filename",
+            get(routes::schedule::download),
+        )
+        .route(
+            "/schedule/:idx",
+            put(routes::schedule::update).delete(routes::schedule::remove),
+        )
+        .route("/schedule/:idx/stop", post(routes::schedule::stop))
+        .route("/livestream", get(routes::schedule::livestream_list))
+        .route(
+            "/livestream/:gid/:cid/:action",
+            post(routes::schedule::livestream_switch),
+        )
+        .route(
+            "/playlist",
+            get(routes::playlist::get).put(routes::playlist::update),
+        )
+        .route("/playlist/settings", put(routes::playlist::update_settings))
+        .route("/playlist/sources", post(routes::playlist::create_source))
+        .route(
+            "/playlist/sources/:id",
+            put(routes::playlist::update_source).delete(routes::playlist::delete_source),
+        )
+        .route(
+            "/playlist/sources/:id/disable",
+            post(routes::playlist::disable_source),
+        )
+        .route(
+            "/playlist/sources/:id/enable",
+            post(routes::playlist::enable_source),
+        )
+        .route("/dash/status", get(routes::dash::status))
+        .route("/dash/tracks/:gid/:cid", get(routes::dash::tracks))
+        .route("/dash/scan-url", post(routes::dash::scan_url))
+        .route(
+            "/dash-timeshift/status",
+            get(routes::dash::timeshift_status),
+        )
+        .route(
+            "/config",
+            get(routes::panel::get_config).put(routes::panel::put_config),
+        )
+        .route("/reload", post(routes::panel::reload))
+        .route("/cache/stats", get(routes::admin::cache_stats))
+        .route("/cache/flush", post(routes::admin::cache_flush))
+        .route("/cdn/estimate", post(routes::cdn::estimate))
+        .route("/stats", get(routes::admin::stats))
+        .route("/metrics/history", get(routes::admin::metrics_history))
+        .route("/logs", get(routes::admin::logs))
+        .route("/link-info", get(routes::security::link_info))
+        .route("/security/ip/stats", get(routes::security::ip_stats))
+        .route("/security/ip/ban", post(routes::security::ip_ban))
+        .route("/security/ip/unban", post(routes::security::ip_unban))
+        .route("/security/ip/unban-batch", post(routes::security::ip_unban))
+        .route("/backup", get(routes::backup::backup))
+        .route(
+            "/restore",
+            post(routes::backup::restore)
+                .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
+        .route("/assets/ffmpeg-status", get(routes::media::ffmpeg_status))
+        .route("/tools/ffmpeg/install", post(routes::media::ffmpeg_install))
+        .route("/tools/ffmpeg/remove", post(routes::media::ffmpeg_remove))
+        .route("/assets/list", get(routes::media::list))
+        .route("/assets/convert", post(routes::media::convert))
+        .route("/assets/candidates", get(routes::media::candidates))
+        .route("/assets/upload", post(routes::media::upload))
+        .route("/assets/remove", post(routes::media::remove))
+        .route("/assets/raw/:file", get(routes::media::raw))
+        .route("/subtitle/list", get(routes::media::list))
+        .route("/subtitle/upload", post(routes::media::upload))
+        .route("/subtitle/remove", post(routes::media::remove))
+        .route("/subtitle/raw/:file", get(routes::media::raw))
+        .route(
+            "/subtitle/translate/status",
+            get(routes::media::translate_status),
+        )
+        .route(
+            "/subtitle/translate",
+            post(routes::media::translate_subtitle),
+        )
+        .route(
+            "/subtitle/translate/raw/:name",
+            get(routes::media::translate_raw),
+        )
+        .route("/subtitle/mtran/test", post(routes::media::mtran_test))
+        .route(
+            "/subtitle/translate/clear",
+            post(routes::media::translate_clear),
+        )
+        .route("/resolver/scripts", get(routes::media::resolver_list))
+        .route("/resolver/script", post(routes::media::resolver_save))
+        .route("/resolver/remove", post(routes::media::resolver_remove))
+        .route("/logo/list", get(routes::logo::panel_list))
+        .route("/logo/upload", post(routes::logo::upload))
+        .route("/logo/delete", post(routes::logo::delete))
+        .route("/logo/rename", post(routes::logo::rename))
+        .route("/logo/restore", post(routes::logo::restore))
+        .route("/logo/animate", post(routes::logo::animate))
+        .route("/logo/match-report", get(routes::logo::match_report))
+        .route("/logo/apply", post(routes::logo::apply))
+        .route("/logo/suggest", post(routes::logo::suggest))
+        // EPG 翻译端点也要有面板路径。
+        .route("/epg/translate/status", get(routes::epg::translate_status))
+        .route("/epg/translate/models", get(routes::epg::translate_models))
+        .route("/epg/translate/run", post(routes::epg::translate_run))
+        .route("/epg/translate/probe", post(routes::epg::translate_probe))
+        .route(
+            "/epg/translate/mtran/test",
+            post(routes::epg::translate_mtran),
+        )
+        .route(
+            "/epg/translate/clear",
+            post(routes::epg::translate_clear_results),
+        )
+        .route(
+            "/epg/translate/clear-engine",
+            post(routes::epg::translate_clear),
+        )
+        .route("/epg/status", get(routes::epg::status))
+        .route("/epg/refresh", post(routes::epg::refresh))
+        .route("/epg/regenerate", post(routes::epg::regenerate))
+        .route("/epg/mappings", get(routes::epg::mappings))
+        .route("/epg/mapping", post(routes::epg::mapping))
+        .route(
+            "/epg/sources",
+            get(routes::epg::sources).post(routes::epg::source_save),
+        )
+        .route("/epg/sources/:id", delete(routes::epg::source_delete))
+        .route(
+            "/epg/sources/:id/refresh",
+            post(routes::epg::source_refresh),
+        )
+        .route("/epg/bindings", get(routes::epg::bindings))
+        .route(
+            "/epg/bindings/:gid/:cid",
+            put(routes::epg::binding_set).delete(routes::epg::binding_delete),
+        )
+        .route(
+            "/epg/bindings/:gid/:cid/copy",
+            post(routes::epg::binding_copy),
+        )
+        .route(
+            "/epg/rules",
+            get(routes::epg::rules).post(routes::epg::rule_save),
+        )
+        .route("/epg/rules/preview", post(routes::epg::rule_preview))
+        .route("/epg/rules/:id", delete(routes::epg::rule_delete))
+        .route("/epg/extra", post(routes::epg::extra))
+        .route("/epg/scripts", get(routes::epg::scripts_list))
+        .route("/epg/script", post(routes::epg::script_save))
+        .route("/epg/script-delete", post(routes::epg::script_delete))
+        .route("/epg/cron-preview", post(routes::epg::cron_preview))
+        .route("/epg/programmes/:channel", get(routes::epg::programmes))
+        .route("/epg/suggest/:gid/:cid", get(routes::epg::suggest))
+        .route("/epg/search", get(routes::epg::search))
+        .route("/epg/viewer-channels", get(routes::epg::viewer_channels))
+        .route(
+            "/epg/source-channels/:id",
+            get(routes::epg::source_channels),
+        )
+        .route("/epg/tz-preview/:id", get(routes::epg::tz_preview))
+        .route("/epg/match-report", get(routes::epg::match_report))
+        .route("/groups", post(routes::groups::create_group))
+        .route("/groups/export", get(routes::groups::export_all))
+        .route("/groups/import", post(routes::groups::import_groups))
+        .route(
+            "/groups/import/force",
+            post(routes::groups::import_groups_force),
+        )
+        .route("/groups/import/m3u", post(routes::groups::import_m3u))
+        .route(
+            "/groups/:gid",
+            put(routes::groups::update_group).delete(routes::groups::delete_group),
+        )
+        .route("/groups/:gid/export", get(routes::groups::export_group))
+        .route(
+            "/groups/:gid/channels",
+            post(routes::groups::create_channel),
+        )
+        .route(
+            "/groups/:gid/channels/:cid",
+            put(routes::groups::update_channel).delete(routes::groups::delete_channel),
+        )
+        .route("/groups/:gid/detach", post(routes::groups::detach_group))
+        .route(
+            "/groups/:gid/channels/:cid/detach",
+            post(routes::groups::detach_channel),
+        )
+        .route("/*rest", any(routes::panel::api_missing))
+        .fallback(routes::panel::api_missing)
 }

@@ -1,7 +1,7 @@
 //! 请求前置检查：IP 统计与封禁。
 //!
-//! 只作用于非 `/panel` 与非 `/unban` 路径，避免管理员或用户无法解封。
-//! 封禁期内返回 `403`（形状为本实现自定）。
+//! 面板、页面、静态面板资源与解封路径不受拦截，避免管理员或用户无法解封。
+//! 封禁期内其他路径返回 `403`（形状为本实现自定）。
 
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ pub async fn ip_guard(
     request: Request,
     next: Next,
 ) -> Response {
-    if !request.uri().path().starts_with("/panel") && !request.uri().path().starts_with("/unban") {
+    if !ip_guard_exempt(request.uri().path()) {
         let peer = request
             .extensions()
             .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
@@ -37,6 +37,26 @@ pub async fn ip_guard(
         }
     }
     next.run(request).await
+}
+
+/// 该路径是否跳过 IP 统计与封禁。
+///
+/// 面板与解封路径必须可用。`/api/health` 不在豁免内。
+fn ip_guard_exempt(path: &str) -> bool {
+    path.starts_with("/page")
+        || path.starts_with("/static/panel")
+        || path.starts_with("/api/panel")
+        || path.starts_with("/api/unban")
+        || path.starts_with("/panel")
+        || path.starts_with("/unban")
+}
+
+/// 去掉面板 API 前缀，返回相对子路径。
+///
+/// 同时识别旧前缀 `/panel/api` 与新前缀 `/api/panel`。
+fn panel_relative(path: &str) -> Option<&str> {
+    path.strip_prefix("/panel/api")
+        .or_else(|| path.strip_prefix("/api/panel"))
 }
 
 /// 管理员校验：未登录返回 `401`，非管理员返回 `403`。
@@ -85,7 +105,7 @@ fn need_login() -> Response {
 
 /// 该路径是否只允许管理员。
 fn needs_admin(path: &str) -> bool {
-    // 非面板路径里的公开管理端点。
+    // 非面板路径里的公开管理端点。旧路由保留到 Task 10。
     const PUBLIC_ADMIN: [&str; 5] = [
         "/subs/status",
         "/subs/groups",
@@ -96,15 +116,15 @@ fn needs_admin(path: &str) -> bool {
     if PUBLIC_ADMIN.contains(&path) || path.starts_with("/epg/translate/") {
         return true;
     }
-    if !path.starts_with("/panel/api") {
+    let Some(relative) = panel_relative(path) else {
         return false;
-    }
-    const OPEN: [&str; 3] = ["/panel/api/login", "/panel/api/logout", "/panel/api/me"];
-    if OPEN.contains(&path) {
+    };
+    const OPEN: [&str; 3] = ["/login", "/logout", "/me"];
+    if OPEN.contains(&relative) {
         return false;
     }
     // 「我的订阅」相关接口对普通用户开放。
-    !path.starts_with("/panel/api/my")
+    !relative.starts_with("/my")
 }
 
 /// 取会话令牌。与 [`crate::http::ext::PanelAuth`] 同一套头。
@@ -150,35 +170,42 @@ pub async fn feature_gate(
 }
 
 /// 路径 → 对应的功能开关。`None` 表示不受功能开关控制。
+///
+/// 面板路径先去掉前缀再匹配，新旧前缀结果一致。非面板的旧路径
+/// （`/subs/`、`/subtitle/`、`/epg/translate/`）保留到 Task 10。
 fn feature_of(path: &str, config: &crate::config::Config) -> Option<bool> {
-    if path.starts_with("/panel/api/schedule") {
-        return Some(config.features.recording);
-    }
-    if path.starts_with("/panel/api/livestream") {
-        return Some(config.features.livestream);
-    }
-    if path.starts_with("/panel/api/logo") {
-        return Some(config.features.logo);
-    }
-    if path.starts_with("/panel/api/assets")
-        || path.starts_with("/panel/api/subtitle")
-        || path.starts_with("/subtitle/")
-    {
+    if path.starts_with("/subtitle/") {
         return Some(config.features.assets);
     }
-    if path.starts_with("/panel/api/playlist")
-        || path.starts_with("/panel/api/subs")
-        || path.starts_with("/subs/")
-    {
+    if path.starts_with("/subs/") {
         return Some(config.features.playlist);
     }
-    if path.starts_with("/panel/api/epg/translate") || path.starts_with("/epg/translate/") {
+    if path.starts_with("/epg/translate/") {
         return Some(config.epg.enabled);
     }
-    if path.starts_with("/panel/api/users") {
+    let relative = panel_relative(path)?;
+    if relative.starts_with("/schedule") {
+        return Some(config.features.recording);
+    }
+    if relative.starts_with("/livestream") {
+        return Some(config.features.livestream);
+    }
+    if relative.starts_with("/logo") {
+        return Some(config.features.logo);
+    }
+    if relative.starts_with("/assets") || relative.starts_with("/subtitle") {
+        return Some(config.features.assets);
+    }
+    if relative.starts_with("/playlist") || relative.starts_with("/subs") {
+        return Some(config.features.playlist);
+    }
+    if relative.starts_with("/epg/translate") {
+        return Some(config.epg.enabled);
+    }
+    if relative.starts_with("/users") {
         return Some(config.features.users);
     }
-    if path == "/panel/api/stats" {
+    if relative == "/stats" {
         return Some(config.stats.enabled);
     }
     None
@@ -209,6 +236,46 @@ mod tests {
         assert_eq!(feature_of("/panel/api/login", &config), None, "登录不受限");
         assert_eq!(feature_of("/panel/api/config", &config), None, "配置可恢复");
         assert_eq!(feature_of("/panel/api/me", &config), None);
+        // 新前缀与旧前缀结果一致。
+        assert_eq!(feature_of("/api/panel/schedule", &config), Some(false));
+        assert_eq!(
+            feature_of("/api/panel/livestream/a/b/start", &config),
+            Some(true)
+        );
+        assert_eq!(feature_of("/api/panel/login", &config), None);
+        assert_eq!(feature_of("/api/panel/config", &config), None);
+        assert_eq!(feature_of("/api/panel/me", &config), None);
+    }
+
+    #[test]
+    fn new_panel_prefix_maps_same_features_as_old() {
+        let mut config = Config::default();
+        for (old, new) in [
+            ("/panel/api/schedule", "/api/panel/schedule"),
+            ("/panel/api/livestream", "/api/panel/livestream"),
+            ("/panel/api/logo/list", "/api/panel/logo/list"),
+            ("/panel/api/assets/list", "/api/panel/assets/list"),
+            ("/panel/api/subtitle/list", "/api/panel/subtitle/list"),
+            ("/panel/api/playlist", "/api/panel/playlist"),
+            ("/panel/api/subs/status", "/api/panel/subs/status"),
+            (
+                "/panel/api/epg/translate/status",
+                "/api/panel/epg/translate/status",
+            ),
+            ("/panel/api/users", "/api/panel/users"),
+            ("/panel/api/stats", "/api/panel/stats"),
+        ] {
+            assert_eq!(feature_of(old, &config), feature_of(new, &config), "{new}");
+        }
+        config.features.assets = false;
+        assert_eq!(feature_of("/api/panel/subtitle/list", &config), Some(false));
+        config.features.playlist = false;
+        assert_eq!(feature_of("/api/panel/subs/status", &config), Some(false));
+        config.epg.enabled = false;
+        assert_eq!(
+            feature_of("/api/panel/epg/translate/status", &config),
+            Some(false)
+        );
     }
 
     #[test]
@@ -222,6 +289,50 @@ mod tests {
         assert!(!needs_admin("/panel/api/my/channels"));
         assert!(!needs_admin("/health"), "非面板路径不管");
         assert!(!needs_admin("/sub/abc/playlist.m3u"));
+        // 新前缀与旧前缀结果一致。
+        assert!(!needs_admin("/api/panel/login"));
+        assert!(!needs_admin("/api/panel/logout"));
+        assert!(!needs_admin("/api/panel/me"));
+        assert!(!needs_admin("/api/panel/my/channels"));
+        assert!(needs_admin("/api/panel/config"), "配置只给管理员");
+        assert!(needs_admin("/api/panel/groups"), "分组只给管理员");
+        assert!(needs_admin("/api/panel/users"), "用户管理只给管理员");
+        assert!(needs_admin("/api/panel/subs/status"), "订阅管理只给管理员");
+        assert!(
+            needs_admin("/api/panel/subtitle/list"),
+            "字幕管理只给管理员"
+        );
+        assert!(
+            needs_admin("/api/panel/epg/translate/status"),
+            "EPG 翻译只给管理员"
+        );
+    }
+
+    #[test]
+    fn page_and_auth_recovery_paths_are_ip_guard_exempt() {
+        for path in [
+            "/page/panel",
+            "/static/panel/a.js",
+            "/api/panel/status",
+            "/api/unban/whoami",
+        ] {
+            assert!(ip_guard_exempt(path), "{path}");
+        }
+        for path in ["/api/health", "/media/g/c/seg.png", "/api/play/g/c.m3u8"] {
+            assert!(!ip_guard_exempt(path), "{path}");
+        }
+        // 旧前缀迁移期内继续豁免。
+        for path in ["/panel/api/status", "/unban/whoami"] {
+            assert!(ip_guard_exempt(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn panel_relative_accepts_both_prefixes() {
+        assert_eq!(panel_relative("/panel/api/login"), Some("/login"));
+        assert_eq!(panel_relative("/api/panel/login"), Some("/login"));
+        assert_eq!(panel_relative("/api/panel"), Some(""));
+        assert_eq!(panel_relative("/health"), None);
     }
 
     #[test]

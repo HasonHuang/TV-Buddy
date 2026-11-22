@@ -1,7 +1,7 @@
 /**
  * 运维分区：安全管控、运行日志、备份与恢复。
  *
- * 接口：`/panel/api/security/*`、`/panel/api/logs`、`/panel/api/{backup,restore}`。
+ * 接口：`/api/panel/security/*`、`/api/panel/logs`、`/api/panel/{backup,restore}`。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -29,8 +29,8 @@ type IpStats = {
 /**
  * `[auth]` 段的可编辑视图（A3）。
  *
- * 后端没有单独的 auth 写接口，所以与设置页同一机制：`GET /panel/api/config`
- * 取整份 → 改 `auth` 子树 → `PUT /panel/api/config` 全量回写（S-CFG-01）。
+ * 后端没有单独的 auth 写接口，所以与设置页同一机制：`GET /api/panel/config`
+ * 取整份 → 改 `auth` 子树 → `PUT /api/panel/config` 全量回写（S-CFG-01）。
  *
  * `[auth]` 的全部键都已生效。并发会话、会话超时、白名单、限流与升级封禁
  * 只在 `ip_guard_enabled` 打开时参与判定；其余键始终生效。
@@ -433,7 +433,7 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
       <h3>登录防爆破</h3>
       <p className="muted">
         同一 IP 的登录失败数在统计窗口内达到「失败容忍次数 + 追加失败次数」后，
-        登录接口 <code className="mono">/panel/api/login</code> 返回{' '}
+        登录接口 <code className="mono">/api/panel/login</code> 返回{' '}
         <code className="mono">429</code>；已登录的面板会话不受影响。
         首次锁定使用「首次锁定时长」；「IP 管控」开启时，后续锁定按阶梯加长。
       </p>
@@ -682,7 +682,7 @@ function levelOf(line: string): string {
   return match ? match[1].toLowerCase() : '';
 }
 
-/** 运行日志：轮询 `/panel/api/logs`。 */
+/** 运行日志：轮询 `/api/panel/logs`。 */
 export function LogsPage() {
   const [lines, setLines] = useState<string[]>([]);
   const [total, setTotal] = useState(0);
@@ -805,7 +805,7 @@ export function BackupPage({
     setMessage('');
     setError('');
     try {
-      const response = await fetch(`/panel/api/backup?include=${scope}`, {
+      const response = await fetch(`/api/panel/backup?include=${scope}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!response.ok) {
@@ -831,7 +831,7 @@ export function BackupPage({
     setMessage('');
     setError('');
     try {
-      const response = await fetch('/panel/api/restore', {
+      const response = await fetch('/api/panel/restore', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${getToken()}`,
@@ -968,7 +968,7 @@ type EpgMapData = {
   extra: EpgExtra[];
 };
 
-/** `[epg.translate]` 的运行时视图（`GET /panel/api/epg/translate/status`）。 */
+/** `[epg.translate]` 的运行时视图（`GET /api/panel/epg/translate/status`）。 */
 type TranslateStatus = {
   enabled: boolean;
   engine: string;
@@ -2185,7 +2185,7 @@ type LinkInfo = {
   use_alias: boolean;
 };
 
-/** 播放链接检查：`GET /panel/api/link-info`。
+/** 播放链接检查：`GET /api/panel/link-info`。
  *
  * 只读：开关分布在「访问控制」与配置文件里，本卡只汇总当前结果。
  * 全局播放令牌已废弃，凭证按用户与设备下发（`docs/design/09-users-and-devices.md` §9.2）。

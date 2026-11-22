@@ -1,9 +1,9 @@
 /**
  * 视频素材与字幕管理分区。
  *
- * 接口：`/panel/api/{assets,subtitle}/{list,upload,remove,raw/:file}`、
- * `/panel/api/subtitle/translate{/status,/raw/:name}` 与
- * `/panel/api/assets/ffmpeg-status`。
+ * 接口：`/api/panel/{assets,subtitle}/{list,upload,remove,raw/:file}`、
+ * `/api/panel/subtitle/translate{/status,/raw/:name}` 与
+ * `/api/panel/assets/ffmpeg-status`。
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -54,10 +54,11 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
-/** 带会话头下载面板文件。 */
+/** 带会话头下载面板文件。`path` 可以是根绝对地址或面板 API 相对路径。 */
 async function download(path: string, name: string): Promise<void> {
   const token = localStorage.getItem('tv_buddy_token') ?? '';
-  const response = await fetch(`/panel/api${path}`, {
+  const targetUrl = path.startsWith('/') ? path : `/api/panel${path}`;
+  const response = await fetch(targetUrl, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!response.ok) {
@@ -305,7 +306,7 @@ function Library({
                 <td className="right">
                   <a
                     className="ghost"
-                    href={`/panel/api/${kind}/raw/${encodeURIComponent(file.file)}`}
+                    href={`/api/panel/${kind}/raw/${encodeURIComponent(file.file)}`}
                     target="_blank"
                     rel="noreferrer"
                     title="在新标签页打开原文件"
@@ -369,7 +370,7 @@ function Library({
   );
 }
 
-/** 远程素材转换：`POST /panel/api/assets/convert {url}`。 */
+/** 远程素材转换：`POST /api/panel/assets/convert {url}`。 */
 function ConvertCard({ ready }: { ready: boolean | null }) {
   const [url, setUrl] = useState('');
   const [result, setResult] = useState<{ local_path: string; bytes: number } | null>(null);
@@ -432,7 +433,7 @@ function ConvertCard({ ready }: { ready: boolean | null }) {
   );
 }
 
-/** 配置里一个占位跳转 URL（`GET /panel/api/assets/candidates`）。 */
+/** 配置里一个占位跳转 URL（`GET /api/panel/assets/candidates`）。 */
 type Candidate = {
   key: string;
   label: string;

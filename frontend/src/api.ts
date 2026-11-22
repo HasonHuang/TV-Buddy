@@ -42,14 +42,14 @@ export class ApiError extends Error {
 /** 未登录事件：由 App 监听，用来回到登录卡。 */
 export const UNAUTHORIZED_EVENT = 'tv-buddy:unauthorized';
 
-/** 调用 `/panel/api/*`；自动带 Bearer token。401 时清除 token 并广播。 */
+/** 调用 `/api/panel/*`；自动带 Bearer token。401 时清除 token 并广播。 */
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
-  const response = await fetch(`/panel/api${path}`, {
+  const response = await fetch(`/api/panel${path}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -75,13 +75,13 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
   return (await response.json()) as T;
 }
 
-/** 调用 `/panel/api/*` 并取纯文本正文（如 `text/plain` 的匹配报告）。 */
+/** 调用 `/api/panel/*` 并取纯文本正文（如 `text/plain` 的匹配报告）。 */
 export async function apiText(method: string, path: string): Promise<string> {
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const response = await fetch(`/panel/api${path}`, { method, headers });
+  const response = await fetch(`/api/panel${path}`, { method, headers });
   if (response.status === 401) {
     clearToken();
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));

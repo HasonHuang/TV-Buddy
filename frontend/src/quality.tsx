@@ -1,6 +1,6 @@
 /** 质量校验徽章。用于分组页频道行与分组标题。
  *
- * 数据来自 Task 6 的 `GET /panel/api/quality/results`。健康探测的状态点
+ * 数据来自 Task 6 的 `GET /api/panel/quality/results`。健康探测的状态点
  * 保持原样，这里只叠加质量结果，不替代它。
  */
 

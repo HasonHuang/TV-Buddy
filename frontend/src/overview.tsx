@@ -16,7 +16,7 @@ import { Loading, PageHead, useToast } from './ui';
 
 type Status = Record<string, unknown>;
 
-/** `GET /panel/api/stats` 的字段子集。 */
+/** `GET /api/panel/stats` 的字段子集。 */
 type PlayStats = {
   online_window_secs?: number;
   online_viewers?: number;
@@ -30,7 +30,7 @@ type PlayStats = {
   }[];
 };
 
-/** `GET /panel/api/schedule` 的字段子集。 */
+/** `GET /api/panel/schedule` 的字段子集。 */
 type Task = {
   id: string;
   name: string;
@@ -40,7 +40,7 @@ type Task = {
   error: string;
 };
 
-/** `GET /panel/api/dash/status` 的单条会话。 */
+/** `GET /api/panel/dash/status` 的单条会话。 */
 type DashSession = {
   stream_key: string;
   phase: string;
@@ -57,7 +57,7 @@ type Sample = {
   cpu: number;
 };
 
-/** `GET /panel/api/metrics/history` 的一个聚合点。 */
+/** `GET /api/panel/metrics/history` 的一个聚合点。 */
 type HistoryPoint = {
   ts: number;
   net_rx: number;

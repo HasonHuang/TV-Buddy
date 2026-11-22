@@ -28,7 +28,7 @@ type TimeshiftStatus = {
   channels: { group_id: string; channel_id: string; hours: number; segments: number }[];
 };
 
-/** `GET /panel/api/epg/programmes/{channel}` 的单条节目。 */
+/** `GET /api/panel/epg/programmes/{channel}` 的单条节目。 */
 type Programme = {
   channel: string;
   disp_start: string | null;
@@ -80,7 +80,7 @@ async function download(name: string): Promise<void> {
     .split('/')
     .map((part) => encodeURIComponent(part))
     .join('/');
-  const response = await fetch(`/panel/api/schedule/download/${path}`, {
+  const response = await fetch(`/api/panel/schedule/download/${path}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);

@@ -1,7 +1,7 @@
 /**
  * 缓存状态与频道热度分区。
  *
- * 接口：`/panel/api/cache/{stats,flush}`、`/panel/api/stats`。
+ * 接口：`/api/panel/cache/{stats,flush}`、`/api/panel/stats`。
  */
 
 import { useCallback, useEffect, useState } from 'react';

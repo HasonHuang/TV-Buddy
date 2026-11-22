@@ -72,7 +72,7 @@ export type Group = {
   [key: string]: unknown;
 };
 
-/** `/panel/api/health` 的单频道条目。 */
+/** `/api/panel/health` 的单频道条目。 */
 export type HealthEntry = {
   checked_at: number;
   consecutive_fails: number;
@@ -743,7 +743,7 @@ export function GroupsPage() {
   /**
    * 重排后整份回写。
    *
-   * 目标没有单独的排序端点：它在前端改数组顺序后 `PUT /panel/api/config` 全量保存，
+   * 目标没有单独的排序端点：它在前端改数组顺序后 `PUT /api/panel/config` 全量保存，
    * 本实现与之一致。播放列表按 `[[groups]]` / `[[groups.channels]]` 的数组顺序输出
    * （`playlist::render_total`），所以顺序即订阅里的顺序。
    */

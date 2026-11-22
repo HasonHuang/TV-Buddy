@@ -1454,6 +1454,81 @@ async fn unknown_panel_api_is_404() {
 }
 
 #[tokio::test]
+async fn panel_api_is_available_under_new_prefix() {
+    let fx = fixture().await;
+    let session = login(&fx).await;
+    let response = fx
+        .client
+        .get(format!("{}/api/panel/status", fx.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn panel_api_unknown_path_returns_json() {
+    let fx = fixture().await;
+    let session = login(&fx).await;
+    let response = fx
+        .client
+        .get(format!("{}/api/panel/not-a-route", fx.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(response.text().await.unwrap().contains("接口不存在"));
+}
+
+#[tokio::test]
+async fn panel_api_old_and_new_prefixes_agree() {
+    let fx = fixture_with(true).await;
+    let session = login(&fx).await;
+    for (old, new) in [
+        ("/panel/api/status", "/api/panel/status"),
+        ("/panel/api/subs/status", "/api/panel/subs/status"),
+        (
+            "/panel/api/epg/translate/status",
+            "/api/panel/epg/translate/status",
+        ),
+        ("/subs/status", "/api/panel/subs/status"),
+    ] {
+        let old_response = fx
+            .client
+            .get(format!("{}{old}", fx.base))
+            .bearer_auth(&session)
+            .send()
+            .await
+            .expect("旧路径请求");
+        let new_response = fx
+            .client
+            .get(format!("{}{new}", fx.base))
+            .bearer_auth(&session)
+            .send()
+            .await
+            .expect("新路径请求");
+        assert_eq!(old_response.status(), new_response.status(), "{new}");
+        let old_body: serde_json::Value =
+            serde_json::from_str(&old_response.text().await.expect("旧正文")).expect("旧 JSON");
+        let new_body: serde_json::Value =
+            serde_json::from_str(&new_response.text().await.expect("新正文")).expect("新 JSON");
+        let keys = |value: &serde_json::Value| {
+            let mut keys: Vec<String> = value
+                .as_object()
+                .expect("JSON 对象")
+                .keys()
+                .cloned()
+                .collect();
+            keys.sort();
+            keys
+        };
+        assert_eq!(keys(&old_body), keys(&new_body), "{new}");
+    }
+}
+
+#[tokio::test]
 async fn epg_disabled_returns_404() {
     let fixture = fixture().await;
     for path in ["/epg.xml", "/epg.xml.gz", "/epg"] {
@@ -3157,6 +3232,16 @@ async fn security_token_rotation_and_ip_ban() {
     let response = fixture
         .client
         .get(format!("{}/panel/api/status", fixture.base))
+        .header("x-forwarded-for", "7.7.7.7")
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    // 新前缀同样不受封禁影响（未登录仍是 401）。
+    let response = fixture
+        .client
+        .get(format!("{}/api/panel/status", fixture.base))
         .header("x-forwarded-for", "7.7.7.7")
         .send()
         .await

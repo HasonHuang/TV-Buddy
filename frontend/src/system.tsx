@@ -33,7 +33,7 @@ type Health = {
   [key: string]: unknown;
 };
 
-/** `/panel/api/dash/status` 的单条会话。 */
+/** `/api/panel/dash/status` 的单条会话。 */
 type DashSession = {
   stream_key: string;
   phase: string;

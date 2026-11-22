@@ -28,7 +28,7 @@ type UploadResult = {
 };
 
 /**
- * 动效：后端 `POST /panel/api/logo/animate` 的 6 种效果
+ * 动效：后端 `POST /api/panel/logo/animate` 的 6 种效果
  * （`src/logo_anim.rs` 的 match 分支）。`quality` 必须是**字符串**，
  * 且目标 v0.8.2 不读取它（帧时长与无损编码都固定），所以界面上只作为占位。
  */
@@ -204,7 +204,7 @@ export function LogosPage() {
   }
 
   /**
-   * 生成动效（`POST /panel/api/logo/animate`）。
+   * 生成动效（`POST /api/panel/logo/animate`）。
    * 服务端读 `[logo].max_size` 缩放，输出固定 10 帧无损动画 WebP 并覆盖原图；
    * 原图先进 `.orig/`，可用「还原」回退。
    */

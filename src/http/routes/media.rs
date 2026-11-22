@@ -29,19 +29,21 @@ use crate::{
     subtitle, translate,
 };
 
-/// 由请求路径判定素材种类（路由静态注册，避免与 `/panel/api/*rest` 冲突）。
+/// 由请求路径判定素材种类（路由静态注册，避免与面板兜底路由冲突）。
+///
+/// 同时识别旧前缀 `/panel/api` 与新前缀 `/api/panel`。
 fn kind_of(uri: &axum::http::Uri) -> Result<Kind, ApiError> {
     let path = uri.path();
-    if path.starts_with("/panel/api/assets/") {
+    if path.starts_with("/panel/api/assets/") || path.starts_with("/api/panel/assets/") {
         Ok(Kind::Video)
-    } else if path.starts_with("/panel/api/subtitle/") {
+    } else if path.starts_with("/panel/api/subtitle/") || path.starts_with("/api/panel/subtitle/") {
         Ok(Kind::Subtitle)
     } else {
         Err(ApiError::not_found("未知素材类型"))
     }
 }
 
-/// `GET /panel/api/{assets,subtitles}/list`。
+/// `GET /api/panel/{assets,subtitles}/list`。
 pub async fn list(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -166,7 +168,7 @@ async fn ffmpeg_probe(state: &AppState) -> Option<PathBuf> {
     probe_version(&path).await.map(|_| path)
 }
 
-/// `POST /panel/api/{assets,subtitles}/upload`——`{"items":[{"name","ext","data"}]}`。
+/// `POST /api/panel/{assets,subtitles}/upload`——`{"items":[{"name","ext","data"}]}`。
 pub async fn upload(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -214,7 +216,7 @@ pub async fn upload(
     ))
 }
 
-/// `POST /panel/api/{assets,subtitles}/remove`——`{"file"}`。
+/// `POST /api/panel/{assets,subtitles}/remove`——`{"file"}`。
 pub async fn remove(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -247,7 +249,7 @@ pub async fn remove(
     }
 }
 
-/// `GET /panel/api/{assets,subtitles}/raw/<file>`——面板内下载。
+/// `GET /api/panel/{assets,subtitles}/raw/<file>`——面板内下载。
 pub async fn raw(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -275,7 +277,7 @@ pub async fn raw(
     Ok(response)
 }
 
-/// `GET /panel/api/assets/ffmpeg-status`——检测 ffmpeg 来源与安装任务。
+/// `GET /api/panel/assets/ffmpeg-status`——检测 ffmpeg 来源与安装任务。
 pub async fn ffmpeg_status(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -320,7 +322,7 @@ pub async fn ffmpeg_status(
     }))
 }
 
-/// `POST /panel/api/tools/ffmpeg/install`——管理员下载并启用 ffmpeg / ffprobe。
+/// `POST /api/panel/tools/ffmpeg/install`——管理员下载并启用 ffmpeg / ffprobe。
 pub async fn ffmpeg_install(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -352,7 +354,7 @@ pub async fn ffmpeg_install(
     Ok(Json(json!({ "ok": true, "job": job })))
 }
 
-/// `POST /panel/api/tools/ffmpeg/remove`——管理员删除面板安装的 ffmpeg / ffprobe。
+/// `POST /api/panel/tools/ffmpeg/remove`——管理员删除面板安装的 ffmpeg / ffprobe。
 pub async fn ffmpeg_remove(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -373,7 +375,7 @@ pub async fn ffmpeg_remove(
     Ok(Json(json!({ "ok": true, "removed": removed })))
 }
 
-/// `GET /panel/api/resolver/scripts`。
+/// `GET /api/panel/resolver/scripts`。
 pub async fn resolver_list(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -397,7 +399,7 @@ pub async fn resolver_list(
     Json(json!({ "count": scripts.len(), "scripts": scripts }))
 }
 
-/// `POST /panel/api/resolver/script`——`{"name","content"}`；写 `<cache>/resolvers/<name>.py`。
+/// `POST /api/panel/resolver/script`——`{"name","content"}`；写 `<cache>/resolvers/<name>.py`。
 pub async fn resolver_save(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -430,7 +432,7 @@ pub async fn resolver_save(
     ))
 }
 
-/// `POST /panel/api/resolver/remove`——`{"name"}`。
+/// `POST /api/panel/resolver/remove`——`{"name"}`。
 pub async fn resolver_remove(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -529,7 +531,7 @@ fn subtitle_cache_name(
     format!("{}.{}", &hex::encode(digest)[..32], format.ext())
 }
 
-/// `GET /panel/api/subtitle/translate/status`——字幕翻译能力。
+/// `GET /api/panel/subtitle/translate/status`——字幕翻译能力。
 pub async fn translate_status(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -556,7 +558,7 @@ pub async fn translate_status(
     }))
 }
 
-/// `POST /panel/api/subtitle/translate`——翻译一个已上传的字幕文件。
+/// `POST /api/panel/subtitle/translate`——翻译一个已上传的字幕文件。
 pub async fn translate_subtitle(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -603,7 +605,7 @@ pub async fn translate_subtitle(
     let directory = subtitle_cache_dir(&state);
     let name = subtitle_cache_name(&file, &target, cfg.translation_first, format);
     let path = directory.join(&name);
-    let download = format!("/panel/api/subtitle/translate/raw/{name}");
+    let download = paths::panel(&format!("subtitle/translate/raw/{name}"));
     if path.is_file() {
         let bytes = std::fs::read(&path)
             .map_err(|error| ApiError::internal(format!("读缓存失败: {error}")))?;
@@ -658,7 +660,7 @@ pub async fn translate_subtitle(
     })))
 }
 
-/// `GET /panel/api/subtitle/translate/raw/<name>`——下载翻译结果。
+/// `GET /api/panel/subtitle/translate/raw/<name>`——下载翻译结果。
 pub async fn translate_raw(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -861,7 +863,7 @@ const PLACEHOLDER_KEYS: [(&str, &str); 5] = [
     ("auth.ban_url", "IP 封禁跳转"),
 ];
 
-/// `GET /panel/api/assets/candidates`——列出配置里可转 HLS 的占位 URL。
+/// `GET /api/panel/assets/candidates`——列出配置里可转 HLS 的占位 URL。
 pub async fn candidates(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,

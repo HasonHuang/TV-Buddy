@@ -2,7 +2,7 @@
  * 用户与设备分区。
  *
  * 功能对齐 mpd-hls 的 `/users`（`docs/design/09-users-and-devices.md` §4）。
- * 接口：`/panel/api/users`、`/panel/api/users/:id/tokens`。
+ * 接口：`/api/panel/users`、`/api/panel/users/:id/tokens`。
  */
 
 import { useCallback, useEffect, useState } from 'react';

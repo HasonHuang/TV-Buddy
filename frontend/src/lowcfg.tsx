@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { copyText } from './api';
 import { Tip } from './ui';
 
-/** `GET /panel/api/cache/stats` 的 `recommend` 块。 */
+/** `GET /api/panel/cache/stats` 的 `recommend` 块。 */
 export type Recommend = {
   ttl_secs: number;
   ttl_source: 'manual' | 'measured' | 'fallback';
