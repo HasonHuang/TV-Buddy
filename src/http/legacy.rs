@@ -10,6 +10,7 @@ use axum::{
     },
     middleware::Next,
     response::Response,
+    Router,
 };
 
 use crate::paths;
@@ -41,6 +42,16 @@ pub async fn middleware(mut request: axum::extract::Request, next: Next) -> Resp
         *request.uri_mut() = uri;
     }
     next.run(request).await
+}
+
+/// 用外层路由包住内层路由。
+///
+/// `Router::layer` 在路由匹配之后运行。旧路径改写必须先于匹配。
+/// 因此本层放在 `fallback_service` 之外。
+pub(crate) fn wrap(inner: Router) -> Router {
+    Router::new()
+        .fallback_service(inner)
+        .layer(axum::middleware::from_fn(middleware))
 }
 
 /// 生成改写后的 URI。查询串原样保留。
@@ -149,12 +160,14 @@ fn rewrite_playback(path: &str) -> Option<String> {
         }
         // 签名切片：`/<gid>/<cid>/l/<exp>/<sig>/<rest>`。
         [gid, cid, "l", exp, sig, rest @ ..]
-            if !gid.is_empty() && !cid.is_empty() && !exp.is_empty() && !sig.is_empty() =>
+            if !gid.is_empty()
+                && !cid.is_empty()
+                && !exp.is_empty()
+                && !sig.is_empty()
+                && !rest.is_empty() =>
         {
             let rest = rest.join("/");
-            // 签名面的 `index.txt` 是清单文件名。
-            let manifest = paths::is_manifest_rest(&rest) || rest == "index.txt";
-            let base = if manifest {
+            let base = if paths::is_manifest_rest(&rest) {
                 paths::PLAY_API
             } else {
                 paths::MEDIA
@@ -258,7 +271,11 @@ mod tests {
         );
         assert_eq!(
             rewrite(&get, "/g/c/l/1/sig/index.txt").as_deref(),
-            Some("/api/play/g/c/l/1/sig/index.txt")
+            Some("/media/g/c/l/1/sig/index.txt")
+        );
+        assert_eq!(
+            rewrite(&get, "/g/c/l/1/sig").as_deref(),
+            Some("/media/g/c/l/1/sig")
         );
         assert_eq!(
             rewrite(&get, "/g/c/l/1/sig/seg.png").as_deref(),
@@ -316,5 +333,44 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn rewrite_runs_before_route_matching() {
+        use axum::{
+            body::Body,
+            http::{Request as HttpRequest, StatusCode, Uri},
+            routing::get,
+            Router,
+        };
+        use tower::ServiceExt;
+
+        async fn echo_uri(uri: Uri) -> String {
+            uri.to_string()
+        }
+
+        let inner = Router::new().route("/api/health", get(echo_uri));
+        // 外层包装：改写先于内层路由匹配。
+        let app = wrap(inner);
+        for (target, expected) in [
+            ("/health", "/api/health"),
+            ("/health?x=1", "/api/health?x=1"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    HttpRequest::builder()
+                        .uri(target)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{target}");
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(&body[..], expected.as_bytes(), "{target}");
+        }
     }
 }

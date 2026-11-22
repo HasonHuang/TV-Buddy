@@ -20,8 +20,9 @@ use crate::{paths, state::AppState};
 ///
 /// M0：面板与公开页。M1：分组/频道接口与订阅导出。
 /// 播放面（`/{gid}/{cid}.{ext}`、切片）在 M2 接入。
+/// 旧路径改写层在内层路由之外。它先运行，然后内层做路由匹配。
 pub fn router(state: Arc<AppState>) -> Router {
-    Router::new()
+    let inner = Router::new()
         // 公开面
         .route("/health", get(routes::public::health))
         .route("/api/health", get(routes::public::health))
@@ -151,8 +152,8 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.clone(),
             guard::admin_gate,
         ))
-        .layer(axum::middleware::from_fn(legacy::middleware))
-        .with_state(state)
+        .with_state(state);
+    legacy::wrap(inner)
 }
 
 /// 面板 API 路由。挂载在 `/panel/api` 与 `/api/panel`。
