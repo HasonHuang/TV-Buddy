@@ -799,7 +799,7 @@ fn media_lines(body: &str) -> Vec<&str> {
 /// 断言伪装切片地址形状：绝对地址 + `<16hex>_<32hex>.<ext>`。
 fn assert_disguised(fixture: &Fixture, url: &str) {
     let prefix = format!(
-        "{}/{}/c1/",
+        "{}/media/{}/c1/",
         fixture.base,
         if url.contains("/pm/") { "pm" } else { "pg" }
     );
@@ -947,11 +947,14 @@ async fn slice_signature_path_token_and_rejections() {
     assert!(!body.contains("?token="));
 
     // 主清单 → 变体清单 → 切片都带 `l/<exp>/<sig>`。
-    let master = fetch(&fixture, &format!("/l/{}/pm/c1.m3u8", fixture.token))
-        .await
-        .text()
-        .await
-        .expect("主清单");
+    let master = fetch(
+        &fixture,
+        &format!("/api/play/token/{}/pm/c1.m3u8", fixture.token),
+    )
+    .await
+    .text()
+    .await
+    .expect("主清单");
     let variant = master
         .lines()
         .find(|line| line.contains("/video/index.txt"))
@@ -979,17 +982,26 @@ async fn slice_signature_path_token_and_rejections() {
     let ok = fixture.client.get(&segment).send().await.expect("切片请求");
     assert_eq!(ok.status(), StatusCode::OK, "{segment}");
 
-    // 形如 `http://host/gid/cid/l/<exp>/<sig>/<name>`。
+    // 形如 `http://host/media/pm/c1/l/<exp>/<sig>/<name>`。
     let parts: Vec<&str> = segment.split('/').collect();
-    assert_eq!(parts.len(), 9, "{segment}");
+    assert_eq!(parts.len(), 10, "{segment}");
 
     // 篡改签名 → 302 失败视频。
-    let mut bad_sig = parts[7].to_string();
+    let mut bad_sig = parts[8].to_string();
     let first = if bad_sig.starts_with('0') { "1" } else { "0" };
     bad_sig.replace_range(0..1, first);
     let tampered = format!(
-        "{}/{}/{}/{}/{}/{}/{}/{}/{}",
-        parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], bad_sig, parts[8]
+        "{}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
+        parts[0],
+        parts[1],
+        parts[2],
+        parts[3],
+        parts[4],
+        parts[5],
+        parts[6],
+        parts[7],
+        bad_sig,
+        parts[9]
     );
     let bad = fixture
         .client
@@ -1000,10 +1012,7 @@ async fn slice_signature_path_token_and_rejections() {
     assert_eq!(bad.status(), StatusCode::FOUND, "{tampered}");
 
     // 去掉签名段 → 302 失败视频。
-    let unsigned = format!(
-        "{}//{}/{}/{}/{}",
-        parts[0], parts[2], parts[3], parts[4], parts[8]
-    );
+    let unsigned = format!("{}/media/pm/c1/unsigned.png", fixture.base);
     let rejected = fixture
         .client
         .get(&unsigned)
@@ -1295,7 +1304,7 @@ async fn master_upstream_entry_is_synthetic_master_playlist() {
     assert!(body.contains("#EXT-X-VERSION:6"));
     assert!(body.contains("#EXT-X-INDEPENDENT-SEGMENTS"));
     assert!(body.contains("#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080"));
-    assert!(body.contains(&format!("{}/pm/c1/video/index.txt", fixture.base)));
+    assert!(body.contains(&format!("{}/api/play/pm/c1/video/index.txt", fixture.base)));
 }
 
 #[tokio::test]
@@ -4544,7 +4553,7 @@ async fn proxy_mode_rewrites_mpd_base_url_and_proxies_segments() {
     );
     let body = manifest.text().await.expect("读 MPD");
     assert!(
-        body.contains(&format!("<BaseURL>{}/mpg/c1/mpd/", fixture.base)),
+        body.contains(&format!("<BaseURL>{}/media/mpg/c1/mpd/", fixture.base)),
         "{body}"
     );
     assert!(
@@ -4573,7 +4582,7 @@ async fn proxy_mode_rewrites_mpd_base_url_and_proxies_segments() {
     // 本地令牌错误：目标返回 302 占位，不是 404。
     let wrong_token = local_base
         .split('/')
-        .nth(4)
+        .nth(5)
         .expect("本地 BaseURL 应含令牌")
         .to_string();
     let wrong_base = local_base.replacen(&wrong_token, "00000000000000000000000000000000", 1);
@@ -4591,7 +4600,7 @@ async fn proxy_mode_rewrites_mpd_base_url_and_proxies_segments() {
         .await
         .expect("读 MPD");
     assert!(
-        body.contains(&format!("<BaseURL>{}/mpg/c2/mpd/", fixture.base)),
+        body.contains(&format!("<BaseURL>{}/media/mpg/c2/mpd/", fixture.base)),
         "{body}"
     );
     let local_base = local_base_path(&body, &fixture.base);
@@ -4810,7 +4819,7 @@ async fn remux_segments_continuous_ts_and_serves_disguised_slices() {
     assert!(body.contains("#EXT-X-TARGETDURATION:5"));
     let segments = media_lines(&body);
     assert!(!segments.is_empty());
-    assert!(segments[0].starts_with("/rx/c1/seg_"));
+    assert!(segments[0].starts_with("/media/rx/c1/seg_"));
 
     let response = fixture
         .client
@@ -5246,10 +5255,10 @@ async fn timeshift_buffers_livestream_and_serves_vod_playlist() {
     assert!(body.contains("#EXT-X-TARGETDURATION:4"));
     let segment = body
         .lines()
-        .find(|line| line.starts_with("/ts/c1/timeshift/"))
+        .find(|line| line.starts_with("/media/ts/c1/timeshift/"))
         .expect("回看切片路径")
         .to_string();
-    assert!(segment.len() > "/ts/c1/timeshift/".len());
+    assert!(segment.len() > "/media/ts/c1/timeshift/".len());
 
     let response = fixture
         .client
@@ -6010,12 +6019,12 @@ async fn cdn_public_base_overrides_host() {
     let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
     let body = response.text().await.expect("读正文");
     for url in media_lines(&body) {
-        assert!(url.starts_with("https://cdn.example/pg/c1/"), "{url}");
+        assert!(url.starts_with("https://cdn.example/media/pg/c1/"), "{url}");
     }
     let response = fetch(&fixture, &format!("/pm/c1.m3u8?token={}", fixture.token)).await;
     let body = response.text().await.expect("读正文");
     assert!(
-        body.contains("https://cdn.example/pm/c1/video/index.txt"),
+        body.contains("https://cdn.example/api/play/pm/c1/video/index.txt"),
         "{body}"
     );
 }

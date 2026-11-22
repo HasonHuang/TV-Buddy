@@ -766,14 +766,18 @@ async fn proxy_entry(
     )
 }
 
-/// 频道在某个切片空间下的基址：`{self_base}/{gid}/{cid}[/{slice}]`。
-fn channel_base(self_base: &str, gid: &str, cid: &str, slice: &str) -> String {
-    let root = format!("{}/{gid}/{cid}", self_base.trim_end_matches('/'));
-    if slice.is_empty() {
-        root
+/// 频道在某个切片空间下的播放基址：`{self_base}/api/play/{gid}/{cid}[/{slice}]`。
+fn play_base(self_base: &str, gid: &str, cid: &str, slice: &str) -> String {
+    let suffix = if slice.is_empty() {
+        String::new()
     } else {
-        format!("{root}/{slice}")
-    }
+        format!("/{slice}")
+    };
+    format!(
+        "{}{}",
+        self_base.trim_end_matches('/'),
+        paths::play(&format!("/{gid}/{cid}{suffix}"))
+    )
 }
 
 /// 自造主清单：保留最佳变体的属性，只指向本服务的变体媒体清单。
@@ -791,7 +795,7 @@ fn master_entry(
         .unwrap_or_else(|| "BANDWIDTH=1000000".to_string());
     let body = format!(
         "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-STREAM-INF:{attrs}\n{}/video/index.txt\n",
-        channel_base(self_base, gid, cid, slice)
+        play_base(self_base, gid, cid, slice)
     );
     let mut response = Response::new(Body::from(body));
     response.headers_mut().insert(
@@ -1311,19 +1315,12 @@ fn format_mpd_number(value: f64) -> String {
 
 /// 本地 MPD 反代前缀。`slice` 非空时插在频道段之后。
 fn local_mpd_prefix(gid: &str, cid: &str, self_base: &str, slice: &str) -> String {
-    let slice = if slice.is_empty() {
-        String::new()
+    let tail = if slice.is_empty() {
+        format!("/{gid}/{cid}/mpd/")
     } else {
-        format!("{slice}/")
+        format!("/{gid}/{cid}/{slice}/mpd/")
     };
-    if self_base.is_empty() {
-        format!("/{gid}/{cid}/{slice}mpd/")
-    } else {
-        format!(
-            "{}/{gid}/{cid}/{slice}mpd/",
-            self_base.trim_end_matches('/')
-        )
-    }
+    format!("{}{}", self_base.trim_end_matches('/'), paths::media(&tail))
 }
 
 /// 本地 BaseURL 令牌；防止任意改写后的地址直接访问本服务。
@@ -2238,7 +2235,7 @@ mod tests {
         let end = xml[start..].find("</BaseURL>").expect("end") + start;
         let local = &xml[start..end];
         let rest = local
-            .strip_prefix("http://self/g/c/mpd/")
+            .strip_prefix("http://self/media/g/c/mpd/")
             .expect("local prefix");
         let (token, rest) = rest.split_once('/').expect("token");
         let (encoded, _) = rest.split_once('/').unwrap_or((rest, ""));

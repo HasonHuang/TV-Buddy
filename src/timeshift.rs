@@ -88,11 +88,12 @@ impl Session {
         let mut body = format!(
             "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-TARGETDURATION:{target}\n#EXT-X-MEDIA-SEQUENCE:0\n"
         );
-        let dir = if slice.is_empty() {
-            format!("/{}/{}/timeshift", self.gid, self.cid)
+        let suffix = if slice.is_empty() {
+            String::new()
         } else {
-            format!("/{}/{}/{slice}/timeshift", self.gid, self.cid)
+            format!("/{slice}")
         };
+        let dir = crate::paths::media(&format!("/{}/{}{suffix}/timeshift", self.gid, self.cid));
         for entry in picked {
             body.push_str(&format!(
                 "#EXTINF:{:.3},\n{dir}/{}\n",
@@ -533,14 +534,17 @@ mod tests {
         let body = session.playlist(base + 2, base + 8, "").expect("清单");
         assert!(body.contains("#EXT-X-PLAYLIST-TYPE:VOD"));
         assert!(body.contains("#EXT-X-ENDLIST"));
-        assert!(body.contains("/g/c/timeshift/1111111111111111.png"));
-        assert!(body.contains("/g/c/timeshift/2222222222222222.gif"));
+        assert!(body.contains("/media/g/c/timeshift/1111111111111111.png"));
+        assert!(body.contains("/media/g/c/timeshift/2222222222222222.gif"));
         assert!(session.playlist(0, 50, "").is_none());
 
         let signed = session
             .playlist(base + 2, base + 8, "l/123/abc")
             .expect("签名清单");
-        assert!(signed.contains("/g/c/l/123/abc/timeshift/"), "{signed}");
+        assert!(
+            signed.contains("/media/g/c/l/123/abc/timeshift/"),
+            "{signed}"
+        );
     }
 
     #[test]

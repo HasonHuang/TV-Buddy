@@ -306,11 +306,15 @@ pub fn rewrite_media(
     let prefix = prefix(gid, cid);
     let offset = ext_offset(gid, cid);
     let root = self_base.trim_end_matches('/');
-    let dir = if slice.is_empty() {
-        format!("{root}/{gid}/{cid}")
+    let dir_slice = if slice.is_empty() {
+        String::new()
     } else {
-        format!("{root}/{gid}/{cid}/{slice}")
+        format!("/{slice}")
     };
+    let dir = format!(
+        "{root}{}",
+        crate::paths::media(&format!("/{gid}/{cid}{dir_slice}"))
+    );
     let mut out = String::with_capacity(body.len() + 256);
     let mut segments = Vec::new();
     let mut index = 0usize;
@@ -475,7 +479,7 @@ mod tests {
         assert_eq!(rendered.segments[1].1, "http://up.example/live/b/seg2.ts");
         assert!(rendered
             .body
-            .contains(&format!("http://self/g1/c1/{}_", prefix("g1", "c1"))));
+            .contains(&format!("http://self/media/g1/c1/{}_", prefix("g1", "c1"))));
         assert!(rendered
             .body
             .contains(&format!("_{}.", rendered.segments[0].0)));
@@ -496,7 +500,7 @@ mod tests {
             "l/123/abc",
         );
         assert!(
-            rendered.body.contains("http://self/g1/c1/l/123/abc/"),
+            rendered.body.contains("http://self/media/g1/c1/l/123/abc/"),
             "{}",
             rendered.body
         );

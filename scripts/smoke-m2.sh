@@ -163,11 +163,11 @@ check "入口缓存窗口 = TARGETDURATION" "public, max-age=4, s-maxage=4" "$(h
 check "入口直接下发媒体清单" "1" "$(grep -c '^#EXT-X-TARGETDURATION:4$' "$WORK/body")"
 check "入口不含变体" "0" "$(grep -c '^#EXT-X-STREAM-INF' "$WORK/body")"
 check "切片地址绝对" "2" \
-  "$(grep -cE "^http://127\.0\.0\.1:$PORT/p1/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+$" "$WORK/body")"
-FIRST_URL=$(grep -oE "http://127\.0\.0\.1:$PORT/p1/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+" "$WORK/body" | head -n1)
+  "$(grep -cE "^http://127\.0\.0\.1:$PORT/media/p1/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+$" "$WORK/body")"
+FIRST_URL=$(grep -oE "http://127\.0\.0\.1:$PORT/media/p1/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+" "$WORK/body" | head -n1)
 FIRST="/${FIRST_URL#http://127.0.0.1:$PORT/}"
-P=$(grep -oE '/p1/c1/[0-9a-f]{16}_' <<<"$FIRST" | head -n1)
-P=${P:7:16}
+P=$(grep -oE '/media/p1/c1/[0-9a-f]{16}_' <<<"$FIRST" | head -n1 |
+  sed -E 's|.*/([0-9a-f]{16})_.*|\1|')
 S=$(printf '%s' "$FIRST" | sed -E 's|.*_([0-9a-f]{32})\..*|\1|')
 
 # --- 变体清单路径：上游是媒体清单时不存在 ---
@@ -177,11 +177,12 @@ check "切片后缀 = sha256 前 32 位" \
   "$(python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:32])' "http://127.0.0.1:$UP/seg1.ts")" "$S"
 # `<P>` 的算法目标未解（F-017），这里只断言目标可观测的性质：16 hex、纯函数、随频道变化。
 check "切片前缀为 16 hex" "1" "$(printf '%s' "$P" | grep -cE '^[0-9a-f]{16}$')"
-P_OPEN=$(curl -s "$B/op/c8.m3u8" | grep -oE '/op/c8/[0-9a-f]{16}_' | head -n1)
-P_OPEN=${P_OPEN:7:16}
+P_OPEN=$(curl -s "$B/op/c8.m3u8" | grep -oE '/media/op/c8/[0-9a-f]{16}_' | head -n1 |
+  sed -E 's|.*/([0-9a-f]{16})_.*|\1|')
 check "前缀随频道不同" "1" "$([ -n "$P_OPEN" ] && [ "$P_OPEN" != "$P" ] && echo 1 || echo 0)"
 check "前缀与 gid/cid 分隔符无关" "1" \
-  "$(P2=$(curl -s "$B/p1/c1.m3u8" | grep -oE '/p1/c1/[0-9a-f]{16}_' | head -n1); [ "${P2:7:16}" = "$P" ] && echo 1 || echo 0)"
+  "$(P2=$(curl -s "$B/p1/c1.m3u8" | grep -oE '/media/p1/c1/[0-9a-f]{16}_' | head -n1 |
+    sed -E 's|.*/([0-9a-f]{16})_.*|\1|'); [ "$P2" = "$P" ] && echo 1 || echo 0)"
 
 # --- 切片 ---
 # 首个切片的扩展名由频道摘要决定（轮换起点），所以类型按扩展名推导，不写死。
@@ -248,7 +249,7 @@ check "主清单入口版本" "1" "$(grep -c '^#EXT-X-VERSION:6$' "$WORK/body")"
 check "主清单入口独立切片" "1" "$(grep -c '^#EXT-X-INDEPENDENT-SEGMENTS$' "$WORK/body")"
 check "主清单入口保留变体属性" "1" "$(grep -c '^#EXT-X-STREAM-INF:BANDWIDTH=800000$' "$WORK/body")"
 check "主清单入口指向变体清单" "1" \
-  "$(grep -c "^http://127\.0\.0\.1:$PORT/p1/m1/video/index.txt$" "$WORK/body")"
+  "$(grep -c "^http://127\.0\.0\.1:$PORT/api/play/p1/m1/video/index.txt$" "$WORK/body")"
 
 # --- 变体媒体清单：抓最佳变体后改写 ---
 CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/p1/m1/video/index.txt")
@@ -256,7 +257,7 @@ check "变体清单 200" "200" "$CODE"
 check "变体清单类型" "text/plain; charset=utf-8" "$(hfile "$WORK/h" content-type)"
 check "变体清单缓存窗口" "public, max-age=6, s-maxage=6" "$(hfile "$WORK/h" cache-control)"
 check "变体清单切片绝对" "1" \
-  "$(grep -cE "^http://127\.0\.0\.1:$PORT/p1/m1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+$" "$WORK/body")"
+  "$(grep -cE "^http://127\.0\.0\.1:$PORT/media/p1/m1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+$" "$WORK/body")"
 
 # --- Token ---
 T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
@@ -282,6 +283,12 @@ PLAYTOKEN=$(curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: appl
   -d '{}' "$B/panel/api/users/$ADMIN_ID/tokens" |
   python3 -c 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
 check "设备令牌长度" "12" "${#PLAYTOKEN}"
+
+BODY=$(curl -s "$B/api/play/p1/c1.m3u8?token=$PLAYTOKEN")
+printf '%s' "$BODY" | grep -q "/media/p1/c1/" || {
+    echo "FAIL manifest does not use /media"
+    exit 1
+}
 
 # --- 新前缀播放面：清单走 /api/play，切片走 /media ---
 check "新路径入口 200" "200" "$(status "$B/api/play/p1/c1.m3u8?token=$PLAYTOKEN")"

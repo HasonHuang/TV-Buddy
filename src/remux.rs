@@ -83,11 +83,12 @@ impl Session {
             "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:{}\n#EXT-X-MEDIA-SEQUENCE:{first}\n",
             self.target_secs as u64
         );
-        let dir = if slice.is_empty() {
-            format!("/{}/{}", self.gid, self.cid)
+        let suffix = if slice.is_empty() {
+            String::new()
         } else {
-            format!("/{}/{}/{slice}", self.gid, self.cid)
+            format!("/{slice}")
         };
+        let dir = crate::paths::media(&format!("/{}/{}{suffix}", self.gid, self.cid));
         for seg in &inner.window {
             body.push_str(&format!(
                 "#EXTINF:{:.3},\n{dir}/{}\n",
@@ -619,7 +620,7 @@ mod tests {
         let body = session.playlist("").expect("清单");
         assert!(body.contains("#EXT-X-TARGETDURATION:5"));
         assert!(body.contains("#EXT-X-MEDIA-SEQUENCE:2"));
-        assert!(body.contains("/g/c/seg_000000000002.bmp"));
+        assert!(body.contains("/media/g/c/seg_000000000002.bmp"));
         // 窗口只保留 4 条。
         assert_eq!(body.matches("#EXTINF").count(), 4);
         let _ = fs::remove_dir_all(&session.dir);
@@ -634,7 +635,7 @@ mod tests {
         }
         let body = session.playlist("l/123/abc").expect("清单");
         assert!(
-            body.contains("/g/c/l/123/abc/seg_"),
+            body.contains("/media/g/c/l/123/abc/seg_"),
             "切片地址要带签名前缀: {body}"
         );
         let _ = fs::remove_dir_all(&session.dir);
