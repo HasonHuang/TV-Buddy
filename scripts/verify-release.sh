@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 校验发布产物：静态链接、能启动、/health 通。
+# 校验发布产物：静态链接、能启动、/api/health 通。
 # 用法：scripts/verify-release.sh [amd64|arm64]
 set -euo pipefail
 
@@ -67,12 +67,12 @@ set -e
 pid=$!
 ok=0
 for _ in $(seq 1 50); do
-  if body=$(wget -qO- http://127.0.0.1:9900/health 2>/dev/null); then ok=1; break; fi
+  if body=$(wget -qO- http://127.0.0.1:9900/api/health 2>/dev/null); then ok=1; break; fi
   sleep 0.1
 done
 [ "$ok" = "1" ] || { echo "健康检查失败"; cat /w/run.log; kill $pid 2>/dev/null || true; exit 1; }
 [ "$body" = "ok" ] || { echo "健康检查返回异常：$body"; kill $pid 2>/dev/null || true; exit 1; }
-echo "/health = ok"
+echo "/api/health = ok"
 
 # 内嵌前端：面板页引用的脚本必须含新分区。
 page=$(wget -qO- http://127.0.0.1:9900/page/panel)

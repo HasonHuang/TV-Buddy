@@ -194,7 +194,7 @@ check "改配置解除冷却" "200" "$(status "$B/dg/d1.m3u8")"
 
 # --- 缓存接口 ---
 check "切片预热 200" "200" "$(status "$B/pg/c1.m3u8")"
-FIRST_URL=$(grep -oE "http://127\.0\.0\.1:$PORT/pg/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+" "$WORK/body" | head -n1)
+FIRST_URL=$(grep -oE "http://127\.0\.0\.1:$PORT/media/pg/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+" "$WORK/body" | head -n1)
 FIRST="/${FIRST_URL#http://127.0.0.1:$PORT/}"
 check "切片抓取 200" "200" "$(status "$B$FIRST")"
 check "缓存状态 200" "200" "$(code "${A[@]}" "$B/panel/api/cache/stats")"

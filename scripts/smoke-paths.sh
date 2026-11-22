@@ -49,6 +49,12 @@ check /page/unban 200
 check /static/panel/panel.html 200
 check /logo/does-not-exist.png 404
 check /static/logo/does-not-exist.png 404
+check /static/assets/does-not-exist.png 404
+
+# 路径面分离：`/api/play` 只给清单，`/media` 只给媒体数据。
+check /api/play/g/c/seg.png 404
+check /media/g/c/index.m3u8 404
+check /media/g/c/video/index.txt 404
 
 # 公开接口新前缀。未登录时 whoami 与 unban 都返回 401。
 check /api/health 200

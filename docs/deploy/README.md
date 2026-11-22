@@ -20,7 +20,7 @@
 
 1. 安装服务。见 01 或 02。
 2. 读取初始口令。
-3. 打开面板 `http://<主机>:9900/panel`。
+3. 打开面板 `http://<主机>:9900/page/panel`。
 4. 用账号 `admin` 与初始口令登录。
 5. 立即修改口令。
 6. 在面板添加分组与频道。
@@ -55,12 +55,14 @@ curl -fsSL https://raw.githubusercontent.com/HasonHuang/TV-Buddy/main/install.sh
 | 缓存 | `/opt/tv-buddy/cache` |
 | 初始口令 | `<安装目录>/cache/admin_initial_credentials.txt`。默认 `/opt/tv-buddy/cache/admin_initial_credentials.txt` |
 | 管理命令 | `/usr/local/bin/tv-buddy` |
-| 面板 | `http://<主机>:9900/panel` |
-| 健康检查 | `http://<主机>:9900/health` |
-| 用户订阅 | `http://<主机>:9900/sub/<令牌>/playlist.m3u` |
+| 面板 | `http://<主机>:9900/page/panel` |
+| 健康检查 | `http://<主机>:9900/api/health` |
+| 用户订阅 | `http://<主机>:9900/api/sub/<令牌>/playlist.m3u` |
 | Docker 数据目录 | `/data` |
 
 数据库保存配置、用户与令牌。备份时必须包含数据库。
+
+旧地址 `/panel`、`/health` 与 `/sub/...` 在本次主版本内仍可用。新部署请使用上表地址。
 
 ## 5. 占位符约定
 

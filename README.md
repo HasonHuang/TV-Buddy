@@ -67,7 +67,7 @@ TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、�
 - 规则条件支持全部满足、任一满足、全部不满足，可嵌套。
 - 采集：XML 源与脚本源。
 - 翻译：接 MTranServer，批量翻译标题与描述。
-- 输出：`/sub/<令牌>/epg.xml`，面板「节目指南」。
+- 输出：`/api/sub/<令牌>/epg.xml`，面板「节目指南」。
 - 订阅注入：开启后自动写入 `x-tvg-url`。
 
 ### 录制与回看
@@ -248,7 +248,7 @@ docker run -d --name tv-buddy \
 | 数据目录 | `/data`（数据库、缓存、初始口令文件） |
 | 端口 | `9900` |
 | 运行用户 | `tvbuddy`，UID/GID `10001` |
-| 健康检查 | `GET http://127.0.0.1:9900/health` |
+| 健康检查 | `GET http://127.0.0.1:9900/api/health` |
 | 版本号 | `--build-arg TV_BUDDY_VERSION=<版本>`，默认 `dev` |
 | ffmpeg | 默认不装。需要 DASH 录制或素材转换时加 `--build-arg WITH_FFMPEG=1`，或在面板安装 |
 
@@ -363,7 +363,7 @@ sudo tv-buddy start   # 启动服务（安装后默认已启动）
 打开面板：
 
 ```text
-http://<host>:9900/panel
+http://<host>:9900/page/panel
 ```
 
 首次启动生成账号 `admin`，口令随机，写在：
@@ -394,13 +394,14 @@ TV_BUDDY_INITIAL_PASSWORD='你的口令' sudo -E sh install.sh
 订阅地址只有一个入口，在面板「我的订阅」页复制：
 
 ```text
-http://<host>:9900/sub/<令牌>/playlist.m3u   # 该用户的订阅
-http://<host>:9900/sub/<令牌>/<分组>/playlist.m3u  # 该用户单个分组的订阅
-http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
+http://<host>:9900/api/sub/<令牌>/playlist.m3u   # 该用户的订阅
+http://<host>:9900/api/sub/<令牌>/<分组>/playlist.m3u  # 该用户单个分组的订阅
+http://<host>:9900/api/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 ```
 
 每个用户默认可见全部分组。需要收紧时，在「用户与设备」里开启「只开放指定分组」与「只开放指定频道」。令牌在同一个弹窗里管理。
-全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用，返回 `404`。分组订阅用 `/sub/<令牌>/<分组>/playlist.m3u`。
+旧路径 `/sub/...`、`/panel/api/...` 与 `/health` 在本次主版本内仍可用。新部署请使用新地址。
+全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用，返回 `404`。分组订阅用 `/api/sub/<令牌>/<分组>/playlist.m3u`。
 
 ---
 
@@ -556,7 +557,7 @@ cargo build --release --target aarch64-unknown-linux-musl
 
 ```bash
 scripts/build-release.sh            # amd64 与 arm64 两个静态 musl 包
-scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /health
+scripts/verify-release.sh arm64     # 校验：静态链接 + 启动 + /api/health
 ```
 
 产物在 `dist/tv-buddy-<version>-linux-<arch>.tar.gz`，含二进制、启停脚本、安装脚本与服务单元。CI 产出的资产名与本地一致。
@@ -611,76 +612,76 @@ ls scripts/smoke-*.sh
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/health` | 健康检查，返回 `ok` |
-| `GET` | `/sub/<令牌>/playlist.m3u` | 用户订阅，只含该用户可见频道 |
-| `GET` | `/sub/<令牌>/<分组>/playlist.m3u` | 该用户单个分组的订阅；不可见或归档分组返回 `404` |
-| `GET` | `/sub/<令牌>/epg.xml[.gz]` | 用户节目单 |
-| `GET` | `/{gid}/{cid}.m3u8`（或 `.mpd`） | 入口清单 |
-| `GET` | `/{gid}/{cid}/video/index.txt` | 媒体清单 |
-| `POST` | `/panel/api/login` | 面板登录 |
-| `GET` | `/panel/api/me` | 当前账号、订阅地址与可见频道 |
-| `GET` | `/panel/api/health` | 本机健康摘要 |
+| `GET` | `/api/health` | 健康检查，返回 `ok` |
+| `GET` | `/api/sub/<令牌>/playlist.m3u` | 用户订阅，只含该用户可见频道 |
+| `GET` | `/api/sub/<令牌>/<分组>/playlist.m3u` | 该用户单个分组的订阅；不可见或归档分组返回 `404` |
+| `GET` | `/api/sub/<令牌>/epg.xml[.gz]` | 用户节目单 |
+| `GET` | `/api/play/{gid}/{cid}.m3u8`（或 `.mpd`） | 入口清单 |
+| `GET` | `/api/play/{gid}/{cid}/video/index.txt` | 媒体清单 |
+| `POST` | `/api/panel/login` | 面板登录 |
+| `GET` | `/api/panel/me` | 当前账号、订阅地址与可见频道 |
+| `GET` | `/api/panel/health` | 本机健康摘要 |
 
 <details>
 <summary>展开全部面板与播放接口</summary>
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/{gid}/{cid}/<P>_<S>.<ext>` | 伪装切片（忽略 `Range`） |
-| `GET`/`PUT` | `/panel/api/config` | 读取 / 全量保存配置 |
-| `GET` | `/panel/api/groups/export` | 导出全部分组 |
-| `GET` | `/panel/api/groups/{gid}/export` | 导出单个分组 |
-| `POST` | `/panel/api/groups` | 新建分组 |
-| `PUT`/`DELETE` | `/panel/api/groups/{gid}` | 局部更新 / 删除分组 |
-| `POST` | `/panel/api/groups/{gid}/channels` | 新建频道 |
-| `PUT`/`DELETE` | `/panel/api/groups/{gid}/channels/{cid}` | 局部更新 / 删除频道 |
-| `POST` | `/panel/api/groups/import[/m3u]` | 批量导入分组（JSON / M3U） |
-| `POST` | `/panel/api/groups/{gid}/detach` | 分组转为手工 |
-| `POST` | `/panel/api/groups/{gid}/channels/{cid}/detach` | 频道转为手工 |
-| `GET`/`PUT` | `/panel/api/playlist` | 读取 / 保存订阅源配置 |
-| `POST` | `/panel/api/playlist/sources` | 新建订阅源 |
-| `PUT`/`DELETE` | `/panel/api/playlist/sources/{id}` | 保存 / 删除订阅源 |
-| `PUT` | `/panel/api/playlist/settings` | 保存全局同步设置 |
-| `GET` | `/panel/api/subs/status` | 订阅源状态与同步差异 |
-| `POST` | `/panel/api/subs/sync` | 立即同步（异步） |
-| `DELETE` | `/panel/api/subs/{id}/content` | 清理某源内容（可转手工） |
-| `POST` | `/panel/api/reload` | 立即重读配置 |
-| `GET` | `/panel/api/cache/stats` | 缓存条目与占用 |
-| `POST` | `/panel/api/cache/flush` | 清空缓存（保留 `dash/`） |
-| `POST` | `/panel/api/cdn/estimate` | 立即估算推荐 TTL 与磁盘上限 |
-| `GET` | `/panel/api/stats` | 运行指标 |
-| `GET` | `/panel/api/logs` | 最近运行日志 |
-| `GET` | `/panel/api/security/token` | 当前播放 Token 与宽限旧值 |
-| `POST` | `/panel/api/security/token/rotate` | 轮换 Token |
-| `GET` | `/panel/api/security/ip/stats` | IP 请求统计与封禁状态 |
-| `POST` | `/panel/api/security/ip/{ban,unban}` | 封禁 / 解封地址 |
-| `GET` | `/panel/api/backup?include=` | 导出 gzip(tar) 备份 |
-| `POST` | `/panel/api/restore` | 恢复备份并重载 |
-| `GET` | `/logo/<file>` | 台标图片 |
-| `GET` | `/panel/api/logo/list` | 台标列表 |
-| `POST` | `/panel/api/logo/{upload,delete,rename,apply}` | 台标管理 |
-| `GET` | `/panel/api/logo/match-report` | 缺台标、坏引用与未使用 |
-| `POST` | `/panel/api/logo/suggest` | 按名称相似度推荐台标 |
-| `GET` | `/panel/api/assets/list` | 视频素材列表 |
-| `POST` | `/panel/api/assets/{upload,remove}` | 上传 / 删除视频素材 |
-| `GET` | `/panel/api/assets/ffmpeg-status` | ffmpeg / ffprobe 检测 |
-| `POST` | `/panel/api/tools/ffmpeg/{install,remove}` | 安装 / 删除面板 ffmpeg / ffprobe（管理员） |
-| `GET`/`POST` | `/panel/api/subtitle/*` | 字幕列表、上传、删除、下载 |
-| `GET`/`POST` | `/panel/api/resolver/{scripts,script,remove}` | 解析脚本管理 |
+| `GET` | `/media/{gid}/{cid}/<P>_<S>.<ext>` | 伪装切片（忽略 `Range`） |
+| `GET`/`PUT` | `/api/panel/config` | 读取 / 全量保存配置 |
+| `GET` | `/api/panel/groups/export` | 导出全部分组 |
+| `GET` | `/api/panel/groups/{gid}/export` | 导出单个分组 |
+| `POST` | `/api/panel/groups` | 新建分组 |
+| `PUT`/`DELETE` | `/api/panel/groups/{gid}` | 局部更新 / 删除分组 |
+| `POST` | `/api/panel/groups/{gid}/channels` | 新建频道 |
+| `PUT`/`DELETE` | `/api/panel/groups/{gid}/channels/{cid}` | 局部更新 / 删除频道 |
+| `POST` | `/api/panel/groups/import[/m3u]` | 批量导入分组（JSON / M3U） |
+| `POST` | `/api/panel/groups/{gid}/detach` | 分组转为手工 |
+| `POST` | `/api/panel/groups/{gid}/channels/{cid}/detach` | 频道转为手工 |
+| `GET`/`PUT` | `/api/panel/playlist` | 读取 / 保存订阅源配置 |
+| `POST` | `/api/panel/playlist/sources` | 新建订阅源 |
+| `PUT`/`DELETE` | `/api/panel/playlist/sources/{id}` | 保存 / 删除订阅源 |
+| `PUT` | `/api/panel/playlist/settings` | 保存全局同步设置 |
+| `GET` | `/api/panel/subs/status` | 订阅源状态与同步差异 |
+| `POST` | `/api/panel/subs/sync` | 立即同步（异步） |
+| `DELETE` | `/api/panel/subs/{id}/content` | 清理某源内容（可转手工） |
+| `POST` | `/api/panel/reload` | 立即重读配置 |
+| `GET` | `/api/panel/cache/stats` | 缓存条目与占用 |
+| `POST` | `/api/panel/cache/flush` | 清空缓存（保留 `dash/`） |
+| `POST` | `/api/panel/cdn/estimate` | 立即估算推荐 TTL 与磁盘上限 |
+| `GET` | `/api/panel/stats` | 运行指标 |
+| `GET` | `/api/panel/logs` | 最近运行日志 |
+| `GET` | `/api/panel/security/token` | 当前播放 Token 与宽限旧值 |
+| `POST` | `/api/panel/security/token/rotate` | 轮换 Token |
+| `GET` | `/api/panel/security/ip/stats` | IP 请求统计与封禁状态 |
+| `POST` | `/api/panel/security/ip/{ban,unban}` | 封禁 / 解封地址 |
+| `GET` | `/api/panel/backup?include=` | 导出 gzip(tar) 备份 |
+| `POST` | `/api/panel/restore` | 恢复备份并重载 |
+| `GET` | `/static/logo/<file>` | 台标图片 |
+| `GET` | `/api/panel/logo/list` | 台标列表 |
+| `POST` | `/api/panel/logo/{upload,delete,rename,apply}` | 台标管理 |
+| `GET` | `/api/panel/logo/match-report` | 缺台标、坏引用与未使用 |
+| `POST` | `/api/panel/logo/suggest` | 按名称相似度推荐台标 |
+| `GET` | `/api/panel/assets/list` | 视频素材列表 |
+| `POST` | `/api/panel/assets/{upload,remove}` | 上传 / 删除视频素材 |
+| `GET` | `/api/panel/assets/ffmpeg-status` | ffmpeg / ffprobe 检测 |
+| `POST` | `/api/panel/tools/ffmpeg/{install,remove}` | 安装 / 删除面板 ffmpeg / ffprobe（管理员） |
+| `GET`/`POST` | `/api/panel/subtitle/*` | 字幕列表、上传、删除、下载 |
+| `GET`/`POST` | `/api/panel/resolver/{scripts,script,remove}` | 解析脚本管理 |
 | `GET` | `/api/share/pull?key=` | 多 VPS 同步载荷 |
-| `GET` | `/panel/api/dash/tracks/:gid/:cid` | DASH 轨道列表 |
-| `POST` | `/panel/api/dash/scan-url` | 解析任意 MPD |
-| `GET` | `/panel/api/epg/{status,mappings,match-report}` | EPG 状态、映射与匹配报告 |
-| `POST` | `/panel/api/epg/{refresh,mapping}` | 立即采集、设置或清除映射 |
-| `GET`/`POST` | `/panel/api/epg/sources` | 源列表、新增或更新源 |
-| `DELETE` | `/panel/api/epg/sources/:id` | 删除源及其绑定 |
-| `POST` | `/panel/api/epg/sources/:id/refresh` | 只采集一个源 |
-| `GET` | `/panel/api/epg/bindings` | 全部频道的绑定状态 |
-| `PUT`/`DELETE` | `/panel/api/epg/bindings/:gid/:cid` | 手工绑定或清除 |
-| `POST` | `/panel/api/epg/bindings/:gid/:cid/copy` | 复用其他频道的绑定 |
-| `GET`/`POST` | `/panel/api/epg/rules` | 关键字规则列表、新增或更新 |
-| `POST` | `/panel/api/epg/rules/preview` | 预览节目单未来窗口内的命中（最多 48 小时） |
-| `DELETE` | `/panel/api/epg/rules/:id` | 删除规则与它生成的待执行任务 |
+| `GET` | `/api/panel/dash/tracks/:gid/:cid` | DASH 轨道列表 |
+| `POST` | `/api/panel/dash/scan-url` | 解析任意 MPD |
+| `GET` | `/api/panel/epg/{status,mappings,match-report}` | EPG 状态、映射与匹配报告 |
+| `POST` | `/api/panel/epg/{refresh,mapping}` | 立即采集、设置或清除映射 |
+| `GET`/`POST` | `/api/panel/epg/sources` | 源列表、新增或更新源 |
+| `DELETE` | `/api/panel/epg/sources/:id` | 删除源及其绑定 |
+| `POST` | `/api/panel/epg/sources/:id/refresh` | 只采集一个源 |
+| `GET` | `/api/panel/epg/bindings` | 全部频道的绑定状态 |
+| `PUT`/`DELETE` | `/api/panel/epg/bindings/:gid/:cid` | 手工绑定或清除 |
+| `POST` | `/api/panel/epg/bindings/:gid/:cid/copy` | 复用其他频道的绑定 |
+| `GET`/`POST` | `/api/panel/epg/rules` | 关键字规则列表、新增或更新 |
+| `POST` | `/api/panel/epg/rules/preview` | 预览节目单未来窗口内的命中（最多 48 小时） |
+| `DELETE` | `/api/panel/epg/rules/:id` | 删除规则与它生成的待执行任务 |
 
 </details>
 
@@ -730,7 +731,7 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 - **Remux**：纯 Rust 切片。冷启动时在首批切片产出前返回 `503 remux warming up`，不是恒 503。
 - **DASH**：已把 MPD 转成 HLS。需要 `SegmentTimeline`，或 `SegmentTemplate@duration` 加总时长。CENC/ClearKey 不解密，按原字节代理。
 - **缓存**：只有磁盘后端，切片正文不进入进程内存。`cache.limit_mb` 是每 60 秒扫描后的回收目标，不是实时硬上限；两次扫描之间占用可能短时超过上限。
-- **EPG**：录制前后缓冲与部分私有端点未实现。公开 EPG 页与全局 `/epg.xml` 已删除，改用 `/sub/<令牌>/epg.xml` 或面板「节目指南」。
+- **EPG**：录制前后缓冲与部分私有端点未实现。公开 EPG 页与全局 `/epg.xml` 已删除，改用 `/api/sub/<令牌>/epg.xml` 或面板「节目指南」。
 - **订阅托管**：同步一次写整份配置。大清单会增加写入时间。单源上限 20000 条，空清单默认拦截。上游分组改名按旧组删除、新组创建处理。
 - **探测下线**：只在下一次探测后生效。默认周期 300 秒。只隐藏订阅清单，直接播放地址仍可用。
 - **录制**：DASH 频道要求直播 MPD 且系统有 ffmpeg。静态 MPD 报「录制区间内无可用切片」。

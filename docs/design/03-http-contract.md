@@ -20,10 +20,10 @@
 | 会话鉴权 | `Authorization: Bearer <uuid>` 或 `X-Token: <uuid>` | S-AUTH-01、F-004 |
 | 面板错误体 | `{"error":"<文本>"}` | F-013 §5 |
 | 播放失败 | `302` 跳占位视频；**不用错误体** | S-DIS-15、F-004 |
-| 面板兜底 | `/panel/api/*` 未匹配 → `404` JSON；其余未匹配 → `302` 占位 | S-EP-08 |
-| 播放令牌 | 路径：`/l/<token>/<gid>/<cid>.<ext>`；查询参数 `?token=` 也接受；`?t=` 无效 | S-URL-06 |
-| 切片签名 | 路径：`/<gid>/<cid>/l/<exp>/<sig>/<name>`；同一时间窗内全用户相同 | 设计决策（CDN 共享缓存） |
-| 前端资源前缀 | `/__assets/*` | S-EP-16 |
+| 面板兜底 | `/api/panel/*` 未匹配 → `404` JSON；其余未匹配 → `302` 占位 | S-EP-08 |
+| 播放令牌 | 路径：`/api/play/token/<token>/<gid>/<cid>.<ext>`；查询参数 `?token=` 也接受；`?t=` 无效 | S-URL-06 |
+| 切片签名 | 清单：`/api/play/<gid>/<cid>/l/<exp>/<sig>/<name>`；媒体：`/media/<gid>/<cid>/l/<exp>/<sig>/<name>`；同一时间窗内全用户相同 | 设计决策（CDN 共享缓存） |
+| 前端资源前缀 | `/static/panel/*` | S-EP-16 |
 | 系统时区 | 回看时间戳按 `server.timezone_offset_hours` 解析 | S-URL-05 |
 
 状态码用量：
@@ -35,7 +35,7 @@
 | `400` | 参数或请求体不合法 |
 | `401` | 未登录、口令错误 |
 | `403` | 边缘密钥不符、面板关闭 |
-| `404` | 分组订阅（归档组）、未知面板接口、`/logo/<缺文件>` |
+| `404` | 分组订阅（归档组）、未知面板接口、`/static/logo/<缺文件>` |
 | `409` | 分组 id 已存在 |
 | `422` | 请求体字段缺失（如 `subs/preview` 缺 `source.id`） |
 | `500` | 内部错误 |
@@ -46,36 +46,76 @@
 
 | 方法 | 路径 | 鉴权 | 响应 | 阶段 | 依据 |
 | --- | --- | --- | --- | --- | --- |
-| GET | `/playlist.m3u` | 无 | `404` 文本，指路 `/sub/<令牌>/playlist.m3u` | v2026.7 | 设计决策（订阅只从用户令牌进入） |
-| GET | `/subs/status` | 管理员会话 | `200` JSON 源列表；未登录 `401`；非管理员 `403` | ✅ v2026.16 | S-GAP-07 |
-| POST | `/subs/groups` | 管理员会话 | `200` JSON 分组；非 http(s) → `400`；抓取失败 → `502` | ✅ v2026.16 | S-GAP-07 |
-| POST | `/subs/preview` | 管理员会话 | `200` JSON 预检 | ✅ v2026.16 | S-GAP-07 |
-| GET | `/{gid}/playlist.m3u` | 无 | `404` 文本，同上 | v2026.7 | 设计决策 |
-| GET | `/sub/:token/playlist.m3u` | 令牌 | `200` M3U；令牌无效或过期 → `404`；`Cache-Control: private, no-store` | ✅ v2026.7 | F-1 §3.3 |
-| GET | `/sub/:token/epg.xml` | 令牌 | `200` XMLTV，只含该用户可见频道；令牌无效 → `404`；EPG 关 → `404`；`private, no-store` | ✅ v2026.7 | F-1 §3.3 |
-| GET | `/sub/:token/epg.xml.gz` | 令牌 | 同上，`application/gzip` | ✅ v2026.7 | F-1 §3.3 |
-| GET | `/l/:token/:gid/:file` | 路径令牌 | `200` 清单；令牌无效 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
-| GET | `/:gid/:cid/l/:exp/:sig/*path` | 签名 | `200` 切片/子清单；签名错或过期 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
-| GET | `/{gid}/{cid}.{ext}` | 按 token 开关 | `200` 清单 / `302` 占位 | M2 | S-EP-03 |
-| GET | `/{gid}/{cid}/index.m3u8` | 同上 | 同上（路径别名） | M2 | F-012 §3 |
-| GET | `/{gid}/{cid}/video/index.txt` | 无 | `200` `text/plain` 媒体清单（仅主清单上游）；否则 `302 error_url` | M2 | F-004、F-018 |
-| GET | `/{gid}/{cid}/<P>_<S>.<ext>` | 无 | `200` 切片 | M2 | S-DIS-04 |
-| GET | `/{gid}/{cid}/timeshift/{filename}` | 按 token 开关 | `200` 本地回看 | P1 | F-014 |
-| GET | `/{gid}/{cid}/dash-timeshift/{track}[/{playlist,playlist.txt,playlist.m3u8}]` | 无 | `200` VOD 清单；缺或错 `playseek` → `400 missing playseek`；区间不重叠、未知轨道、非 `dash` 组 → `404 no segments in range` | P3.5 | S-EP-16、S-TS-01、F-016 §5.1 |
-| GET | `/{gid}/{cid}/dash-timeshift/{track}/<段号>.<ext>` | 无 | `200` 切片；ext 取伪装扩展名或 `m4s`；未命中 → `404 segment not found` | P3.5 | 同上 |
-| GET | `/epg` | — | 已删除公开路由，`404`。改用 `/sub/<令牌>/epg.xml` 与面板「节目指南」 | ✅ v2026.16 | 安全收紧 |
-| GET | `/epg.xml`、`/epg.xml.gz` | — | 已删除公开路由，`404`。改用 `/sub/<令牌>/epg.xml[.gz]` | ✅ v2026.16 | 安全收紧 |
-| GET | `/epg/api/{channels,programmes/:channel,search}` | — | 已删除公开路由，`404`。改用 `/panel/api/epg/*` | ✅ v2026.16 | 安全收紧 |
+| GET | `/api/panel/subs/status` | 管理员会话 | `200` JSON 源列表；未登录 `401`；非管理员 `403` | ✅ v2026.16 | S-GAP-07 |
+| POST | `/api/panel/subs/groups` | 管理员会话 | `200` JSON 分组；非 http(s) → `400`；抓取失败 → `502` | ✅ v2026.16 | S-GAP-07 |
+| POST | `/api/panel/subs/preview` | 管理员会话 | `200` JSON 预检 | ✅ v2026.16 | S-GAP-07 |
+| GET | `/api/sub/:token/playlist.m3u` | 令牌 | `200` M3U；令牌无效或过期 → `404`；`Cache-Control: private, no-store` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/api/sub/:token/epg.xml` | 令牌 | `200` XMLTV，只含该用户可见频道；令牌无效 → `404`；EPG 关 → `404`；`private, no-store` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/api/sub/:token/epg.xml.gz` | 令牌 | 同上，`application/gzip` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/api/play/token/:token/:gid/:file` | 路径令牌 | `200` 清单；令牌无效 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
+| GET | `/api/play/:gid/:cid/l/:exp/:sig/*path` | 签名 | `200` 清单；签名错或过期 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
+| GET | `/media/:gid/:cid/l/:exp/:sig/*path` | 签名 | `200` 媒体数据；签名错或过期 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
+| GET | `/api/play/{gid}/{cid}.{ext}` | 按 token 开关 | `200` 清单 / `302` 占位 | M2 | S-EP-03 |
+| GET | `/api/play/{gid}/{cid}/index.m3u8` | 同上 | 同上（路径别名） | M2 | F-012 §3 |
+| GET | `/api/play/{gid}/{cid}/video/index.txt` | 无 | `200` `text/plain` 媒体清单（仅主清单上游）；否则 `302 error_url` | M2 | F-004、F-018 |
+| GET | `/api/play/{gid}/{cid}/<rest>` | 无 | 清单形状：同上；媒体形状：`404 not found` | ✅ 本次 | 路径面约束 |
+| GET | `/media/{gid}/{cid}/<rest>` | 无 | 媒体形状：`200`；清单形状：`404 not found` | ✅ 本次 | 路径面约束 |
+| GET | `/media/{gid}/{cid}/<P>_<S>.<ext>` | 无 | `200` 切片 | M2 | S-DIS-04 |
+| GET | `/media/{gid}/{cid}/timeshift/{filename}` | 按 token 开关 | `200` 本地回看 | P1 | F-014 |
+| GET | `/api/play/{gid}/{cid}/dash-timeshift/{track}[/{playlist,playlist.txt,playlist.m3u8}]` | 无 | `200` VOD 清单；缺或错 `playseek` → `400 missing playseek`；区间不重叠、未知轨道、非 `dash` 组 → `404 no segments in range` | P3.5 | S-EP-16、S-TS-01、F-016 §5.1 |
+| GET | `/media/{gid}/{cid}/dash-timeshift/{track}/<段号>.<ext>` | 无 | `200` 切片；ext 取伪装扩展名或 `m4s`；未命中 → `404 segment not found` | P3.5 | 同上 |
+| GET | `/epg` | — | 已删除公开路由，`404`。改用 `/api/sub/<令牌>/epg.xml` 与面板「节目指南」 | ✅ v2026.16 | 安全收紧 |
+| GET | `/epg.xml`、`/epg.xml.gz` | — | 已删除公开路由，`404`。改用 `/api/sub/<令牌>/epg.xml[.gz]` | ✅ v2026.16 | 安全收紧 |
+| GET | `/epg/api/{channels,programmes/:channel,search}` | — | 已删除公开路由，`404`。改用 `/api/panel/epg/*` | ✅ v2026.16 | 安全收紧 |
 | GET | `/logo` | — | 已删除公开页面，`404`。改用面板「台标管理」 | ✅ v2026.16 | 安全收紧 |
-| GET | `/logo/<file>` | 无 | `200` 图片 + `public, max-age=86400`；缺文件、越界名、非白名单扩展 → `404` | ✅ P1 | F-011 §6 |
-| GET | `/logo/api/list` | — | 已删除公开接口，`404`。改用 `/panel/api/logo/list` | ✅ v2026.16 | 安全收紧 |
-| GET | `/unban` | 无 | `200` `text/html`；封禁期也可访问。无会话时页面提示先登录 | ✅ P3 | S-EP-07 |
-| POST | `/unban` | 登录会话 | `200` `{"msg","ok"}`；未登录 `401`；未封禁、配额用完、IP 管控关闭均为 `ok:false` | ✅ v2026.16 | S-AUTH-07 |
-| GET | `/unban/whoami` | 登录会话 | 开启 IP 管控：`{"banned","enabled":true,"ip","max_per_month":3,"remaining","used"}`；关闭：`{"enabled":false,"ip"}`；未登录 `401`；XFF 取末项，其次 `X-Real-IP`，最后 TCP 对端 | ✅ v2026.16 | S-EP-15 |
+| GET | `/static/logo/<file>` | 无 | `200` 图片 + `public, max-age=86400`；缺文件、越界名、非白名单扩展 → `404` | ✅ P1 | F-011 §6 |
+| GET | `/logo/api/list` | — | 已删除公开接口，`404`。改用 `/api/panel/logo/list` | ✅ v2026.16 | 安全收紧 |
+| GET | `/page/unban` | 无 | `200` `text/html`；封禁期也可访问。无会话时页面提示先登录 | ✅ P3 | S-EP-07 |
+| POST | `/api/unban` | 登录会话 | `200` `{"msg","ok"}`；未登录 `401`；未封禁、配额用完、IP 管控关闭均为 `ok:false` | ✅ v2026.16 | S-AUTH-07 |
+| GET | `/api/unban/whoami` | 登录会话 | 开启 IP 管控：`{"banned","enabled":true,"ip","max_per_month":3,"remaining","used"}`；关闭：`{"enabled":false,"ip"}`；未登录 `401`；XFF 取末项，其次 `X-Real-IP`，最后 TCP 对端 | ✅ v2026.16 | S-EP-15 |
 | GET | `/whoami` | 无 | `404`（目标未注册） | ✅ P3 | S-EP-15 |
-| GET | `/health` | 无 | `200` `ok`（`text/plain`） | ✅ M0 | S-EP-10 |
-| GET | `/panel`、`/panel/` | 无 | `200` `text/html` | ✅ M0 | S-EP-01 |
-| GET | `/__assets/*path` | 无 | `200` 静态资源 / `404` | ✅ M0 | S-EP-16 |
+| GET | `/api/health` | 无 | `200` `ok`（`text/plain`） | ✅ M0 | S-EP-10 |
+| GET | `/page/panel`、`/page/panel/` | 无 | `200` `text/html` | ✅ M0 | S-EP-01 |
+| GET | `/static/panel/*path` | 无 | `200` 静态资源 / `404` | ✅ M0 | S-EP-16 |
+| GET | `/static/assets/*path` | 无 | `200` 本地 HLS 清单或切片 / `404` | ✅ P2 | S-EP-16 |
+| GET | `/api/share/pull?key=` | 分享密钥 | `200` JSON；见 §6.10 | ✅ P1 | F-013 |
+
+### 3.1 旧路径别名
+
+旧路径在本次主版本内继续可用。改写层先于路由匹配运行。它不用重定向。旧路径与新路径使用同一套处理器，响应一致。下一主版本删除。
+
+| 旧路径 | 改写目标 |
+| --- | --- |
+| `GET /health` | `/api/health` |
+| `/panel/api/*` | `/api/panel/*` |
+| `/subs/*` | `/api/panel/subs/*` |
+| `/epg/translate/*` | `/api/panel/epg/translate/*` |
+| `/subtitle/*` | `/api/panel/subtitle/*` |
+| `/sub/*` | `/api/sub/*` |
+| `/l/*` | `/api/play/token/*` |
+| `/logo/*` | `/static/logo/*` |
+| `/__assets/*` | `/static/panel/*` |
+| `/assets/*` | `/static/assets/*` |
+| `GET /unban/whoami` | `/api/unban/whoami` |
+| `POST /unban` | `/api/unban` |
+| `GET /unban` | `/page/unban` |
+| `GET /panel`、`GET /panel/` | `/page/panel`、`/page/panel/` |
+
+播放形状按顺序判断：
+
+| 旧路径形状 | 改写目标 |
+| --- | --- |
+| `/<gid>/<file>` | `/api/play/<gid>/<file>` |
+| `/<gid>/<cid>/l/<exp>/<sig>/<rest>`，清单形状 | `/api/play/<gid>/<cid>/l/<exp>/<sig>/<rest>` |
+| `/<gid>/<cid>/l/<exp>/<sig>/<rest>`，其余形状 | `/media/<gid>/<cid>/l/<exp>/<sig>/<rest>` |
+| `/<gid>/<cid>/<rest>`，清单形状 | `/api/play/<gid>/<cid>/<rest>` |
+| `/<gid>/<cid>/<rest>`，其余形状 | `/media/<gid>/<cid>/<rest>` |
+
+清单形状：`index.m3u8`、`<track>/index.txt`、`<track>/index.m3u8`、`dash-timeshift/<track>/playlist[.txt|.m3u8]`。其余形状按媒体数据处理。
+
+两段 `/<gid>/<file>` 一律改写，不限于入口文件名。旧 `/<gid>/<cid>.mp4` 返回占位 `302`，改写后保持该响应。这是兼容性放宽。处理器的扩展名白名单不变。
+
+`/playlist.m3u` 与 `/<gid>/playlist.m3u` 是固定 `404` 指路。它们不改写。`/api/`、`/media/`、`/static/`、`/page/` 与 `/` 不参与改写。
 
 ## 4. 播放契约（proxy）
 
@@ -86,31 +126,31 @@
 
 ```text
 上游是媒体清单（单码率）
-GET /{gid}/{cid}.m3u8
+GET /api/play/{gid}/{cid}.m3u8
   → 200  text/plain; charset=utf-8
          cache-control: public, max-age=<TARGETDURATION>, s-maxage=<同上>
          正文 = 上游媒体清单；切片改写为绝对伪装地址
-                http://<host>/{gid}/{cid}/<16hex>_<32hex>.<ext>
-GET /{gid}/{cid}/video/index.txt
+                http://<host>/media/{gid}/{cid}/<16hex>_<32hex>.<ext>
+GET /api/play/{gid}/{cid}/video/index.txt
   → 302  跳 error_url（该路径只在主清单上游时存在）
 
 上游是主清单（多码率）
-GET /{gid}/{cid}.m3u8
+GET /api/play/{gid}/{cid}.m3u8
   → 200  application/vnd.apple.mpegurl
          cache-control: no-cache, no-store
          正文 = #EXTM3U
                 #EXT-X-VERSION:6
                 #EXT-X-INDEPENDENT-SEGMENTS
                 #EXT-X-STREAM-INF:<白名单属性>
-                http://<host>/{gid}/{cid}/video/index.txt
-GET /{gid}/{cid}/video/index.txt
+                http://<host>/api/play/{gid}/{cid}/video/index.txt
+GET /api/play/{gid}/{cid}/video/index.txt
   → 200  text/plain; charset=utf-8
          cache-control: public, max-age=<变体 TARGETDURATION>, s-maxage=<同上>
          正文 = 最佳变体的媒体清单；切片改写为绝对伪装地址
 
-GET /{gid}/{cid}/index.m3u8
+GET /api/play/{gid}/{cid}/index.m3u8
   → 与入口同义（路径别名）
-GET /{gid}/{cid}/<P>_<S>.<ext>
+GET /media/{gid}/{cid}/<P>_<S>.<ext>
   → 200  切片；忽略 Range（返回全量）
          首次写入 public, max-age=<TTL>；命中缓存 private, max-age=<TTL>
 ```
@@ -164,17 +204,17 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 | `passthrough` | `302` 到上游 URL | **校验 Token**（与其它模式一致），不缓存上游清单 | S-MODE-11、F-018 |
 | `rewrite` | `200 text/plain; charset=utf-8` + `no-cache, must-revalidate` | 相对地址改绝对，切片客户端直连；清单缓存 ≈5 s | S-MODE-09/14、F-018 |
 | `remux` | 预热期 `503` + `Retry-After: 2`，体 `remux warming up`；就绪后 `200` 清单 | 纯 Rust 把连续 TS 切成 HLS；HLS 上游永不就绪（S-MODE-18） | S-MODE-16/18 |
-| `dash` | `200 application/vnd.apple.mpegurl` + `no-cache, no-store` | MPD→HLS；主清单指向 `/{gid}/{cid}/{track}/index.txt`；轨道名 `video_{高}p` / `audio-{n}`；init/切片伪装为图片；就绪门 30 s，超时 → `503 timeout waiting for master playlist` | S-MODE-06/15 |
+| `dash` | `200 application/vnd.apple.mpegurl` + `no-cache, no-store` | MPD→HLS；主清单指向 `/api/play/{gid}/{cid}/{track}/index.txt`；轨道名 `video_{高}p` / `audio-{n}`；init/切片伪装为图片；就绪门 30 s，超时 → `503 timeout waiting for master playlist` | S-MODE-06/15 |
 | `proxy` | 代理链路（§4） | — | S-MODE-03 |
 
-> `remux` 已实现（纯 Rust 切片，不调用 ffmpeg）。`dash` 已实现 MPD→HLS：解析 `BaseURL`、`SegmentTemplate`/`SegmentTimeline`、`SegmentList`，按需代理 init 与切片。`proxy` 模式下的 MPD 保留正文，把绝对、相对与缺失 `<BaseURL>` 都改写成本地 `/{gid}/{cid}/mpd/{token}/{base64}/` 并代理 init/切片与查询串；错误令牌 → `302 error_url`；已有 `minimumUpdatePeriod` 改为 `PT1S`，已有 `publishTime` 改为当前 UTC；响应头为 `application/dash+xml; charset=utf-8` + `max-age=1, s-maxage=1`。`mpd_keep_seconds > 0` 时裁剪时间线，并同步推进 `$Number$` 的 `startNumber`；DASH 媒体清单窗口按 `[cache.dash].playlist_min_secs`（默认 30 秒）取最后 N 秒，分组 `mpd_keep_seconds > 0` 优先。直播媒体清单按 `start_time_offset_secs` 输出 `#EXT-X-START:TIME-OFFSET=-…`。
+> `remux` 已实现（纯 Rust 切片，不调用 ffmpeg）。`dash` 已实现 MPD→HLS：解析 `BaseURL`、`SegmentTemplate`/`SegmentTimeline`、`SegmentList`，按需代理 init 与切片。`proxy` 模式下的 MPD 保留正文，把绝对、相对与缺失 `<BaseURL>` 都改写成本地 `/media/{gid}/{cid}/mpd/{token}/{base64}/` 并代理 init/切片与查询串；错误令牌 → `302 error_url`；已有 `minimumUpdatePeriod` 改为 `PT1S`，已有 `publishTime` 改为当前 UTC；响应头为 `application/dash+xml; charset=utf-8` + `max-age=1, s-maxage=1`。`mpd_keep_seconds > 0` 时裁剪时间线，并同步推进 `$Number$` 的 `startNumber`；DASH 媒体清单窗口按 `[cache.dash].playlist_min_secs`（默认 30 秒）取最后 N 秒，分组 `mpd_keep_seconds > 0` 优先。直播媒体清单按 `start_time_offset_secs` 输出 `#EXT-X-START:TIME-OFFSET=-…`。
 
 ## 5. 订阅契约
 
 订阅有两个入口：
 
-- `/sub/:token/playlist.m3u`：用户订阅，含该用户可见的全部分组。
-- `/sub/:token/:gid/playlist.m3u`：单个分组的订阅，只含指定分组的频道。
+- `/api/sub/:token/playlist.m3u`：用户订阅，含该用户可见的全部分组。
+- `/api/sub/:token/:gid/playlist.m3u`：单个分组的订阅，只含指定分组的频道。
 
 令牌即身份，范围由用户决定。全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 返回 `404` 文本，指路用户订阅。
 
@@ -182,19 +222,19 @@ GET /{gid}/{cid}/<P>_<S>.<ext>
 
 | 路径 | 头 |
 | --- | --- |
-| `/sub/:token/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="playlist.m3u"` |
-| `/sub/:token/:gid/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="<gid>.m3u"` |
-| `/sub/:token/epg.xml` | `content-type: application/xml; charset=utf-8` |
-| `/sub/:token/epg.xml.gz` | `content-type: application/gzip` |
+| `/api/sub/:token/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="playlist.m3u"` |
+| `/api/sub/:token/:gid/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="<gid>.m3u"` |
+| `/api/sub/:token/epg.xml` | `content-type: application/xml; charset=utf-8` |
+| `/api/sub/:token/epg.xml.gz` | `content-type: application/gzip` |
 | `/playlist.m3u`、`/{gid}/playlist.m3u` | `404` + `text/plain` 提示 |
 
 ### 5.2 正文形状
 
 ```text
-#EXTM3U x-tvg-url="http://<host>/sub/<token>/epg.xml.gz"   ← EPG 开启才有
+#EXTM3U x-tvg-url="http://<host>/api/sub/<token>/epg.xml.gz"   ← EPG 开启才有
 <server.m3u_header_lines 逐行原文>
 #EXTINF:-1 tvg-id="<tvg_id||id>" tvg-name="<tvg_name||name>" tvg-logo="<logo>" group-title="<分组显示名>",<频道名>
-http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
+http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 <聚合源条目，原样保留上游地址>                              ← merge_position 决定位置
 ```
 
@@ -203,8 +243,8 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | `tvg-id` | 缺省用频道 id | S-MODEL-04 |
 | `tvg-name` | 缺省用频道名 | S-MODEL-04 |
 | `group-title` | 分组**显示名** | F-013 §3 |
-| 令牌段 | 一律用 `/l/<token>/…` 路径段 | S-URL-04、F-009 |
-| `x-tvg-url` | 指向该用户自己的 `/sub/<token>/epg.xml.gz` | F-1 §3.3 |
+| 令牌段 | 一律用 `/api/play/token/<token>/…` 路径段 | S-URL-04、F-009 |
+| `x-tvg-url` | 指向该用户自己的 `/api/sub/<token>/epg.xml.gz` | F-1 §3.3 |
 | `m3u_header_lines` | 追加在 `#EXTM3U` 后；热重载生效 | S-URL-07 |
 | 范围 | 只含 `allowed_group_ids` 与 `allowed_channel_ids` 允许的频道 | F-1 §5 |
 | 分组订阅范围 | 只含指定分组；分组不存在、已归档或对用户不可见时返回 `404` | — |
@@ -226,7 +266,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 ### 5.4 订阅聚合
 
-聚合源条目追加到**每个用户**的订阅（F-013 §5）。`/panel/api/playlist` 管配置。
+聚合源条目追加到**每个用户**的订阅（F-013 §5）。`/api/panel/playlist` 管配置。
 
 > 外部源条目不属于任何本地分组，无法映射到 `allowed_group_ids`，所以对所有用户一视同仁。
 > 这是已确认的取舍。
@@ -267,12 +307,12 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
-| POST | `/panel/api/login` | `{"username","password"}` | `{"token":"<uuid>"}`；错 → `401`；失败过多 → `429`（`locked_for_secs`） |
-| POST | `/panel/api/logout` | — | `{"ok":true}` |
-| GET | `/panel/api/status` | — | 目标字段：`uptime_secs, active_sessions, online_viewers, group_count, channel_count, version, mem_rss_mb, cpu_seconds, disk_cache_mb, recording_mb, low_resource_mode, poll_interval_secs, traffic_in_bytes, traffic_out_bytes, whole_file_{committed,budget,peak,hits,fallbacks}, entry_exts{gid → ext}, cpu_cores`。附加字段：`name, bind, log_level, timezone_offset_hours, cache_disk_path, host_cpu_percent, mem_total_mb, load_avg, disk_total_mb, disk_free_mb, host_net_rx_bytes, host_net_tx_bytes, group_modes`。`traffic_in_bytes` 恒 0（S-BUG-01）。附加的主机指标只读 `/proc` 与 `statvfs`，读不到时输出 0。缓存只有磁盘后端，响应不含后端字段 |
-| GET | `/panel/api/config` | — | 全量配置 JSON |
-| PUT | `/panel/api/config` | 全量配置 | `{"ok":true,"revision":<n>}`；非法 → `400`；缺 `revision` 或版本不符 → `409 stale_revision` |
-| POST | `/panel/api/reload` | — | `{"ok":true}`；读取或保存失败 → `500`（保留当前快照） |
+| POST | `/api/panel/login` | `{"username","password"}` | `{"token":"<uuid>"}`；错 → `401`；失败过多 → `429`（`locked_for_secs`） |
+| POST | `/api/panel/logout` | — | `{"ok":true}` |
+| GET | `/api/panel/status` | — | 目标字段：`uptime_secs, active_sessions, online_viewers, group_count, channel_count, version, mem_rss_mb, cpu_seconds, disk_cache_mb, recording_mb, low_resource_mode, poll_interval_secs, traffic_in_bytes, traffic_out_bytes, whole_file_{committed,budget,peak,hits,fallbacks}, entry_exts{gid → ext}, cpu_cores`。附加字段：`name, bind, log_level, timezone_offset_hours, cache_disk_path, host_cpu_percent, mem_total_mb, load_avg, disk_total_mb, disk_free_mb, host_net_rx_bytes, host_net_tx_bytes, group_modes`。`traffic_in_bytes` 恒 0（S-BUG-01）。附加的主机指标只读 `/proc` 与 `statvfs`，读不到时输出 0。缓存只有磁盘后端，响应不含后端字段 |
+| GET | `/api/panel/config` | — | 全量配置 JSON |
+| PUT | `/api/panel/config` | 全量配置 | `{"ok":true,"revision":<n>}`；非法 → `400`；缺 `revision` 或版本不符 → `409 stale_revision` |
+| POST | `/api/panel/reload` | — | `{"ok":true}`；读取或保存失败 → `500`（保留当前快照） |
 
 登录锁：窗口内失败数达到 `auth_fail_free_per_window + auth_fail_ban_threshold` 后，后续登录返回 `429`。默认窗口 60 秒、免费 15 次、阈值 6、锁定 300 秒。既有 Bearer 会话不受影响。
 
@@ -280,26 +320,26 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 请求 | 响应 | 依据 |
 | --- | --- | --- | --- | --- |
-| POST | `/panel/api/groups` | `{"id":"<gid>", …}` | `{"ok":true}`；重复 → `409` `Group id already exists` | F-013 §5 |
-| PUT | `/panel/api/groups/{gid}` | **局部**字段 | `{"ok":true}`；缺组 → `404` `Group not found` | F-005、F-013 §5 |
-| DELETE | `/panel/api/groups/{gid}` | — | `{"ok":true}`；缺组 → `404` | F-013 §5 |
-| POST | `/panel/api/groups/{gid}/channels` | `{"id","name","url", …}` | `{"ok":true}` | F-004 |
-| PUT | `/panel/api/groups/{gid}/channels/{cid}` | 局部字段 | `{"ok":true}` | F-004 |
-| DELETE | `/panel/api/groups/{gid}/channels/{cid}` | — | `{"ok":true}`；缺 → `404` `Channel not found` | F-013 §5 |
-| GET | `/panel/api/groups/export` | — | 顶层**数组**（完整分组对象） | F-013 §1 |
-| POST | `/panel/api/groups/import` | — | 体为分组数组；id 已存在则跳过；`{"ok":true,"imported":n,"skipped":m}` | F-013 |
-| POST | `/panel/api/groups/import/force` | — | 同上，但同 id 覆盖 | F-013 |
-| POST | `/panel/api/groups/import/m3u` | — | 体 `{text,mode,group_mode}`；解析后落库 | F-013 §2 |
-| GET | `/panel/api/logo/list` | — | 同 `/logo/api/list` | F-012 |
-| POST | `/panel/api/logo/upload` | — | 体 `{"items":[{"name","ext","data"}]}`（`data` 可带 `data:image/…;base64,` 前缀）；返回 `{"ok":true,"added":[…],"failed":[…]}` | F-012 |
-| POST | `/panel/api/logo/delete` | — | 体 `{"file"}`；成功 `{"ok":true,"removed":1}`；缺文件 → `404` | F-012 |
-| POST | `/panel/api/logo/rename` | — | 体 `{"file","name"}`；保留扩展名；`{"ok":true,"logo":{…}}`；缺文件 → `404`，目标已存在 → `400` | F-012（形状自定） |
-| POST | `/panel/api/logo/restore` | — | 体 `{"file"}`；用 `<cache>/logos/.orig/` 备份覆盖当前文件；`{"ok":true}`；无备份 → `400` | F-012 |
-| POST | `/panel/api/logo/animate` | — | 体 `{"file","effect","quality":"<1..100>"}`；`effect` ∈ `diagonal/vertical/bounce/spot/glow/breathe`；返回 `{"ok":true,"frames":10,"width","height","total_ms":2220,"bytes_before","bytes_after","dirty_ratio"}`；输出动画 WebP（扩展名不变）；PNG/WebP 纯 Rust 解码，其他格式回退 `ffmpeg`；已动画源图 → `400` | F-012 |
-| GET | `/panel/api/logo/match-report` | — | `{"channels","missing","broken","unused","missing_channels":[…],"broken_logos":[…],"unused_logos":[…]}` | F-012（形状自定） |
-| POST | `/panel/api/logo/apply` | — | 体 `{"gid","cid","file"}`；把 `/logo/<file>` 写入频道 `logo`；`404` 用于缺文件或未知分组/频道 | F-012（形状自定） |
-| POST | `/panel/api/logo/suggest` | — | 体 `{"threshold","limit"}`；按名称相似度推荐，`{"threshold","count","channels":[{"gid","cid","name","suggest":[{"file","score"}]}]}` | F-012（形状自定） |
-| GET | `/panel/api/groups/{gid}/export` | — | 单个分组对象 | F-013 §1 |
+| POST | `/api/panel/groups` | `{"id":"<gid>", …}` | `{"ok":true}`；重复 → `409` `Group id already exists` | F-013 §5 |
+| PUT | `/api/panel/groups/{gid}` | **局部**字段 | `{"ok":true}`；缺组 → `404` `Group not found` | F-005、F-013 §5 |
+| DELETE | `/api/panel/groups/{gid}` | — | `{"ok":true}`；缺组 → `404` | F-013 §5 |
+| POST | `/api/panel/groups/{gid}/channels` | `{"id","name","url", …}` | `{"ok":true}` | F-004 |
+| PUT | `/api/panel/groups/{gid}/channels/{cid}` | 局部字段 | `{"ok":true}` | F-004 |
+| DELETE | `/api/panel/groups/{gid}/channels/{cid}` | — | `{"ok":true}`；缺 → `404` `Channel not found` | F-013 §5 |
+| GET | `/api/panel/groups/export` | — | 顶层**数组**（完整分组对象） | F-013 §1 |
+| POST | `/api/panel/groups/import` | — | 体为分组数组；id 已存在则跳过；`{"ok":true,"imported":n,"skipped":m}` | F-013 |
+| POST | `/api/panel/groups/import/force` | — | 同上，但同 id 覆盖 | F-013 |
+| POST | `/api/panel/groups/import/m3u` | — | 体 `{text,mode,group_mode}`；解析后落库 | F-013 §2 |
+| GET | `/api/panel/logo/list` | — | 同 `/logo/api/list` | F-012 |
+| POST | `/api/panel/logo/upload` | — | 体 `{"items":[{"name","ext","data"}]}`（`data` 可带 `data:image/…;base64,` 前缀）；返回 `{"ok":true,"added":[…],"failed":[…]}` | F-012 |
+| POST | `/api/panel/logo/delete` | — | 体 `{"file"}`；成功 `{"ok":true,"removed":1}`；缺文件 → `404` | F-012 |
+| POST | `/api/panel/logo/rename` | — | 体 `{"file","name"}`；保留扩展名；`{"ok":true,"logo":{…}}`；缺文件 → `404`，目标已存在 → `400` | F-012（形状自定） |
+| POST | `/api/panel/logo/restore` | — | 体 `{"file"}`；用 `<cache>/logos/.orig/` 备份覆盖当前文件；`{"ok":true}`；无备份 → `400` | F-012 |
+| POST | `/api/panel/logo/animate` | — | 体 `{"file","effect","quality":"<1..100>"}`；`effect` ∈ `diagonal/vertical/bounce/spot/glow/breathe`；返回 `{"ok":true,"frames":10,"width","height","total_ms":2220,"bytes_before","bytes_after","dirty_ratio"}`；输出动画 WebP（扩展名不变）；PNG/WebP 纯 Rust 解码，其他格式回退 `ffmpeg`；已动画源图 → `400` | F-012 |
+| GET | `/api/panel/logo/match-report` | — | `{"channels","missing","broken","unused","missing_channels":[…],"broken_logos":[…],"unused_logos":[…]}` | F-012（形状自定） |
+| POST | `/api/panel/logo/apply` | — | 体 `{"gid","cid","file"}`；把 `/static/logo/<file>` 写入频道 `logo`；`404` 用于缺文件或未知分组/频道 | F-012（形状自定） |
+| POST | `/api/panel/logo/suggest` | — | 体 `{"threshold","limit"}`；按名称相似度推荐，`{"threshold","count","channels":[{"gid","cid","name","suggest":[{"file","score"}]}]}` | F-012（形状自定） |
+| GET | `/api/panel/groups/{gid}/export` | — | 单个分组对象 | F-013 §1 |
 
 写入语义：分组与频道改动**立即写入数据库**；`PUT /config` 是**全量替换**（F-013 §6）。
 
@@ -324,21 +364,21 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 组 | 路径 | 阶段 |
 | --- | --- | --- |
-| 缓存 | `POST /panel/api/cache/flush`、`GET /panel/api/cache/stats` | ✅ M4 |
-| 素材 | `/panel/api/assets/{list,convert,remove,ffmpeg-status}`、`GET /assets/*path`（本地 HLS） | ✅ P2 |
-| 录制 | `/panel/api/schedule`、`/schedule/from-epg`、`/schedule/{idx}`、`/schedule/{idx}/stop`、`/schedule/download/{filename}` | P1 |
-| 推流 | `/panel/api/livestream`、`/livestream/{gid}/{cid}/{start,stop}` | P1 |
-| DASH | `/panel/api/dash/{status,scan-url,tracks/:gid/:cid}`、`/dash-timeshift/status` | P2 |
-| EPG | `/panel/api/epg/{status,refresh,regenerate,mappings,mapping,extra,match-report,scripts,script,script-delete,cron-preview,programmes/:channel,suggest/:gid/:cid,search,viewer-channels,source-channels/:id,tz-preview/:id}` | ✅ P1 |
-| 安全 | `/panel/api/security/{token,token/rotate,ip/stats,ip/ban,ip/unban,ip/unban-batch}` | ✅ P1（见 §6.7） |
-| 指标 | `/panel/api/{stats,logs,health}` | ✅ M4（`health` 在 M0） |
-| 备份 | `GET /panel/api/backup?include=all\|epg-scripts\|resolver`、`POST /panel/api/restore` | ✅ P1（见 §6.6） |
-| 导入 | `POST /panel/api/groups/import/m3u` | ✅ P1（见 §6.2） |
+| 缓存 | `POST /api/panel/cache/flush`、`GET /api/panel/cache/stats` | ✅ M4 |
+| 素材 | `/api/panel/assets/{list,convert,remove,ffmpeg-status}`、`GET /static/assets/*path`（本地 HLS） | ✅ P2 |
+| 录制 | `/api/panel/schedule`、`/schedule/from-epg`、`/schedule/{idx}`、`/schedule/{idx}/stop`、`/schedule/download/{filename}` | P1 |
+| 推流 | `/api/panel/livestream`、`/livestream/{gid}/{cid}/{start,stop}` | P1 |
+| DASH | `/api/panel/dash/{status,scan-url,tracks/:gid/:cid}`、`/dash-timeshift/status` | P2 |
+| EPG | `/api/panel/epg/{status,refresh,regenerate,mappings,mapping,extra,match-report,scripts,script,script-delete,cron-preview,programmes/:channel,suggest/:gid/:cid,search,viewer-channels,source-channels/:id,tz-preview/:id}` | ✅ P1 |
+| 安全 | `/api/panel/security/{token,token/rotate,ip/stats,ip/ban,ip/unban,ip/unban-batch}` | ✅ P1（见 §6.7） |
+| 指标 | `/api/panel/{stats,logs,health}` | ✅ M4（`health` 在 M0） |
+| 备份 | `GET /api/panel/backup?include=all\|epg-scripts\|resolver`、`POST /api/panel/restore` | ✅ P1（见 §6.6） |
+| 导入 | `POST /api/panel/groups/import/m3u` | ✅ P1（见 §6.2） |
 | 导入 | `/groups/{import,import/force}`（JSON 分组数组） | ✅ P1（`/groups/import/m3u` 相邻） |
-| 订阅聚合 | `POST /panel/api/subs/{groups,preview}` | P2 |
-| 翻译 | `/panel/api/epg/translate/{run,status,clear,clear-engine,probe,models,mtran/test}`（兼容无前缀别名）、`/panel/api/subtitle/{translate/clear,mtran/test}` | ✅ P2 |
+| 订阅聚合 | `POST /api/panel/subs/{groups,preview}` | P2 |
+| 翻译 | `/api/panel/epg/translate/{run,status,clear,clear-engine,probe,models,mtran/test}`（兼容无前缀别名）、`/api/panel/subtitle/{translate/clear,mtran/test}` | ✅ P2 |
 | 分享 | `GET /api/share/pull?key=`（仅 GET/HEAD） | P2 |
-| 解析脚本 | `/panel/api/resolver/{scripts,script-delete}` | P2 |
+| 解析脚本 | `/api/panel/resolver/{scripts,script-delete}` | P2 |
 
 ### 6.4 运维接口（M4 已实现）
 
@@ -346,12 +386,12 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 响应 |
 | --- | --- | --- |
-| `GET` | `/panel/api/cache/stats` | 目标字段：`disk_bytes, m3u8_entries, segment_entries, segment_url_entries, sub_url_entries, dash_disk_bytes, timeshift_disk_bytes, recording_disk_bytes, livestream_disk_bytes`。附加字段：`disk_path, cdn_enabled, entries, bytes, playlist_cache_entries, segment_body_bytes, segment_index_bytes, segment_cache_bytes, recommend`。只有磁盘后端，响应不含后端字段；`recommend` 字段见 `04-config-and-storage.md` §11.4 |
-| `POST` | `/panel/api/cache/flush` | `{"ok":true,"removed":<文件数>}`；清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash`**（S-CACHE-06）；同时丢弃进程内索引、清单缓存与订阅源缓存 |
-| `GET` | `/panel/api/stats` | `{"version","uptime_secs","requests","playlists","segments","segment_hits","upstream_failures","online_window_secs","groups":[{"id","requests"}]}`。`groups` 只含配置中存在的分组；统计键有上限（分组 1024、频道 16384），未知路径只增加总请求数 |
-| `GET` | `/panel/api/metrics/history?range=5m` | `{"range","points":[{"ts","net_rx","net_tx","cpu_host","cpu_proc"}]}`。窗口：`5m`、`10m`、`1h`、`24h`、`7d`；未知值按 `5m`。原始采样 10 秒一行，SQLite 保留 7 天，查询时按窗口聚合 |
-| `GET` | `/panel/api/logs?limit=n` | `{"total","lines":[…]}`；`limit` 上限 500，默认 200；来源为进程内环形缓冲（500 行） |
-| `POST` | `/panel/api/reload` | 立即重读配置；返回 `{"ok":true}`；读取或保存失败返回 `500` |
+| `GET` | `/api/panel/cache/stats` | 目标字段：`disk_bytes, m3u8_entries, segment_entries, segment_url_entries, sub_url_entries, dash_disk_bytes, timeshift_disk_bytes, recording_disk_bytes, livestream_disk_bytes`。附加字段：`disk_path, cdn_enabled, entries, bytes, playlist_cache_entries, segment_body_bytes, segment_index_bytes, segment_cache_bytes, recommend`。只有磁盘后端，响应不含后端字段；`recommend` 字段见 `04-config-and-storage.md` §11.4 |
+| `POST` | `/api/panel/cache/flush` | `{"ok":true,"removed":<文件数>}`；清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash`**（S-CACHE-06）；同时丢弃进程内索引、清单缓存与订阅源缓存 |
+| `GET` | `/api/panel/stats` | `{"version","uptime_secs","requests","playlists","segments","segment_hits","upstream_failures","online_window_secs","groups":[{"id","requests"}]}`。`groups` 只含配置中存在的分组；统计键有上限（分组 1024、频道 16384），未知路径只增加总请求数 |
+| `GET` | `/api/panel/metrics/history?range=5m` | `{"range","points":[{"ts","net_rx","net_tx","cpu_host","cpu_proc"}]}`。窗口：`5m`、`10m`、`1h`、`24h`、`7d`；未知值按 `5m`。原始采样 10 秒一行，SQLite 保留 7 天，查询时按窗口聚合 |
+| `GET` | `/api/panel/logs?limit=n` | `{"total","lines":[…]}`；`limit` 上限 500，默认 200；来源为进程内环形缓冲（500 行） |
+| `POST` | `/api/panel/reload` | 立即重读配置；返回 `{"ok":true}`；读取或保存失败返回 `500` |
 
 热重载：只监视配置文件本身；解析失败保留当前快照并记 `error` 日志（`design/04` §2）。冷却中的频道在配置重载后立即解除冷却（S-MODE-17）。
 
@@ -364,35 +404,35 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | `GET` | `/epg.xml` | 无 | `200 application/xml; charset=utf-8`；`[epg].enabled = false` 或尚未生成 → `404` |
 | `GET` | `/epg.xml.gz` | 无 | `200 application/gzip`（gzip 魔数 `1f 8b`）；同上 `404` |
 | `GET` | `/epg` | 无 | `200 text/html`（内嵌浏览页）；`epg.enabled = false` 或 `public_viewer_enabled = false` → `404` |
-| `GET` | `/panel/api/epg/status` | Bearer | `{"enabled","running","sources","channels","programmes","kept","keep_days","future_days","last_success","last_error"}` |
-| `POST` | `/panel/api/epg/refresh` | Bearer | 同步采集一次；`{"ok":true,"msg":"采集完成","channels","programmes"}`；失败 → `500` + 原因 |
-| `POST` | `/panel/api/epg/regenerate` | Bearer | 只读 `<cache>/epg/raw/` 重新匹配并生成，不重新下载；`{"ok":true,"channels","programmes"}` |
-| `GET` | `/panel/api/epg/mappings` | Bearer | `{"mappings":{"gid/cid":{"source_id","source_channel_id","source_name","source_display_name"}},"extra":[{"source_id","source_channel_id","out_id","out_name"}]}` |
-| `POST` | `/panel/api/epg/mapping` | Bearer | `{"gid","cid","source_id","source_channel_id"}`；两者留空 → 清除。写 `manual` 绑定 |
-| `GET` | `/panel/api/epg/sources` | Bearer | 源数组。每项含配置与运行时状态：`last_fetch_*`、`channels`、`programmes`、`coverage_*`、`url_statuses` |
-| `POST` | `/panel/api/epg/sources` | Bearer | 新增或更新源。`id` 为空表示新增 |
-| `DELETE` | `/panel/api/epg/sources/{id}` | Bearer | 删除源及其绑定 |
-| `POST` | `/panel/api/epg/sources/{id}/refresh` | Bearer | 只采集一个源 |
-| `GET` | `/panel/api/epg/bindings` | Bearer | `{"items":[{gid,cid,name,group_name,out_id,source_id,source_name,raw_channel_id,upstream_display_name,origin,match_via,programmes}],"bound","total"}` |
-| `PUT` | `/panel/api/epg/bindings/{gid}/{cid}` | Bearer | `{"source_id","raw_channel_id"}`；写 `manual` 绑定 |
-| `DELETE` | `/panel/api/epg/bindings/{gid}/{cid}` | Bearer | 清除绑定并重新匹配 |
-| `POST` | `/panel/api/epg/bindings/{gid}/{cid}/copy` | Bearer | `{"from_gid","from_cid"}`；复制另一频道的绑定 |
-| `GET` | `/panel/api/epg/rules` | Bearer | `[{rule,group_name,channel_name}]` |
-| `POST` | `/panel/api/epg/rules` | Bearer | 新增或更新规则。`id` 为空表示新增 |
-| `POST` | `/panel/api/epg/rules/preview` | Bearer | 同规则对象；返回 `lookahead_secs` 与节目单未来窗口内的命中节目（最多 48 小时） |
-| `DELETE` | `/panel/api/epg/rules/{id}` | Bearer | 删除规则与它生成的待执行任务 |
-| `POST` | `/panel/api/epg/extra` | Bearer | `{"action":"add","source_id","source_channel_id","out_id","out_name"}`；`{"action":"remove","source_id","source_channel_id"}`；批量 `items[]` |
-| `GET` | `/panel/api/epg/match-report` | Bearer | `text/plain`：`matched_count=… empty_count=… extra_count=…` + 表格 |
-| `GET` | `/panel/api/epg/scripts` | Bearer | `{"python":<版本或 null>,"scripts":[{"name","size"}]}` |
-| `POST` | `/panel/api/epg/script` | Bearer | `{"name","content"}`；只接受 `.py`；`{"ok":true,"script":{…}}` |
-| `POST` | `/panel/api/epg/script-delete` | Bearer | `{"name"}`；`{"ok":true,"removed":<bool>}` |
-| `POST` | `/panel/api/epg/cron-preview` | Bearer | `{"expr"}`；`{"ok":true,"next":[epoch…]}` 或 `{"ok":false,"error"}` |
-| `GET` | `/panel/api/epg/programmes/{channel}` | Bearer | `{"now","pad_before","pad_after","programmes":[{"disp_start","disp_end","stop_epoch","rec_start","rec_end","live","title","desc"}]}` |
-| `GET` | `/panel/api/epg/suggest/{gid}/{cid}` | Bearer | `{"suggestions":[{"source_id","source_channel_id","source_name","display_name","score"}]}` |
-| `GET` | `/panel/api/epg/search?q=` | Bearer | 同公开搜索 |
-| `GET` | `/panel/api/epg/viewer-channels` | Bearer | `{"channels":[…]}`；频道对象同公开表，无 `generated_at`/`total`/`tz_offset_hours` |
-| `GET` | `/panel/api/epg/source-channels/{id}?q=&offset=&limit=` | Bearer | `{"items":[{"id","display_names","source_id","source_name"}],"total"}`；`id=__all__` 跨源 |
-| `GET` | `/panel/api/epg/tz-preview/{id}?shift=` | Bearer | `{"ok":true,"items":[{"raw","current","shifted"}]}`；`shift` 单位为分钟 |
+| `GET` | `/api/panel/epg/status` | Bearer | `{"enabled","running","sources","channels","programmes","kept","keep_days","future_days","last_success","last_error"}` |
+| `POST` | `/api/panel/epg/refresh` | Bearer | 同步采集一次；`{"ok":true,"msg":"采集完成","channels","programmes"}`；失败 → `500` + 原因 |
+| `POST` | `/api/panel/epg/regenerate` | Bearer | 只读 `<cache>/epg/raw/` 重新匹配并生成，不重新下载；`{"ok":true,"channels","programmes"}` |
+| `GET` | `/api/panel/epg/mappings` | Bearer | `{"mappings":{"gid/cid":{"source_id","source_channel_id","source_name","source_display_name"}},"extra":[{"source_id","source_channel_id","out_id","out_name"}]}` |
+| `POST` | `/api/panel/epg/mapping` | Bearer | `{"gid","cid","source_id","source_channel_id"}`；两者留空 → 清除。写 `manual` 绑定 |
+| `GET` | `/api/panel/epg/sources` | Bearer | 源数组。每项含配置与运行时状态：`last_fetch_*`、`channels`、`programmes`、`coverage_*`、`url_statuses` |
+| `POST` | `/api/panel/epg/sources` | Bearer | 新增或更新源。`id` 为空表示新增 |
+| `DELETE` | `/api/panel/epg/sources/{id}` | Bearer | 删除源及其绑定 |
+| `POST` | `/api/panel/epg/sources/{id}/refresh` | Bearer | 只采集一个源 |
+| `GET` | `/api/panel/epg/bindings` | Bearer | `{"items":[{gid,cid,name,group_name,out_id,source_id,source_name,raw_channel_id,upstream_display_name,origin,match_via,programmes}],"bound","total"}` |
+| `PUT` | `/api/panel/epg/bindings/{gid}/{cid}` | Bearer | `{"source_id","raw_channel_id"}`；写 `manual` 绑定 |
+| `DELETE` | `/api/panel/epg/bindings/{gid}/{cid}` | Bearer | 清除绑定并重新匹配 |
+| `POST` | `/api/panel/epg/bindings/{gid}/{cid}/copy` | Bearer | `{"from_gid","from_cid"}`；复制另一频道的绑定 |
+| `GET` | `/api/panel/epg/rules` | Bearer | `[{rule,group_name,channel_name}]` |
+| `POST` | `/api/panel/epg/rules` | Bearer | 新增或更新规则。`id` 为空表示新增 |
+| `POST` | `/api/panel/epg/rules/preview` | Bearer | 同规则对象；返回 `lookahead_secs` 与节目单未来窗口内的命中节目（最多 48 小时） |
+| `DELETE` | `/api/panel/epg/rules/{id}` | Bearer | 删除规则与它生成的待执行任务 |
+| `POST` | `/api/panel/epg/extra` | Bearer | `{"action":"add","source_id","source_channel_id","out_id","out_name"}`；`{"action":"remove","source_id","source_channel_id"}`；批量 `items[]` |
+| `GET` | `/api/panel/epg/match-report` | Bearer | `text/plain`：`matched_count=… empty_count=… extra_count=…` + 表格 |
+| `GET` | `/api/panel/epg/scripts` | Bearer | `{"python":<版本或 null>,"scripts":[{"name","size"}]}` |
+| `POST` | `/api/panel/epg/script` | Bearer | `{"name","content"}`；只接受 `.py`；`{"ok":true,"script":{…}}` |
+| `POST` | `/api/panel/epg/script-delete` | Bearer | `{"name"}`；`{"ok":true,"removed":<bool>}` |
+| `POST` | `/api/panel/epg/cron-preview` | Bearer | `{"expr"}`；`{"ok":true,"next":[epoch…]}` 或 `{"ok":false,"error"}` |
+| `GET` | `/api/panel/epg/programmes/{channel}` | Bearer | `{"now","pad_before","pad_after","programmes":[{"disp_start","disp_end","stop_epoch","rec_start","rec_end","live","title","desc"}]}` |
+| `GET` | `/api/panel/epg/suggest/{gid}/{cid}` | Bearer | `{"suggestions":[{"source_id","source_channel_id","source_name","display_name","score"}]}` |
+| `GET` | `/api/panel/epg/search?q=` | Bearer | 同公开搜索 |
+| `GET` | `/api/panel/epg/viewer-channels` | Bearer | `{"channels":[…]}`；频道对象同公开表，无 `generated_at`/`total`/`tz_offset_hours` |
+| `GET` | `/api/panel/epg/source-channels/{id}?q=&offset=&limit=` | Bearer | `{"items":[{"id","display_names","source_id","source_name"}],"total"}`；`id=__all__` 跨源 |
+| `GET` | `/api/panel/epg/tz-preview/{id}?shift=` | Bearer | `{"ok":true,"items":[{"raw","current","shifted"}]}`；`shift` 单位为分钟 |
 | `GET` | `/epg/api/channels` | 无 | `{"channels":[{"icon","id","kind","last_stop","name","programme_count","source_id","source_name"}],"generated_at","total","tz_offset_hours"}`；`cache-control: public, max-age=300` |
 | `GET` | `/epg/api/programmes/{channel}` | 无 | `{"channel","programmes":[{"desc","start","stop","title"}],"tz_offset_hours"}`；`start`/`stop` 为 Unix 秒；路径大小写敏感；`max-age=120` |
 | `GET` | `/epg/api/search?q=` | 无 | `{"channels":[…],"programmes":[{"channel","channel_name","start","stop","title"}],"tz_offset_hours"}`；只搜频道 ID/名称与节目标题；按 `start` 升序；最多 200 条；`max-age=30` |
@@ -422,16 +462,16 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 > 额外频道不进入公开频道表；只有已匹配本地频道可出现，且允许 `programme_count=0`。
 >
 | 翻译 | 读 `[epg.translate]`：`enabled`、`url`（或 `engine="mtran"` 时的 `mtran_url`）、`token`/`mtran_token`、`source`/`mtran_source`、`target`/`targets`、`translation_first`、`mtran_batch`。采集后把节目文本批量发到 MTranServer v5 `/translate/batch`（`{from,to,texts}` → `{results}`）；`/translate/batch` 不可用时回退单条 `/translate`。译文按目标语言追加为 `lang="<target>"` 的文本节点；`translation_first = true` 时排在原文前。结果缓存在 `<cache>/epg/.translate/cache.json`，命中不发请求 |
-| 翻译接口 | `GET /epg/translate/{status,models}` 报告引擎与目标语言；`POST /epg/translate/{run,probe,mtran/test,clear,clear-engine}`。面板别名在相同路径前加 `/panel/api`。`run/probe` 需面板会话；未启用或未配地址 → `400`。`clear*` 清空缓存 |
+| 翻译接口 | `GET /api/panel/epg/translate/{status,models}` 报告引擎与目标语言；`POST /api/panel/epg/translate/{run,probe,mtran/test,clear,clear-engine}`。旧 `/epg/translate/*` 在迁移期内可用。`run/probe` 需面板会话；未启用或未配地址 → `400`。`clear*` 清空缓存 |
 
 ### 6.6 备份与恢复（P1 已实现）
 
 | 项 | 规则 |
 | --- | --- |
-| 备份请求 | `GET /panel/api/backup?include=all\|epg-scripts\|resolver`；其它值回退 `all` |
+| 备份请求 | `GET /api/panel/backup?include=all\|epg-scripts\|resolver`；其它值回退 `all` |
 | 备份响应 | `200 application/gzip`；`Content-Disposition: attachment; filename="tv-buddy-backup-YYYYmmdd-HHMMSS.tar.gz"`（UTC） |
 | 包内布局 | `tv-buddy-backup/config.json`、`tv-buddy-backup/epg.json`、`logos/*`、`epg/scripts/*.py`、`epg/epg_map.json`、`resolvers/*.py`、`manifest.json`（`generator`/`version`/`created`/`scope`）。`config.json` 与 `epg.json` 只在 `scope=all` 时写入 |
-| 恢复请求 | `POST /panel/api/restore`，`Content-Type: application/gzip`，体为 tar.gz 原文；上限 64 MiB |
+| 恢复请求 | `POST /api/panel/restore`，`Content-Type: application/gzip`，体为 tar.gz 原文；上限 64 MiB |
 | 恢复步骤 | 解包 → 解析并**校验** `config.json` 与 `epg.json` → 恢复台标 → 当前配置另存 `tv-buddy.db.bak.json` 与 `tv-buddy.db.bak.epg.json` → 写库 → 替换配置与 EPG 快照（立即解除看门狗冷却） |
 | 恢复响应 | `{"ok":true,"config_reloaded":true,"report":{"files":[…],"skipped":[…]},"groups":N}` |
 | 失败 | 无 `config.json`、无 `epg.json`、配置或 EPG 不合法、非 gzip → `400`；未登录 → `401` |
@@ -444,19 +484,19 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 响应 |
 | --- | --- | --- |
-| `GET` | `/panel/api/link-info` | `{"aliases":{},"random_id_enabled":false,"token":"","token_enabled":false,"use_alias":false}`；形状与目标一致（S-GAP-04）；Token 关闭时 `token` 为空串 |
-| `GET` | `/panel/api/security/token` | 目标字段：`{current_value, enabled, status{current{remaining_secs,valid,value}, old, ttl_hours}, ttl_hours}`；`status` 里的 `value` 是掩码（前 4 + `****` + 后 4）。附加字段：`current`、`old` |
-| `POST` | `/panel/api/security/token/rotate` | `{ok, new_token, expires_in_hours}`；附加字段 `token`。旧值保留 1 小时宽限（S-AUTH-09） |
-| `GET` | `/panel/api/security/ip/stats` | `{"count","banned","entries":[{"ip","requests","failures","banned","remaining_secs"}]}`，按请求数降序 |
-| `POST` | `/panel/api/security/ip/ban` | 目标字段：`{"ips":[…],"secs":N}` → `{ok, results[{ip,ok}], secs}`；也接受单数 `{"ip"}` 与 `seconds`。`0` 用默认 3600，上限 30 天 |
-| `POST` | `/panel/api/security/ip/unban`<br>`POST …/ip/unban-batch` | `{"ip"}` 或 `{"ips":[…]}`；`{"ok":true,"removed":n,"requested":n}`；两个路径同义。空请求 → `400 Missing ip` |
+| `GET` | `/api/panel/link-info` | `{"aliases":{},"random_id_enabled":false,"token":"","token_enabled":false,"use_alias":false}`；形状与目标一致（S-GAP-04）；Token 关闭时 `token` 为空串 |
+| `GET` | `/api/panel/security/token` | 目标字段：`{current_value, enabled, status{current{remaining_secs,valid,value}, old, ttl_hours}, ttl_hours}`；`status` 里的 `value` 是掩码（前 4 + `****` + 后 4）。附加字段：`current`、`old` |
+| `POST` | `/api/panel/security/token/rotate` | `{ok, new_token, expires_in_hours}`；附加字段 `token`。旧值保留 1 小时宽限（S-AUTH-09） |
+| `GET` | `/api/panel/security/ip/stats` | `{"count","banned","entries":[{"ip","requests","failures","banned","remaining_secs"}]}`，按请求数降序 |
+| `POST` | `/api/panel/security/ip/ban` | 目标字段：`{"ips":[…],"secs":N}` → `{ok, results[{ip,ok}], secs}`；也接受单数 `{"ip"}` 与 `seconds`。`0` 用默认 3600，上限 30 天 |
+| `POST` | `/api/panel/security/ip/unban`<br>`POST …/ip/unban-batch` | `{"ip"}` 或 `{"ips":[…]}`；`{"ok":true,"removed":n,"requested":n}`；两个路径同义。空请求 → `400 Missing ip` |
 
 执行规则：
 
 | 项 | 规则 |
 | --- | --- |
-| 记账 | 非 `/panel`、非 `/unban` 路径按 `X-Forwarded-For` 末项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略 |
-| 拦截 | 封禁期内 → `403` 纯文本 `banned`；面板与 `/unban` 路径不拦截（避免管理员或用户自锁） |
+| 记账 | 非 `/page/panel`、非 `/page/unban`、非 `/api/panel`、非 `/api/unban` 路径按 `X-Forwarded-For` 末项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略 |
+| 拦截 | 封禁期内 → `403` 纯文本 `banned`；面板与解封路径不拦截（避免管理员或用户自锁）。旧路径同样豁免 |
 | 容量 | 最多保留 10 000 个地址，超出后忽略新地址 |
 | 未实现 | 按 IP 的会话上限与自动限流 |
 
@@ -464,20 +504,20 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 分区 | 数据来源 | 状态 |
 | --- | --- | --- |
-| 概览 | `GET /panel/api/status`、`GET/PUT /panel/api/config` | ✅ |
-| 分组管理 | `/panel/api/{groups,channels}` 与导入 | ✅ |
-| 安全管控 | `/panel/api/security/{token,token/rotate,ip/stats,ip/ban,ip/unban}` | ✅ |
-| 缓存状态 | `GET /panel/api/cache/stats`、`POST /panel/api/cache/flush`（二次确认） | ✅ |
-| 频道热度 | `GET /panel/api/stats`（总请求、切片、上游失败、分组排行） | ✅ |
-| 节目指南 | `GET /panel/api/epg/status`、`POST /panel/api/epg/refresh`；链接到 `/epg` 浏览页 | ✅ |
-| 运行日志 | `GET /panel/api/logs?limit=`（5 秒轮询） | ✅ |
-| 备份恢复 | `GET /panel/api/backup`、`POST /panel/api/restore`（浏览器内下载/上传） | ✅ |
-| 素材 | `/panel/api/{assets,subtitle}/*`、`/panel/api/assets/ffmpeg-status`、`/panel/api/tools/ffmpeg/{install,remove}` | ✅ |
-| 录制与回看 | `/panel/api/schedule*`、`/panel/api/livestream*`、`GET /panel/api/dash-timeshift/status` | ✅ |
-| 订阅聚合 | `GET/PUT /panel/api/playlist`（源、过滤、缓存与合并位置）；条目追加到 `/sub/<令牌>/playlist.m3u` | ✅ |
-| 系统状态 | `GET /panel/api/health`、`/assets/ffmpeg-status`、`/resolver/scripts`、`/dash-timeshift/status` | ✅ |
-| 台标 | 独立页 `/logo`（`/logo/api/*`） | ✅ |
-| 其它（系统设置） | 概览页已支持 `GET/PUT /panel/api/config` 全量编辑 | ✅ |
+| 概览 | `GET /api/panel/status`、`GET/PUT /api/panel/config` | ✅ |
+| 分组管理 | `/api/panel/{groups,channels}` 与导入 | ✅ |
+| 安全管控 | `/api/panel/security/{token,token/rotate,ip/stats,ip/ban,ip/unban}` | ✅ |
+| 缓存状态 | `GET /api/panel/cache/stats`、`POST /api/panel/cache/flush`（二次确认） | ✅ |
+| 频道热度 | `GET /api/panel/stats`（总请求、切片、上游失败、分组排行） | ✅ |
+| 节目指南 | `GET /api/panel/epg/status`、`POST /api/panel/epg/refresh`；链接到 `/epg` 浏览页 | ✅ |
+| 运行日志 | `GET /api/panel/logs?limit=`（5 秒轮询） | ✅ |
+| 备份恢复 | `GET /api/panel/backup`、`POST /api/panel/restore`（浏览器内下载/上传） | ✅ |
+| 素材 | `/api/panel/{assets,subtitle}/*`、`/api/panel/assets/ffmpeg-status`、`/api/panel/tools/ffmpeg/{install,remove}` | ✅ |
+| 录制与回看 | `/api/panel/schedule*`、`/api/panel/livestream*`、`GET /api/panel/dash-timeshift/status` | ✅ |
+| 订阅聚合 | `GET/PUT /api/panel/playlist`（源、过滤、缓存与合并位置）；条目追加到 `/api/sub/<令牌>/playlist.m3u` | ✅ |
+| 系统状态 | `GET /api/panel/health`、`/api/panel/assets/ffmpeg-status`、`/api/panel/resolver/scripts`、`/api/panel/dash-timeshift/status` | ✅ |
+| 台标 | 面板「台标管理」（`/api/panel/logo/*`） | ✅ |
+| 其它（系统设置） | 概览页已支持 `GET/PUT /api/panel/config` 全量编辑 | ✅ |
 
 ### 6.9 素材与脚本（P1 已实现）
 
@@ -485,22 +525,22 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/panel/api/assets/list` | `{"kind","count","files":[…],"items":[{"url","converted","local_path"}],"ffmpeg_installed","ffmpeg_path"}`；`items` 来自配置中的非 HLS URL |
-| `POST` | `/panel/api/assets/convert` | `{"url"}`；下载后调用 `ffmpeg` 转 HLS，写 `[assets].map`，返回 `{"ok":true,"url","local_path","bytes"}` |
-| `POST` | `/panel/api/assets/upload` | `{"items":[{"name","ext","data"}]}`；`data` 可带 `data:` 前缀 |
-| `POST` | `/panel/api/assets/remove` | `{"file"}` 或 `{"url"}`；按 URL 删除时同时清 `[assets].map` 与本地目录 |
-| `GET` | `/panel/api/assets/raw/<file>` | 面板内下载（`private, max-age=0`） |
-| `GET` | `/assets/*path` | 公开读取 `<cache>/assets/` 下的 HLS 清单与切片 |
-| `GET` | `/panel/api/assets/ffmpeg-status` | `{"installed","version","source","path","managed_installed","system_installed","job","remux_ready","note"}`；`source` ∈ `managed/system/null`；`job` 为当前或最近一次安装任务 |
-| `POST` | `/panel/api/tools/ffmpeg/install` | 仅管理员；启动单实例安装任务，立即返回 `{ok,job}`；不支持平台 `400`；任务运行中 `409` |
-| `POST` | `/panel/api/tools/ffmpeg/remove` | 仅管理员；删除 `<数据库目录>/tools/ffmpeg` 与临时文件；任务运行中 `409`；系统版本不受影响 |
-| `GET` | `/panel/api/subtitle/list`、`…/upload`、`…/remove`、`…/raw/<file>` | 与视频同形；扩展名 `srt/ass/ssa/vtt` |
-| `GET` | `/panel/api/subtitle/translate/status` | `{enabled,engine,url,source,targets,translation_first,formats,converts_ass,cached}` |
-| `POST` | `/panel/api/subtitle/translate` | `{"file","target"}`：翻译 SRT/VTT/ASS/SSA，返回 `{ok,file,target,format,cached,lines?,bytes,download}`；ASS/SSA 转 VTT 后翻译；未启用/无地址/非 UTF-8 → `400` |
-| `GET` | `/panel/api/subtitle/translate/raw/<name>` | 下载译文；名称须为 32 位十六进制 + `.srt`/`.vtt` |
-| `GET` | `/panel/api/resolver/scripts` | `{"count","scripts":[{"name","bytes"}]}`（`<cache>/resolvers/*.py`） |
-| `POST` | `/panel/api/resolver/script` | `{"name","content"}`；写 `<name>.py`；空内容 → `400` |
-| `POST` | `/panel/api/resolver/remove` | `{"name"}`；缺文件 → `404` |
+| `GET` | `/api/panel/assets/list` | `{"kind","count","files":[…],"items":[{"url","converted","local_path"}],"ffmpeg_installed","ffmpeg_path"}`；`items` 来自配置中的非 HLS URL |
+| `POST` | `/api/panel/assets/convert` | `{"url"}`；下载后调用 `ffmpeg` 转 HLS，写 `[assets].map`，返回 `{"ok":true,"url","local_path","bytes"}` |
+| `POST` | `/api/panel/assets/upload` | `{"items":[{"name","ext","data"}]}`；`data` 可带 `data:` 前缀 |
+| `POST` | `/api/panel/assets/remove` | `{"file"}` 或 `{"url"}`；按 URL 删除时同时清 `[assets].map` 与本地目录 |
+| `GET` | `/api/panel/assets/raw/<file>` | 面板内下载（`private, max-age=0`） |
+| `GET` | `/static/assets/*path` | 公开读取 `<cache>/assets/` 下的 HLS 清单与切片 |
+| `GET` | `/api/panel/assets/ffmpeg-status` | `{"installed","version","source","path","managed_installed","system_installed","job","remux_ready","note"}`；`source` ∈ `managed/system/null`；`job` 为当前或最近一次安装任务 |
+| `POST` | `/api/panel/tools/ffmpeg/install` | 仅管理员；启动单实例安装任务，立即返回 `{ok,job}`；不支持平台 `400`；任务运行中 `409` |
+| `POST` | `/api/panel/tools/ffmpeg/remove` | 仅管理员；删除 `<数据库目录>/tools/ffmpeg` 与临时文件；任务运行中 `409`；系统版本不受影响 |
+| `GET` | `/api/panel/subtitle/list`、`…/upload`、`…/remove`、`…/raw/<file>` | 与视频同形；扩展名 `srt/ass/ssa/vtt` |
+| `GET` | `/api/panel/subtitle/translate/status` | `{enabled,engine,url,source,targets,translation_first,formats,converts_ass,cached}` |
+| `POST` | `/api/panel/subtitle/translate` | `{"file","target"}`：翻译 SRT/VTT/ASS/SSA，返回 `{ok,file,target,format,cached,lines?,bytes,download}`；ASS/SSA 转 VTT 后翻译；未启用/无地址/非 UTF-8 → `400` |
+| `GET` | `/api/panel/subtitle/translate/raw/<name>` | 下载译文；名称须为 32 位十六进制 + `.srt`/`.vtt` |
+| `GET` | `/api/panel/resolver/scripts` | `{"count","scripts":[{"name","bytes"}]}`（`<cache>/resolvers/*.py`） |
+| `POST` | `/api/panel/resolver/script` | `{"name","content"}`；写 `<name>.py`；空内容 → `400` |
+| `POST` | `/api/panel/resolver/remove` | `{"name"}`；缺文件 → `404` |
 
 规则：
 
@@ -539,7 +579,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | 载荷 | `token` 为当前播放 Token；`token_old` 为宽限期旧值；`bans` 为封禁中地址；`unbans` 为最近两个周期内解封的地址 |
 | 角色 | `master` 每周期拉取 `follower_urls` 汇总；`follower` 从 `master_url` 采用 Token |
 | 周期 | `[share].poll_secs`，最小 5 秒 |
-| follower 轮换 | `POST /panel/api/security/token/rotate` → `409`（`token 由主机接管`） |
+| follower 轮换 | `POST /api/panel/security/token/rotate` → `409`（`token 由主机接管`） |
 | 封禁同步 | 对端封禁按 30 天写入本机；解封立即生效 |
 
 > 差异：目标启动后立即同步；本实现延迟 5 秒，避开启动竞态。
@@ -550,11 +590,11 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/panel/api/health` | 目标字段：`{enabled, entries{"<gid>/<cid>": {checked_at, consecutive_fails, error, http_status, latency_ms, ok}}}`。附加字段：`{ok, version, uptime_secs, time, bind, groups, channels, sessions, cache, epg, security, share}` |
-| `GET` | `/panel/api/dash/status` | 运行中的 DASH 会话数组；`stream_key`、`source_url`、`phase`、`segment_count`、`active_tracks` 等 |
-| `GET` | `/panel/api/dash/tracks/:gid/:cid` | 抓频道 MPD 并列出轨道；未知频道 → `404 Channel not found` |
-| `POST` | `/panel/api/dash/scan-url` | `{"url"}`；只解析，不改配置；非 HTTP(S) → `400` |
-| `GET` | `/panel/api/dash-timeshift/status` | `{ok,enabled,ready,channels[{group_id,channel_id,hours,segments,mode}],note}`；代理频道直接缓冲，DASH 频道按轨道录制 MPD 切片。DASH 频道另带 `tracks`、`bytes`、`oldest_age_secs`、`running`、`last_error`、`max_gb`、`target_duration` |
+| `GET` | `/api/panel/health` | 目标字段：`{enabled, entries{"<gid>/<cid>": {checked_at, consecutive_fails, error, http_status, latency_ms, ok}}}`。附加字段：`{ok, version, uptime_secs, time, bind, groups, channels, sessions, cache, epg, security, share}` |
+| `GET` | `/api/panel/dash/status` | 运行中的 DASH 会话数组；`stream_key`、`source_url`、`phase`、`segment_count`、`active_tracks` 等 |
+| `GET` | `/api/panel/dash/tracks/:gid/:cid` | 抓频道 MPD 并列出轨道；未知频道 → `404 Channel not found` |
+| `POST` | `/api/panel/dash/scan-url` | `{"url"}`；只解析，不改配置；非 HTTP(S) → `400` |
+| `GET` | `/api/panel/dash-timeshift/status` | `{ok,enabled,ready,channels[{group_id,channel_id,hours,segments,mode}],note}`；代理频道直接缓冲，DASH 频道按轨道录制 MPD 切片。DASH 频道另带 `tracks`、`bytes`、`oldest_age_secs`、`running`、`last_error`、`max_gb`、`target_duration` |
 
 轨道对象：`{id, kind, codecs, bandwidth, lang, width, height}`。
 `kind` 取 `video`/`audio`/`text`/`unknown`。
@@ -594,7 +634,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | 输入 | 连续 TS（HTTP 裸流）；HLS 上游不会产出切片 |
 | 输出 | `#EXT-X-VERSION:3`、`#EXT-X-TARGETDURATION:5`、`#EXT-X-MEDIA-SEQUENCE`，窗口 4 条 |
 | 切片 | 按视频关键帧切分（PTS 计时，5 秒）；扩展名轮换 `png/gif/bmp/jpg/webp` |
-| 路径 | `/{gid}/{cid}/seg_<12 位序号>.<ext>` |
+| 路径 | `/media/{gid}/{cid}/seg_<12 位序号>.<ext>` |
 | 字节 | **上游 TS 的连续字节切片**；不重封装、不改 PID、不插 SDT/水印 |
 | 首片 | 从源流第一个 TS 包开始（保留源流 SDT/PAT/PMT） |
 | 后续片 | 从关键帧前的最近一组 PAT/PMT 开始复制，再进入关键帧 |
@@ -613,17 +653,17 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/panel/api/schedule` | 任务数组 |
-| `POST` | `/panel/api/schedule` | 新增，返回 `{"ok":true,"id"}`；未知分组/频道 → `404` |
-| `PUT` | `/panel/api/schedule/:idx` | 更新字段 |
-| `DELETE` | `/panel/api/schedule/:idx` | `{"ok":true,"was_running"}` |
-| `POST` | `/panel/api/schedule/:idx/stop` | 停止录制 |
-| `GET` | `/panel/api/schedule/download/:filename` | 下载产物 |
-| `POST` | `/panel/api/schedule/from-epg` | 批量建任务：`{"items":[…]}` → `{ok,created,ids,failed}` |
-| `GET` | `/panel/api/livestream` | 已点亮频道 |
-| `POST` | `/panel/api/livestream/:gid/:cid/{start,stop}` | 改写频道 `livestream` 并落盘 |
-| `POST` | `/subtitle/mtran/test` | 机翻自检：未配 `[subtitle.translate].url` → `400`；否则调 MTranServer，返回 `{ok,result,...}`。地址可写根地址或 `/translate`；`token` 以 Bearer 发送 |
-| `POST` | `/subtitle/translate/clear` | 清空 `<cache>/subtitles/.translate/`，返回 `{ok,cleared}` |
+| `GET` | `/api/panel/schedule` | 任务数组 |
+| `POST` | `/api/panel/schedule` | 新增，返回 `{"ok":true,"id"}`；未知分组/频道 → `404` |
+| `PUT` | `/api/panel/schedule/:idx` | 更新字段 |
+| `DELETE` | `/api/panel/schedule/:idx` | `{"ok":true,"was_running"}` |
+| `POST` | `/api/panel/schedule/:idx/stop` | 停止录制 |
+| `GET` | `/api/panel/schedule/download/:filename` | 下载产物 |
+| `POST` | `/api/panel/schedule/from-epg` | 批量建任务：`{"items":[…]}` → `{ok,created,ids,failed}` |
+| `GET` | `/api/panel/livestream` | 已点亮频道 |
+| `POST` | `/api/panel/livestream/:gid/:cid/{start,stop}` | 改写频道 `livestream` 并落盘 |
+| `POST` | `/api/panel/subtitle/mtran/test` | 机翻自检：未配 `[subtitle.translate].url` → `400`；否则调 MTranServer，返回 `{ok,result,...}`。地址可写根地址或 `/translate`；`token` 以 Bearer 发送 |
+| `POST` | `/api/panel/subtitle/translate/clear` | 清空 `<cache>/subtitles/.translate/`，返回 `{ok,cleared}` |
 
 任务字段：`id,name,group_id,channel_id,start_time,end_time,format,status,output_file,extra_files,note,error,created_at,file_size,record_secs`。
 时间格式 `YYYY-MM-DDTHH:MM:SS`（按 `[server].timezone_offset_hours` 解释）。
@@ -651,7 +691,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | 缓冲 | 抓上游媒体清单，增量下载切片；主清单取最高码率；窗口 `timeshift_hours`，容量 `timeshift_max_gb`（0 = 不限） |
 | 参数 | `?start=<unix>&end=<unix>` 或 `?playseek=<本地 yyyymmddHHMMSS-yyyymmddHHMMSS>` |
 | 清单 | `#EXT-X-PLAYLIST-TYPE:VOD`、`#EXT-X-TARGETDURATION`、`#EXT-X-ENDLIST`；`Cache-Control: no-cache, must-revalidate` |
-| 切片 | `/{gid}/{cid}/timeshift/<16hex>.<png\|gif\|bmp\|jpg\|webp>`；图片 Content-Type；`Cache-Control: private, max-age=3600` |
+| 切片 | `/media/{gid}/{cid}/timeshift/<16hex>.<png\|gif\|bmp\|jpg\|webp>`；图片 Content-Type；`Cache-Control: private, max-age=3600` |
 | 越界 | 缓冲区无交集 → 落回实时清单，不报错 |
 | 会话 | 键 `gid/cid`；15 分钟无访问回收；索引在内存，重启后从空开始 |
 | 范围 | 代理频道；DASH 频道设 `dash_timeshift = true` 时，用 ffmpeg 转本地 HLS 后缓冲（需 ffmpeg 含 DASH 解复用器） |
@@ -662,9 +702,9 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
-| GET | `/subs/status`、`/panel/api/subs/status` | — | `{"sources":[{"id","name","url","enabled","mode","error","channels","groups","last_ok","last_try","last_sync","added","updated","removed","skipped_removals","needs_review","zero_blocked","shrink_permille","duration_ms","syncing","queued","next_sync","ttl"}],"sync":{"enabled","schedule","interval_secs","daily_at"}}` |
-| POST | `/subs/groups`、`/panel/api/subs/groups` | `{"url":"<m3u>"}` | `{"groups":[{"name","count"}],"total":<n>}` |
-| POST | `/subs/preview`、`/panel/api/subs/preview` | `{"source":{"id"?,"url"?,"mode"?,"group_map":{…},"group_mode"?,"merge_group"?,"merge_into":{…}?,"merge_new":{…}?,"unlisted_groups"?,"include"?,"exclude"?,"headers"?,"proxy"?}}` | `{"kept","sample":[{"name","group","tvg_id"}]×≤5,"sync"?,"trace":{"total","after_group","after_global_exclude","after_include","after_exclude","dropped_groups","out_groups":[{"name","count"}]}}` |
+| GET | `/api/panel/subs/status` | — | `{"sources":[{"id","name","url","enabled","mode","error","channels","groups","last_ok","last_try","last_sync","added","updated","removed","skipped_removals","needs_review","zero_blocked","shrink_permille","duration_ms","syncing","queued","next_sync","ttl"}],"sync":{"enabled","schedule","interval_secs","daily_at"}}` |
+| POST | `/api/panel/subs/groups` | `{"url":"<m3u>"}` | `{"groups":[{"name","count"}],"total":<n>}` |
+| POST | `/api/panel/subs/preview` | `{"source":{"id"?,"url"?,"mode"?,"group_map":{…},"group_mode"?,"merge_group"?,"merge_into":{…}?,"merge_new":{…}?,"unlisted_groups"?,"include"?,"exclude"?,"headers"?,"proxy"?}}` | `{"kept","sample":[{"name","group","tvg_id"}]×≤5,"sync"?,"trace":{"total","after_group","after_global_exclude","after_include","after_exclude","dropped_groups","out_groups":[{"name","count"}]}}` |
 
 规则：
 
@@ -678,7 +718,7 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 - `trace` 的 `after_group` 只计分组阶段；`after_global_exclude`、`after_include`、`after_exclude` 均在分组与全局排除之后，按各自阶段累计。
 - 过滤词：频道名包含；`group:<文本>` 同时匹配原分组、映射分组与 `merge_new` 新组名；`id:<tvg-id>` 精确匹配；`url:<完整地址>` 精确匹配且区分大小写。
 - 过滤词含 `*` 或 `?` 时，裸词、`group:`、`id:` 改为整串通配符匹配。`*` 匹配任意长度，`?` 匹配一个字符。`idname:` 与 `url:` 仍精确匹配。
-- 所有处理器需要管理员会话。公开路径与 `/panel/api` 别名受同一保护。
+- 所有处理器需要管理员会话。公开路径与 `/api/panel` 别名受同一保护。
 - 抓取超时 25 秒，正文上限 16 MiB。托管源预检使用草稿源的请求头与代理。
 - `sample` 最多 5 条。
 - `ttl_secs=0` 按 3600 秒；状态 `channels` 为去重后并入条数。
@@ -691,14 +731,14 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 项 | 规则 |
 | --- | --- |
-| 入口 | `GET /unban` 免登录；封禁期也可访问 |
-| 提交 | `POST /unban` 免登录；只解封调用方地址 |
+| 入口 | `GET /page/unban` 免登录；封禁期也可访问 |
+| 提交 | `POST /api/unban` 免登录；只解封调用方地址 |
 | 配额 | 每个 IP 每月最多 3 次；成功解封才消耗 |
 | 未封禁 | `200` `{"msg":"你的 IP 当前未被封禁","ok":false}` |
 | 成功 | `200` `{"msg":"解封成功","ok":true}` |
 | 配额用完 | `200` `{"msg":"本月自助解封次数已用完（每月最多3次）","ok":false}` |
 | IP 管控关闭 | `200` `{"msg":"IP 管控未启用","ok":false}` |
-| 查询 | `GET /unban/whoami`；开启时带 `banned/used/remaining/max_per_month` |
+| 查询 | `GET /api/unban/whoami`；开启时带 `banned/used/remaining/max_per_month` |
 | 计数 | 保存在内存；进程重启后清零 |
 
 ### 6.18 上游代理覆盖（P3 已实现）
@@ -725,11 +765,11 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 | 项 | 规则 |
 | --- | --- |
 | 启用 | `mode = "dash"` 的分组，频道 `dash_timeshift = true` |
-| 清单 | `GET /{gid}/{cid}/dash-timeshift/{track}` 或 `…/{playlist,playlist.txt,playlist.m3u8}` |
+| 清单 | `GET /api/play/{gid}/{cid}/dash-timeshift/{track}` 或 `…/{playlist,playlist.txt,playlist.m3u8}` |
 | 参数 | `?playseek=<本地 yyyymmddHHMMSS>-<本地 yyyymmddHHMMSS>`；缺或格式错 → `400 missing playseek` |
 | 空区间 | 不重叠、反向、起止相等 → `404 no segments in range` |
 | 未知轨道 | `404 no segments in range`（与空区间同串） |
-| 切片 | `GET /{gid}/{cid}/dash-timeshift/{track}/{段号}.{ext}`；`ext` 取 5 项图片扩展名或磁盘原名 `m4s` |
+| 切片 | `GET /media/{gid}/{cid}/dash-timeshift/{track}/{段号}.{ext}`；`ext` 取 5 项图片扩展名或磁盘原名 `m4s` |
 | init | `GET …/{track}/init.{ext}`；`ext` 取 5 项图片扩展名或 `mp4` |
 | 未命中 | `404 segment not found`（全小写） |
 | 清单头 | `text/plain; charset=utf-8`；`public, max-age=3600, s-maxage=3600` |
@@ -745,23 +785,23 @@ http://<host>/l/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
-| POST | `/panel/api/subs/sync` | `{"id"?,"force"?}` | `202 {"ok":true,"queued":<n>}`。同步串行执行，已有任务时排队等待，不返回 `409`；同一源已在队列中时 `queued=0` |
-| DELETE | `/panel/api/subs/:id/content` | `?to_manual=1`（默认）或 `0` | `{"ok":true,"channels":<n>,"to_manual":<bool>}` |
-| PUT | `/panel/api/playlist/settings` | 全局字段 | `{"ok":true}`。保留源列表 |
-| POST | `/panel/api/playlist/sources` | 一个源；空 `id` 生成 UUID | `{"ok":true,"source":{…}}` |
-| PUT | `/panel/api/playlist/sources/:id` | 一个源；`?keep_content=0` | `409 content_exists` 或 `{"ok":true}` |
-| DELETE | `/panel/api/playlist/sources/:id` | `?keep_content=0` | 默认保留为手工；`409 content_exists` 或 `{"ok":true}` |
-| POST | `/panel/api/groups/:gid/detach` | — | 分组转为手工 |
-| POST | `/panel/api/groups/:gid/channels/:cid/detach` | — | 频道转为手工 |
+| POST | `/api/panel/subs/sync` | `{"id"?,"force"?}` | `202 {"ok":true,"queued":<n>}`。同步串行执行，已有任务时排队等待，不返回 `409`；同一源已在队列中时 `queued=0` |
+| DELETE | `/api/panel/subs/:id/content` | `?to_manual=1`（默认）或 `0` | `{"ok":true,"channels":<n>,"to_manual":<bool>}` |
+| PUT | `/api/panel/playlist/settings` | 全局字段 | `{"ok":true}`。保留源列表 |
+| POST | `/api/panel/playlist/sources` | 一个源；空 `id` 生成 UUID | `{"ok":true,"source":{…}}` |
+| PUT | `/api/panel/playlist/sources/:id` | 一个源；`?keep_content=0` | `409 content_exists` 或 `{"ok":true}` |
+| DELETE | `/api/panel/playlist/sources/:id` | `?keep_content=0` | 默认保留为手工；`409 content_exists` 或 `{"ok":true}` |
+| POST | `/api/panel/groups/:gid/detach` | — | 分组转为手工 |
+| POST | `/api/panel/groups/:gid/channels/:cid/detach` | — | 频道转为手工 |
 
 规则：
 
 - 所有路径需要管理员会话。
-- `PUT /panel/api/config` 校验 `revision`。不一致时 `409`，响应带 `code=stale_revision` 与当前 `revision`。
+- `PUT /api/panel/config` 校验 `revision`。不一致时 `409`，响应带 `code=stale_revision` 与当前 `revision`。
 - 导入分组默认跳过 `source_id` 非空的分组。`include_synced=true` 才覆盖。
 - 删除同步频道或分组时，自动写入源 `exclude`。有 `tvg-id` 用 `id:`，否则用 `url:`。
 - 编辑同步频道的上游字段且未显式传 `sync_follow` 时，自动置 `false`。
-- 分组与频道可设 `offline_on_fail`。订阅渲染按 `/panel/api/health` 的最近结果隐藏探测失败的频道；接口形状不变。
+- 分组与频道可设 `offline_on_fail`。订阅渲染按 `/api/panel/health` 的最近结果隐藏探测失败的频道；接口形状不变。
 
 ## 7. 错误串对照
 

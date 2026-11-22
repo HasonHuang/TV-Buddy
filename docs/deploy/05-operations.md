@@ -78,7 +78,7 @@ sudo journalctl -u tv-buddy -n 200 --no-pager
 ## 3. 健康检查
 
 ```bash
-curl -fsS http://127.0.0.1:9900/health
+curl -fsS http://127.0.0.1:9900/api/health
 ```
 
 期望返回 `ok`。
@@ -89,8 +89,10 @@ Docker 环境：
 
 ```bash
 docker compose ps
-docker compose exec tv-buddy wget -qO- http://127.0.0.1:9900/health
+docker compose exec tv-buddy wget -qO- http://127.0.0.1:9900/api/health
 ```
+
+旧地址 `/health` 在本次主版本内仍可用。新脚本请使用 `/api/health`。
 
 ## 4. 修改端口与监听地址
 
@@ -234,7 +236,7 @@ sudo TV_BUDDY_VERSION=v2026.3.0 tv-buddy update
 2. 停止服务。
 3. 替换二进制。
 4. 启动服务。
-5. 检查 `/health`。
+5. 检查 `/api/health`。
 
 新二进制启动失败时，脚本恢复旧二进制。启动成功但健康检查失败时，脚本只告警，不自动回滚。此时查看日志并手动处理。
 
@@ -251,7 +253,7 @@ docker compose up -d --force-recreate
 
 ```bash
 sudo tv-buddy status
-curl -fsS http://127.0.0.1:9900/health
+curl -fsS http://127.0.0.1:9900/api/health
 sudo tv-buddy log 100
 ```
 
@@ -375,7 +377,7 @@ docker compose start
 | 服务无法启动 | 端口占用、权限、监听地址或数据库损坏 | `sudo tv-buddy log 200`。检查端口与目录权限 |
 | 面板无法打开 | 服务未启动、防火墙、监听地址 | `tv-buddy status`、`ss -lntp \| grep 9900`、防火墙规则 |
 | 登录失败 | 口令错误，或失败次数过多被临时锁定 | 等待锁定结束。用 `tv-buddy pass` 重设口令 |
-| 修改配置后不生效 | 配置需要重启，或 `config set` 未触发热载 | 面板保存。或执行 `tv-buddy restart`、`POST /panel/api/reload` |
+| 修改配置后不生效 | 配置需要重启，或 `config set` 未触发热载 | 面板保存。或执行 `tv-buddy restart`、`POST /api/panel/reload` |
 | 播放 404 | 令牌错误、分组不可见、频道归档或上游失败 | 从面板重新复制订阅地址。检查分组权限与上游 |
 | 播放 502 | 上游片源失败，或 NGINX upstream 错误 | 检查日志与 [`03-nginx.md`](03-nginx.md) |
 | 磁盘占满 | 缓存上限过高、日志过大、备份过多 | 调整缓存上限。清理日志与旧备份 |

@@ -44,10 +44,12 @@ docker compose exec tv-buddy cat /data/cache/admin_initial_credentials.txt
 打开面板：
 
 ```text
-http://<主机>:9900/panel
+http://<主机>:9900/page/panel
 ```
 
 账号是 `admin`。口令来自初始口令文件。首次登录后立即修改口令。
+
+旧地址 `/panel` 与 `/health` 在本次主版本内仍可用。新部署请使用新地址。
 
 ## 3. 配置
 
@@ -250,7 +252,7 @@ docker exec tv-buddy cat /data/cache/admin_initial_credentials.txt
 
 ```bash
 docker compose ps
-curl -fsS http://127.0.0.1:9900/health
+curl -fsS http://127.0.0.1:9900/api/health
 ```
 
 期望结果：
@@ -258,7 +260,7 @@ curl -fsS http://127.0.0.1:9900/health
 | 检查 | 期望 |
 | --- | --- |
 | `docker compose ps` | 服务为 `running`，健康状态为 `healthy` |
-| `/health` | 返回 `ok` |
+| `/api/health` | 返回 `ok` |
 | 面板 | 可以打开并登录 |
 | 数据卷 | `/data/tv-buddy.db` 存在 |
 

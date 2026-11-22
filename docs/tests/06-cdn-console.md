@@ -90,7 +90,7 @@ VPS 上必须有：
 BASE=http://127.0.0.1:9900
 PANEL_USER=admin
 PANEL_PASS=admin
-ADMIN=$(curl -sS -X POST "$BASE/panel/api/login" \
+ADMIN=$(curl -sS -X POST "$BASE/api/panel/login" \
   -H 'Content-Type: application/json' \
   -d "{\"username\":\"$PANEL_USER\",\"password\":\"$PANEL_PASS\"}" | jq -r .token)
 printf 'token=%s\n' "$ADMIN"
@@ -103,7 +103,7 @@ printf 'token=%s\n' "$ADMIN"
 ### 3.2 读取生效配置
 
 ```bash
-curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
+curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/config" \
   | jq '{cdn, cache: {limit_mb: .cache.limit_mb, auto_tune: .cache.auto_tune, disk_path: .cache.disk_path, prefetch: .cache.prefetch.enabled, gc: .cache.gc}, token_enabled: .auth.token_enabled}'
 ```
 
@@ -133,7 +133,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
 ### 3.3 选择测试分组与频道
 
 ```bash
-curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
+curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/config" \
   | jq -r '.groups[]
       | select(.mode=="proxy" and .format=="hls" and .access!="archived" and (.channels|length)>0)
       | [.id, .mode, .format, .access, .channels[0].id] | @tsv'
@@ -154,7 +154,7 @@ EXT=m3u8
 ### 3.4 读取 CDN 推荐值
 
 ```bash
-curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq .recommend
+curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq .recommend
 ```
 
 预期输出含 21 个键：
@@ -193,10 +193,10 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq .r
 - `channels` 与 `working_channels` 是整数；`working_channels >= 3`。
 - `ttl_secs` 在 300–900 之间，或 `ttl_source=manual`。
 
-依据：服务端每次 `GET /panel/api/cache/stats` 都重新计算（`src/http/routes/admin.rs`、`src/cache_gc.rs` 的 `recommendation`）。
+依据：服务端每次 `GET /api/panel/cache/stats` 都重新计算（`src/http/routes/admin.rs`、`src/cache_gc.rs` 的 `recommendation`）。
 
 面板同样显示该卡片。打开面板 → 「缓存状态」。卡片标题「CDN 推荐值」（`frontend/src/lowcfg.tsx:83`）。
-卡片上的「立即估算」调用 `POST /panel/api/cdn/estimate`。系统设置页不再重复该卡片。
+卡片上的「立即估算」调用 `POST /api/panel/cdn/estimate`。系统设置页不再重复该卡片。
 
 徽标三值（`frontend/src/lowcfg.tsx:31-35`）：
 
@@ -213,7 +213,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq .r
 首次安装没有实测数据。先播放一个频道，或执行估算：
 
 ```bash
-curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cdn/estimate" \
+curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cdn/estimate" \
   | jq '{ok, groups, failed, recommend: (.recommend | {ttl_secs, ttl_source, cap_source, groups, updated_secs_ago})}'
 ```
 
@@ -264,7 +264,7 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cdn/estimate
 TTL 取值：
 
 ```bash
-curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq -r .recommend.ttl_secs
+curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq -r .recommend.ttl_secs
 ```
 
 预期：打印纯整数。例如 `600`。
@@ -277,9 +277,13 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq -r
 
 控制台单位未在仓库定义（第 2.6 节）。记录实际单位。
 
-### 3.7 控制台加两条规则
+### 3.7 控制台加规则
 
-顺序固定。命中即止。规则 A 在最前。
+顺序固定。命中即止。
+
+#### 3.7.1 迁移期规则
+
+迁移期保留现有规则 A 与 B。不要删除。新规则叠加在 A、B 之后。一个主版本后删除 A、B 与 §3.8 的补丁。
 
 规则 A，不缓存：
 
@@ -307,15 +311,60 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq -r
 /*/*/*
 ```
 
+新增规则，不缓存：
+
+```text
+/api/*
+/page/*
+/l/*
+/logo/api/*
+```
+
+新增规则，缓存：
+
+```text
+/media/*
+/static/panel/*
+/static/logo/*
+/static/assets/*
+```
+
+兜底规则，不缓存：
+
+```text
+/*
+```
+
+兜底规则必须放在最后。否则媒体路径不会被缓存。
+
 依据：`docs/design/06-low-spec-optimization.md:77-87`。
 
-不要按扩展名写规则。伪装扩展名在 `jpg`、`png`、`gif`、`bmp`、`webp` 之间轮换（`src/config/model.rs:526-549`、`src/proxy/media.rs:159-162`）。控制台只支持扩展名时，改用路径前缀 `/{gid}/{cid}/`，逐分组配置（`docs/design/06-low-spec-optimization.md:89-90`）。
+#### 3.7.2 迁移后规则
 
-规则 A 中的 `/metrics` 与 `/share*` 在本实现没有对应路由。保留这两条不影响结果。本实现只有 `/api/share/pull`（`src/http.rs:38`）。
+不缓存：
 
-### 3.8 本实现的路径补丁
+```text
+/api/*
+/page/*
+/
+```
 
-本实现的路径与设计稿有三处深度差异。先加 BYPASS，再加 CACHE。控制台不支持多段通配符时，按 `/{gid}/{cid}/` 前缀逐分组配置。
+缓存：
+
+```text
+/media/*
+/static/panel/*
+/static/logo/*
+/static/assets/*
+```
+
+不要按扩展名写规则。伪装扩展名在 `jpg`、`png`、`gif`、`bmp`、`webp` 之间轮换（`src/config/model.rs:526-549`、`src/proxy/media.rs:159-162`）。控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`，逐分组配置（`docs/design/06-low-spec-optimization.md:89-90`）。
+
+规则 A 中的 `/metrics` 与 `/share*` 在本实现没有对应路由。保留这两条不影响结果。本实现只有 `/api/share/pull`（`src/http.rs:31`）。
+
+### 3.8 本实现的路径补丁（迁移期）
+
+本实现的旧路径与设计稿有三处深度差异。迁移期先加 BYPASS，再加 CACHE。迁移后这些补丁随旧路径一起删除。控制台不支持多段通配符时，按 `/{gid}/{cid}/` 前缀逐分组配置。
 
 规则 A 补充，不缓存：
 
@@ -341,7 +390,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq -r
 | `/assets/*` | `src/http.rs:60` | `/assets/*` |
 | `/logo/*` | `src/http.rs:36` | `/logo/*` |
 
-`/*/*/*/*` 会匹配四段路径。`/panel*` 与 `/epg*` 已在规则 A 中先行命中。顺序不能反。
+`/*/*/*/*` 会匹配四段路径。规则 A 的 `/api/*`、`/page/*`、`/panel*` 与 `/epg*` 先行命中。顺序不能反。
 
 ### 3.9 保存并刷新
 
@@ -355,12 +404,12 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq -r
 
 ```bash
 CDN=https://<你的 CDN 域名>
-TOKEN_ENABLED=$(curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" | jq -r .auth.token_enabled)
+TOKEN_ENABLED=$(curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/config" | jq -r .auth.token_enabled)
 PLAY=""
 if [ "$TOKEN_ENABLED" = "true" ]; then
-  PLAY=$(curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/security/token" | jq -r .current_value)
+  PLAY=$(curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/security/token" | jq -r .current_value)
 fi
-MANIFEST="$CDN/$GID/$CID.$EXT"
+MANIFEST="$CDN/api/play/$GID/$CID.$EXT"
 if [ -n "$PLAY" ]; then MANIFEST="$MANIFEST?token=$PLAY"; fi
 printf 'MANIFEST=%s\n' "$MANIFEST"
 ```
@@ -398,9 +447,9 @@ printf 'SEG_PATH=%s\n' "$SEG_PATH"
 printf 'SEG_CDN=%s\n' "$SEG_CDN"
 ```
 
-预期：`SEG_PATH` 以 `/$GID/$CID/` 开头。路径含 `_`（伪装切片）、`seg_`（remux 切片）或 `timeshift/`（时移切片）。
+预期：`SEG_PATH` 以 `/media/$GID/$CID/` 开头。路径含 `_`（伪装切片）、`seg_`（remux 切片）或 `timeshift/`（时移切片）。
 
-依据：伪装切片路径是 `/{gid}/{cid}/{P}_{S}.{ext}`（`src/proxy/media.rs:335`）。`{P}` 是频道摘要前 16 位小写十六进制（`src/proxy/media.rs:65-67`）。`{S}` 是上游绝对 URL 的 SHA-256 前 32 位小写十六进制（`src/proxy/media.rs:70-72`）。
+依据：伪装切片路径是 `/media/{gid}/{cid}/{P}_{S}.{ext}`（`src/proxy/media.rs:335`）。`{P}` 是频道摘要前 16 位小写十六进制（`src/proxy/media.rs:65-67`）。`{S}` 是上游绝对 URL 的 SHA-256 前 32 位小写十六进制（`src/proxy/media.rs:70-72`）。
 
 连续请求两次：
 
@@ -447,13 +496,13 @@ curl -sS "$MANIFEST" | grep -v '^#' | grep -v '^$' | head -n1
 本步验证源站，不验证 CDN。先清本地缓存，让下一次请求回源：
 
 ```bash
-curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/flush" | jq .
+curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/flush" | jq .
 ```
 
 预期：`{"ok":true,"removed":<整数>}`。清缓存删除 `m3u8`、`seg_url`、`seg_bytes`、`sub_url` 四个目录（`src/http/routes/admin.rs:18`）。`seg_url` 索引同时被删，所以必须重取清单。
 
 ```bash
-ORIGIN_MANIFEST="$BASE/$GID/$CID.$EXT"
+ORIGIN_MANIFEST="$BASE/api/play/$GID/$CID.$EXT"
 if [ -n "$PLAY" ]; then ORIGIN_MANIFEST="$ORIGIN_MANIFEST?token=$PLAY"; fi
 PLAYLIST_ORIGIN=$(curl -sS "$ORIGIN_MANIFEST")
 LAST=$(printf '%s\n' "$PLAYLIST_ORIGIN" | grep -v '^#' | grep -v '^$' | tail -n1)
@@ -486,7 +535,7 @@ TTL 由 `[cache.ttl].segment_secs` 控制（`src/http/routes/stream.rs` 的 `seg
 本步可选。等待时间较长。
 
 ```bash
-TTL=$(curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq -r .recommend.ttl_secs)
+TTL=$(curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq -r .recommend.ttl_secs)
 sleep $((TTL + 60))
 curl -sS -o /dev/null -D - "$SEG_CDN" | sed -n '1,25p'
 ```
@@ -498,15 +547,23 @@ curl -sS -o /dev/null -D - "$SEG_CDN" | sed -n '1,25p'
 面板接口：
 
 ```bash
-curl -sS -o /dev/null -D - -H "Authorization: Bearer $ADMIN" "$CDN/panel/api/status" | sed -n '1,25p'
+curl -sS -o /dev/null -D - -H "Authorization: Bearer $ADMIN" "$CDN/api/panel/status" | sed -n '1,25p'
 ```
 
 预期：`200`。缓存状态 `BYPASS`。未带会话时返回 401（`src/http/ext.rs:23-36`、`src/http/error.rs:64`）。带会话时返回 200。
 
+面板页面：
+
+```bash
+curl -sS -o /dev/null -D - "$CDN/page/panel" | sed -n '1,25p'
+```
+
+预期：`200`。缓存状态 `BYPASS`。
+
 订阅清单：
 
 ```bash
-curl -sS -o /dev/null -D - "$CDN/sub/<令牌>/playlist.m3u" | sed -n '1,25p'
+curl -sS -o /dev/null -D - "$CDN/api/sub/<令牌>/playlist.m3u" | sed -n '1,25p'
 ```
 
 预期：`200`。缓存状态 `BYPASS`。源站不给 `Cache-Control`，所以可能没有该头。
@@ -514,18 +571,18 @@ curl -sS -o /dev/null -D - "$CDN/sub/<令牌>/playlist.m3u" | sed -n '1,25p'
 面板静态资源：
 
 ```bash
-curl -sS -o /dev/null -D - "$CDN/__assets/panel.js" | sed -n '1,25p'
+curl -sS -o /dev/null -D - "$CDN/static/panel/panel.js" | sed -n '1,25p'
 ```
 
-预期：`BYPASS`。源站给 `no-cache`（`src/http/static_assets.rs:23-27`）。文件名以实际构建产物为准。
+预期：按缓存规则处理。第一次 `MISS`，第二次 `HIT`。源站给 `public, max-age=31536000, immutable`（`src/http/static_assets.rs:49-55`）。文件名以实际构建产物为准。
 
 ### 3.18 验证换台不 404
 
 连续请求两个不同频道入口：
 
 ```bash
-curl -sS -o /dev/null -D - "$CDN/$GID/$CID.$EXT" | sed -n '1,15p'
-curl -sS -o /dev/null -D - "$CDN/$GID/$CID.$EXT" | sed -n '1,15p'
+curl -sS -o /dev/null -D - "$CDN/api/play/$GID/$CID.$EXT" | sed -n '1,15p'
+curl -sS -o /dev/null -D - "$CDN/api/play/$GID/$CID.$EXT" | sed -n '1,15p'
 ```
 
 预期：两次都是 `200`。第二次不是缓存的 302。
@@ -541,7 +598,7 @@ curl -sS -o /dev/null -D - "$CDN/$GID/$CID.$EXT" | sed -n '1,15p'
 退出面板会话：
 
 ```bash
-curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/logout" | jq .
+curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/logout" | jq .
 ```
 
 预期：`{"ok":true}`。
@@ -598,6 +655,9 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/logout" | jq
 
 - 规则 A 条数：
 - 规则 B 条数：
+- 新增 BYPASS 条数：
+- 新增 CACHE 条数：
+- 兜底规则：
 - 补充 BYPASS 条数：
 - 补充 CACHE 条数：
 - 保存时间（UTC）：
@@ -685,14 +745,14 @@ origin=
 date -u +%FT%TZ
 curl -sS -o /dev/null -D - "$MANIFEST"
 curl -sS -o /dev/null -D - "$SEG_CDN"
-curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/logs?limit=500" | jq -r '.lines[]'
+curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/logs?limit=500" | jq -r '.lines[]'
 tail -n 200 /opt/tv-buddy/tv-buddy.log
-curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/cache/stats" | jq .recommend
-curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
+curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq .recommend
+curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/config" \
   | jq '{cdn, cache: {limit_mb: .cache.limit_mb, auto_tune: .cache.auto_tune, disk_path: .cache.disk_path, ttl: .cache.ttl, prefetch: .cache.prefetch, gc: .cache.gc}, token_enabled: .auth.token_enabled}'
 ```
 
-`GET /panel/api/logs` 读取进程内环形缓冲，默认 200 行，上限 500 行（`src/http/routes/admin.rs:133-148`）。
+`GET /api/panel/logs` 读取进程内环形缓冲，默认 200 行，上限 500 行（`src/http/routes/admin.rs:133-148`）。
 
 日志文件是 `tv-buddy.log`，位于配置文件同目录（`src/logging.rs:163-173`）。
 
@@ -718,15 +778,16 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/panel/api/config" \
 | 清单给 `http://` | 未下发 XFP；或 CDN 改写了 Host | `docs/design/06-low-spec-optimization.md:140` |
 | 源站命中返回 `private` | 只能「遵循源站头」的 CDN 不缓存。改用强制 TTL，或开 `[cdn].shared_cache_hits=true` | `src/http/routes/stream.rs:57-70` |
 | 上游失败被缓存成 200 空体 | 开 `[cdn].enabled=true`，设 `empty_status=502` | `src/http/routes/stream.rs:1579-1594` |
-| 订阅清单被缓存 | 源站已发 `Cache-Control: private, no-store`。检查规则 A 是否仍 BYPASS `/sub/*` | `src/http/routes/sub.rs:60-66` |
+| 订阅清单被缓存 | 源站已发 `Cache-Control: private, no-store`。检查规则 A 是否仍 BYPASS `/api/sub/*`（旧 `/sub/*`） | `src/http/routes/sub.rs:60-66` |
 | 切片 URL 每 5 分钟变一次 | 正常。时间窗签名会让路径变。缓存键必须包含 URI 路径 | `src/sign.rs` |
 | 切片返回 `302` | 签名过期或密钥被改。播放器重拉清单即恢复 | `src/http/routes/stream.rs` |
 | 两个用户拿到不同切片 URL | 时间窗不同或密钥不同。检查系统时钟与 `slice_sign_window_secs` | `src/sign.rs` |
-| 面板 JS/CSS 被缓存 | `/__assets/*` 不在规则 A。补 BYPASS | `src/http/static_assets.rs:23-27` |
-| `/logo/api/*` 被缓存 | 该路径不是媒体，且不在规则 A。补 BYPASS | `src/http.rs:35` |
+| 面板 JS/CSS 不缓存 | `/static/panel/*` 不在缓存规则。补 CACHE | `src/http/static_assets.rs:49-55` |
+| 面板页面被缓存 | `/page/*` 不在规则 A。补 BYPASS | `src/http/static_assets.rs:31-39` |
+| `/api/panel/*` 被缓存 | `/api/*` 不在规则 A。补 BYPASS | `src/http.rs:45` |
 | DASH 轨道清单被缓存 | 四段路径不在 `/*/*/index.txt`。补 BYPASS | `src/dash_hls.rs:998-1000` |
-| 时移切片不缓存 | 四段路径不在 `/*/*/*`。补 CACHE | `src/timeshift.rs:7` |
-| DASH 时移清单被缓存 | 五段路径不在规则 A。补 BYPASS | `src/dash_timeshift.rs:7` |
+| 时移切片不缓存 | `/media/{gid}/{cid}/timeshift/*` 不在缓存规则。补 CACHE | `src/timeshift.rs:7` |
+| DASH 时移清单被缓存 | `/api/play/{gid}/{cid}/dash-timeshift/*` 不在规则 A。补 BYPASS | `src/dash_timeshift.rs:7` |
 | `HIT` 但 `content-length` 变化 | CDN 压缩或转码。关闭内容压缩改写与图片优化 | `docs/design/06-low-spec-optimization.md:69` |
 | 源站 `max-age` 不是推荐 TTL | 检查 `[cache.ttl].segment_secs`。`0` 时用实测值，无实测 600 | `src/http/routes/stream.rs` 的 `segment_ttl_secs` |
 | `ttl_source` 显示「手动配置」但 TTL 未手填 | 检查 `cache.ttl.segment_secs`。磁盘上限手填只影响 `cap_source` | `src/cache_gc.rs` 的 `recommendation` |

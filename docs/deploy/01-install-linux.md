@@ -173,7 +173,7 @@ sudo tv-buddy url
 输出包含三行：
 
 ```text
-面板地址：http://<主机>:9900/panel
+面板地址：http://<主机>:9900/page/panel
 账号：admin
 初始口令：<安装目录>/cache/admin_initial_credentials.txt
 ```
@@ -193,7 +193,9 @@ sudo tv-buddy url
 sudo cat /opt/tv-buddy/cache/admin_initial_credentials.txt
 ```
 
-打开面板 `http://<主机>:9900/panel`。使用账号 `admin` 与初始口令登录。
+打开面板 `http://<主机>:9900/page/panel`。使用账号 `admin` 与初始口令登录。
+
+旧地址 `/panel` 与 `/health` 在本次主版本内仍可用。新部署请使用新地址。
 
 **立即修改口令：**
 
@@ -258,7 +260,7 @@ Docker 部署不要改为 `127.0.0.1:9900`。容器内的回环地址不接收�
 
 ```bash
 sudo tv-buddy status
-curl -fsS http://127.0.0.1:9900/health
+curl -fsS http://127.0.0.1:9900/api/health
 ```
 
 期望结果：
@@ -266,7 +268,7 @@ curl -fsS http://127.0.0.1:9900/health
 | 检查 | 期望 |
 | --- | --- |
 | `tv-buddy status` | 服务为运行状态 |
-| `/health` | 返回 `ok` |
+| `/api/health` | 返回 `ok` |
 | 面板 | 可以打开并登录 |
 | `ss -lntp \| grep 9900` | 端口在监听 |
 

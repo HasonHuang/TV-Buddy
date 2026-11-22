@@ -233,7 +233,7 @@ health_check() {
     i=0
     while [ "$i" -lt 8 ]; do
         code=$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 3 \
-            "http://127.0.0.1:$port/health" 2>/dev/null || true)
+            "http://127.0.0.1:$port/api/health" 2>/dev/null || true)
         [ "$code" = "200" ] && return 0
         sleep 1
         i=$((i + 1))
@@ -301,7 +301,7 @@ show_url() {
     case "$host" in
         *:*) host="[$host]" ;;
     esac
-    printf '面板地址：http://%s:%s/panel\n' "$host" "$port"
+    printf '面板地址：http://%s:%s/page/panel\n' "$host" "$port"
     printf '账号：%s\n' "$DEFAULT_USER"
     printf '初始口令：%s\n' "$CREDENTIALS_FILE"
 }

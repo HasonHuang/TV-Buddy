@@ -83,7 +83,7 @@ CDN 缓存切片。同一个边缘节点对每个新切片通常只回源一次�
 ```bash
 ADMIN='<面板会话令牌>'
 curl -sS -H "Authorization: Bearer $ADMIN" \
-  http://127.0.0.1:9900/panel/api/cache/stats \
+  http://127.0.0.1:9900/api/panel/cache/stats \
   | jq -r .recommend.ttl_secs
 ```
 
@@ -93,7 +93,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" \
 
 ```bash
 curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
-  http://127.0.0.1:9900/panel/api/cdn/estimate
+  http://127.0.0.1:9900/api/panel/cdn/estimate
 ```
 
 估算探测最多 3 个分组，每组 1 个频道。并发请求返回 `409`。
@@ -110,9 +110,13 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 
 ## 6. 缓存规则
 
-规则顺序固定。命中即止。规则 A 必须在最前。
+规则顺序固定。命中即止。
 
-### 6.1 规则 A：不缓存
+### 6.1 迁移期规则
+
+迁移期保留现有规则 A 与 B。不要删除。新规则叠加在 A、B 之后。
+
+规则 A，不缓存：
 
 ```text
 /panel*
@@ -132,17 +136,62 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 /*/*/mpd/*
 ```
 
-### 6.2 规则 B：缓存
+规则 B，缓存：
 
 ```text
 /*/*/*
 ```
 
-规则 B 与 §6.3 的补充规则包含伪装切片、remux 的 `seg_*`、`timeshift/*` 与 DASH 轨道切片。
+新增规则，不缓存：
 
-### 6.3 本实现的路径补丁
+```text
+/api/*
+/page/*
+/l/*
+/logo/api/*
+```
 
-本实现的路径深度与通用设计不同。先加规则 A 的补充，再加规则 B 的补充。
+新增规则，缓存：
+
+```text
+/media/*
+/static/panel/*
+/static/logo/*
+/static/assets/*
+```
+
+兜底规则，不缓存：
+
+```text
+/*
+```
+
+兜底规则必须放在最后。否则媒体路径不会被缓存。
+
+### 6.2 迁移后规则
+
+一个主版本后删除旧规则 A 与 B，只保留这组规则。
+
+不缓存：
+
+```text
+/api/*
+/page/*
+/
+```
+
+缓存：
+
+```text
+/media/*
+/static/panel/*
+/static/logo/*
+/static/assets/*
+```
+
+### 6.3 本实现的路径补丁（迁移期）
+
+本实现的旧路径深度与通用设计不同。先加规则 A 的补充，再加规则 B 的补充。迁移后这些补丁随旧路径一起删除。
 
 规则 A 补充，不缓存：
 
@@ -168,13 +217,13 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 | `/assets/*` | `/assets/*` |
 | `/logo/*` | `/logo/*` |
 
-`/*/*/*/*` 会匹配四段路径。`/panel*` 与 `/epg*` 已在规则 A 中先行命中。顺序不能反。
+`/*/*/*/*` 会匹配四段路径。规则 A 的 `/api/*`、`/page/*`、`/panel*` 与 `/epg*` 先行命中。顺序不能反。
 
 ### 6.4 不要按扩展名写规则
 
 切片伪装扩展名在 `jpg`、`png`、`gif`、`bmp`、`webp` 之间轮换。关闭伪装时又是 `ts`。
 
-控制台只支持扩展名时，改用路径前缀 `/{gid}/{cid}/`，逐分组配置。
+控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。旧路径用 `/{gid}/{cid}/` 前缀。逐分组配置。
 
 不同控制台的通配符语义不同。仓库不定义 `*` 是否跨多段。若控制台不支持多段通配符，按 `/{gid}/{cid}/` 前缀配置。
 
@@ -209,7 +258,7 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 | 修改方式 | 生效时间 |
 | --- | --- |
 | 面板保存 | 立即。下一请求按新值处理 |
-| `tv-buddy config set` 直接写库 | 运行中的进程不会自动读取。执行 `tv-buddy restart` 或 `POST /panel/api/reload` |
+| `tv-buddy config set` 直接写库 | 运行中的进程不会自动读取。执行 `tv-buddy restart` 或 `POST /api/panel/reload` |
 
 配置细节见 [`../design/04-config-and-storage.md`](../design/04-config-and-storage.md) §11.1。
 
@@ -219,10 +268,10 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 
 ```bash
 CDN='https://<CDN域名>'
-MANIFEST="$CDN/<gid>/<cid>.m3u8?token=<令牌>"
+MANIFEST="$CDN/api/play/<gid>/<cid>.m3u8?token=<令牌>"
 ```
 
-`token` 只在入口清单需要。切片 URL 不带 token。
+`token` 只在入口清单需要。切片 URL 不带 token。旧路径 `/<gid>/<cid>.m3u8` 仍可用，但 CDN 规则应优先覆盖新路径。
 
 ### 8.2 清单必须不缓存
 
@@ -255,7 +304,7 @@ for i in 1 2; do
 done
 ```
 
-期望：第二次请求返回 `HIT` 并带 `Age`。
+期望：切片路径以 `/media/` 开头。第二次请求返回 `HIT` 并带 `Age`。
 
 ### 8.4 字节不能被改写
 
@@ -278,11 +327,13 @@ printf 'cdn1=%s\ncdn2=%s\norigin=%s\n' "$CDN1" "$CDN2" "$ORIGIN"
 ### 8.5 面板与接口必须不缓存
 
 ```bash
-curl -sS -o /dev/null -D - "$CDN/panel/api/status" \
+curl -sS -o /dev/null -D - "$CDN/api/panel/status" \
+  | grep -iE 'x-cache|cache-control'
+curl -sS -o /dev/null -D - "$CDN/page/panel" \
   | grep -iE 'x-cache|cache-control'
 ```
 
-期望：`BYPASS`。
+期望：两个请求都是 `BYPASS`。
 
 ### 8.6 清单必须下发 https
 
@@ -290,7 +341,19 @@ curl -sS -o /dev/null -D - "$CDN/panel/api/status" \
 curl -sS "$MANIFEST" | grep -E '^https?://' | head
 ```
 
-期望：切片地址以 `https://` 开头。
+期望：切片地址以 `https://` 开头。切片地址的路径以 `/media/` 开头。
+
+### 8.7 台标必须缓存
+
+```bash
+LOGO="$CDN/static/logo/<已有台标文件>"
+for i in 1 2; do
+  curl -sS -o /dev/null -D - "$LOGO" \
+    | grep -iE '^(x-cache|age|cache-control|content-length)'
+done
+```
+
+期望：第二次请求返回 `HIT` 并带 `Age`。台标响应头为 `public, max-age=86400`。
 
 完整验收流程见 [`../tests/06-cdn-console.md`](../tests/06-cdn-console.md)。
 
@@ -306,7 +369,8 @@ curl -sS "$MANIFEST" | grep -E '^https?://' | head
 | 清单仍给 `http://` | 缺少 `X-Forwarded-Proto` | 回源加 `X-Forwarded-Proto: https`，或设置 `public_base` |
 | 切片 404 | 切片路径被缓存成了旧清单地址 | Purge。确认规则 A 不缓存清单 |
 | 回源 502 | CDN 回源地址或端口错误 | 检查源站域名、端口、防火墙 |
-| 面板被缓存 | 规则 A 缺少 `/panel*` | 补规则 A |
+| 面板被缓存 | 规则 A 缺少 `/page/*` 或 `/api/*` | 补规则 A |
+| 新切片一直 `BYPASS` | 缺少 `/media/*` 缓存规则 | 补缓存规则。确认兜底规则在最后 |
 | 缓存命中率低 | 每个 POP 各自 Miss，或伪装路径未命中 | 检查规则覆盖。多 POP 场景属正常 |
 
 ## 10. 多 CDN
