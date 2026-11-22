@@ -714,6 +714,7 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 | [`docs/spec/`](docs/spec/) | 目标规格（`S-*`）与验证基线 |
 | [`docs/findings/`](docs/findings/) | 逆向证据（`F-*`、`D-*`） |
 | [`docs/design/`](docs/design/) | 实现方案：选型、架构、HTTP 契约、低配优化、翻译 |
+| [`docs/deploy/`](docs/deploy/) | 部署与运维：Linux 安装、Docker、NGINX 反代、CDN、升级与备份 |
 | [`docs/design/03-http-contract.md`](docs/design/03-http-contract.md) | 路由表与接口契约 |
 | [`docs/design/11-subscription-sync.md`](docs/design/11-subscription-sync.md) | 定时订阅、托管同步与管理规则 |
 | [`docs/design/12-python-scripts.md`](docs/design/12-python-scripts.md) | Python 脚本开发：解析脚本与 EPG 采集脚本 |
