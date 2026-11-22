@@ -19,8 +19,6 @@ type Entry = {
   ext: string;
   bytes: number;
   mtime: number;
-  /** 后端归一化后的公开地址；存在时优先使用。 */
-  url?: string;
 };
 
 type Kind = 'assets' | 'subtitle';
@@ -191,9 +189,7 @@ function Library({
   }
 
   async function copyLink(entry: Entry) {
-    const url = entry.url
-      ? new URL(entry.url, location.origin).toString()
-      : `${location.origin}/static/assets/${encodeURIComponent(entry.file)}`;
+    const url = `${location.origin}/static/assets/${encodeURIComponent(entry.file)}`;
     setMessage((await copyText(url)) ? `已复制 ${url}` : '复制失败，请手动复制');
   }
 

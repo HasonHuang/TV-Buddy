@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BIN=${BIN:-target/debug/tv-buddy}
-PORT=${PORT:-19916}
+PORT=${PORT:-19960}
 WORK=$(mktemp -d)
 CFG="$WORK/config.json"
 DB="$WORK/tv-buddy.db"

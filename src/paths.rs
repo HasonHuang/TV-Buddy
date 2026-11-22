@@ -21,15 +21,13 @@ pub const PAGE: &str = "/page";
 
 /// 在 `prefix` 后拼接 `path`。
 ///
-/// `path` 可带前导 `/`。空 `path` 返回 `prefix` 本身。
+/// `path` 的全部前导 `/` 先删除。空 `path` 返回 `prefix` 本身。
 fn join(prefix: &str, path: &str) -> String {
+    let path = path.trim_start_matches('/');
     if path.is_empty() {
         return prefix.to_string();
     }
-    match path.strip_prefix('/') {
-        Some(rest) => format!("{prefix}/{rest}"),
-        None => format!("{prefix}/{path}"),
-    }
+    format!("{prefix}/{path}")
 }
 
 /// 生成面板 API 路径。
@@ -107,15 +105,16 @@ pub fn media_url(self_base: &str, gid: &str, cid: &str, slice: &str, rest: &str)
 ///
 /// 真形状：`index.m3u8`、`<track>/index.txt`、`<track>/index.m3u8`、
 /// `dash-timeshift/<track>/playlist[.txt|.m3u8]`。其余形状为媒体数据。
+/// 本函数零分配。
 pub fn is_manifest_rest(rest: &str) -> bool {
-    if rest == "index.m3u8" {
-        return true;
-    }
-    let parts: Vec<&str> = rest.split('/').collect();
-    match parts.as_slice() {
-        [_track, file] => matches!(*file, "index.txt" | "index.m3u8"),
-        ["dash-timeshift", _track, file] => {
-            matches!(*file, "playlist" | "playlist.txt" | "playlist.m3u8")
+    let mut parts = rest.split('/');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some("index.m3u8"), None, None, None) => true,
+        (Some(track), Some(file), None, None) => {
+            !track.is_empty() && matches!(file, "index.txt" | "index.m3u8")
+        }
+        (Some("dash-timeshift"), Some(track), Some(file), None) => {
+            !track.is_empty() && matches!(file, "playlist" | "playlist.txt" | "playlist.m3u8")
         }
         _ => false,
     }
@@ -151,14 +150,31 @@ mod tests {
             assert!(is_manifest_rest(rest), "{rest}");
         }
         for rest in [
+            "",
+            "/index.m3u8",
+            "index.txt",
             "timeshift/a.ts",
             "mpd/tok/abc/init.mp4",
             "seg_000000000000.png",
             "video_720p/init.webp",
             "dash-timeshift/video_720p/12.m4s",
+            "dash-timeshift/video_720p",
+            "dash-timeshift//playlist",
+            "a/b/c",
+            "a/b/c/d",
+            "video/index.txt/more",
         ] {
             assert!(!is_manifest_rest(rest), "{rest}");
         }
+    }
+
+    #[test]
+    fn join_trims_all_leading_slashes() {
+        assert_eq!(join("/api/panel", "//x"), "/api/panel/x");
+        assert_eq!(join("/api/panel", "/x"), "/api/panel/x");
+        assert_eq!(join("/api/panel", "x"), "/api/panel/x");
+        assert_eq!(join("/api/panel", ""), "/api/panel");
+        assert_eq!(join("/api/panel", "///"), "/api/panel");
     }
 
     #[test]

@@ -55,7 +55,10 @@ cat > "$CFG" <<JSON
   "auth": {
     "token_enabled": false,
     "token_failure_url": "http://placeholder.test/Failure.mp4",
-    "ip_guard_enabled": false
+    "ip_guard_enabled": true,
+    "whitelist": ["127.0.0.1"],
+    "l1_limit": 0,
+    "l2_limit": 0
   },
   "cache": {
     "disk_path": "$CACHE",

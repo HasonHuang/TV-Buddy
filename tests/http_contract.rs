@@ -849,7 +849,10 @@ async fn health_and_user_playlist() {
     );
     // 归档组停播，不进订阅；其余组都进。
     assert!(body.contains(&format!("/api/play/token/{}/pg/c1.m3u8", fixture.token)));
-    assert!(body.contains(&"/op/c1.m3u8\n".to_string()), "open 组不带令牌");
+    assert!(
+        body.contains(&"/op/c1.m3u8\n".to_string()),
+        "open 组不带令牌"
+    );
     // 直通组在订阅里直接给上游地址。
     assert!(body.contains(&format!("{}/live.m3u8", fixture.upstream)));
     assert!(!body.contains("/pt/"));
@@ -916,7 +919,7 @@ async fn global_playlist_is_gone() {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
         let body = response.text().await.expect("读正文");
-        assert!(body.contains("/sub/"), "应指路到用户订阅：{body}");
+        assert!(body.contains("/api/sub/"), "应指路到用户订阅：{body}");
     }
 }
 
@@ -2252,6 +2255,21 @@ async fn playseek_is_forwarded_to_upstream() {
 async fn single_segment_unknown_path_is_404() {
     let fixture = fixture().await;
     for path in ["/status", "/foo"] {
+        let response = fetch(&fixture, path).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+/// `/media` 只给媒体数据。清单形状必须 404，签名路径也不例外。
+#[tokio::test]
+async fn media_route_rejects_manifest_paths() {
+    let fixture = fixture().await;
+    for path in [
+        "/media/g/c/l/1/sig/index.m3u8",
+        "/media/pg/c1/index.m3u8",
+        "/media/pg/c1/video/index.txt",
+        "/media/pg/c1/dash-timeshift/video_720p/playlist.m3u8",
+    ] {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }

@@ -164,6 +164,8 @@ pub async fn token_alias(
 ///
 /// 目标是「别名与入口同义」（2026-10-25 实测：`redirect` / `rewrite` 两组的两条路径
 /// 给出完全相同的 `302` 目标或清单正文），所以不能再按模式分裂实现。
+// 处理器签名由路由参数决定，拆分只增加无价值包装。
+#[allow(clippy::too_many_arguments)]
 async fn play_entry(
     state: &Arc<AppState>,
     gid: &str,
@@ -290,7 +292,7 @@ async fn redirect_entry(
             // 失败不缓存（S-MODE-08）。
             Err(err) => {
                 tracing::warn!(url = %channel_url, error = %err, "解析上游主清单失败");
-                return redirect_asset(&config, &config.server.error_url);
+                return redirect_asset(config, &config.server.error_url);
             }
         }
     } else {
@@ -422,68 +424,6 @@ fn warming_up() -> Response {
     response
 }
 
-/// `GET /{gid}/{cid}/*path`：`video/index.txt`、`index.m3u8` 或伪装切片。
-pub async fn wildcard(
-    State(state): State<Arc<AppState>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-    Path((gid, cid, rest)): Path<(String, String, String)>,
-    RawQuery(raw_query): RawQuery,
-) -> Response {
-    let rest = rest.trim_start_matches('/').to_string();
-    // 对外基址与分组解析共用一份快照。
-    let config = state.snapshot();
-    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
-        return response;
-    }
-    serve_rest(
-        &state,
-        &config,
-        &headers,
-        &gid,
-        &cid,
-        &rest,
-        raw_query.as_deref(),
-        None,
-        false,
-        Placement::Legacy,
-    )
-    .await
-}
-
-/// `GET /{gid}/{cid}/l/{exp}/{sig}/*path`：带时间窗签名的切片与子资源。
-///
-/// 签名校验通过后按授权请求处理，不再看用户令牌。
-pub async fn signed(
-    State(state): State<Arc<AppState>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-    Path((gid, cid, exp, sig, rest)): Path<(String, String, String, String, String)>,
-    RawQuery(raw_query): RawQuery,
-) -> Response {
-    let config = state.snapshot();
-    if !crate::sign::verify(&config, &gid, &cid, &exp, &sig) {
-        return redirect_asset(&config, &config.auth.token_failure_url);
-    }
-    if let Some(response) = session_limit(&state, &config, &headers, Some(peer), &cid) {
-        return response;
-    }
-    let rest = rest.trim_start_matches('/').to_string();
-    serve_rest(
-        &state,
-        &config,
-        &headers,
-        &gid,
-        &cid,
-        &rest,
-        raw_query.as_deref(),
-        None,
-        true,
-        Placement::Legacy,
-    )
-    .await
-}
-
 /// `GET /api/play/{gid}/{cid}/*path`：只提供清单。
 pub async fn play_wildcard(
     State(state): State<Arc<AppState>>,
@@ -602,12 +542,11 @@ pub async fn signed_media(
     .await
 }
 
-/// 路径面：`/api/play` 只给清单，`/media` 只给媒体数据，旧路径两者都给。
+/// 路径面：`/api/play` 只给清单，`/media` 只给媒体数据。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Placement {
     Play,
     Media,
-    Legacy,
 }
 
 /// 路径面是否允许这个子路径。
@@ -615,7 +554,6 @@ fn placement_allows(placement: Placement, rest: &str) -> bool {
     match placement {
         Placement::Play => paths::is_manifest_rest(rest),
         Placement::Media => !paths::is_manifest_rest(rest),
-        Placement::Legacy => true,
     }
 }
 
@@ -726,6 +664,8 @@ async fn serve_rest(
 ///
 /// - 上游是主清单 → 自造单变体主清单（S-PROXY-06）。
 /// - 上游是媒体清单 → 直接改写为伪装切片地址（S-PROXY-01）。
+// 处理器签名由路由参数决定，拆分只增加无价值包装。
+#[allow(clippy::too_many_arguments)]
 async fn proxy_entry(
     state: &Arc<AppState>,
     config: &Config,
@@ -810,6 +750,8 @@ fn master_entry(
 }
 
 /// 改写媒体清单并登记切片。
+// 处理器签名由路由参数决定，拆分只增加无价值包装。
+#[allow(clippy::too_many_arguments)]
 fn media_entry(
     state: &Arc<AppState>,
     config: &Config,
@@ -1188,7 +1130,7 @@ fn trim_mpd_window(xml: &str, keep_seconds: u64) -> String {
                     if remaining <= keep {
                         break;
                     }
-                    let (node, duration, repeats, start) = spans[index].clone();
+                    let (node, duration, repeats, start) = spans[index];
                     let span_duration = duration * repeats as f64;
                     if index + 1 < spans.len() && remaining - span_duration >= keep {
                         edits.push((node.range(), String::new()));
@@ -2076,11 +2018,24 @@ pub(crate) async fn fetch_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        format_utc, media_cache_control, merge_upstream_headers, mpd_base_token, placement_allows,
-        rewrite_minimum_update_period, rewrite_mpd_base_urls, rewrite_publish_time,
-        trim_mpd_window, Placement,
+        format_utc, local_mpd_prefix, media_cache_control, merge_upstream_headers, mpd_base_token,
+        placement_allows, rewrite_minimum_update_period, rewrite_mpd_base_urls,
+        rewrite_publish_time, trim_mpd_window, Placement,
     };
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+    #[test]
+    fn local_mpd_prefix_inserts_slice_before_mpd() {
+        assert_eq!(
+            local_mpd_prefix("g", "c", "http://h", "l/1/sig"),
+            "http://h/media/g/c/l/1/sig/mpd/"
+        );
+        assert_eq!(
+            local_mpd_prefix("g", "c", "http://h/", ""),
+            "http://h/media/g/c/mpd/"
+        );
+        assert_eq!(local_mpd_prefix("g", "c", "", ""), "/media/g/c/mpd/");
+    }
 
     #[test]
     fn placement_rejects_manifests_under_media_and_segments_under_play() {
@@ -2088,7 +2043,6 @@ mod tests {
         assert!(!placement_allows(Placement::Play, "seg_000000000000.png"));
         assert!(placement_allows(Placement::Play, "video/index.txt"));
         assert!(placement_allows(Placement::Media, "timeshift/a.ts"));
-        assert!(placement_allows(Placement::Legacy, "index.m3u8"));
     }
 
     #[test]

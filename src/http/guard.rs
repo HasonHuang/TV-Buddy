@@ -42,21 +42,17 @@ pub async fn ip_guard(
 /// 该路径是否跳过 IP 统计与封禁。
 ///
 /// 面板与解封路径必须可用。`/api/health` 不在豁免内。
+/// 旧前缀由 [`crate::http::legacy`] 先改写，本函数只处理新前缀。
 fn ip_guard_exempt(path: &str) -> bool {
     path.starts_with("/page")
         || path.starts_with("/static/panel")
         || path.starts_with("/api/panel")
         || path.starts_with("/api/unban")
-        || path.starts_with("/panel")
-        || path.starts_with("/unban")
 }
 
 /// 去掉面板 API 前缀，返回相对子路径。
-///
-/// 同时识别旧前缀 `/panel/api` 与新前缀 `/api/panel`。
 fn panel_relative(path: &str) -> Option<&str> {
-    path.strip_prefix("/panel/api")
-        .or_else(|| path.strip_prefix("/api/panel"))
+    path.strip_prefix("/api/panel")
 }
 
 /// 管理员校验：未登录返回 `401`，非管理员返回 `403`。
@@ -105,17 +101,6 @@ fn need_login() -> Response {
 
 /// 该路径是否只允许管理员。
 fn needs_admin(path: &str) -> bool {
-    // 非面板路径里的公开管理端点。旧路由保留到 Task 10。
-    const PUBLIC_ADMIN: [&str; 5] = [
-        "/subs/status",
-        "/subs/groups",
-        "/subs/preview",
-        "/subtitle/mtran/test",
-        "/subtitle/translate/clear",
-    ];
-    if PUBLIC_ADMIN.contains(&path) || path.starts_with("/epg/translate/") {
-        return true;
-    }
     let Some(relative) = panel_relative(path) else {
         return false;
     };
@@ -148,8 +133,8 @@ fn session_token(headers: &axum::http::HeaderMap) -> Option<String> {
 /// 语义与部署规格无关。高配与低配行为一致：
 /// 入口隐藏与接口拒绝同时生效。
 ///
-/// 恢复路径不受拦截：`/panel/api/config` 可以重新打开开关，
-/// `/panel/api/login` 与 `/panel/api/me` 也不在拦截范围。
+/// 恢复路径不受拦截：`/api/panel/config` 可以重新打开开关，
+/// `/api/panel/login` 与 `/api/panel/me` 也不在拦截范围。
 pub async fn feature_gate(
     State(state): State<Arc<AppState>>,
     request: Request,
@@ -171,18 +156,8 @@ pub async fn feature_gate(
 
 /// 路径 → 对应的功能开关。`None` 表示不受功能开关控制。
 ///
-/// 面板路径先去掉前缀再匹配，新旧前缀结果一致。非面板的旧路径
-/// （`/subs/`、`/subtitle/`、`/epg/translate/`）保留到 Task 10。
+/// 只匹配 `/api/panel` 下的相对路径；旧前缀已由改写层转换。
 fn feature_of(path: &str, config: &crate::config::Config) -> Option<bool> {
-    if path.starts_with("/subtitle/") {
-        return Some(config.features.assets);
-    }
-    if path.starts_with("/subs/") {
-        return Some(config.features.playlist);
-    }
-    if path.starts_with("/epg/translate/") {
-        return Some(config.epg.enabled);
-    }
     let relative = panel_relative(path)?;
     if relative.starts_with("/schedule") {
         return Some(config.features.recording);
@@ -220,52 +195,40 @@ mod tests {
     fn feature_gate_maps_paths_to_switches() {
         let mut config = Config::default();
         assert_eq!(
-            feature_of("/panel/api/schedule", &config),
+            feature_of("/api/panel/schedule", &config),
             Some(true),
             "默认开启"
         );
         config.features.recording = false;
         assert_eq!(
-            feature_of("/panel/api/schedule/3/stop", &config),
+            feature_of("/api/panel/schedule/3/stop", &config),
             Some(false)
         );
-        assert_eq!(
-            feature_of("/panel/api/livestream/a/b/start", &config),
-            Some(true)
-        );
-        assert_eq!(feature_of("/panel/api/login", &config), None, "登录不受限");
-        assert_eq!(feature_of("/panel/api/config", &config), None, "配置可恢复");
-        assert_eq!(feature_of("/panel/api/me", &config), None);
-        // 新前缀与旧前缀结果一致。
-        assert_eq!(feature_of("/api/panel/schedule", &config), Some(false));
         assert_eq!(
             feature_of("/api/panel/livestream/a/b/start", &config),
             Some(true)
         );
-        assert_eq!(feature_of("/api/panel/login", &config), None);
-        assert_eq!(feature_of("/api/panel/config", &config), None);
+        assert_eq!(feature_of("/api/panel/login", &config), None, "登录不受限");
+        assert_eq!(feature_of("/api/panel/config", &config), None, "配置可恢复");
         assert_eq!(feature_of("/api/panel/me", &config), None);
     }
 
     #[test]
-    fn new_panel_prefix_maps_same_features_as_old() {
+    fn panel_prefix_maps_features() {
         let mut config = Config::default();
-        for (old, new) in [
-            ("/panel/api/schedule", "/api/panel/schedule"),
-            ("/panel/api/livestream", "/api/panel/livestream"),
-            ("/panel/api/logo/list", "/api/panel/logo/list"),
-            ("/panel/api/assets/list", "/api/panel/assets/list"),
-            ("/panel/api/subtitle/list", "/api/panel/subtitle/list"),
-            ("/panel/api/playlist", "/api/panel/playlist"),
-            ("/panel/api/subs/status", "/api/panel/subs/status"),
-            (
-                "/panel/api/epg/translate/status",
-                "/api/panel/epg/translate/status",
-            ),
-            ("/panel/api/users", "/api/panel/users"),
-            ("/panel/api/stats", "/api/panel/stats"),
+        for (path, expected) in [
+            ("/api/panel/schedule", Some(true)),
+            ("/api/panel/livestream", Some(true)),
+            ("/api/panel/logo/list", Some(true)),
+            ("/api/panel/assets/list", Some(true)),
+            ("/api/panel/subtitle/list", Some(true)),
+            ("/api/panel/playlist", Some(true)),
+            ("/api/panel/subs/status", Some(true)),
+            ("/api/panel/epg/translate/status", Some(true)),
+            ("/api/panel/users", Some(true)),
+            ("/api/panel/stats", Some(true)),
         ] {
-            assert_eq!(feature_of(old, &config), feature_of(new, &config), "{new}");
+            assert_eq!(feature_of(path, &config), expected, "{path}");
         }
         config.features.assets = false;
         assert_eq!(feature_of("/api/panel/subtitle/list", &config), Some(false));
@@ -280,20 +243,12 @@ mod tests {
 
     #[test]
     fn admin_gate_maps_paths() {
-        assert!(needs_admin("/panel/api/config"), "配置只给管理员");
-        assert!(needs_admin("/panel/api/groups"), "分组只给管理员");
-        assert!(needs_admin("/panel/api/users"), "用户管理只给管理员");
-        assert!(!needs_admin("/panel/api/login"));
-        assert!(!needs_admin("/panel/api/logout"));
-        assert!(!needs_admin("/panel/api/me"));
-        assert!(!needs_admin("/panel/api/my/channels"));
-        assert!(!needs_admin("/health"), "非面板路径不管");
-        assert!(!needs_admin("/sub/abc/playlist.m3u"));
-        // 新前缀与旧前缀结果一致。
         assert!(!needs_admin("/api/panel/login"));
         assert!(!needs_admin("/api/panel/logout"));
         assert!(!needs_admin("/api/panel/me"));
         assert!(!needs_admin("/api/panel/my/channels"));
+        assert!(!needs_admin("/health"), "非面板路径不管");
+        assert!(!needs_admin("/sub/abc/playlist.m3u"));
         assert!(needs_admin("/api/panel/config"), "配置只给管理员");
         assert!(needs_admin("/api/panel/groups"), "分组只给管理员");
         assert!(needs_admin("/api/panel/users"), "用户管理只给管理员");
@@ -321,25 +276,21 @@ mod tests {
         for path in ["/api/health", "/media/g/c/seg.png", "/api/play/g/c.m3u8"] {
             assert!(!ip_guard_exempt(path), "{path}");
         }
-        // 旧前缀迁移期内继续豁免。
-        for path in ["/panel/api/status", "/unban/whoami"] {
-            assert!(ip_guard_exempt(path), "{path}");
-        }
     }
 
     #[test]
-    fn panel_relative_accepts_both_prefixes() {
-        assert_eq!(panel_relative("/panel/api/login"), Some("/login"));
+    fn panel_relative_accepts_new_prefix() {
         assert_eq!(panel_relative("/api/panel/login"), Some("/login"));
         assert_eq!(panel_relative("/api/panel"), Some(""));
+        assert_eq!(panel_relative("/panel/api/login"), None, "旧前缀先被改写");
         assert_eq!(panel_relative("/health"), None);
     }
 
     #[test]
     fn stats_switch_follows_stats_config() {
         let mut config = Config::default();
-        assert_eq!(feature_of("/panel/api/stats", &config), Some(true));
+        assert_eq!(feature_of("/api/panel/stats", &config), Some(true));
         config.stats.enabled = false;
-        assert_eq!(feature_of("/panel/api/stats", &config), Some(false));
+        assert_eq!(feature_of("/api/panel/stats", &config), Some(false));
     }
 }
