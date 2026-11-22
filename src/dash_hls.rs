@@ -1272,6 +1272,36 @@ mod tests {
     }
 
     #[test]
+    fn media_manifest_signs_segment_urls() {
+        let p = presentation();
+        let stream = p.streams.iter().find(|s| s.kind == "video").unwrap();
+        let rendered = render_media(
+            &p,
+            stream,
+            MediaOptions {
+                gid: "g",
+                cid: "c",
+                self_base: "http://self",
+                slice: "l/123/abc",
+                keep_seconds: 4,
+                pool_size: 1,
+                formats: &["webp".to_string()],
+                track_index: 0,
+                start_offset: 0.0,
+                publish_delay_secs: 0.0,
+                fetch_extra_segments: 0,
+            },
+        );
+        assert!(
+            rendered
+                .body
+                .contains("http://self/media/g/c/l/123/abc/video_720p/"),
+            "{}",
+            rendered.body
+        );
+    }
+
+    #[test]
     fn render_media_caps_entry_urls() {
         let xml = r#"<?xml version="1.0"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT4S">
