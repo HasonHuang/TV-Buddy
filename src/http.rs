@@ -3,6 +3,7 @@
 pub mod error;
 pub mod ext;
 pub mod guard;
+mod legacy;
 pub mod routes;
 pub mod static_assets;
 
@@ -150,6 +151,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.clone(),
             guard::admin_gate,
         ))
+        .layer(axum::middleware::from_fn(legacy::middleware))
         .with_state(state)
 }
 
