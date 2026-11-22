@@ -4479,18 +4479,18 @@ async fn dash_timeshift_serves_recorded_playlist_and_segments() {
     assert!(body.contains("#EXT-X-MEDIA-SEQUENCE:1"), "{body}");
     assert!(body.contains("#EXT-X-PROGRAM-DATE-TIME:"), "{body}");
     assert!(
-        body.contains("#EXT-X-MAP:URI=\"/dts/c1/dash-timeshift/video_720p/init."),
+        body.contains("#EXT-X-MAP:URI=\"/media/dts/c1/dash-timeshift/video_720p/init."),
         "{body}"
     );
     assert!(
-        body.contains("/dts/c1/dash-timeshift/video_720p/1."),
+        body.contains("/media/dts/c1/dash-timeshift/video_720p/1."),
         "{body}"
     );
 
     // 清单里的切片可取。
     let segment = body
         .lines()
-        .find(|line| line.starts_with("/dts/c1/dash-timeshift/video_720p/1."))
+        .find(|line| line.starts_with("/media/dts/c1/dash-timeshift/video_720p/1."))
         .expect("切片路径")
         .to_string();
     let response = fetch(&fixture, &segment).await;

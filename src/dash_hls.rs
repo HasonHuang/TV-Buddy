@@ -1009,21 +1009,11 @@ fn short_hash(url: &str) -> String {
 }
 
 fn media_url(self_base: &str, gid: &str, cid: &str, track: &str, slice: &str) -> String {
-    media_file_url(self_base, gid, cid, &format!("{track}/index.txt"), slice)
+    crate::paths::play_url(self_base, gid, cid, slice, &format!("{track}/index.txt"))
 }
 
 fn media_file_url(self_base: &str, gid: &str, cid: &str, rest: &str, slice: &str) -> String {
-    let base = self_base.trim_end_matches('/');
-    let dir = if slice.is_empty() {
-        String::new()
-    } else {
-        format!("/{slice}")
-    };
-    if base.is_empty() {
-        format!("/{gid}/{cid}{dir}/{rest}")
-    } else {
-        format!("{base}/{gid}/{cid}{dir}/{rest}")
-    }
+    crate::paths::media_url(self_base, gid, cid, slice, rest)
 }
 
 fn codecs(stream: &Stream, audio: Option<&Stream>) -> Option<String> {
@@ -1231,17 +1221,23 @@ mod tests {
     fn master_has_audio_and_video() {
         let body = render_master(&presentation(), "g", "c", "http://self", "");
         assert!(body.contains("#EXT-X-MEDIA:TYPE=AUDIO"));
-        assert!(body.contains("video_720p/index.txt"));
-        assert!(body.contains("audio-zh/index.txt"), "{body}");
+        assert!(
+            body.contains("http://self/api/play/g/c/video_720p/index.txt"),
+            "{body}"
+        );
+        assert!(
+            body.contains("http://self/api/play/g/c/audio-zh/index.txt"),
+            "{body}"
+        );
         assert!(body.contains("RESOLUTION=1280x720"));
 
         let signed = render_master(&presentation(), "g", "c", "http://self", "l/123/abc");
         assert!(
-            signed.contains("http://self/g/c/l/123/abc/video_720p/index.txt"),
+            signed.contains("http://self/api/play/g/c/l/123/abc/video_720p/index.txt"),
             "{signed}"
         );
         assert!(
-            signed.contains("http://self/g/c/l/123/abc/audio-zh/index.txt"),
+            signed.contains("http://self/api/play/g/c/l/123/abc/audio-zh/index.txt"),
             "{signed}"
         );
     }
@@ -1269,7 +1265,7 @@ mod tests {
         );
         assert!(rendered
             .body
-            .contains("#EXT-X-MAP:URI=\"http://self/g/c/video_720p/init.webp\""));
+            .contains("#EXT-X-MAP:URI=\"http://self/media/g/c/video_720p/init.webp\""));
         assert!(rendered.body.contains("#EXT-X-ENDLIST"));
         // 4 秒窗口只保留最后两段。
         assert_eq!(rendered.entries.len(), 1 + 2);
@@ -1709,7 +1705,7 @@ mod tests {
             },
         );
         assert!(rendered.body.contains("#EXT-X-MEDIA-SEQUENCE:1"));
-        assert!(rendered.body.contains("/g/c/video_720p/1_"));
+        assert!(rendered.body.contains("/media/g/c/video_720p/1_"));
     }
 
     #[test]

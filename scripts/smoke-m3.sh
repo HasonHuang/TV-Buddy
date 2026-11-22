@@ -258,9 +258,11 @@ CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/dh/c6.m3u8")
 check "dash 就绪 200" "200" "$CODE"
 check "dash 类型" "application/vnd.apple.mpegurl" "$(hfile "$WORK/h" content-type)"
 check "dash 主清单" "1" "$(grep -c '^#EXT-X-STREAM-INF:' "$WORK/body")"
-check "dash 轨道" "1" "$(grep -c '/dh/c6/video_360p/index.txt' "$WORK/body")"
+check "dash 轨道" "1" "$(grep -c '/api/play/dh/c6/video_360p/index.txt' "$WORK/body")"
 check "dash 媒体清单 200" "200" "$(status "$B/dh/c6/video_360p/index.txt")"
 check "dash 媒体清单切片" "1" "$(grep -c '#EXTINF:2.000000,' "$WORK/body")"
+check "dash 媒体清单切片地址" "1" \
+  "$(curl -s "$B/api/play/dh/c6/video_360p/index.txt" | grep -c '/media/dh/c6/video_360p/')"
 check "dash 未就绪 503" "503" "$(status "$B/dh/c7.m3u8")"
 check "dash 未就绪文案" "timeout waiting for master playlist" "$(cat "$WORK/body")"
 

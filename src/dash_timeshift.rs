@@ -404,11 +404,15 @@ impl Session {
             first.seq,
             crate::schedule::format_utc_iso(first.ts)
         );
-        let dir = if slice.is_empty() {
-            format!("/{}/{}/dash-timeshift", self.gid, self.cid)
+        let suffix = if slice.is_empty() {
+            String::new()
         } else {
-            format!("/{}/{}/{slice}/dash-timeshift", self.gid, self.cid)
+            format!("/{slice}")
         };
+        let dir = crate::paths::media(&format!(
+            "/{}/{}{}/dash-timeshift",
+            self.gid, self.cid, suffix
+        ));
         if entry.has_init {
             let init_ext = pick_ext(track, first.seq);
             body.push_str(&format!(
@@ -1016,16 +1020,22 @@ mod tests {
         assert!(body.starts_with("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-PLAYLIST-TYPE:VOD"));
         assert!(body.contains("#EXT-X-MEDIA-SEQUENCE:7"), "{body}");
         assert!(body.contains("#EXT-X-PROGRAM-DATE-TIME:"), "{body}");
-        assert!(body.contains("#EXT-X-MAP:URI=\"/g/c/dash-timeshift/video_720p/init."));
-        assert!(body.contains("/g/c/dash-timeshift/video_720p/7."), "{body}");
-        assert!(body.contains("/g/c/dash-timeshift/video_720p/8."), "{body}");
+        assert!(body.contains("#EXT-X-MAP:URI=\"/media/g/c/dash-timeshift/video_720p/init."));
+        assert!(
+            body.contains("/media/g/c/dash-timeshift/video_720p/7."),
+            "{body}"
+        );
+        assert!(
+            body.contains("/media/g/c/dash-timeshift/video_720p/8."),
+            "{body}"
+        );
         assert!(body.ends_with("#EXT-X-ENDLIST\n"));
         let signed = match session.playlist("video_720p", now - 60, now + 60, "l/123/abc") {
             Playlist::Body(body) => body,
             _ => panic!("应生成签名清单"),
         };
         assert!(
-            signed.contains("/g/c/l/123/abc/dash-timeshift/video_720p/"),
+            signed.contains("/media/g/c/l/123/abc/dash-timeshift/video_720p/"),
             "{signed}"
         );
         let _ = fs::remove_dir_all(dir);
