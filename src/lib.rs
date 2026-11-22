@@ -32,6 +32,7 @@ pub mod logo_anim;
 pub mod m3u;
 pub mod metrics;
 pub mod metrics_store;
+pub mod paths;
 pub mod playlist;
 pub mod proxy;
 pub mod quality;
