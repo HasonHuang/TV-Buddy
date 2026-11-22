@@ -48,8 +48,13 @@ pub async fn unban_page() -> Response {
 
 /// `/static/panel/*path`（旧 `/__assets/*path`）——Vite 构建产物。
 ///
-/// 文件名带内容哈希，可以长缓存。
+/// 文件名带内容哈希时可以长缓存。HTML 入口不带哈希，只允许协商缓存。
 pub async fn asset(Path(path): Path<String>) -> Response {
-    asset_response(&path, "public, max-age=31536000, immutable")
+    let cache_control = if path.ends_with(".html") {
+        "no-cache"
+    } else {
+        "public, max-age=31536000, immutable"
+    };
+    asset_response(&path, cache_control)
         .unwrap_or_else(|| (StatusCode::NOT_FOUND, "not found").into_response())
 }

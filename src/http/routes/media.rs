@@ -31,12 +31,15 @@ use crate::{
 
 /// 由请求路径判定素材种类（路由静态注册，避免与面板兜底路由冲突）。
 ///
-/// 同时识别旧前缀 `/panel/api` 与新前缀 `/api/panel`。
+/// 同时识别旧前缀 `/panel/api`、旧别名 `/subtitle` 与新前缀 `/api/panel`。
 fn kind_of(uri: &axum::http::Uri) -> Result<Kind, ApiError> {
     let path = uri.path();
     if path.starts_with("/panel/api/assets/") || path.starts_with("/api/panel/assets/") {
         Ok(Kind::Video)
-    } else if path.starts_with("/panel/api/subtitle/") || path.starts_with("/api/panel/subtitle/") {
+    } else if path.starts_with("/panel/api/subtitle/")
+        || path.starts_with("/api/panel/subtitle/")
+        || path.starts_with("/subtitle/")
+    {
         Ok(Kind::Subtitle)
     } else {
         Err(ApiError::not_found("未知素材类型"))
@@ -910,7 +913,7 @@ fn asset_map(config: &crate::config::model::Config) -> HashMap<String, String> {
     for (url, local) in map {
         if let Some(local) = local.as_str() {
             if !local.is_empty() {
-                out.insert(url.clone(), local.to_string());
+                out.insert(url.clone(), paths::normalize_asset_url(local));
             }
         }
     }

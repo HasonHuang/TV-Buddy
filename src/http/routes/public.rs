@@ -50,7 +50,8 @@ pub async fn home(State(state): State<Arc<AppState>>) -> Response {
 /// 目标把 `/status` 一类单段未知路径判为 404（S-EP-08）。
 /// 两段及以上的播放形状由 `/{gid}/{file}` 与通配路由处理。
 pub async fn fallback(State(_): State<Arc<AppState>>, uri: Uri) -> Response {
-    if uri.path().starts_with("/panel/api/") {
+    let path = uri.path();
+    if path.starts_with("/panel/api/") || path == "/api/panel" || path.starts_with("/api/panel/") {
         return (
             StatusCode::NOT_FOUND,
             axum::Json(serde_json::json!({ "error": "接口不存在" })),

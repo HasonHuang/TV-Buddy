@@ -125,7 +125,7 @@ impl Config {
         };
         for (url, local) in table {
             if let Some(local) = local.as_str() {
-                out.insert(url.clone(), local.to_string());
+                out.insert(url.clone(), crate::paths::normalize_asset_url(local));
             }
         }
         out
@@ -1542,6 +1542,29 @@ mod tests {
             Some("/static/assets/convert/x/index.m3u8")
         );
         assert_eq!(config.asset_local("http://missing"), None);
+    }
+
+    #[test]
+    fn asset_map_normalizes_legacy_prefix() {
+        let raw = serde_json::json!({
+            "assets": {
+                "map": {
+                    "http://upstream/placeholder.mp4": "/assets/convert/x/index.m3u8",
+                    "http://upstream/other.mp4": "/static/assets/convert/y/index.m3u8"
+                }
+            }
+        });
+        let config: Config = serde_json::from_value(raw).expect("解析");
+        let map = config.asset_map();
+        assert_eq!(
+            map.get("http://upstream/placeholder.mp4")
+                .map(String::as_str),
+            Some("/static/assets/convert/x/index.m3u8")
+        );
+        assert_eq!(
+            map.get("http://upstream/other.mp4").map(String::as_str),
+            Some("/static/assets/convert/y/index.m3u8")
+        );
     }
 
     #[test]

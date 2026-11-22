@@ -69,7 +69,7 @@ fn rewritten_uri(method: &Method, uri: &Uri) -> Option<Uri> {
 
 /// 前缀规则。按规格顺序匹配，命中即停。
 fn rewrite_prefix(method: &Method, path: &str) -> Option<String> {
-    let get = method == Method::GET;
+    let get = method == Method::GET || method == Method::HEAD;
     if get && path == "/health" {
         return Some(format!("{}/health", paths::API));
     }
@@ -246,6 +246,22 @@ mod tests {
         assert_eq!(rewrite(&post, "/unban").as_deref(), Some("/api/unban"));
         assert_eq!(rewrite(&get, "/panel").as_deref(), Some("/page/panel"));
         assert_eq!(rewrite(&get, "/panel/").as_deref(), Some("/page/panel/"));
+    }
+
+    #[test]
+    fn head_uses_the_same_rewrite_as_get() {
+        let head = Method::HEAD;
+        assert_eq!(rewrite(&head, "/health").as_deref(), Some("/api/health"));
+        assert_eq!(rewrite(&head, "/panel").as_deref(), Some("/page/panel"));
+        assert_eq!(rewrite(&head, "/unban").as_deref(), Some("/page/unban"));
+        assert_eq!(
+            rewrite(&head, "/unban/whoami").as_deref(),
+            Some("/api/unban/whoami")
+        );
+        // POST 规则不受影响。
+        let post = Method::POST;
+        assert_eq!(rewrite(&post, "/health"), None);
+        assert_eq!(rewrite(&post, "/unban").as_deref(), Some("/api/unban"));
     }
 
     #[test]

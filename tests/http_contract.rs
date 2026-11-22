@@ -1536,15 +1536,20 @@ async fn panel_api_is_available_under_new_prefix() {
 async fn panel_api_unknown_path_returns_json() {
     let fx = fixture().await;
     let session = login(&fx).await;
-    let response = fx
-        .client
-        .get(format!("{}/api/panel/not-a-route", fx.base))
-        .header("authorization", format!("Bearer {session}"))
-        .send()
-        .await
-        .expect("请求");
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    assert!(response.text().await.unwrap().contains("接口不存在"));
+    for path in ["/api/panel/not-a-route", "/api/panel/"] {
+        let response = fx
+            .client
+            .get(format!("{}{path}", fx.base))
+            .header("authorization", format!("Bearer {session}"))
+            .send()
+            .await
+            .expect("请求");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        assert!(
+            response.text().await.unwrap().contains("接口不存在"),
+            "{path}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1642,10 +1647,38 @@ async fn legacy_paths_match_new_paths() {
     assert_legacy_matches_new(&fixture, "/health", "/api/health", None).await;
     assert_legacy_matches_new(&fixture, "/panel", "/page/panel", None).await;
 
+    // HEAD 与 GET 使用同一套改写规则。
+    let old_head = fixture
+        .client
+        .head(format!("{}/health", fixture.base))
+        .send()
+        .await
+        .expect("旧 HEAD");
+    let new_head = fixture
+        .client
+        .head(format!("{}/api/health", fixture.base))
+        .send()
+        .await
+        .expect("新 HEAD");
+    assert_eq!(old_head.status(), new_head.status(), "HEAD /health");
+    assert_eq!(
+        header(&old_head, "content-type"),
+        header(&new_head, "content-type"),
+        "HEAD /health"
+    );
+
     // 订阅与播放入口。
-    let sub_old = fixture.sub(&fixture.token, "m3u8");
-    let sub_new = format!("/api/sub/{}/m3u8", fixture.token);
+    let sub_old = fixture.sub(&fixture.token, "playlist.m3u");
+    let sub_new = format!("/api/sub/{}/playlist.m3u", fixture.token);
     assert_legacy_matches_new(&fixture, &sub_old, &sub_new, None).await;
+
+    // `/l/<token>/...` 是订阅条目的旧路径令牌入口。
+    let token_entry_old = format!("/l/{}/pm/c1.m3u8?token={}", fixture.token, fixture.token);
+    let token_entry_new = format!(
+        "/api/play/token/{}/pm/c1.m3u8?token={}",
+        fixture.token, fixture.token
+    );
+    assert_legacy_matches_new(&fixture, &token_entry_old, &token_entry_new, None).await;
 
     let entry_old = format!("/pm/c1.m3u8?token={}", fixture.token);
     let entry_new = format!("/api/play/pm/c1.m3u8?token={}", fixture.token);
@@ -1747,6 +1780,72 @@ async fn legacy_paths_match_new_paths() {
     }
 
     assert_legacy_matches_new(&fixture, &old_media_url, &media_url, None).await;
+}
+
+/// 旧 `/subtitle/*` 别名由改写层提供，必须与新面板路径一致。
+#[tokio::test]
+async fn legacy_subtitle_aliases_match_new_paths() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let upload = serde_json::json!({
+        "items": [{
+            "name": "legacy-demo.srt",
+            "data": "data:application/x-subrip;base64,MSAwOjAwOjAw"
+        }]
+    });
+
+    // 旧上传别名可用。
+    let response = fixture
+        .client
+        .post(format!("{}/subtitle/upload", fixture.base))
+        .bearer_auth(&session)
+        .header("content-type", "application/json")
+        .body(upload.to_string())
+        .send()
+        .await
+        .expect("旧上传");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("JSON");
+    assert_eq!(body["added"][0]["file"], "legacy-demo.srt");
+
+    // 列表 A/B：状态与正文一致。
+    let old_list = get_with_session(&fixture, "/subtitle/list", Some(&session)).await;
+    let new_list = get_with_session(&fixture, "/api/panel/subtitle/list", Some(&session)).await;
+    assert_eq!(old_list.status(), StatusCode::OK);
+    assert_eq!(new_list.status(), StatusCode::OK);
+    assert_eq!(
+        old_list.bytes().await.expect("旧正文"),
+        new_list.bytes().await.expect("新正文")
+    );
+
+    // 下载 A/B。
+    assert_legacy_matches_new(
+        &fixture,
+        "/subtitle/raw/legacy-demo.srt",
+        "/api/panel/subtitle/raw/legacy-demo.srt",
+        Some(&session),
+    )
+    .await;
+
+    // 旧删除别名可用，删除后新路径确认文件已不存在。
+    let response = fixture
+        .client
+        .post(format!("{}/subtitle/remove", fixture.base))
+        .bearer_auth(&session)
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "file": "legacy-demo.srt" }).to_string())
+        .send()
+        .await
+        .expect("旧删除");
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = get_with_session(
+        &fixture,
+        "/api/panel/subtitle/raw/legacy-demo.srt",
+        Some(&session),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -3003,6 +3102,18 @@ async fn logo_library_upload_serve_and_delete() {
 }
 
 #[tokio::test]
+async fn static_panel_html_is_not_long_cached() {
+    let fixture = fixture().await;
+    let response = fetch(&fixture, "/static/panel/panel.html").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        header(&response, "cache-control"),
+        "no-cache",
+        "HTML 入口不带内容哈希，不能长缓存"
+    );
+}
+
+#[tokio::test]
 async fn assets_map_lists_serves_and_removes_local_hls() {
     let fixture = fixture().await;
     let token = login(&fixture).await;
@@ -3024,6 +3135,7 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
                 "http://placeholder.test/404.mp4".to_string(),
                 serde_json::Value::String("/assets/convert/demo/index.m3u8".to_string()),
             );
+            config.server.not_found_url = "http://placeholder.test/404.mp4".to_string();
             Ok(())
         })
         .expect("写配置");
@@ -3046,7 +3158,33 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
         .find(|item| item["url"] == "http://placeholder.test/404.mp4")
         .expect("应检测到占位 URL");
     assert_eq!(item["converted"], true);
-    assert_eq!(item["local_path"], "/assets/convert/demo/index.m3u8");
+    assert_eq!(
+        item["local_path"], "/static/assets/convert/demo/index.m3u8",
+        "旧持久化值必须归一化"
+    );
+
+    // 候选列表读取同一份 map，也必须归一化。
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/assets/candidates", fixture.base))
+        .header("authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("候选列表");
+    assert_eq!(response.status(), StatusCode::OK);
+    let candidates: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("JSON");
+    let candidate = candidates["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["key"] == "server.not_found_url")
+        .expect("应有 404 跳转候选");
+    assert_eq!(candidate["converted"], true);
+    assert_eq!(
+        candidate["local_path"],
+        "/static/assets/convert/demo/index.m3u8"
+    );
 
     let response = fixture
         .client
