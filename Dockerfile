@@ -98,7 +98,7 @@ USER tvbuddy
 
 # 健康检查走本机回环。默认 bind 是 [::]，同时接受 IPv4。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:9900/health || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1:9900/api/health || exit 1
 
 ENTRYPOINT ["/opt/tv-buddy/tv-buddy"]
 CMD ["/data/tv-buddy.db"]

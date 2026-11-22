@@ -23,9 +23,12 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         // 公开面
         .route("/health", get(routes::public::health))
+        .route("/api/health", get(routes::public::health))
         .route("/", get(routes::public::home))
         .route("/logo/:file", get(routes::logo::file))
         .route("/unban/whoami", get(routes::public::whoami))
+        .route("/api/unban/whoami", get(routes::public::whoami))
+        .route("/api/unban", post(routes::public::unban))
         .route("/api/share/pull", get(routes::share::pull))
         .route("/subs/status", get(routes::subs::status))
         .route("/subs/groups", post(routes::subs::groups))
