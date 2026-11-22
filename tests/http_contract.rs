@@ -849,7 +849,7 @@ async fn health_and_user_playlist() {
     );
     // 归档组停播，不进订阅；其余组都进。
     assert!(body.contains(&format!("/api/play/token/{}/pg/c1.m3u8", fixture.token)));
-    assert!(body.contains(&format!("/op/c1.m3u8\n")), "open 组不带令牌");
+    assert!(body.contains(&"/op/c1.m3u8\n".to_string()), "open 组不带令牌");
     // 直通组在订阅里直接给上游地址。
     assert!(body.contains(&format!("{}/live.m3u8", fixture.upstream)));
     assert!(!body.contains("/pt/"));
@@ -3494,7 +3494,7 @@ async fn login_locks_after_repeated_failures() {
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     let locked = body["locked_for_secs"].as_u64().expect("locked_for_secs");
-    assert!(locked >= 1 && locked <= 300, "{body}");
+    assert!((1..=300).contains(&locked), "{body}");
 
     // 既有会话不受登录锁影响。
     let response = fixture
@@ -5114,7 +5114,7 @@ fn ts_stream(keyframes: u64) -> Vec<u8> {
             let mut pes = vec![0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x80, 0x80, 0x05];
             pes.extend_from_slice(&pts_bytes(pts + frame * 18_000));
             pes.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, if key { 0x65 } else { 0x41 }]);
-            pes.extend(std::iter::repeat(0x88).take(40));
+            pes.extend(std::iter::repeat_n(0x88, 40));
             out.extend(packet(0x101, true, &pes));
         }
     }

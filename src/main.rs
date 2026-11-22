@@ -120,6 +120,22 @@ fn credentials_path(db_path: &std::path::Path) -> PathBuf {
     parent.join("cache").join("admin_initial_credentials.txt")
 }
 
+/// 每 60 秒把 `last_seen_at_ms` 的改动落盘。
+///
+/// 令牌每次被使用都只改内存并置脏位；没有这个循环，「最近使用」永远是空。
+fn spawn_token_flush(state: std::sync::Arc<state::AppState>) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            if let Err(error) = state.users.flush_if_dirty() {
+                tracing::warn!(%error, "写入令牌使用时间失败");
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,20 +162,4 @@ mod tests {
         let path = credentials_path(std::path::Path::new("tv-buddy.db"));
         assert_eq!(path, PathBuf::from("./cache/admin_initial_credentials.txt"));
     }
-}
-
-/// 每 60 秒把 `last_seen_at_ms` 的改动落盘。
-///
-/// 令牌每次被使用都只改内存并置脏位；没有这个循环，「最近使用」永远是空。
-fn spawn_token_flush(state: std::sync::Arc<state::AppState>) {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(error) = state.users.flush_if_dirty() {
-                tracing::warn!(%error, "写入令牌使用时间失败");
-            }
-        }
-    });
 }
