@@ -848,12 +848,65 @@ async fn health_and_user_playlist() {
         "EPG 关闭时不注入 x-tvg-url"
     );
     // 归档组停播，不进订阅；其余组都进。
-    assert!(body.contains(&format!("/l/{}/pg/c1.m3u8", fixture.token)));
+    assert!(body.contains(&format!("/api/play/token/{}/pg/c1.m3u8", fixture.token)));
     assert!(body.contains(&format!("/op/c1.m3u8\n")), "open 组不带令牌");
     // 直通组在订阅里直接给上游地址。
     assert!(body.contains(&format!("{}/live.m3u8", fixture.upstream)));
     assert!(!body.contains("/pt/"));
     assert!(!body.contains("/ar/"), "归档组不进订阅");
+}
+
+#[tokio::test]
+async fn subscription_uses_new_paths() {
+    let fx = fixture().await;
+    let response = fx
+        .client
+        .get(format!("{}/api/sub/{}/playlist.m3u", fx.base, fx.token))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.expect("读正文");
+    assert!(body.contains(&format!("/api/play/token/{}/", fx.token)));
+    assert!(!body.contains("/l/"));
+}
+
+#[tokio::test]
+async fn subscription_old_and_new_paths_agree() {
+    let fixture = fixture_with(true).await;
+    epg::refresh(&fixture.state).await.expect("采集应成功");
+
+    // 四类订阅端点：旧路径与新路径必须返回同一响应。
+    for (old, new) in [
+        (
+            fixture.sub(&fixture.token, "playlist.m3u"),
+            format!("/api/sub/{}/playlist.m3u", fixture.token),
+        ),
+        (
+            fixture.sub(&fixture.token, "pg/playlist.m3u"),
+            format!("/api/sub/{}/pg/playlist.m3u", fixture.token),
+        ),
+        (
+            fixture.sub(&fixture.token, "epg.xml"),
+            format!("/api/sub/{}/epg.xml", fixture.token),
+        ),
+        (
+            fixture.sub(&fixture.token, "epg.xml.gz"),
+            format!("/api/sub/{}/epg.xml.gz", fixture.token),
+        ),
+    ] {
+        let old_response = fetch(&fixture, &old).await;
+        let new_response = fetch(&fixture, &new).await;
+        assert_eq!(old_response.status(), new_response.status(), "{new}");
+        assert_eq!(
+            header(&old_response, "content-type"),
+            header(&new_response, "content-type"),
+            "{new}"
+        );
+        let old_body = old_response.bytes().await.expect("旧正文");
+        let new_body = new_response.bytes().await.expect("新正文");
+        assert_eq!(old_body, new_body, "{new}");
+    }
 }
 
 #[tokio::test]
@@ -876,7 +929,10 @@ async fn sub_playlist_filters_by_user_scope() {
         .text()
         .await
         .expect("读正文");
-    assert!(body.contains(&format!("/l/{}/pg/c1.m3u8", fixture.user_token)));
+    assert!(body.contains(&format!(
+        "/api/play/token/{}/pg/c1.m3u8",
+        fixture.user_token
+    )));
     assert!(!body.contains("/pm/"), "未授权的分组不出现");
     assert!(!body.contains("/op/"));
     assert!(!body.contains("/ar/"));
@@ -906,7 +962,7 @@ async fn group_playlist_is_scoped() {
         "inline; filename=\"pg.m3u\""
     );
     let body = response.text().await.expect("读正文");
-    assert!(body.contains(&format!("/l/{}/pg/c1.m3u8", fixture.token)));
+    assert!(body.contains(&format!("/api/play/token/{}/pg/c1.m3u8", fixture.token)));
     assert!(!body.contains("/pm/"));
     assert!(!body.contains("/ar/"));
 
@@ -943,7 +999,7 @@ async fn slice_signature_path_token_and_rejections() {
         .text()
         .await
         .expect("读正文");
-    assert!(body.contains(&format!("/l/{}/pg/c1.m3u8", fixture.token)));
+    assert!(body.contains(&format!("/api/play/token/{}/pg/c1.m3u8", fixture.token)));
     assert!(!body.contains("?token="));
 
     // 主清单 → 变体清单 → 切片都带 `l/<exp>/<sig>`。
@@ -1068,7 +1124,7 @@ async fn device_token_can_be_customized() {
     assert_eq!(body["token"]["token"], "living-room");
     assert_eq!(
         body["token"]["playlist_url"],
-        "/sub/living-room/playlist.m3u"
+        "/api/sub/living-room/playlist.m3u"
     );
     let expires = body["token"]["expires_at_ms"].as_i64().expect("应有有效期");
 
@@ -1613,7 +1669,7 @@ async fn epg_enabled_serves_xmltv_and_filters() {
     assert_eq!(response.status(), StatusCode::OK);
     let playlist = response.text().await.expect("读订阅");
     let expected = format!(
-        "#EXTM3U x-tvg-url=\"{}/sub/{}/epg.xml.gz\"",
+        "#EXTM3U x-tvg-url=\"{}/api/sub/{}/epg.xml.gz\"",
         fixture.base, fixture.token
     );
     assert_eq!(playlist.lines().next(), Some(expected.as_str()));
@@ -2416,7 +2472,7 @@ async fn group_import_adds_skips_and_overwrites() {
         .expect("读正文");
     assert!(playlist.contains("/imp/c1.m3u8"));
     // 用户订阅给的是该用户自己的令牌，不再是匿名地址。
-    assert!(playlist.contains(&format!("/l/{}/imp/c1.m3u8", fixture.token)));
+    assert!(playlist.contains(&format!("/api/play/token/{}/imp/c1.m3u8", fixture.token)));
 
     // 重复导入 → 跳过。
     let response = post("/panel/api/groups/import", &body).await.expect("请求");

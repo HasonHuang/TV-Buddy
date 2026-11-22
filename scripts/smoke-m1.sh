@@ -181,42 +181,44 @@ check "删组 200" "200" "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new1")
 check "再删组 404" "404" "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new1")"
 
 # --- 用户订阅 ---
-# 订阅入口在 `/sub/<令牌>/` 下：用户订阅与分组订阅。令牌从 `/panel/api/me` 取。
+# 订阅入口在 `/api/sub/<令牌>/` 下：用户订阅与分组订阅。令牌从 `/panel/api/me` 取。
 PTOK=$(curl -s "${A[@]}" "$B/panel/api/me" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-SUB="$B/sub/$PTOK/playlist.m3u"
+SUB="$B/api/sub/$PTOK/playlist.m3u"
 
 check "全局订阅已停用" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/playlist.m3u")"
 check "全局分组订阅已停用" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/pub/playlist.m3u")"
 check "用户订阅 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$SUB")"
+check "旧订阅别名 200" "200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/$PTOK/playlist.m3u")"
 check "用户订阅类型" "application/vnd.apple.mpegurl; charset=utf-8" \
   "$(curl -s -o "$WORK/body" -w '%{content_type}' "$SUB")"
 # `[epg].enabled = true` 时首行带该用户自己的 `x-tvg-url`（S-EPG-01）。
 check "用户订阅首行带 EPG 头" \
-  "#EXTM3U x-tvg-url=\"http://127.0.0.1:$PORT/sub/$PTOK/epg.xml.gz\"" \
+  "#EXTM3U x-tvg-url=\"http://127.0.0.1:$PORT/api/sub/$PTOK/epg.xml.gz\"" \
   "$(head -n1 "$WORK/body")"
 check "用户订阅头行" "#EXTVLCOPT:http-user-agent=ReaTest/1.0" "$(sed -n '2p' "$WORK/body")"
-check "含公开组" "1" "$(grep -c "http://127.0.0.1:$PORT/l/$PTOK/pub/c1.m3u8" "$WORK/body")"
-check "含隐藏组" "1" "$(grep -c "http://127.0.0.1:$PORT/l/$PTOK/hid/c2.m3u8" "$WORK/body")"
+check "含公开组" "1" "$(grep -c "http://127.0.0.1:$PORT/api/play/token/$PTOK/pub/c1.m3u8" "$WORK/body")"
+check "含隐藏组" "1" "$(grep -c "http://127.0.0.1:$PORT/api/play/token/$PTOK/hid/c2.m3u8" "$WORK/body")"
 check "含直通组" "1" "$(grep -c 'http://example.invalid/live.m3u8' "$WORK/body")"
-check "开放组已归一并带 Token" "1" "$(grep -c "http://127.0.0.1:$PORT/l/$PTOK/op/c3.m3u8" "$WORK/body")"
+check "开放组已归一并带 Token" "1" "$(grep -c "http://127.0.0.1:$PORT/api/play/token/$PTOK/op/c3.m3u8" "$WORK/body")"
 check "排归档组" "0" "$(grep -c '/arc/' "$WORK/body")"
 check "条目数" "4" "$(grep -c '^#EXTINF' "$WORK/body")"
 
 # --- 分组订阅 ---
-GSUB="$B/sub/$PTOK/pub/playlist.m3u"
+GSUB="$B/api/sub/$PTOK/pub/playlist.m3u"
 check "分组订阅 200" "200" "$(curl -s -o "$WORK/gbody" -w '%{http_code}' "$GSUB")"
 check "分组订阅类型" "application/vnd.apple.mpegurl; charset=utf-8" \
   "$(curl -s -o /dev/null -w '%{content_type}' "$GSUB")"
 check "分组订阅文件名" 'inline; filename="pub.m3u"' \
   "$(curl -s -D - -o /dev/null "$GSUB" | tr -d '\r' | sed -n 's/^[Cc]ontent-[Dd]isposition: //p')"
 check "分组订阅含本组频道" "1" \
-  "$(grep -c "http://127.0.0.1:$PORT/l/$PTOK/pub/c1.m3u8" "$WORK/gbody")"
+  "$(grep -c "http://127.0.0.1:$PORT/api/play/token/$PTOK/pub/c1.m3u8" "$WORK/gbody")"
 check "分组订阅不含他组" "0" "$(grep -c '/hid/' "$WORK/gbody" || true)"
 check "归档分组订阅 404" "404" \
-  "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/$PTOK/arc/playlist.m3u")"
+  "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/sub/$PTOK/arc/playlist.m3u")"
 check "未知分组订阅 404" "404" \
-  "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/$PTOK/nope/playlist.m3u")"
+  "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/sub/$PTOK/nope/playlist.m3u")"
 
 # --- 播放 Token ---
 curl -s "${A[@]}" "$B/panel/api/config" > "$WORK/cfg.json"
@@ -229,11 +231,11 @@ json.dump(cfg, open("'"$WORK"'/put.json", "w"))
 check "开启 Token 200" "200" \
   "$(code -X PUT "${A[@]}" --data-binary "@$WORK/put.json" "$B/panel/api/config")"
 curl -s -o "$WORK/body" "$SUB"
-check "订阅下发路径令牌" "3" "$(grep -c "/l/$PTOK/" "$WORK/body" || true)"
-check "开放组带 Token" "1" "$(grep -c "/l/$PTOK/op/c3.m3u8" "$WORK/body" || true)"
+check "订阅下发路径令牌" "3" "$(grep -c "/api/play/token/$PTOK/" "$WORK/body" || true)"
+check "开放组带 Token" "1" "$(grep -c "/api/play/token/$PTOK/op/c3.m3u8" "$WORK/body" || true)"
 check "直通组不带 Token" "0" "$(grep -c 'example.invalid/live.m3u8?token' "$WORK/body" || true)"
-check "坏令牌 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/nope/playlist.m3u")"
-check "坏令牌 EPG 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/nope/epg.xml")"
+check "坏令牌 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/sub/nope/playlist.m3u")"
+check "坏令牌 EPG 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/sub/nope/epg.xml")"
 
 # --- 未建模段保留 ---
 check "未建模段保留" "* * * * *" "$("$BIN" config get epg.cron --db "$DB")"

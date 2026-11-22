@@ -3,8 +3,8 @@
 //! 契约见 [`docs/design/03-http-contract.md`](../docs/design/03-http-contract.md) §5。
 //! 证据：F-004、F-009、S-URL-02/04/07。
 //!
-//! 订阅有两种入口：用户订阅 `/sub/:token/playlist.m3u` 与分组订阅
-//! `/sub/:token/:gid/playlist.m3u`。令牌即身份，范围由用户决定。
+//! 订阅有两种入口：用户订阅 `/api/sub/:token/playlist.m3u` 与分组订阅
+//! `/api/sub/:token/:gid/playlist.m3u`。令牌即身份，范围由用户决定。
 //! 全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用。
 
 use std::collections::{BTreeMap, HashSet};
@@ -37,7 +37,7 @@ pub fn render_user(
     health: Option<&Health>,
     quality: Option<&QualityState>,
 ) -> String {
-    let epg_path = format!("/sub/{token}/epg.xml.gz");
+    let epg_path = paths::sub(&format!("/{token}/epg.xml.gz"));
     let mut body = header(config, base, &epg_path);
     for group in &config.groups {
         if group.access == "archived" || !user.can_see_group(&group.id) {
@@ -48,7 +48,7 @@ pub fn render_user(
     body
 }
 
-/// 渲染某个分组的订阅 `/sub/:token/:gid/playlist.m3u`。
+/// 渲染某个分组的订阅 `/api/sub/:token/:gid/playlist.m3u`。
 ///
 /// 规则与 [`render_user`] 相同：归档组、不可见频道与探测失败的频道都不进清单。
 /// 分组不存在、已归档或对该用户不可见时返回 `None`。
@@ -65,7 +65,7 @@ pub fn render_user_group(
     if group.access == "archived" || !user.can_see_group(&group.id) {
         return None;
     }
-    let epg_path = format!("/sub/{token}/epg.xml.gz");
+    let epg_path = paths::sub(&format!("/{token}/epg.xml.gz"));
     let mut body = header(config, base, &epg_path);
     push_group(&mut body, config, user, group, base, token, health, quality);
     Some(body)
@@ -232,14 +232,17 @@ fn header(config: &Config, base: &str, epg_path: &str) -> String {
 /// 一个频道的播放地址。
 ///
 /// `passthrough` 直接给上游原始地址，且不套 Token（S-URL-02、S-MODE-11）。
-/// 其余组用路径令牌：`/l/<token>/<gid>/<cid>.<ext>`。
+/// 其余组用路径令牌：`/api/play/token/<token>/<gid>/<cid>.<ext>`。
 pub fn entry_url(group: &Group, channel: &Channel, base: &str, token: &str) -> String {
     if group.mode == "passthrough" {
         return channel.url.clone();
     }
     let ext = if group.format == "mpd" { "mpd" } else { "m3u8" };
     let root = base.trim_end_matches('/');
-    format!("{root}/l/{token}/{}/{}.{ext}", group.id, channel.id)
+    format!(
+        "{root}{}",
+        paths::play(&format!("/token/{token}/{}/{}.{ext}", group.id, channel.id))
+    )
 }
 
 fn push_entry(
@@ -352,7 +355,7 @@ mod tests {
             group("g4", "archived", "proxy"),
         ]);
         let body = render_user(&config, &admin(), "http://host", "tok", None, None);
-        assert!(body.contains("http://host/l/tok/g1/c1.m3u8"));
+        assert!(body.contains("http://host/api/play/token/tok/g1/c1.m3u8"));
         assert!(!body.contains("?token="), "订阅条目不用查询参数");
         assert!(!body.contains("/g4/"), "归档组停播，不进订阅");
     }
@@ -383,7 +386,7 @@ mod tests {
     fn public_group_entry_has_token() {
         let config = config_with(vec![group("g3", "public", "proxy")]);
         let body = render_user(&config, &admin(), "http://host", "tok", None, None);
-        assert!(body.contains("http://host/l/tok/g3/c1.m3u8\n"));
+        assert!(body.contains("http://host/api/play/token/tok/g3/c1.m3u8\n"));
     }
 
     #[test]
@@ -420,7 +423,7 @@ mod tests {
         let first = body.lines().next().unwrap();
         assert_eq!(
             first,
-            "#EXTM3U x-tvg-url=\"http://host/sub/tok/epg.xml.gz\""
+            "#EXTM3U x-tvg-url=\"http://host/api/sub/tok/epg.xml.gz\""
         );
     }
 
@@ -447,7 +450,7 @@ mod tests {
         let mut config = config_with(vec![group("g6", "public", "dash")]);
         config.groups[0].format = "mpd".into();
         let body = render_user(&config, &admin(), "http://host", "tok", None, None);
-        assert!(body.contains("http://host/l/tok/g6/c1.mpd"));
+        assert!(body.contains("http://host/api/play/token/tok/g6/c1.mpd"));
     }
 
     #[test]
@@ -467,7 +470,10 @@ mod tests {
         );
         assert_eq!(groups.len(), 2, "归档组不进视图");
         assert_eq!(groups[0].id, "g1");
-        assert_eq!(groups[0].channels[0].url, "http://host/l/tok/g1/c1.m3u8");
+        assert_eq!(
+            groups[0].channels[0].url,
+            "http://host/api/play/token/tok/g1/c1.m3u8"
+        );
     }
 
     #[test]

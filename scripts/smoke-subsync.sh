@@ -180,7 +180,7 @@ ok = True
 for i, line in enumerate(lines):
     if line.startswith("#EXTINF") and line.rsplit(",", 1)[-1] in wanted:
         url = lines[i + 1] if i + 1 < len(lines) else ""
-        ok = ok and ("/l/" + os.environ["PTOK"] + "/") in url
+        ok = ok and ("/api/play/token/" + os.environ["PTOK"] + "/") in url
 print(1 if ok else 0)
 ')"
 

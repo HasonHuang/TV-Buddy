@@ -58,8 +58,8 @@ fn token_view(token: &AccessToken) -> Value {
         "created_at_ms": token.created_at_ms,
         "expires_at_ms": token.expires_at_ms,
         "last_seen_at_ms": token.last_seen_at_ms,
-        "playlist_url": format!("/sub/{}/playlist.m3u", token.token),
-        "epg_url": format!("/sub/{}/epg.xml", token.token),
+        "playlist_url": crate::paths::sub(&format!("/{}/playlist.m3u", token.token)),
+        "epg_url": crate::paths::sub(&format!("/{}/epg.xml", token.token)),
     })
 }
 
@@ -459,8 +459,8 @@ pub async fn me(
     Ok(Json(json!({
         "user": user_view(&user),
         "token": token,
-        "playlist_link": format!("/sub/{token}/playlist.m3u"),
-        "epg_link": format!("/sub/{token}/epg.xml"),
+        "playlist_link": crate::paths::sub(&format!("/{token}/playlist.m3u")),
+        "epg_link": crate::paths::sub(&format!("/{token}/epg.xml")),
         "groups": groups,
     })))
 }

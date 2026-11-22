@@ -1,5 +1,6 @@
-//! 用户订阅入口：`/sub/:token/playlist.m3u`、`/sub/:token/epg.xml[.gz]`。
+//! 用户订阅入口：`/api/sub/:token/playlist.m3u`、`/api/sub/:token/epg.xml[.gz]`。
 //!
+//! 旧前缀 `/sub/...` 保留到 Task 10，响应与新前缀一致。
 //! 令牌来自 `access_tokens`。无效或过期一律 `404`，不区分原因，
 //! 避免探测令牌是否存在。
 //!
@@ -26,7 +27,10 @@ fn missing() -> Response {
 pub async fn gone() -> Response {
     (
         StatusCode::NOT_FOUND,
-        "全局订阅已停用，请使用 /sub/<令牌>/playlist.m3u",
+        format!(
+            "全局订阅已停用，请使用 {}/<令牌>/playlist.m3u",
+            crate::paths::SUB_API
+        ),
     )
         .into_response()
 }
@@ -39,7 +43,7 @@ fn resolve(state: &AppState, token: &str) -> Option<User> {
     Some(user)
 }
 
-/// `GET /sub/:token/playlist.m3u`。
+/// `GET /api/sub/:token/playlist.m3u`（旧 `/sub/:token/playlist.m3u` 同响应）。
 pub async fn playlist(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -79,7 +83,7 @@ pub async fn playlist(
         .into_response()
 }
 
-/// `GET /sub/:token/:gid/playlist.m3u`——单个分组的订阅。
+/// `GET /api/sub/:token/:gid/playlist.m3u`——单个分组的订阅。
 ///
 /// 分组不存在、已归档或对该用户不可见时返回 `404`，与无效令牌不区分。
 pub async fn group_playlist(
@@ -224,12 +228,12 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// `GET /sub/:token/epg.xml`。
+/// `GET /api/sub/:token/epg.xml`。
 pub async fn epg(State(state): State<Arc<AppState>>, Path(token): Path<String>) -> Response {
     user_epg(&state, &token, false)
 }
 
-/// `GET /sub/:token/epg.xml.gz`。
+/// `GET /api/sub/:token/epg.xml.gz`。
 pub async fn epg_gz(State(state): State<Arc<AppState>>, Path(token): Path<String>) -> Response {
     user_epg(&state, &token, true)
 }

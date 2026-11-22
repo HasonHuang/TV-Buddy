@@ -145,12 +145,12 @@ check "普通用户看自己的订阅 200" "200" "$(code "${V[@]}" "$B/panel/api
 PTOK=$(jget 'd["token"]' < <(curl -s "${V[@]}" "$B/panel/api/me"))
 VSUB="$B/sub/$PTOK/playlist.m3u"
 curl -s "$VSUB" > "$WORK/vpl.m3u"
-check "订阅含授权频道" "1" "$(grep -c "/l/$PTOK/ga/alpha.m3u8" "$WORK/vpl.m3u" || true)"
+check "订阅含授权频道" "1" "$(grep -c "/api/play/token/$PTOK/ga/alpha.m3u8" "$WORK/vpl.m3u" || true)"
 check "订阅不含未授权分组" "0" "$(grep -c '/gb/' "$WORK/vpl.m3u" || true)"
 check "订阅不含归档组" "0" "$(grep -c '/gz/' "$WORK/vpl.m3u" || true)"
 check "订阅条目数" "1" "$(grep -c '^#EXTINF' "$WORK/vpl.m3u" || true)"
 check "订阅头指向自己的 EPG" \
-  "#EXTM3U x-tvg-url=\"$B/sub/$PTOK/epg.xml.gz\"" "$(head -n1 "$WORK/vpl.m3u")"
+  "#EXTM3U x-tvg-url=\"$B/api/sub/$PTOK/epg.xml.gz\"" "$(head -n1 "$WORK/vpl.m3u")"
 
 # 管理员看到全部非归档频道。
 ATOK=$(curl -s "${A[@]}" "$B/panel/api/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')

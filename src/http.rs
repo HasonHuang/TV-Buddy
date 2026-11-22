@@ -59,19 +59,28 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/playlist.m3u", get(routes::sub::gone))
         .route("/:gid/playlist.m3u", get(routes::sub::gone))
         // 用户订阅入口。令牌见 `tv-buddy.db` 的 access_tokens 表。
+        // 旧 `/sub/...` 保留到 Task 10，两套路径的响应必须一致。
         .route("/sub/:token/playlist.m3u", get(routes::sub::playlist))
+        .route("/api/sub/:token/playlist.m3u", get(routes::sub::playlist))
         // 单个分组的订阅。分组范围仍受令牌所属用户的可见性限制。
         .route(
             "/sub/:token/:gid/playlist.m3u",
             get(routes::sub::group_playlist),
         )
+        .route(
+            "/api/sub/:token/:gid/playlist.m3u",
+            get(routes::sub::group_playlist),
+        )
         .route("/sub/:token/epg.xml", get(routes::sub::epg))
+        .route("/api/sub/:token/epg.xml", get(routes::sub::epg))
         .route("/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
+        .route("/api/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
         // 面板接口：旧前缀与新前缀使用同一套处理器，未知路径固定 404 JSON。
         .nest("/panel/api", panel_api_routes())
         .nest(paths::PANEL_API, panel_api_routes())
         // 播放链路（M2）
-        // 订阅条目的路径令牌入口：`/l/<token>/<gid>/<cid>.m3u8`。
+        // 旧订阅条目入口：`/l/<token>/<gid>/<cid>.m3u8`。保留到 Task 10。
+        // 新条目入口在 `/api/play/token/...`，见下方播放路由。
         .route("/l/:token/:gid/:file", get(routes::stream::token_entry))
         .route(
             "/l/:token/:gid/:cid/*path",
