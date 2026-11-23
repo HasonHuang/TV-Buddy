@@ -19,7 +19,7 @@ import {
 } from './api';
 import { headersToText, parseHeaders } from './headers';
 import { Icon } from './icons';
-import { modeCode, modeOptions, modeTip } from './modes';
+import { channelModeOptions, modeCode, modeOptions, modeTip } from './modes';
 import { QualityBadges, qualityCounts } from './quality';
 import { ScriptManagerModal } from './scripts';
 import {
@@ -1582,9 +1582,12 @@ export function GroupsPage() {
               const offline = healthEnabled && offlineOnFail && state?.ok === false;
               const logo = text(channel, 'logo') || text(channel, 'tvg_logo');
               const tvgId = text(channel, 'tvg_id');
-              const allTracks = group.mode === 'dash' && (channel.selected_tracks ?? []).length === 0;
+              const effectiveMode = channel.mode ?? group.mode;
+              const modeDiff = effectiveMode !== group.mode;
+              const allTracks =
+                effectiveMode === 'dash' && (channel.selected_tracks ?? []).length === 0;
               const local =
-                group.mode === 'passthrough'
+                effectiveMode === 'passthrough'
                   ? channel.url
                   : playUrl(group, channel, playToken);
               return (
@@ -1688,7 +1691,6 @@ export function GroupsPage() {
                     <div className="ch-url">{channel.url}</div>
                     <div className="ch-url local">
                       {local}
-                      {group.mode === 'passthrough' && <Badge tone="muted">直通</Badge>}
                     </div>
                     <div className="ch-badges">
                       {channel.source_id ? (
@@ -1706,6 +1708,13 @@ export function GroupsPage() {
                         </HoverTip>
                       ) : (
                         <Badge tone="muted">本地</Badge>
+                      )}
+                      {modeDiff && (
+                        <HoverTip text={modeTip(effectiveMode)}>
+                          <Badge tone={effectiveMode === 'passthrough' ? 'warn' : 'muted'}>
+                            {effectiveMode === 'passthrough' ? '直通' : modeCode(effectiveMode)}
+                          </Badge>
+                        </HoverTip>
                       )}
                       {!channel.source_id && (
                         <Badge tone={offlineOnFail ? 'warn' : 'muted'}>
@@ -1989,6 +1998,27 @@ export function GroupsPage() {
               />
             </Field>
           </div>
+          {(() => {
+            const current = groups.find((group) => group.id === groupForm.form.id);
+            const explicit = (current?.channels ?? []).filter((channel) => channel.mode).length;
+            const unsafe = (current?.channels ?? []).filter(
+              (channel) => channel.source_id && !channel.mode,
+            ).length;
+            return (
+              <>
+                {explicit > 0 && (
+                  <p className="hint">
+                    {explicit} 个频道使用单独设置的模式，不受分组修改影响。
+                  </p>
+                )}
+                {groupForm.form.mode === 'passthrough' && unsafe > 0 && (
+                  <p className="msg warn">
+                    组内有 {unsafe} 个同步频道未设置工作模式，直通会绕过凭证。请先为它们设置模式或按源默认回填。
+                  </p>
+                )}
+              </>
+            );
+          })()}
           <Field
             label="访问范围"
             tip="归档的分组停播：不出现在订阅里，也不能播放。"
@@ -2257,6 +2287,37 @@ export function GroupsPage() {
               </button>
             )}
           </div>
+
+          <Field
+            label="工作模式"
+            tip="频道可以单独覆盖分组的工作模式。未设置时跟随分组。"
+            hint={
+              channelForm.form.modeFromSource
+                ? '当前值来自订阅源默认。手动修改后以频道为准。'
+                : undefined
+            }
+          >
+            <Select
+              ariaLabel="工作模式"
+              value={channelForm.form.mode}
+              options={channelModeOptions(
+                groups.find((group) => group.id === channelForm.gid)?.mode ?? 'proxy',
+                channelForm.form.sourceId !== '',
+                !(
+                  channelForm.form.sourceId !== '' &&
+                  (groups.find((group) => group.id === channelForm.gid)?.mode ?? 'proxy') ===
+                    'passthrough'
+                ),
+              )}
+              onChange={(next) =>
+                setChannelForm({
+                  ...channelForm,
+                  form: { ...channelForm.form, mode: next, modeFromSource: false },
+                })
+              }
+              width={220}
+            />
+          </Field>
 
           <details className="block">
             <summary>
