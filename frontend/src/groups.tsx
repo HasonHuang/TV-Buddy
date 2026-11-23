@@ -42,6 +42,10 @@ export type Channel = {
   id: string;
   name: string;
   url: string;
+  /** 频道级工作模式；缺省继承分组。 */
+  mode?: string;
+  /** `sync:auto`、`sync:<模式>` 或 `manual`。 */
+  mode_source?: string;
   /** 来源订阅源 id；空表示本地频道。 */
   source_id?: string;
   source_key?: string;
@@ -199,6 +203,12 @@ type ChannelForm = {
   logo: string;
   tvgId: string;
   tvgName: string;
+  /** `''` = 跟随分组；其余是显式模式。 */
+  mode: string;
+  /** 打开弹窗时的模式。用来判断用户是否显式修改。 */
+  originalMode: string;
+  /** 当前值来自订阅源默认。 */
+  modeFromSource: boolean;
   /** `static` = 直接用 URL；`script` = 交给解析脚本。 */
   upstream: 'static' | 'script';
   script: string;
@@ -683,6 +693,9 @@ export function GroupsPage() {
       proxy: proxyPayload(form.proxy),
       prefetch: prefetchPayload(prefetch),
     };
+    if (isNew || form.mode !== form.originalMode) {
+      payload.mode = form.mode === '' ? null : form.mode;
+    }
     // 只在用户显式切换时发送；否则由服务端按来源字段变化自动固定。
     if (!isNew && form.syncFollow !== form.originalFollow) {
       payload.sync_follow = form.syncFollow;
@@ -1037,6 +1050,9 @@ export function GroupsPage() {
             logo: text(channel, 'logo') || text(channel, 'tvg_logo'),
             tvgId: text(channel, 'tvg_id'),
             tvgName: text(channel, 'tvg_name'),
+            mode: channel.mode ?? '',
+            originalMode: channel.mode ?? '',
+            modeFromSource: text(channel, 'mode_source').startsWith('sync:'),
             upstream: script === '' ? 'static' : 'script',
             script,
             scriptArg: text(channel, 'resolver_arg'),
@@ -1063,6 +1079,9 @@ export function GroupsPage() {
             logo: '',
             tvgId: '',
             tvgName: '',
+            mode: '',
+            originalMode: '',
+            modeFromSource: false,
             upstream: 'static',
             script: '',
             scriptArg: '',

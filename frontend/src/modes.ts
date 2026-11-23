@@ -39,6 +39,24 @@ export function syncModeOptions(): ModeOption[] {
   return MODES.filter((mode) => !mode.aggregateOnly).map(optionOf);
 }
 
+/** 频道模式选项：首项继承分组；同步频道不显示 passthrough。 */
+export function channelModeOptions(
+  groupMode: string,
+  sync: boolean,
+  allowInherit = true,
+): ModeOption[] {
+  const inherited: ModeOption[] = allowInherit
+    ? [
+        {
+          value: '',
+          label: `跟随分组（${modeText(groupMode)}）`,
+          desc: '使用分组的工作模式。',
+        },
+      ]
+    : [];
+  return [...inherited, ...(sync ? syncModeOptions() : modeOptions())];
+}
+
 /** 中文名加短标识，如「服务器转发（PROXY）」。名称已含标识时不重复添加。 */
 export function modeText(mode: string): string {
   const item = MODES.find((entry) => entry.value === mode);
