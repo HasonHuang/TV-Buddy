@@ -14,13 +14,44 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 TARGET = os.environ.get("TARGET_BASE", "http://127.0.0.1:19899")
 OURS = os.environ.get("OUR_BASE", "http://127.0.0.1:19898")
 
-SEG_RE = re.compile(r"^https?://[^/]+/([^/]+)/([^/]+)/([0-9a-f]{16})_([0-9a-f]{32})\.([a-z0-9]+)$")
-ENTRY_RE = re.compile(r"^http://[^/]+/([^/]+)/([^/?]+)\.(\w+)(\?token=([0-9a-f]{48}))?$")
+SEG_RE = re.compile(
+    r"^https?://[^/]+/(?:media/)?([^/]+)/([^/]+)/([0-9a-f]{16})_([0-9a-f]{32})\.([a-z0-9]+)$"
+)
+NEW_ENTRY_RE = re.compile(
+    r"^https?://[^/]+/api/play/(?:token/([^/]+)/)?([^/]+)/([^/?]+)\.(\w+)(?:\?token=[0-9a-f]{48})?$"
+)
+OLD_ENTRY_RE = re.compile(
+    r"^https?://[^/]+/([^/]+)/([^/?]+)\.(\w+)(\?token=([0-9a-f]{48}))?$"
+)
+
+
+def target_path(path):
+    """把本实现的路径转换成目标 v0.8.2 的旧路径。"""
+    prefixes = [
+        ("/api/play/token", "/l"),
+        ("/api/play", ""),
+        ("/api/panel", "/panel/api"),
+        ("/api/sub", "/sub"),
+        ("/api/unban", "/unban"),
+        ("/api/health", "/health"),
+        ("/api/share", "/api/share"),
+        ("/media", ""),
+        ("/static/panel", "/__assets"),
+        ("/static/logo", "/logo"),
+        ("/static/assets", "/assets"),
+        ("/page/unban", "/unban"),
+        ("/page", "/panel"),
+    ]
+    for prefix, replacement in prefixes:
+        if path == prefix or path.startswith(prefix + "/") or path.startswith(prefix + "?"):
+            return replacement + path[len(prefix):]
+    return path
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -34,6 +65,8 @@ OPENER = urllib.request.build_opener(NoRedirect)
 
 
 def get(base, path, headers=None):
+    if base == TARGET:
+        path = target_path(path)
     request = urllib.request.Request(base + path, headers=headers or {})
     try:
         with OPENER.open(request, timeout=20) as response:
@@ -70,11 +103,13 @@ def token_of(base):
 def playlist_shape(body):
     entries = []
     for line in lines_of(body):
-        matched = ENTRY_RE.match(line)
-        if matched:
-            entries.append(
-                (matched.group(1), matched.group(2), matched.group(3), bool(matched.group(5)))
-            )
+        new = NEW_ENTRY_RE.match(line)
+        if new:
+            entries.append((new.group(2), new.group(3), new.group(4), bool(new.group(1))))
+            continue
+        old = OLD_ENTRY_RE.match(line)
+        if old:
+            entries.append((old.group(1), old.group(2), old.group(3), bool(old.group(5))))
     return entries
 
 
