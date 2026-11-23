@@ -102,7 +102,7 @@ function App() {
         {message ? <p className={`msg ${tone}`}>{message}</p> : null}
         {!getToken() ? (
           <p className="muted">
-            <a href="/page/panel">前往面板登录</a>
+            <a href="/page">前往面板登录</a>
           </p>
         ) : null}
       </div>

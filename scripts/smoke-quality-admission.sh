@@ -66,17 +66,17 @@ if ! docker compose -f "$COMPOSE" up -d --build >"$WORK/compose.log" 2>&1; then
   exit 1
 fi
 for _ in $(seq 1 180); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 1
 done
-if ! curl -fsS "$B/health" >/dev/null 2>&1; then
+if ! curl -fsS "$B/api/health" >/dev/null 2>&1; then
   echo "服务未就绪" >&2
   docker logs "$CONTAINER" --tail 80 >&2 || true
   exit 1
 fi
 
 login() {
-  curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
+  curl -s -X POST "$B/api/panel/login" -H 'content-type: application/json' \
     -d '{"username":"admin","password":"admin"}' | jq -r '.token // ""'
 }
 TOKEN=$(login)
@@ -86,16 +86,16 @@ if [ -z "$TOKEN" ]; then
   exit 1
 fi
 
-getcfg() { curl -fsS -H "$AUTH" "$B/panel/api/config"; }
+getcfg() { curl -fsS -H "$AUTH" "$B/api/panel/config"; }
 putcfg() {
-  curl -s -o "$WORK/put.out" -w '%{http_code}' -X PUT "$B/panel/api/config" \
+  curl -s -o "$WORK/put.out" -w '%{http_code}' -X PUT "$B/api/panel/config" \
     -H "$AUTH" -H 'content-type: application/json' --data-binary "@$1"
 }
 subs_row() {
-  curl -s -H "$AUTH" "$B/panel/api/subs/status" |
+  curl -s -H "$AUTH" "$B/api/panel/subs/status" |
     jq -c --arg id "$1" '.sources[] | select(.id == $id)'
 }
-quality_status() { curl -s -H "$AUTH" "$B/panel/api/quality/status"; }
+quality_status() { curl -s -H "$AUTH" "$B/api/panel/quality/status"; }
 
 # 等待同步结束。伪源含慢速频道，一次同步至少约 2 秒，1 秒后轮询不会错过启动。
 wait_sync() {
@@ -123,7 +123,7 @@ wait_sync() {
 request_sync() {
   local id=$1 code
   # force=true 绕过订阅源正文缓存，确保 /control 切换后的清单立即生效。
-  code=$(curl -s -o "$WORK/sync.json" -w '%{http_code}' -X POST "$B/panel/api/subs/sync" \
+  code=$(curl -s -o "$WORK/sync.json" -w '%{http_code}' -X POST "$B/api/panel/subs/sync" \
     -H "$AUTH" -H 'content-type: application/json' \
     -d "{\"id\":\"$id\",\"force\":true}")
   check "触发同步 $id" "202" "$code"
@@ -133,13 +133,13 @@ request_sync() {
 run_quality() {
   local code attempt
   for attempt in 1 2; do
-    code=$(curl -s -o "$WORK/run.json" -w '%{http_code}' -X POST "$B/panel/api/quality/run" \
+    code=$(curl -s -o "$WORK/run.json" -w '%{http_code}' -X POST "$B/api/panel/quality/run" \
       -H "$AUTH" -H 'content-type: application/json' -d '{"scope":"all","run_mode":"quick"}')
     if [ "$code" = "202" ]; then
       break
     fi
     if [ "$code" = "409" ]; then
-      curl -s -X POST "$B/panel/api/quality/cancel" -H "$AUTH" >/dev/null
+      curl -s -X POST "$B/api/panel/quality/cancel" -H "$AUTH" >/dev/null
       sleep 1
       continue
     fi
@@ -158,7 +158,7 @@ run_quality() {
 }
 
 results_json_for() {
-  curl -s -H "$AUTH" "$B/panel/api/quality/results?source_id=$1&limit=200"
+  curl -s -H "$AUTH" "$B/api/panel/quality/results?source_id=$1&limit=200"
 }
 results_json() {
   results_json_for qsrc
@@ -240,7 +240,7 @@ check "分辨率档位只留 720p" "720p频道" "$(source_names qres)"
 check "720p 档位准入" "1" "$(result_count_for qres 720p频道 admitted pass)"
 check "1080p 档位拒绝" "1" "$(result_count_for qres 1080p频道 rejected speed_low)"
 CODE=$(curl -s -o "$WORK/delete-res.json" -w '%{http_code}' -X DELETE \
-  "$B/panel/api/playlist/sources/qres?keep_content=0" -H "$AUTH")
+  "$B/api/panel/playlist/sources/qres?keep_content=0" -H "$AUTH")
 check "分辨率源清理" "200" "$CODE"
 
 # 3) 关闭源门控同步，三个频道直接进入分组。
@@ -295,26 +295,26 @@ run_quality || true
 check "关闭安全阀后移出两个失败频道" "正常频道" "$(group_names)"
 
 # 8) 停用保留 / 移出。
-curl -s -X POST "$B/panel/api/playlist/sources/qsrc/disable" \
+curl -s -X POST "$B/api/panel/playlist/sources/qsrc/disable" \
   -H "$AUTH" -H 'content-type: application/json' -d '{"keep_channels":true}' >/dev/null
 check "停用保留频道" "正常频道" "$(group_names)"
 check "源已停用" "false" "$(subs_row qsrc | jq -r '.enabled')"
 
-curl -s -X POST "$B/panel/api/playlist/sources/qsrc/enable" -H "$AUTH" >/dev/null
+curl -s -X POST "$B/api/panel/playlist/sources/qsrc/enable" -H "$AUTH" >/dev/null
 request_sync qsrc || true
 check "重新启用后频道保留" "正常频道" "$(group_names)"
 
-curl -s -X POST "$B/panel/api/playlist/sources/qsrc/disable" \
+curl -s -X POST "$B/api/panel/playlist/sources/qsrc/disable" \
   -H "$AUTH" -H 'content-type: application/json' -d '{"keep_channels":false}' >/dev/null
 check "停用移出频道" "" "$(group_names)"
 
-curl -s -X POST "$B/panel/api/playlist/sources/qsrc/enable" -H "$AUTH" >/dev/null
+curl -s -X POST "$B/api/panel/playlist/sources/qsrc/enable" -H "$AUTH" >/dev/null
 request_sync qsrc || true
 check "再次启用恢复频道" "正常频道" "$(group_names)"
 
 # 9) 删除随源移出。
 CODE=$(curl -s -o "$WORK/delete.json" -w '%{http_code}' -X DELETE \
-  "$B/panel/api/playlist/sources/qsrc?keep_content=0" -H "$AUTH")
+  "$B/api/panel/playlist/sources/qsrc?keep_content=0" -H "$AUTH")
 check "删除源并移出" "200" "$CODE"
 check "删除后没有该源频道" "" "$(all_names)"
 
@@ -335,7 +335,7 @@ request_sync qsrc || true
 check "重建后准入正常频道" "正常频道" "$(group_names)"
 
 CODE=$(curl -s -o "$WORK/delete.json" -w '%{http_code}' -X DELETE \
-  "$B/panel/api/playlist/sources/qsrc?keep_content=1" -H "$AUTH")
+  "$B/api/panel/playlist/sources/qsrc?keep_content=1" -H "$AUTH")
 check "删除源并保留频道" "200" "$CODE"
 check "频道转为本地" "" \
   "$(getcfg | jq -r '[(.groups // [])[] | .channels[] | select(.name == "正常频道") | .source_id] | join(",")')"

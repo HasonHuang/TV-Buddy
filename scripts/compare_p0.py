@@ -87,7 +87,7 @@ def slice_shape(body):
 
 def segment_path(base, token=""):
     """取媒体清单首条切片路径（相对本服务）。"""
-    _, _, body = get(base, "/pm/c1/video/index.txt" + (f"?token={token}" if token else ""))
+    _, _, body = get(base, "/api/play/pm/c1/video/index.txt" + (f"?token={token}" if token else ""))
     for line in lines_of(body):
         matched = SEG_RE.match(line)
         if matched:
@@ -99,7 +99,7 @@ def segment_path(base, token=""):
 
 
 def c_health(base, _token):
-    status, _, body = get(base, "/health")
+    status, _, body = get(base, "/api/health")
     return status, body.decode().strip()
 
 
@@ -129,7 +129,7 @@ def c_group_playlists(base, _token):
 
 def c_entry_media(base, token):
     """上游是媒体清单：入口直接下发媒体清单。"""
-    status, headers, body = get(base, f"/pg/c1.m3u8?token={token}")
+    status, headers, body = get(base, f"/api/play/pg/c1.m3u8?token={token}")
     return (
         status,
         header(headers, "content-type"),
@@ -141,7 +141,7 @@ def c_entry_media(base, token):
 
 def c_entry_master(base, token):
     """上游是主清单：入口自造单变体主清单。"""
-    status, headers, body = get(base, f"/pm/c1.m3u8?token={token}")
+    status, headers, body = get(base, f"/api/play/pm/c1.m3u8?token={token}")
     return (
         status,
         header(headers, "content-type"),
@@ -153,13 +153,13 @@ def c_entry_master(base, token):
 
 def c_index_media(base, token):
     """上游是媒体清单时，变体清单路径不存在。"""
-    status, headers, _ = get(base, f"/pg/c1/video/index.txt?token={token}")
+    status, headers, _ = get(base, f"/api/play/pg/c1/video/index.txt?token={token}")
     return status, tail(header(headers, "location"))
 
 
 def c_index_master(base, token):
     """上游是主清单时，变体清单存在。"""
-    status, headers, body = get(base, f"/pm/c1/video/index.txt?token={token}")
+    status, headers, body = get(base, f"/api/play/pm/c1/video/index.txt?token={token}")
     return (
         status,
         header(headers, "content-type"),
@@ -171,7 +171,7 @@ def c_index_master(base, token):
 
 def c_index_alias(base, token):
     """`/{gid}/{cid}/index.m3u8` 与入口同义。"""
-    status, headers, body = get(base, f"/pg/c1/index.m3u8?token={token}")
+    status, headers, body = get(base, f"/api/play/pg/c1/index.m3u8?token={token}")
     return status, header(headers, "content-type"), len(tags_of(body))
 
 
@@ -205,7 +205,7 @@ def c_segment_range(base, token):
 
 def c_unknown_with_token(base, token):
     result = []
-    for path in ["/pg/ghost.m3u8", "/ghost/c1.m3u8"]:
+    for path in ["/api/play/pg/ghost.m3u8", "/api/play/ghost/c1.m3u8"]:
         status, headers, _ = get(base, f"{path}?token={token}")
         result.append((path, status, tail(header(headers, "location"))))
     return result
@@ -213,20 +213,20 @@ def c_unknown_with_token(base, token):
 
 def c_unknown_without_token(base, _token):
     result = []
-    for path in ["/pg/ghost.m3u8", "/ghost/c1.m3u8"]:
+    for path in ["/api/play/pg/ghost.m3u8", "/api/play/ghost/c1.m3u8"]:
         status, headers, _ = get(base, path)
         result.append((path, status, tail(header(headers, "location"))))
     return result
 
 
 def c_archived(base, token):
-    status, headers, _ = get(base, f"/ar/c1.m3u8?token={token}")
+    status, headers, _ = get(base, f"/api/play/ar/c1.m3u8?token={token}")
     return status, tail(header(headers, "location"))
 
 
 def c_token_missing(base, _token):
-    status, headers, _ = get(base, "/pg/c1.m3u8")
-    bad_status, bad_headers, _ = get(base, "/pg/c1.m3u8?token=deadbeef")
+    status, headers, _ = get(base, "/api/play/pg/c1.m3u8")
+    bad_status, bad_headers, _ = get(base, "/api/play/pg/c1.m3u8?token=deadbeef")
     return (
         status,
         tail(header(headers, "location")),
@@ -236,19 +236,19 @@ def c_token_missing(base, _token):
 
 
 def c_token_open(base, token):
-    without = get(base, "/op/c1.m3u8")[0]
-    wrong = get(base, "/op/c1.m3u8?token=deadbeef")[0]
-    with_token = get(base, f"/op/c1.m3u8?token={token}")[0]
+    without = get(base, "/api/play/op/c1.m3u8")[0]
+    wrong = get(base, "/api/play/op/c1.m3u8?token=deadbeef")[0]
+    with_token = get(base, f"/api/play/op/c1.m3u8?token={token}")[0]
     return without, wrong, with_token
 
 
 def c_redirect(base, token):
-    status, headers, _ = get(base, f"/rg/c1.m3u8?token={token}")
+    status, headers, _ = get(base, f"/api/play/rg/c1.m3u8?token={token}")
     return status, tail(header(headers, "location"))
 
 
 def c_rewrite(base, token):
-    status, headers, body = get(base, f"/rw/c1.m3u8?token={token}")
+    status, headers, body = get(base, f"/api/play/rw/c1.m3u8?token={token}")
     targets = [line for line in lines_of(body) if line and not line.startswith("#")]
     return (
         status,
@@ -260,13 +260,13 @@ def c_rewrite(base, token):
 
 
 def c_passthrough(base, token):
-    status, headers, _ = get(base, f"/pt/c1.m3u8?token={token}")
-    without = get(base, "/pt/c1.m3u8")[0]
+    status, headers, _ = get(base, f"/api/play/pt/c1.m3u8?token={token}")
+    without = get(base, "/api/play/pt/c1.m3u8")[0]
     return status, tail(header(headers, "location")), without
 
 
 def c_unknown_path(base, _token):
-    status, headers, _ = get(base, "/nope/nope/nope")
+    status, headers, _ = get(base, "/media/nope/nope/nope")
     return status, tail(header(headers, "location"))
 
 

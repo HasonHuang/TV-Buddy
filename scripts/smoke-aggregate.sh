@@ -82,19 +82,19 @@ JSON
 PID=$!
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
 fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
-# 聚合条目只出现在用户订阅里。令牌从 `/panel/api/me` 取。
-T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+# 聚合条目只出现在用户订阅里。令牌从 `/api/panel/me` 取。
+T=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-PTOK=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/me" \
+PTOK=$(curl -s -H "Authorization: Bearer $T" "$B/api/panel/me" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-SUB="$B/sub/$PTOK/playlist.m3u"
+SUB="$B/api/sub/$PTOK/playlist.m3u"
 body=$(curl -s "$SUB")
 
 check "含远端频道" "1" "$(printf '%s' "$body" | grep -c '远端频道' || true)"

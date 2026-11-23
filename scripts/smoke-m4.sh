@@ -99,7 +99,7 @@ trap '{ kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf 
 
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -116,14 +116,14 @@ status() { curl -s -o "$WORK/body" -w '%{http_code}' "$1"; }
 code() { curl -s -o "$WORK/body" -w '%{http_code}' "$@"; }
 jget() { python3 -c "import sys,json;d=json.load(open('$WORK/body'));print($1)"; }
 
-T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+T=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 A=(-H "Authorization: Bearer $T" -H 'Content-Type: application/json')
-# 订阅只从用户令牌进入。令牌从 `/panel/api/me` 取。
-PTOK=$(curl -s "${A[@]}" "$B/panel/api/me" \
+# 订阅只从用户令牌进入。令牌从 `/api/panel/me` 取。
+PTOK=$(curl -s "${A[@]}" "$B/api/panel/me" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-SUB="$B/sub/$PTOK/playlist.m3u"
+SUB="$B/api/sub/$PTOK/playlist.m3u"
 
 # --- 重载：管理 CLI 改库，面板接口生效 ---
 check "重载前 2 条" "2" "$(curl -s "$SUB" | grep -c '^#EXTINF')"
@@ -148,12 +148,12 @@ json.dump(cfg, open(path, "w", encoding="utf-8"), ensure_ascii=False)
 PY
 "$BIN" config import "$CFG" --db "$DB" --force >/dev/null || exit 1
 check "改库后未生效" "2" "$(curl -s "$SUB" | grep -c '^#EXTINF')"
-check "重载接口 200" "200" "$(code -X POST "${A[@]}" "$B/panel/api/reload")"
+check "重载接口 200" "200" "$(code -X POST "${A[@]}" "$B/api/panel/reload")"
 for _ in $(seq 1 50); do
-  [ "$(status "$B/hot/h1.m3u8")" = "200" ] && break
+  [ "$(status "$B/api/play/hot/h1.m3u8")" = "200" ] && break
   sleep 0.2
 done
-check "重载新组可播" "200" "$(status "$B/hot/h1.m3u8")"
+check "重载新组可播" "200" "$(status "$B/api/play/hot/h1.m3u8")"
 check "重载后 3 条" "3" "$(curl -s "$SUB" | grep -c '^#EXTINF')"
 check "重载已记日志" "1" "$(grep -c '配置已重载' "$WORK/tv-buddy.log")"
 
@@ -168,9 +168,9 @@ check "坏配置保留旧快照" "3" "$(curl -s "$SUB" | grep -c '^#EXTINF')"
 
 # --- 看门狗 ---
 for _ in $(seq 1 6); do
-  status "$B/dg/d1.m3u8" >/dev/null
+  status "$B/api/play/dg/d1.m3u8" >/dev/null
 done
-check "冷却后仍 503" "503" "$(status "$B/dg/d1.m3u8")"
+check "冷却后仍 503" "503" "$(status "$B/api/play/dg/d1.m3u8")"
 check "冷却文案" "timeout waiting for master playlist" "$(cat "$WORK/body")"
 # 日志里是「DASH 连续失败，进入冷却」加字段 `cooldown_secs=3600`，冷却秒数不在文案里。
 # 字段名与值之间插着 ANSI 复位码，所以分开断言。
@@ -189,30 +189,30 @@ for group in cfg["groups"]:
 json.dump(cfg, open(path, "w", encoding="utf-8"), ensure_ascii=False)
 PY
 "$BIN" config import "$CFG" --db "$DB" --force >/dev/null || exit 1
-curl -s -o /dev/null -X POST "${A[@]}" "$B/panel/api/reload"
-check "改配置解除冷却" "200" "$(status "$B/dg/d1.m3u8")"
+curl -s -o /dev/null -X POST "${A[@]}" "$B/api/panel/reload"
+check "改配置解除冷却" "200" "$(status "$B/api/play/dg/d1.m3u8")"
 
 # --- 缓存接口 ---
-check "切片预热 200" "200" "$(status "$B/pg/c1.m3u8")"
+check "切片预热 200" "200" "$(status "$B/api/play/pg/c1.m3u8")"
 FIRST_URL=$(grep -oE "http://127\.0\.0\.1:$PORT/media/pg/c1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+" "$WORK/body" | head -n1)
 FIRST="/${FIRST_URL#http://127.0.0.1:$PORT/}"
 check "切片抓取 200" "200" "$(status "$B$FIRST")"
-check "缓存状态 200" "200" "$(code "${A[@]}" "$B/panel/api/cache/stats")"
+check "缓存状态 200" "200" "$(code "${A[@]}" "$B/api/panel/cache/stats")"
 check "缓存条目 ≥ 1" "1" \
   "$(python3 -c 'import json;d=json.load(open("'"$WORK"'/body"));print(1 if d["entries"]["seg_bytes"]>=1 and d["bytes"]>0 else 0)')"
-check "缓存清空 200" "200" "$(code -X POST "${A[@]}" "$B/panel/api/cache/flush")"
+check "缓存清空 200" "200" "$(code -X POST "${A[@]}" "$B/api/panel/cache/flush")"
 check "清空计数 ≥ 1" "1" "$(jget '1 if d["removed"]>=1 else 0')"
 check "清空后缓存为空" "0" \
-  "$(code "${A[@]}" "$B/panel/api/cache/stats" >/dev/null; jget 'd["entries"]["seg_bytes"] + d["entries"]["seg_url"]')"
-check "清空后索引重建" "200" "$(status "$B/pg/c1.m3u8")"
+  "$(code "${A[@]}" "$B/api/panel/cache/stats" >/dev/null; jget 'd["entries"]["seg_bytes"] + d["entries"]["seg_url"]')"
+check "清空后索引重建" "200" "$(status "$B/api/play/pg/c1.m3u8")"
 check "清空后切片重取" "200" "$(status "$B$FIRST")"
 
 # --- 指标与日志 ---
-check "指标 200" "200" "$(code "${A[@]}" "$B/panel/api/stats")"
+check "指标 200" "200" "$(code "${A[@]}" "$B/api/panel/stats")"
 check "指标有请求数" "1" "$(jget '1 if d["requests"]>0 else 0')"
 check "指标含分组" "1" "$(jget '1 if any(g["id"]=="pg" for g in d["groups"]) else 0')"
 check "指标含切片数" "1" "$(jget '1 if d["segments"]>=2 else 0')"
-check "日志 200" "200" "$(code "${A[@]}" "$B/panel/api/logs?limit=50")"
+check "日志 200" "200" "$(code "${A[@]}" "$B/api/panel/logs?limit=50")"
 check "日志有内容" "1" "$(jget '1 if d["total"]>0 and len(d["lines"])>0 else 0')"
 check "日志含清空记录" "1" "$(jget '1 if any("缓存已清空" in line for line in d["lines"]) else 0')"
 check "日志文件存在" "1" "$([ -s "$WORK/tv-buddy.log" ] && echo 1 || echo 0)"

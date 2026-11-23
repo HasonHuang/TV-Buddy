@@ -38,7 +38,7 @@ trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' E
 B="http://127.0.0.1:$PORT"
 
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -47,11 +47,11 @@ check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s
 header() { curl -s -o /dev/null -D - "$1" | awk -v k="$2" 'BEGIN{IGNORECASE=1}index($0,k":")==1{sub(/\r$/,"");print substr($0,length(k)+3)}'; }
 groups() { python3 -c 'import json,sys;print(",".join(g["id"] for g in json.load(sys.stdin)["groups"]))'; }
 
-TOKEN=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
+TOKEN=$(curl -s -X POST "$B/api/panel/login" -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
 AUTH="Authorization: Bearer $TOKEN"
 
-STATUS=$(curl -s -o "$WORK/backup.tar.gz" -D "$WORK/backup.head" -w '%{http_code}' -H "$AUTH" "$B/panel/api/backup?include=all")
+STATUS=$(curl -s -o "$WORK/backup.tar.gz" -D "$WORK/backup.head" -w '%{http_code}' -H "$AUTH" "$B/api/panel/backup?include=all")
 check "备份 200" "200" "$STATUS"
 check "备份类型" "application/gzip" "$(awk 'BEGIN{IGNORECASE=1}index($0,"content-type:")==1{sub(/\r$/,"");print substr($0,15)}' "$WORK/backup.head")"
 check "备份文件名" "1" "$(awk 'BEGIN{IGNORECASE=1}/^content-disposition:/&&/tv-buddy-backup-/{n=1}END{print n+0}' "$WORK/backup.head")"
@@ -60,16 +60,16 @@ check "备份含配置" "1" "$(tar tzf "$WORK/backup.tar.gz" 2>/dev/null | grep 
 check "备份包只有一份配置" "1" "$(tar tzf "$WORK/backup.tar.gz" 2>/dev/null | grep -c 'config' || true)"
 
 IMPORT='[{"id":"tmp","name":"临时组","mode":"proxy"}]'
-curl -s -o /dev/null -X POST "$B/panel/api/groups/import" -H "$AUTH" -H 'content-type: application/json' -d "$IMPORT"
-check "导入后含临时组" "g1,tmp" "$(curl -s -H "$AUTH" "$B/panel/api/config" | groups)"
+curl -s -o /dev/null -X POST "$B/api/panel/groups/import" -H "$AUTH" -H 'content-type: application/json' -d "$IMPORT"
+check "导入后含临时组" "g1,tmp" "$(curl -s -H "$AUTH" "$B/api/panel/config" | groups)"
 
-STATUS=$(curl -s -o "$WORK/restore.json" -w '%{http_code}' -X POST "$B/panel/api/restore" \
+STATUS=$(curl -s -o "$WORK/restore.json" -w '%{http_code}' -X POST "$B/api/panel/restore" \
   -H "$AUTH" -H 'content-type: application/gzip' --data-binary "@$WORK/backup.tar.gz")
 check "恢复 200" "200" "$STATUS"
 check "恢复已重载" "True" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["config_reloaded"])' "$WORK/restore.json")"
-check "恢复后只剩原组" "g1" "$(curl -s -H "$AUTH" "$B/panel/api/config" | groups)"
+check "恢复后只剩原组" "g1" "$(curl -s -H "$AUTH" "$B/api/panel/config" | groups)"
 
-STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/restore" \
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/restore" \
   -H "$AUTH" -H 'content-type: application/gzip' --data-binary 'not gzip')
 check "非法内容 400" "400" "$STATUS"
 

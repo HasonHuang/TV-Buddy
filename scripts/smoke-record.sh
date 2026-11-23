@@ -56,31 +56,31 @@ JSON
 PID=$!
 trap 'kill $PID $UPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 B="http://127.0.0.1:$PORT"
-for _ in $(seq 1 60); do curl -fsS "$B/health" >/dev/null 2>&1 && break; sleep 0.1; done
+for _ in $(seq 1 60); do curl -fsS "$B/api/health" >/dev/null 2>&1 && break; sleep 0.1; done
 
 fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 
-T=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
+T=$(curl -s -X POST "$B/api/panel/login" -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')
 A="Authorization: Bearer $T"
 START=$(python3 -c 'import datetime;print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=8)-datetime.timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%S"))')
 END=$(python3 -c 'import datetime;print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=8)+datetime.timedelta(seconds=15)).strftime("%Y-%m-%dT%H:%M:%S"))')
 BODY="{\"name\":\"冒烟\",\"group_id\":\"g\",\"channel_id\":\"c1\",\"start_time\":\"$START\",\"end_time\":\"$END\",\"format\":\"mkv\"}"
-check "建任务 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/schedule" -H "$A" -H 'content-type: application/json' -d "$BODY")"
+check "建任务 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/schedule" -H "$A" -H 'content-type: application/json' -d "$BODY")"
 
 STATUS=""
 FILE=""
 for _ in $(seq 1 60); do
   sleep 1
-  JSON=$(curl -s -H "$A" "$B/panel/api/schedule")
+  JSON=$(curl -s -H "$A" "$B/api/panel/schedule")
   STATUS=$(printf '%s' "$JSON" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d[0]["status"] if d else "")')
   FILE=$(printf '%s' "$JSON" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d[0]["output_file"] if d else "")')
   [ "$STATUS" = "finished" ] && break
 done
 check "任务完成" "finished" "$STATUS"
 check "有产物" "yes" "$([ -n "$FILE" ] && echo yes || echo no)"
-check "下载 200" "200" "$(curl -s -o "$WORK/out.bin" -w '%{http_code}' -H "$A" "$B/panel/api/schedule/download/$FILE")"
+check "下载 200" "200" "$(curl -s -o "$WORK/out.bin" -w '%{http_code}' -H "$A" "$B/api/panel/schedule/download/$FILE")"
 check "产物非空" "yes" "$([ -s "$WORK/out.bin" ] && echo yes || echo no)"
 
 if [ "$fail" = "0" ]; then echo "录制冒烟测试全部通过"; else echo "录制冒烟测试有失败项"; tail -5 "$WORK/server.log"; exit 1; fi

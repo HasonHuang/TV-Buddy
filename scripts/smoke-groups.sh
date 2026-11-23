@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 分组管理页冒烟（P1 A9/A10/A11）：排序回写、导入/覆盖/导出、频道徽章数据可用性。
 #
-# 排序机制与目标一致：前端改数组顺序 → `PUT /panel/api/config` 全量保存，
+# 排序机制与目标一致：前端改数组顺序 → `PUT /api/panel/config` 全量保存，
 # 播放列表按数组顺序输出，所以断言直接看 `playlist.m3u` 的先后。
 # 首次安装的初始口令固定为 admin，供脚本登录。
 export TV_BUDDY_INITIAL_PASSWORD=admin
@@ -84,7 +84,7 @@ trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' E
 B="http://127.0.0.1:$PORT"
 
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -98,19 +98,19 @@ check() {
   fi
 }
 
-T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+T=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' |
   python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 A=(-H "Authorization: Bearer $T" -H 'Content-Type: application/json')
 code() { curl -s -o "$WORK/body" -w '%{http_code}' "$@"; }
 jget() { python3 -c "import sys,json;d=json.load(open('$WORK/body'));print($1)"; }
-getcfg() { curl -s -H "Authorization: Bearer $T" "$B/panel/api/config" > "$1"; }
-putcfg() { curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" \
+getcfg() { curl -s -H "Authorization: Bearer $T" "$B/api/panel/config" > "$1"; }
+putcfg() { curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/api/panel/config" \
   -H "Authorization: Bearer $T" -H 'Content-Type: application/json' --data-binary "@$1"; }
 
 # --- A9 分组排序 ---
 check "配置 GET 200" "200" "$(curl -s -o "$WORK/cfg.json" -w '%{http_code}' \
-  -H "Authorization: Bearer $T" "$B/panel/api/config")"
+  -H "Authorization: Bearer $T" "$B/api/panel/config")"
 check "初始分组顺序" "ga,gb,gc" \
   "$(python3 -c 'import json;print(",".join(g["id"] for g in json.load(open("'"$WORK"'/cfg.json"))["groups"]))')"
 
@@ -132,9 +132,9 @@ check "排序落盘" "ga,gc,gb" \
   "$("$BIN" config get groups --db "$DB" | python3 -c 'import json,sys;print(",".join(g["id"] for g in json.load(sys.stdin)))')"
 
 # 订阅顺序跟着走：EXTINF 的先后就是数组顺序。订阅只从用户令牌进入。
-PTOK=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/me" \
+PTOK=$(curl -s -H "Authorization: Bearer $T" "$B/api/panel/me" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-curl -s "$B/sub/$PTOK/playlist.m3u" > "$WORK/pl.m3u"
+curl -s "$B/api/sub/$PTOK/playlist.m3u" > "$WORK/pl.m3u"
 check "订阅顺序随排序" "ga,gc,gb" \
   "$(python3 - "$WORK/pl.m3u" <<'PY'
 import re, sys
@@ -156,12 +156,12 @@ group["channels"].insert(0, group["channels"].pop(1))  # a2 上移
 json.dump(cfg, open(sys.argv[2], "w"))
 PY
 check "频道排序 PUT 200" "200" "$(putcfg "$WORK/chmoved.json")"
-code "${A[@]}" "$B/panel/api/groups/ga/export" >/dev/null
+code "${A[@]}" "$B/api/panel/groups/ga/export" >/dev/null
 check "频道顺序已改" "a2,a1" \
   "$(python3 -c 'import json;d=json.load(open("'"$WORK"'/body"));print(",".join(c["id"] for c in d["channels"]))')"
 
 # --- A10 导出全部 ---
-check "导出全部 200" "200" "$(code "${A[@]}" "$B/panel/api/groups/export")"
+check "导出全部 200" "200" "$(code "${A[@]}" "$B/api/panel/groups/export")"
 check "导出是数组" "list" "$(jget 'type(d).__name__')"
 check "导出含三组" "3" "$(jget 'len(d)')"
 check "导出首项是 ga" "ga" "$(jget 'd[0]["id"]')"
@@ -169,22 +169,22 @@ check "导出首项是 ga" "ga" "$(jget 'd[0]["id"]')"
 # --- A10 JSON 导入（append 语义：同 id 跳过） ---
 check "JSON 导入 200" "200" "$(code -X POST "${A[@]}" \
   -d '[{"id":"ga","name":"重复","mode":"proxy","access":"public"},{"id":"gd","name":"丁组","mode":"proxy","access":"public"}]' \
-  "$B/panel/api/groups/import")"
+  "$B/api/panel/groups/import")"
 check "JSON 导入计数" "1,1" "$(jget '"{},{}".format(d["imported"],d["skipped"])')"
 check "JSON 导入未改重复组" "甲组" "$(python3 -c 'import json;d=json.load(open("'"$WORK"'/after.json"))["groups"];print("甲组")')"
-code "${A[@]}" "$B/panel/api/groups/gd/export" >/dev/null
+code "${A[@]}" "$B/api/panel/groups/gd/export" >/dev/null
 check "JSON 导入新增组" "丁组" "$(jget 'd["name"]')"
 
 # --- A10 JSON 覆盖（force 语义：同 id 整体替换） ---
 check "JSON 覆盖 200" "200" "$(code -X POST "${A[@]}" \
   -d '[{"id":"gd","name":"丁组改名","mode":"remux","access":"hidden"}]' \
-  "$B/panel/api/groups/import/force")"
+  "$B/api/panel/groups/import/force")"
 check "JSON 覆盖计数" "1,0" "$(jget '"{},{}".format(d["imported"],d["skipped"])')"
-code "${A[@]}" "$B/panel/api/groups/gd/export" >/dev/null
+code "${A[@]}" "$B/api/panel/groups/gd/export" >/dev/null
 check "覆盖后改名" "丁组改名" "$(jget 'd["name"]')"
 check "覆盖后改模式" "remux" "$(jget 'd["mode"]')"
 
-check "JSON 非数组 400" "400" "$(code -X POST "${A[@]}" -d '{"id":"x"}' "$B/panel/api/groups/import")"
+check "JSON 非数组 400" "400" "$(code -X POST "${A[@]}" -d '{"id":"x"}' "$B/api/panel/groups/import")"
 check "JSON 非数组错误串" "请求体必须是分组数组" "$(jget 'd["error"]')"
 
 # --- A10 M3U 导入三种模式 ---
@@ -198,34 +198,34 @@ http://example.invalid/m2.m3u8
 '
 check "M3U 导入 200" "200" "$(code -X POST "${A[@]}" \
   -d "$(python3 -c 'import json,sys;print(json.dumps({"text":sys.argv[1],"mode":"append"}))' "$M3U")" \
-  "$B/panel/api/groups/import/m3u")"
+  "$B/api/panel/groups/import/m3u")"
 check "M3U 解析频道数" "2" "$(jget 'd["parsed_channels"]')"
 check "M3U 新增分组数" "1" "$(jget 'd["added_groups"]')"
 
 check "M3U merge 200" "200" "$(code -X POST "${A[@]}" \
   -d "$(python3 -c 'import json,sys;print(json.dumps({"text":sys.argv[1],"mode":"merge"}))' "$M3U")" \
-  "$B/panel/api/groups/import/m3u")"
+  "$B/api/panel/groups/import/m3u")"
 check "M3U merge 补频道 0（tvg-id 重复）" "0" "$(jget 'd["merged_channels"]')"
 check "M3U merge 不新增分组" "0" "$(jget 'd["added_groups"]')"
 # 纯中文 group-title 会回退成随机 id，所以同名分组的导入**不幂等**（对齐目标 S-SUB-06）。
 CN='{"text":"#EXTM3U\n#EXTINF:-1 tvg-id=\"n1\" group-title=\"中文组\",一\nhttp://example.invalid/n1.m3u8\n","mode":"append"}'
-code -X POST "${A[@]}" -d "$CN" "$B/panel/api/groups/import/m3u" >/dev/null
-code -X POST "${A[@]}" -d "$CN" "$B/panel/api/groups/import/m3u" >/dev/null
+code -X POST "${A[@]}" -d "$CN" "$B/api/panel/groups/import/m3u" >/dev/null
+code -X POST "${A[@]}" -d "$CN" "$B/api/panel/groups/import/m3u" >/dev/null
 check "中文分组名两次导入都新增" "1" "$(jget 'd["added_groups"]')"
 check "M3U 非法 mode 400" "400" "$(code -X POST "${A[@]}" \
   -d "$(python3 -c 'import json,sys;print(json.dumps({"text":sys.argv[1],"mode":"weird"}))' "$M3U")" \
-  "$B/panel/api/groups/import/m3u")"
-check "M3U 空文本 400" "400" "$(code -X POST "${A[@]}" -d '{"text":"  "}' "$B/panel/api/groups/import/m3u")"
+  "$B/api/panel/groups/import/m3u")"
+check "M3U 空文本 400" "400" "$(code -X POST "${A[@]}" -d '{"text":"  "}' "$B/api/panel/groups/import/m3u")"
 
 # --- A11 徽章所需字段可读 ---
-code "${A[@]}" "$B/panel/api/groups/gb/export" >/dev/null
+code "${A[@]}" "$B/api/panel/groups/gb/export" >/dev/null
 check "常驻徽章字段" "True" "$(jget 'd["channels"][0]["livestream"]')"
 check "全轨道徽章字段" "[]" "$(jget 'd["channels"][0]["selected_tracks"]')"
-code "${A[@]}" "$B/panel/api/groups/ga/export" >/dev/null
+code "${A[@]}" "$B/api/panel/groups/ga/export" >/dev/null
 check "DASH 组外的全轨道不显示（mode）" "proxy" "$(jget 'd["mode"]')"
 
 # --- 前端已内嵌 A9/A10 的入口文案（ASCII needle，esbuild 会转义中文） ---
-PAGE=$(curl -s -H "Authorization: Bearer $T" "$B/page/panel")
+PAGE=$(curl -s -H "Authorization: Bearer $T" "$B/page")
 ASSET=$(printf '%s' "$PAGE" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]*\.js' | head -n1)
 check "面板页引用 panel 资源" "yes" "$([ -n "$ASSET" ] && echo yes || echo no)"
 JS=$(curl -s "$B$ASSET")

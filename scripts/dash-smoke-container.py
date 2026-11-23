@@ -104,7 +104,7 @@ try:
         base = f"http://127.0.0.1:{PORT}"
         for _ in range(60):
             try:
-                if get(f"{base}/health", timeout=1)[0] == 200:
+                if get(f"{base}/api/health", timeout=1)[0] == 200:
                     break
             except Exception:
                 pass
@@ -113,7 +113,7 @@ try:
         now = int(time.time())
         seek_a = time.strftime("%Y%m%d%H%M%S", time.localtime(now - 900))
         seek_b = time.strftime("%Y%m%d%H%M%S", time.localtime(now + 60))
-        url = f"{base}/dg/c1/dash-timeshift/video_240p/playlist.txt?playseek={seek_a}-{seek_b}"
+        url = f"{base}/api/play/dg/c1/dash-timeshift/video_240p/playlist.txt?playseek={seek_a}-{seek_b}"
         body = ""
         status = 0
         for _ in range(120):
@@ -127,7 +127,7 @@ try:
             time.sleep(0.5)
         check("DASH 时移清单 200", 200, status)
         check("VOD 类型", True, "#EXT-X-PLAYLIST-TYPE:VOD" in body)
-        match = re.search(r"/dg/c1/dash-timeshift/video_240p/[0-9]+[.][a-z]+", body)
+        match = re.search(r"/media/dg/c1/dash-timeshift/video_240p/[0-9]+[.][a-z]+", body)
         if not match:
             print("FAIL 找不到切片")
             fail = 1

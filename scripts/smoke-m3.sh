@@ -202,7 +202,7 @@ trap 'kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$
 
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -221,56 +221,56 @@ hfile() { awk -v k="$2" 'BEGIN{IGNORECASE=1}index($0,k":")==1{sub(/\r$/,"");prin
 hits() { grep -c "$1" "$WORK/up.log" || true; }
 
 # --- Redirect（直接跳转） ---
-check "直连 302" "302" "$(status "$B/rd/c1.m3u8")"
-check "直连指向上游" "http://127.0.0.1:$UP/direct.m3u8" "$(location "$B/rd/c1.m3u8")"
+check "直连 302" "302" "$(status "$B/api/play/rd/c1.m3u8")"
+check "直连指向上游" "http://127.0.0.1:$UP/direct.m3u8" "$(location "$B/api/play/rd/c1.m3u8")"
 check "直连不抓上游" "0" "$(hits '/direct.m3u8 ')"
-check "直连可重复" "302" "$(status "$B/rd/c1.m3u8")"
+check "直连可重复" "302" "$(status "$B/api/play/rd/c1.m3u8")"
 
 # --- Redirect（解析最佳画质） ---
-check "选画质 302" "302" "$(status "$B/rb/c2.m3u8")"
-L1=$(location "$B/rb/c2.m3u8")
+check "选画质 302" "302" "$(status "$B/api/play/rb/c2.m3u8")"
+L1=$(location "$B/api/play/rb/c2.m3u8")
 check "选画质挑最高码率" "http://127.0.0.1:$UP/1080/index.m3u8" "$L1"
-check "选画质结果一致" "http://127.0.0.1:$UP/1080/index.m3u8" "$(location "$B/rb/c2.m3u8")"
+check "选画质结果一致" "http://127.0.0.1:$UP/1080/index.m3u8" "$(location "$B/api/play/rb/c2.m3u8")"
 check "选画质缓存地址" "1" "$(hits '/master.m3u8 ')"
 
 # --- Rewrite ---
-CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/rw/c3.m3u8")
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/api/play/rw/c3.m3u8")
 check "改写 200" "200" "$CODE"
 check "改写类型" "text/plain; charset=utf-8" "$(hfile "$WORK/h" content-type)"
 check "改写缓存头" "no-cache, must-revalidate" "$(hfile "$WORK/h" cache-control)"
 check "改写切片绝对化" "1" "$(grep -c "^http://127.0.0.1:$UP/seg1.ts$" "$WORK/body")"
 check "改写相对地址解析" "1" "$(grep -c "^http://127.0.0.1:$UP/sub/seg2.ts$" "$WORK/body")"
 check "改写不含本地路径" "0" "$(grep -c '/rw/c3/' "$WORK/body")"
-check "改写复用 200" "200" "$(status "$B/rw/c3.m3u8")"
+check "改写复用 200" "200" "$(status "$B/api/play/rw/c3.m3u8")"
 check "改写复用缓存" "1" "$(hits '/rw.m3u8 ')"
 
 # --- Passthrough ---
-check "透传 302" "302" "$(status "$B/pt/c4.m3u8")"
-check "透传指向上游" "http://127.0.0.1:$UP/pt.m3u8" "$(location "$B/pt/c4.m3u8")"
+check "透传 302" "302" "$(status "$B/api/play/pt/c4.m3u8")"
+check "透传指向上游" "http://127.0.0.1:$UP/pt.m3u8" "$(location "$B/api/play/pt/c4.m3u8")"
 check "透传不抓上游" "0" "$(hits '/pt.m3u8 ')"
 
 # --- Remux ---
-CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/rm/c5.m3u8")
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/api/play/rm/c5.m3u8")
 check "remux 503" "503" "$CODE"
 check "remux 预热文案" "remux warming up" "$(cat "$WORK/body")"
 check "remux Retry-After" "2" "$(hfile "$WORK/h" retry-after)"
-check "remux 保持预热" "503" "$(status "$B/rm/c5.m3u8")"
+check "remux 保持预热" "503" "$(status "$B/api/play/rm/c5.m3u8")"
 
 # --- DASH ---
-CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/dh/c6.m3u8")
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/api/play/dh/c6.m3u8")
 check "dash 就绪 200" "200" "$CODE"
 check "dash 类型" "application/vnd.apple.mpegurl" "$(hfile "$WORK/h" content-type)"
 check "dash 主清单" "1" "$(grep -c '^#EXT-X-STREAM-INF:' "$WORK/body")"
 check "dash 轨道" "1" "$(grep -c '/api/play/dh/c6/video_360p/index.txt' "$WORK/body")"
-check "dash 媒体清单 200" "200" "$(status "$B/dh/c6/video_360p/index.txt")"
+check "dash 媒体清单 200" "200" "$(status "$B/api/play/dh/c6/video_360p/index.txt")"
 check "dash 媒体清单切片" "1" "$(grep -c '#EXTINF:2.000000,' "$WORK/body")"
 check "dash 媒体清单切片地址" "1" \
   "$(curl -s "$B/api/play/dh/c6/video_360p/index.txt" | grep -c '/media/dh/c6/video_360p/')"
-check "dash 未就绪 503" "503" "$(status "$B/dh/c7.m3u8")"
+check "dash 未就绪 503" "503" "$(status "$B/api/play/dh/c7.m3u8")"
 check "dash 未就绪文案" "timeout waiting for master playlist" "$(cat "$WORK/body")"
 
 # --- Proxy + MPD ---
-CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/mp/m1.mpd")
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/api/play/mp/m1.mpd")
 check "proxy MPD 200" "200" "$CODE"
 # 契约：`application/dash+xml; charset=utf-8`（`stream.rs` 的 MPD_CONTENT_TYPE）。
 check "proxy MPD 类型" "application/dash+xml; charset=utf-8" "$(hfile "$WORK/h" content-type)"
@@ -278,14 +278,14 @@ check "proxy MPD 类型" "application/dash+xml; charset=utf-8" "$(hfile "$WORK/h
 # （见 `04` §3 的「proxy MPD 反代」行），不是裸的 `/mpd/`。
 check "proxy MPD 改写 BaseURL" "1" \
   "$(grep -cE "<BaseURL>http://127.0.0.1:$PORT/media/mp/m1/mpd/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/</BaseURL>" "$WORK/body")"
-check "proxy MPD 切片 200" "200" "$(status "$B/mp/m1/mpd/dash-1.m4s")"
+check "proxy MPD 切片 200" "200" "$(status "$B/media/mp/m1/mpd/dash-1.m4s")"
 check "proxy MPD 切片非空" "yes" "$([ -s "$WORK/body" ] && echo yes || echo no)"
 
 # --- Token ---
-T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+T=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-curl -s -H "Authorization: Bearer $T" "$B/panel/api/config" > "$WORK/cfg.json"
+curl -s -H "Authorization: Bearer $T" "$B/api/panel/config" > "$WORK/cfg.json"
 python3 -c '
 import json
 cfg = json.load(open("'"$WORK"'/cfg.json"))
@@ -293,21 +293,21 @@ cfg["auth"]["token_enabled"] = True
 json.dump(cfg, open("'"$WORK"'/put.json", "w"))
 '
 check "开启 Token 200" "200" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/api/panel/config" \
     -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
     --data-binary "@$WORK/put.json")"
 # 播放令牌来自 users.db 的设备令牌，公开清单不再下发。
-ADMIN_ID=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/users" |
+ADMIN_ID=$(curl -s -H "Authorization: Bearer $T" "$B/api/panel/users" |
   python3 -c 'import sys,json;print(json.load(sys.stdin)["users"][0]["id"])')
 PLAYTOKEN=$(curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
-  -d '{}' "$B/panel/api/users/$ADMIN_ID/tokens" |
+  -d '{}' "$B/api/panel/users/$ADMIN_ID/tokens" |
   python3 -c 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
-check "直连无 Token 302" "302" "$(status "$B/rd/c1.m3u8")"
-check "直连无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/rd/c1.m3u8")"
-check "直连带 Token 302 上游" "http://127.0.0.1:$UP/direct.m3u8" "$(location "$B/rd/c1.m3u8?token=$PLAYTOKEN")"
-check "透传无 Token 302" "302" "$(status "$B/pt/c4.m3u8")"
-check "透传无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/pt/c4.m3u8")"
-check "透传带 Token 指上游" "http://127.0.0.1:$UP/pt.m3u8" "$(location "$B/pt/c4.m3u8?token=$PLAYTOKEN")"
+check "直连无 Token 302" "302" "$(status "$B/api/play/rd/c1.m3u8")"
+check "直连无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/api/play/rd/c1.m3u8")"
+check "直连带 Token 302 上游" "http://127.0.0.1:$UP/direct.m3u8" "$(location "$B/api/play/rd/c1.m3u8?token=$PLAYTOKEN")"
+check "透传无 Token 302" "302" "$(status "$B/api/play/pt/c4.m3u8")"
+check "透传无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/api/play/pt/c4.m3u8")"
+check "透传带 Token 指上游" "http://127.0.0.1:$UP/pt.m3u8" "$(location "$B/api/play/pt/c4.m3u8?token=$PLAYTOKEN")"
 
 if [ "$fail" = "0" ]; then
   printf 'M3 冒烟测试全部通过\n'

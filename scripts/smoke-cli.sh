@@ -55,11 +55,11 @@ cfgval() {
 login_ok() { # 参数：端口 口令
     i=0
     while [ "$i" -lt 40 ]; do
-        curl -fsS -o /dev/null "http://127.0.0.1:$1/health" 2>/dev/null && break
+        curl -fsS -o /dev/null "http://127.0.0.1:$1/api/health" 2>/dev/null && break
         sleep 0.2
         i=$((i + 1))
     done
-    curl -fsS -o /dev/null -X POST "http://127.0.0.1:$1/panel/api/login" \
+    curl -fsS -o /dev/null -X POST "http://127.0.0.1:$1/api/panel/login" \
         -H 'content-type: application/json' \
         -d "{\"username\":\"admin\",\"password\":\"$2\"}"
 }
@@ -100,7 +100,7 @@ fi
 # 只取一次输出。`grep -q` 会提前关闭管道，令 printf 得到 SIGPIPE，与 pipefail 冲突。
 url_out=$("$CLI" url)
 case "$url_out" in
-    *":$NEW_PORT/page/panel"*) ;;
+    *":$NEW_PORT/page"*) ;;
     *) fail "url 端口不对：$url_out" ;;
 esac
 # 初始口令文件按 `cache.disk_path` 解析；默认相对路径要拼成绝对路径。

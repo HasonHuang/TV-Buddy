@@ -45,7 +45,7 @@ trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' E
 B="http://127.0.0.1:$PORT"
 
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -53,85 +53,85 @@ fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 header() { curl -s -o /dev/null -D - "$1" | awk -v k="$2" 'BEGIN{IGNORECASE=1}index($0,k":")==1{sub(/\r$/,"");print substr($0,length(k)+3)}'; }
 
-TOKEN=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
+TOKEN=$(curl -s -X POST "$B/api/panel/login" -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
 A="Authorization: Bearer $TOKEN"
 
-check "初始列表为空" "0" "$(curl -s -H "$A" "$B/panel/api/logo/list" | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])')"
+check "初始列表为空" "0" "$(curl -s -H "$A" "$B/api/panel/logo/list" | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])')"
 check "公开台标列表已删除" "1" \
   "$(test "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/api/list")" != "200" && echo 1 || echo 0)"
 
 PNG='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 BODY="{\"items\":[{\"name\":\"cctv1.png\",\"data\":\"data:image/png;base64,$PNG\"}]}"
-STATUS=$(curl -s -o "$WORK/up.json" -w '%{http_code}' -X POST "$B/panel/api/logo/upload" \
+STATUS=$(curl -s -o "$WORK/up.json" -w '%{http_code}' -X POST "$B/api/panel/logo/upload" \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "$BODY")
 check "上传 200" "200" "$STATUS"
 check "上传落库" "cctv1.png" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["added"][0]["file"])' "$WORK/up.json")"
 
-check "取图 200" "200" "$(curl -s -o "$WORK/logo.png" -w '%{http_code}' "$B/logo/cctv1.png")"
-check "取图类型" "image/png" "$(header "$B/logo/cctv1.png" content-type)"
-check "取图缓存头" "public, max-age=3600" "$(header "$B/logo/cctv1.png" cache-control)"
+check "取图 200" "200" "$(curl -s -o "$WORK/logo.png" -w '%{http_code}' "$B/static/logo/cctv1.png")"
+check "取图类型" "image/png" "$(header "$B/static/logo/cctv1.png" content-type)"
+check "取图缓存头" "public, max-age=3600" "$(header "$B/static/logo/cctv1.png" cache-control)"
 check "取图魔数" "89504e47" "$(od -An -tx1 -N4 "$WORK/logo.png" | tr -d ' ')"
 check "新前缀取图 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$B/static/logo/cctv1.png")"
-check "列表计数" "1" "$(curl -s -H "$A" "$B/panel/api/logo/list" | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])')"
-check "缺文件 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/missing.png")"
-check "越界名 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/..%2F..%2Fconfig.json")"
-check "越界扩展 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/evil.exe")"
+check "列表计数" "1" "$(curl -s -H "$A" "$B/api/panel/logo/list" | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])')"
+check "缺文件 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/static/logo/missing.png")"
+check "越界名 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/static/logo/..%2F..%2Fconfig.json")"
+check "越界扩展 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/static/logo/evil.exe")"
 
 check "公开台标页已删除" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo")"
 
-DEL=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/delete" \
+DEL=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/logo/delete" \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"file":"cctv1.png"}')
 check "删除 200" "200" "$DEL"
-check "删除后 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/cctv1.png")"
+check "删除后 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/static/logo/cctv1.png")"
 
 # 第二个台标：上传后未使用。
 BODY2="{\"items\":[{\"name\":\"hunan.png\",\"data\":\"data:image/png;base64,$PNG\"}]}"
-STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/upload" \
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/logo/upload" \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "$BODY2")
 check "上传第二个 200" "200" "$STATUS"
 
 # 前一段已删除 cctv1.png；重新上传以便应用与重命名。
-STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/upload" \
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/logo/upload" \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "$BODY")
 check "重传第一个 200" "200" "$STATUS"
 
 # 应用到频道 g1/c1。
-APPLY=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/apply" \
+APPLY=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/logo/apply" \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"gid":"g1","cid":"c1","file":"cctv1.png"}')
 check "应用台标 200" "200" "$APPLY"
-PTOK=$(curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/me" \
+PTOK=$(curl -s -H "Authorization: Bearer $TOKEN" "$B/api/panel/me" \
   | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
 check "订阅含台标" "1" \
-  "$(curl -s "$B/sub/$PTOK/playlist.m3u" | grep -c 'tvg-logo="/static/logo/cctv1.png"' || true)"
+  "$(curl -s "$B/api/sub/$PTOK/playlist.m3u" | grep -c 'tvg-logo="/static/logo/cctv1.png"' || true)"
 
 # 匹配报告：hunan.png 未使用。
-curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/logo/match-report" > "$WORK/report.json"
+curl -s -H "Authorization: Bearer $TOKEN" "$B/api/panel/logo/match-report" > "$WORK/report.json"
 check "报告未使用 1" "1" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["unused"])' "$WORK/report.json")"
 
 # 重命名为中文名。
-RENAME=$(curl -s -o "$WORK/rename.json" -w '%{http_code}' -X POST "$B/panel/api/logo/rename" \
+RENAME=$(curl -s -o "$WORK/rename.json" -w '%{http_code}' -X POST "$B/api/panel/logo/rename" \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"file":"cctv1.png","name":"央视一套"}')
 check "重命名 200" "200" "$RENAME"
 check "新文件名" "央视一套.png" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["logo"]["file"])' "$WORK/rename.json")"
-check "新文件可取" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$B/logo/%E5%A4%AE%E8%A7%86%E4%B8%80%E5%A5%97.png")"
+check "新文件可取" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$B/static/logo/%E5%A4%AE%E8%A7%86%E4%B8%80%E5%A5%97.png")"
 
 # 推荐接口。
-SUGGEST=$(curl -s -o "$WORK/suggest.json" -w '%{http_code}' -X POST "$B/panel/api/logo/suggest" \
+SUGGEST=$(curl -s -o "$WORK/suggest.json" -w '%{http_code}' -X POST "$B/api/panel/logo/suggest" \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"threshold":0.1}')
 check "推荐 200" "200" "$SUGGEST"
 
-# --- 动效与还原（A2）：`/panel/api/logo/animate` 输出固定 10 帧无损动画 WebP ---
+# --- 动效与还原（A2）：`/api/panel/logo/animate` 输出固定 10 帧无损动画 WebP ---
 # 用 ASCII 名，避免 URL 编码干扰断言。
 UP2="{\"items\":[{\"name\":\"anim.png\",\"ext\":\"png\",\"data\":\"data:image/png;base64,$PNG\"}]}"
 check "上传待动效台标 200" "200" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/upload" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/logo/upload" \
     -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "$UP2")"
 
 check "动效 200" "200" \
-  "$(curl -s -o "$WORK/anim.json" -w '%{http_code}' -X POST "$B/panel/api/logo/animate" \
+  "$(curl -s -o "$WORK/anim.json" -w '%{http_code}' -X POST "$B/api/panel/logo/animate" \
     -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
     -d '{"file":"anim.png","effect":"breathe","quality":"80"}')"
 check "动效 10 帧" "10" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["frames"])' "$WORK/anim.json")"
@@ -140,33 +140,33 @@ check "动效总时长 2220ms" "2220" \
 check "动效后体积变大" "1" \
   "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(1 if d["bytes_after"]>d["bytes_before"] else 0)' "$WORK/anim.json")"
 check "动效已备份原图" "1" \
-  "$(curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/logo/list" | \
+  "$(curl -s -H "Authorization: Bearer $TOKEN" "$B/api/panel/logo/list" | \
     python3 -c 'import json,sys;print(1 if any(l["file"]=="anim.png" and l["has_original"] for l in json.load(sys.stdin)["logos"]) else 0)')"
 
 check "未知动效 400" "400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/animate" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/logo/animate" \
     -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
     -d '{"file":"anim.png","effect":"nope"}')"
 check "缺 file 400" "400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/animate" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/logo/animate" \
     -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"effect":"breathe"}')"
 # `quality` 必须是字符串：整数会被拒（S-LOGO-03 的目标行为）。
 check "整数 quality 400" "400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/animate" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/logo/animate" \
     -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
     -d '{"file":"anim.png","effect":"breathe","quality":80}')"
 
 check "还原 200" "200" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/logo/restore" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/logo/restore" \
     -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"file":"anim.png"}')"
 # `.orig/` 备份保留在磁盘上（还原是复制回来，不删备份），所以 `has_original` 仍为 true。
 # 断言点改成「文件内容回到原图大小」。
 check "还原回原图大小" "70" \
-  "$(curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/logo/list" | \
+  "$(curl -s -H "Authorization: Bearer $TOKEN" "$B/api/panel/logo/list" | \
     python3 -c 'import json,sys;print(next(l["bytes"] for l in json.load(sys.stdin)["logos"] if l["file"]=="anim.png"))')"
 
 # --- 前端接线（A2）：动效与浏览器侧转码参数已内嵌在面板包 ---
-ASSET=$(curl -s "$B/page/panel" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+ASSET=$(curl -s "$B/page" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
 check "面板引用入口资源" "yes" "$([ -n "$ASSET" ] && echo yes || echo no)"
 LJS=$(curl -s "$B$ASSET")
 for needle in 'logo/animate' 'logo/restore' 'toBlob' 'image/webp'; do

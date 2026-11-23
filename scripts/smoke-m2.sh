@@ -136,7 +136,7 @@ trap 'kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$
 
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -159,7 +159,7 @@ status() { curl -s -o "$WORK/body" -w '%{http_code}' "$1"; }
 location() { curl -s -o /dev/null -D - "$1" | awk 'BEGIN{IGNORECASE=1}/^location:/{sub(/\r$/,"");print substr($0,11)}'; }
 
 # --- 入口清单（上游是媒体清单：直接下发改写后的媒体清单） ---
-CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/p1/c1.m3u8")
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/api/play/p1/c1.m3u8")
 check "入口 200" "200" "$CODE"
 check "入口类型" "text/plain; charset=utf-8" "$(hfile "$WORK/h" content-type)"
 check "入口缓存窗口 = TARGETDURATION" "public, max-age=4, s-maxage=4" "$(hfile "$WORK/h" cache-control)"
@@ -174,17 +174,17 @@ P=$(grep -oE '/media/p1/c1/[0-9a-f]{16}_' <<<"$FIRST" | head -n1 |
 S=$(printf '%s' "$FIRST" | sed -E 's|.*_([0-9a-f]{32})\..*|\1|')
 
 # --- 变体清单路径：上游是媒体清单时不存在 ---
-check "变体清单 302" "302" "$(status "$B/p1/c1/video/index.txt")"
-check "变体清单跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B/p1/c1/video/index.txt")"
+check "变体清单 302" "302" "$(status "$B/api/play/p1/c1/video/index.txt")"
+check "变体清单跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B/api/play/p1/c1/video/index.txt")"
 check "切片后缀 = sha256 前 32 位" \
   "$(python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:32])' "http://127.0.0.1:$UP/seg1.ts")" "$S"
 # `<P>` 的算法目标未解（F-017），这里只断言目标可观测的性质：16 hex、纯函数、随频道变化。
 check "切片前缀为 16 hex" "1" "$(printf '%s' "$P" | grep -cE '^[0-9a-f]{16}$')"
-P_OPEN=$(curl -s "$B/op/c8.m3u8" | grep -oE '/media/op/c8/[0-9a-f]{16}_' | head -n1 |
+P_OPEN=$(curl -s "$B/api/play/op/c8.m3u8" | grep -oE '/media/op/c8/[0-9a-f]{16}_' | head -n1 |
   sed -E 's|.*/([0-9a-f]{16})_.*|\1|')
 check "前缀随频道不同" "1" "$([ -n "$P_OPEN" ] && [ "$P_OPEN" != "$P" ] && echo 1 || echo 0)"
 check "前缀与 gid/cid 分隔符无关" "1" \
-  "$(P2=$(curl -s "$B/p1/c1.m3u8" | grep -oE '/media/p1/c1/[0-9a-f]{16}_' | head -n1 |
+  "$(P2=$(curl -s "$B/api/play/p1/c1.m3u8" | grep -oE '/media/p1/c1/[0-9a-f]{16}_' | head -n1 |
     sed -E 's|.*/([0-9a-f]{16})_.*|\1|'); [ "$P2" = "$P" ] && echo 1 || echo 0)"
 
 # --- 切片 ---
@@ -215,36 +215,36 @@ check "Range 返回全量" "1" \
 #   未知 gid/cid、归档组           → 302 not_found_url（404.mp4）
 #   <P>/<S> 形状或取值不对、未登记 → 302 error_url（mistake.mp4）
 # 即两种占位要分开断言，不能都当 not_found_url。
-BAD="/p1/c1/0000000000000000_${S}.jpg"
+BAD="/media/p1/c1/0000000000000000_${S}.jpg"
 check "错前缀 302" "302" "$(status "$B$BAD")"
 check "错前缀跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B$BAD")"
-check "缺前缀 302" "302" "$(status "$B/p1/c1/${S}.jpg")"
-check "缺前缀跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B/p1/c1/${S}.jpg")"
-check "截短前缀 302" "302" "$(status "$B/p1/c1/ea86_${S}.jpg")"
+check "缺前缀 302" "302" "$(status "$B/media/p1/c1/${S}.jpg")"
+check "缺前缀跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B/media/p1/c1/${S}.jpg")"
+check "截短前缀 302" "302" "$(status "$B/media/p1/c1/ea86_${S}.jpg")"
 check "大写前缀 302" "302" \
-  "$(status "$B/p1/c1/$(printf '%s' "$P" | tr 'a-f' 'A-F')_${S}.jpg")"
-check "错后缀 302" "302" "$(status "$B/p1/c1/${P}_00000000000000000000000000000000.jpg")"
-check "扩展名两点 302" "302" "$(status "$B/p1/c1/${P}_${S}.a.b")"
-check "双下划线 302" "302" "$(status "$B/p1/c1/${P}__${S}.jpg")"
-check "扩展名不校验" "200" "$(status "$B/p1/c1/${P}_${S}.png")"
+  "$(status "$B/media/p1/c1/$(printf '%s' "$P" | tr 'a-f' 'A-F')_${S}.jpg")"
+check "错后缀 302" "302" "$(status "$B/media/p1/c1/${P}_00000000000000000000000000000000.jpg")"
+check "扩展名两点 302" "302" "$(status "$B/media/p1/c1/${P}_${S}.a.b")"
+check "双下划线 302" "302" "$(status "$B/media/p1/c1/${P}__${S}.jpg")"
+check "扩展名不校验" "200" "$(status "$B/media/p1/c1/${P}_${S}.png")"
 check "p1/c1 错后缀跳错误页" "http://placeholder.test/mistake.mp4" \
-  "$(location "$B/p1/c1/${P}_00000000000000000000000000000000.jpg")"
-check "未知频道 302" "302" "$(status "$B/p1/ghost.m3u8")"
-check "未知频道跳占位" "http://placeholder.test/404.mp4" "$(location "$B/p1/ghost.m3u8")"
-check "未知分组 302" "302" "$(status "$B/ghost/c1.m3u8")"
-check "归档组 302" "302" "$(status "$B/arc/c9.m3u8")"
-check "归档组跳占位" "http://placeholder.test/404.mp4" "$(location "$B/arc/c9.m3u8")"
-UNKNOWN="/p1/c1/${P}_$(python3 -c 'print("a"*32)').jpg"
+  "$(location "$B/media/p1/c1/${P}_00000000000000000000000000000000.jpg")"
+check "未知频道 302" "302" "$(status "$B/api/play/p1/ghost.m3u8")"
+check "未知频道跳占位" "http://placeholder.test/404.mp4" "$(location "$B/api/play/p1/ghost.m3u8")"
+check "未知分组 302" "302" "$(status "$B/api/play/ghost/c1.m3u8")"
+check "归档组 302" "302" "$(status "$B/api/play/arc/c9.m3u8")"
+check "归档组跳占位" "http://placeholder.test/404.mp4" "$(location "$B/api/play/arc/c9.m3u8")"
+UNKNOWN="/media/p1/c1/${P}_$(python3 -c 'print("a"*32)').jpg"
 check "未知切片 302" "302" "$(status "$B$UNKNOWN")"
 check "未知切片跳错误页" "http://placeholder.test/mistake.mp4" "$(location "$B$UNKNOWN")"
 # 入口扩展名白名单（目标实测 2026-10-25）：`.m3u8` / `.mpd` / `.txt` / 无后缀等价，其余 302。
-check "入口 .txt 等价" "200" "$(status "$B/p1/c1.txt")"
-check "入口无后缀等价" "200" "$(status "$B/p1/c1")"
-check "非法入口名 302" "302" "$(status "$B/p1/c1.mp4")"
-check "非法入口名跳占位" "http://placeholder.test/404.mp4" "$(location "$B/p1/c1.mp4")"
+check "入口 .txt 等价" "200" "$(status "$B/api/play/p1/c1.txt")"
+check "入口无后缀等价" "200" "$(status "$B/api/play/p1/c1")"
+check "非法入口名 302" "302" "$(status "$B/api/play/p1/c1.mp4")"
+check "非法入口名跳占位" "http://placeholder.test/404.mp4" "$(location "$B/api/play/p1/c1.mp4")"
 
 # --- 主清单上游：自造单变体主清单 ---
-CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/p1/m1.m3u8")
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/api/play/p1/m1.m3u8")
 check "主清单入口 200" "200" "$CODE"
 check "主清单入口类型" "application/vnd.apple.mpegurl" "$(hfile "$WORK/h" content-type)"
 check "主清单入口不缓存" "no-cache, no-store" "$(hfile "$WORK/h" cache-control)"
@@ -255,7 +255,7 @@ check "主清单入口指向变体清单" "1" \
   "$(grep -c "^http://127\.0\.0\.1:$PORT/api/play/p1/m1/video/index.txt$" "$WORK/body")"
 
 # --- 变体媒体清单：抓最佳变体后改写 ---
-CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/p1/m1/video/index.txt")
+CODE=$(curl -s -o "$WORK/body" -D "$WORK/h" -w '%{http_code}' "$B/api/play/p1/m1/video/index.txt")
 check "变体清单 200" "200" "$CODE"
 check "变体清单类型" "text/plain; charset=utf-8" "$(hfile "$WORK/h" content-type)"
 check "变体清单缓存窗口" "public, max-age=6, s-maxage=6" "$(hfile "$WORK/h" cache-control)"
@@ -263,10 +263,10 @@ check "变体清单切片绝对" "1" \
   "$(grep -cE "^http://127\.0\.0\.1:$PORT/media/p1/m1/[0-9a-f]{16}_[0-9a-f]{32}\.[a-z]+$" "$WORK/body")"
 
 # --- Token ---
-T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+T=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-curl -s -H "Authorization: Bearer $T" "$B/panel/api/config" > "$WORK/cfg.json"
+curl -s -H "Authorization: Bearer $T" "$B/api/panel/config" > "$WORK/cfg.json"
 python3 -c '
 import json
 cfg = json.load(open("'"$WORK"'/cfg.json"))
@@ -276,14 +276,14 @@ cfg["auth"]["slice_sign_enabled"] = False
 json.dump(cfg, open("'"$WORK"'/put.json", "w"))
 '
 check "开启 Token 200" "200" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/api/panel/config" \
     -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
     --data-binary "@$WORK/put.json")"
 # 播放令牌来自 users.db 的设备令牌；公开清单不再下发。
-ADMIN_ID=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/users" |
+ADMIN_ID=$(curl -s -H "Authorization: Bearer $T" "$B/api/panel/users" |
   python3 -c 'import sys,json;print(json.load(sys.stdin)["users"][0]["id"])')
 PLAYTOKEN=$(curl -s -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
-  -d '{}' "$B/panel/api/users/$ADMIN_ID/tokens" |
+  -d '{}' "$B/api/panel/users/$ADMIN_ID/tokens" |
   python3 -c 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
 check "设备令牌长度" "12" "${#PLAYTOKEN}"
 
@@ -298,14 +298,14 @@ check "新路径入口 200" "200" "$(status "$B/api/play/p1/c1.m3u8?token=$PLAYT
 check "/media 清单 404" "404" "$(status "$B/media/p1/c1/index.m3u8")"
 check "/api/play 切片 404" "404" "$(status "$B/api/play/p1/c1/seg_000000000000.png")"
 
-check "无 Token 入口 302" "302" "$(status "$B/p1/c1.m3u8")"
-check "无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/p1/c1.m3u8")"
-check "带 Token 入口 200" "200" "$(status "$B/p1/c1.m3u8?token=$PLAYTOKEN")"
-check "错 Token 入口 302" "302" "$(status "$B/p1/c1.m3u8?token=deadbeef")"
-check "未知频道带 Token 跳占位" "http://placeholder.test/404.mp4" "$(location "$B/p1/ghost.m3u8?token=$PLAYTOKEN")"
-check "未知分组带 Token 跳占位" "http://placeholder.test/404.mp4" "$(location "$B/ghost/c1.m3u8?token=$PLAYTOKEN")"
-check "未知频道无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/p1/ghost.m3u8")"
-check "开放组不再免 Token" "302" "$(status "$B/op/c8.m3u8")"
+check "无 Token 入口 302" "302" "$(status "$B/api/play/p1/c1.m3u8")"
+check "无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/api/play/p1/c1.m3u8")"
+check "带 Token 入口 200" "200" "$(status "$B/api/play/p1/c1.m3u8?token=$PLAYTOKEN")"
+check "错 Token 入口 302" "302" "$(status "$B/api/play/p1/c1.m3u8?token=deadbeef")"
+check "未知频道带 Token 跳占位" "http://placeholder.test/404.mp4" "$(location "$B/api/play/p1/ghost.m3u8?token=$PLAYTOKEN")"
+check "未知分组带 Token 跳占位" "http://placeholder.test/404.mp4" "$(location "$B/api/play/ghost/c1.m3u8?token=$PLAYTOKEN")"
+check "未知频道无 Token 跳 failure" "http://placeholder.test/Failure.mp4" "$(location "$B/api/play/p1/ghost.m3u8")"
+check "开放组不再免 Token" "302" "$(status "$B/api/play/op/c8.m3u8")"
 check "切片不校验 Token" "200" "$(status "$B$FIRST")"
 
 if [ "$fail" = "0" ]; then

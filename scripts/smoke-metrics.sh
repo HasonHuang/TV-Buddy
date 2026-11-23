@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 指标面冒烟：`/status` 字段、`online_viewers` 语义、`/cache/stats`、`/health` 条目。
+# 指标面冒烟：`/status` 字段、`online_viewers` 语义、`/cache/stats`、`/api/health` 条目。
 #
 # 目标契约见 `docs/findings/dynamic/11-security-and-metrics.md` §6.1。
 # 首次安装的初始口令固定为 admin，供脚本登录。
@@ -80,17 +80,17 @@ JSON
 PID=$!
 trap 'kill $PID $UPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 B="http://127.0.0.1:$PORT"
-for _ in $(seq 1 60); do curl -fsS "$B/health" >/dev/null 2>&1 && break; sleep 0.1; done
+for _ in $(seq 1 60); do curl -fsS "$B/api/health" >/dev/null 2>&1 && break; sleep 0.1; done
 
 fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 py() { python3 -c "$1"; }
 
-T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+T=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' | py 'import sys,json;print(json.load(sys.stdin)["token"])')
 AUTH="Authorization: Bearer $T"
 
-STATUS=$(curl -s -H "$AUTH" "$B/panel/api/status")
+STATUS=$(curl -s -H "$AUTH" "$B/api/panel/status")
 for field in uptime_secs active_sessions online_viewers group_count channel_count \
   version mem_rss_mb cpu_seconds disk_cache_mb recording_mb low_resource_mode poll_interval_secs \
   traffic_in_bytes traffic_out_bytes whole_file_committed whole_file_budget whole_file_peak \
@@ -103,17 +103,17 @@ check "entry_exts 按分组" "1" "$(printf '%s' "$STATUS" | py 'import sys,json;
 check "初始在线观众 0" "0" "$(printf '%s' "$STATUS" | py 'import sys,json;print(json.load(sys.stdin)["online_viewers"])')"
 
 # 播放令牌来自 users.db 的设备令牌。
-ADMIN_ID=$(curl -s -H "$AUTH" "$B/panel/api/users" | py 'import sys,json;print(json.load(sys.stdin)["users"][0]["id"])')
+ADMIN_ID=$(curl -s -H "$AUTH" "$B/api/panel/users" | py 'import sys,json;print(json.load(sys.stdin)["users"][0]["id"])')
 TK=$(curl -s -X POST -H "$AUTH" -H 'content-type: application/json' -d '{"label":"smoke"}' \
-  "$B/panel/api/users/$ADMIN_ID/tokens" | py 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
-curl -s -o /dev/null "$B/mx/c1.m3u8?token=$TK"
-check "播放后在线观众 1" "1" "$(curl -s -H "$AUTH" "$B/panel/api/status" | py 'import sys,json;print(json.load(sys.stdin)["online_viewers"])')"
-curl -s -o /dev/null "$B/mx/c1.m3u8?token=$TK"
-check "同 IP 重复不增" "1" "$(curl -s -H "$AUTH" "$B/panel/api/status" | py 'import sys,json;print(json.load(sys.stdin)["online_viewers"])')"
-curl -s -o /dev/null -H 'X-Forwarded-For: 9.9.9.9' "$B/mx/c1.m3u8?token=$TK"
-check "换 IP 增到 2" "2" "$(curl -s -H "$AUTH" "$B/panel/api/status" | py 'import sys,json;print(json.load(sys.stdin)["online_viewers"])')"
+  "$B/api/panel/users/$ADMIN_ID/tokens" | py 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
+curl -s -o /dev/null "$B/api/play/mx/c1.m3u8?token=$TK"
+check "播放后在线观众 1" "1" "$(curl -s -H "$AUTH" "$B/api/panel/status" | py 'import sys,json;print(json.load(sys.stdin)["online_viewers"])')"
+curl -s -o /dev/null "$B/api/play/mx/c1.m3u8?token=$TK"
+check "同 IP 重复不增" "1" "$(curl -s -H "$AUTH" "$B/api/panel/status" | py 'import sys,json;print(json.load(sys.stdin)["online_viewers"])')"
+curl -s -o /dev/null -H 'X-Forwarded-For: 9.9.9.9' "$B/api/play/mx/c1.m3u8?token=$TK"
+check "换 IP 增到 2" "2" "$(curl -s -H "$AUTH" "$B/api/panel/status" | py 'import sys,json;print(json.load(sys.stdin)["online_viewers"])')"
 
-CACHE=$(curl -s -H "$AUTH" "$B/panel/api/cache/stats")
+CACHE=$(curl -s -H "$AUTH" "$B/api/panel/cache/stats")
 for field in disk_bytes m3u8_entries segment_entries segment_url_entries \
   segment_body_bytes segment_index_bytes segment_cache_bytes sub_url_entries \
   dash_disk_bytes timeshift_disk_bytes recording_disk_bytes livestream_disk_bytes; do
@@ -128,7 +128,7 @@ done
 # 等探测跑出成功结果（首轮可能早于上游就绪）。
 ENTRIES=""
 for _ in $(seq 1 60); do
-  ENTRIES=$(curl -s -H "$AUTH" "$B/panel/api/health")
+  ENTRIES=$(curl -s -H "$AUTH" "$B/api/panel/health")
   if [ "$(printf '%s' "$ENTRIES" | py 'import sys,json;d=json.load(sys.stdin).get("entries") or {};print(1 if (d.get("mx/c1") or {}).get("ok") else 0)')" = "1" ]; then
     break
   fi

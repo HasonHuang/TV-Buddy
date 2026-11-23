@@ -60,14 +60,14 @@ JSON
 PID=$!
 trap 'kill $PID $UPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 B="http://127.0.0.1:$PORT"
-for _ in $(seq 1 60); do curl -fsS "$B/health" >/dev/null 2>&1 && break; sleep 0.1; done
+for _ in $(seq 1 60); do curl -fsS "$B/api/health" >/dev/null 2>&1 && break; sleep 0.1; done
 
 fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 
 NOW=$(date +%s)
 SEEK="$(date -r $((NOW - 900)) +%Y%m%d%H%M%S)-$(date -r $((NOW + 60)) +%Y%m%d%H%M%S)"
-LIST="$B/dg/c1/dash-timeshift/video_240p/playlist.txt?playseek=$SEEK"
+LIST="$B/api/play/dg/c1/dash-timeshift/video_240p/playlist.txt?playseek=$SEEK"
 
 CODE=0
 for _ in $(seq 1 40); do
@@ -81,15 +81,15 @@ check "ENDLIST" "1" "$(grep -c '#EXT-X-ENDLIST' "$WORK/list.m3u8" || true)"
 check "PROGRAM-DATE-TIME" "1" "$(grep -c '#EXT-X-PROGRAM-DATE-TIME:' "$WORK/list.m3u8" || true)"
 check "EXT-X-MAP" "1" "$(grep -c '#EXT-X-MAP:URI=' "$WORK/list.m3u8" || true)"
 
-SEG=$(grep -o '/dg/c1/dash-timeshift/video_240p/[0-9]*[.][a-z]*' "$WORK/list.m3u8" | head -1)
+SEG=$(grep -o '/media/dg/c1/dash-timeshift/video_240p/[0-9]*[.][a-z]*' "$WORK/list.m3u8" | head -1)
 check "切片 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$B$SEG")"
 check "切片缓存头" "1" "$(curl -s -o /dev/null -D - "$B$SEG" | tr -d '\r' | grep -ci '^cache-control: private, max-age=3600')"
 check "切片类型为图片" "1" "$(curl -s -o /dev/null -D - "$B$SEG" | tr -d '\r' | grep -ci '^content-type: image/')"
 
-check "缺 playseek 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' "$B/dg/c1/dash-timeshift/video_240p/playlist.txt")"
-check "格式错 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' "$B/dg/c1/dash-timeshift/video_240p/playlist.txt?playseek=abc")"
-check "不重叠 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/dg/c1/dash-timeshift/video_240p/playlist.txt?playseek=20200101000000-20200101000100")"
-check "未知轨道 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/dg/c1/dash-timeshift/nosuch/playlist.txt?playseek=$SEEK")"
-check "未知切片 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/dg/c1/dash-timeshift/video_240p/999.jpg")"
+check "缺 playseek 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/play/dg/c1/dash-timeshift/video_240p/playlist.txt")"
+check "格式错 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/play/dg/c1/dash-timeshift/video_240p/playlist.txt?playseek=abc")"
+check "不重叠 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/play/dg/c1/dash-timeshift/video_240p/playlist.txt?playseek=20200101000000-20200101000100")"
+check "未知轨道 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/play/dg/c1/dash-timeshift/nosuch/playlist.txt?playseek=$SEEK")"
+check "未知切片 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/media/dg/c1/dash-timeshift/video_240p/999.jpg")"
 
 if [ "$fail" = "0" ]; then echo "DASH 时移冒烟测试全部通过"; else echo "DASH 时移冒烟测试有失败项"; tail -20 "$WORK/server.log"; exit 1; fi

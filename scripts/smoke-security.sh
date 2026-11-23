@@ -48,46 +48,46 @@ trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' E
 B="http://127.0.0.1:$PORT"
 
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
 fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 
-TOKEN=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
+TOKEN=$(curl -s -X POST "$B/api/panel/login" -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
 AUTH="Authorization: Bearer $TOKEN"
 
 # 全局播放令牌已废弃：两个端点都应为 404。
-check "Token 端点已移除" "404" "$(curl -s -o /dev/null -w '%{http_code}' -H "$AUTH" "$B/panel/api/security/token")"
-check "轮换端点已移除" "404" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AUTH" "$B/panel/api/security/token/rotate")"
+check "Token 端点已移除" "404" "$(curl -s -o /dev/null -w '%{http_code}' -H "$AUTH" "$B/api/panel/security/token")"
+check "轮换端点已移除" "404" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AUTH" "$B/api/panel/security/token/rotate")"
 check "全局订阅已停用" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/playlist.m3u")"
 
-check "公开请求 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/health")"
+check "公开请求 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/api/health")"
 check "封禁 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AUTH" -H 'content-type: application/json' \
-  -d '{"ip":"7.7.7.7","seconds":60}' "$B/panel/api/security/ip/ban")"
-check "封禁后 403" "403" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/health")"
-check "面板不受封禁" "401" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/panel/api/status")"
+  -d '{"ip":"7.7.7.7","seconds":60}' "$B/api/panel/security/ip/ban")"
+check "封禁后 403" "403" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/api/health")"
+check "面板不受封禁" "401" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/api/panel/status")"
 
-curl -s -H "$AUTH" "$B/panel/api/security/ip/stats" > "$WORK/stats.json"
+curl -s -H "$AUTH" "$B/api/panel/security/ip/stats" > "$WORK/stats.json"
 check "统计含封禁项" "1" "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(1 if any(e["ip"]=="7.7.7.7" and e["banned"] for e in d["entries"]) else 0)' "$WORK/stats.json")"
 
 check "解封 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AUTH" -H 'content-type: application/json' \
-  -d '{"ip":"7.7.7.7"}' "$B/panel/api/security/ip/unban")"
-check "解封后 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/health")"
+  -d '{"ip":"7.7.7.7"}' "$B/api/panel/security/ip/unban")"
+check "解封后 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 7.7.7.7' "$B/api/health")"
 
 # 批量解封。
 for ip in 8.8.8.8 9.9.9.9; do
   curl -s -o /dev/null -X POST -H "$AUTH" -H 'content-type: application/json' \
-    -d "{\"ip\":\"$ip\",\"seconds\":60}" "$B/panel/api/security/ip/ban"
+    -d "{\"ip\":\"$ip\",\"seconds\":60}" "$B/api/panel/security/ip/ban"
 done
 curl -s -o "$WORK/batch.json" -X POST -H "$AUTH" -H 'content-type: application/json' \
-  -d '{"ips":["8.8.8.8","9.9.9.9"]}' "$B/panel/api/security/ip/unban-batch"
+  -d '{"ips":["8.8.8.8","9.9.9.9"]}' "$B/api/panel/security/ip/unban-batch"
 check "批量解封 2 个" "2" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["removed"])' "$WORK/batch.json")"
 
 # --- 访问控制卡片（A3）：`[auth]` 段可读可写，且写回后键面齐全 ---
-curl -s -H "$AUTH" "$B/panel/api/config" > "$WORK/cfg.json"
+curl -s -H "$AUTH" "$B/api/panel/config" > "$WORK/cfg.json"
 check "配置含 [auth]" "1" \
   "$(python3 -c 'import json,sys;print(1 if "auth" in json.load(open(sys.argv[1])) else 0)' "$WORK/cfg.json")"
 check "auth 有 23 个键" "1" \
@@ -128,21 +128,21 @@ cfg["auth"]["ip_guard_enabled"] = True
 json.dump(cfg, open(sys.argv[2], "w"))
 PYEOF
 check "写白名单 PUT 200" "200" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" -H "$AUTH" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/api/panel/config" -H "$AUTH" \
     -H 'content-type: application/json' --data-binary "@$WORK/put.json")"
-curl -s -H "$AUTH" "$B/panel/api/config" > "$WORK/after.json"
+curl -s -H "$AUTH" "$B/api/panel/config" > "$WORK/after.json"
 check "白名单已落盘" "3" \
   "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["auth"]["whitelist"]))' "$WORK/after.json")"
 check "IP 管控已开启" "True" \
   "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["auth"]["ip_guard_enabled"])' "$WORK/after.json")"
-check "未登录 /unban/whoami 401" "401" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 203.0.113.7' "$B/unban/whoami")"
-check "开启 IP 管控后 /unban/whoami 可用" "True" \
-  "$(curl -s -H "$AUTH" -H 'X-Forwarded-For: 203.0.113.7' "$B/unban/whoami" | \
+check "未登录 /api/unban/whoami 401" "401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 203.0.113.7' "$B/api/unban/whoami")"
+check "开启 IP 管控后 /api/unban/whoami 可用" "True" \
+  "$(curl -s -H "$AUTH" -H 'X-Forwarded-For: 203.0.113.7' "$B/api/unban/whoami" | \
     python3 -c 'import json,sys;print(json.load(sys.stdin).get("enabled"))')"
 
 # 前端已内嵌访问控制卡片（ASCII needle：esbuild 会转义中文）。
-ASSET=$(curl -s "$B/page/panel" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+ASSET=$(curl -s "$B/page" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
 PJS=$(curl -s "$B$ASSET")
 for needle in 'auth_fail_window_secs' 'auth_fail_ban_escalate_window_secs' \
   'max_sessions_per_ip' 'violation_decay_secs' 'ip_guard_enabled'; do

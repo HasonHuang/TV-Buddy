@@ -82,7 +82,7 @@ trap 'kill $PID $UP_PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$
 
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -98,22 +98,22 @@ check() { # 名称 期望 实际
 header() { curl -s -o /dev/null -D - "$1" | awk -v k="$2" 'BEGIN{IGNORECASE=1}index($0,k":")==1{sub(/\r$/,"");print substr($0,length(k)+3)}' ; }
 
 # 先登录。公开 EPG 面已删除，节目单只经用户订阅与面板接口。
-COOKIE=$(curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
+COOKIE=$(curl -s -X POST "$B/api/panel/login" -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' -D - -o "$WORK/login.json" | awk 'BEGIN{IGNORECASE=1}/^set-cookie:/{sub(/\r$/,"");print substr($0,13)}')
 TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$WORK/login.json")
 A="Authorization: Bearer $TOKEN"
-ADMIN_ID=$(curl -s -H "$A" "$B/panel/api/users" |
+ADMIN_ID=$(curl -s -H "$A" "$B/api/panel/users" |
   python3 -c 'import sys,json;print(json.load(sys.stdin)["users"][0]["id"])')
 PTOK=$(curl -s -X POST -H "$A" -H 'content-type: application/json' -d '{}' \
-  "$B/panel/api/users/$ADMIN_ID/tokens" |
+  "$B/api/panel/users/$ADMIN_ID/tokens" |
   python3 -c 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
-SUB="$B/sub/$PTOK"
+SUB="$B/api/sub/$PTOK"
 
 # 建一个采集源。启动后不再从配置导入源，必须走面板接口。
 curl -s -o /dev/null -X POST -H "$A" -H 'content-type: application/json' \
   -d '{"id":"s1","name":"本地源","kind":"xml","enabled":true,"urls":[{"url":"http://127.0.0.1:'"$UP"'/epg.xml","priority":0}]}' \
-  "$B/panel/api/epg/sources"
-curl -s -o /dev/null -X POST -H "$A" "$B/panel/api/epg/refresh"
+  "$B/api/panel/epg/sources"
+curl -s -o /dev/null -X POST -H "$A" "$B/api/panel/epg/refresh"
 
 check "公开 EPG XML 已删除" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/epg.xml")"
 check "公开 EPG 页已删除" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/epg")"
@@ -135,48 +135,48 @@ check "EPG gzip 200" "200" "$(curl -s -o "$WORK/body.gz" -w '%{http_code}' "$SUB
 check "EPG gzip 类型" "application/gzip" "$(header "$SUB/epg.xml.gz" content-type)"
 check "EPG gzip 魔数" "1f8b" "$(od -An -tx1 -N2 "$WORK/body.gz" | tr -d ' ')"
 
-check "面板频道接口 200" "200" "$(curl -s -o "$WORK/channels.json" -w '%{http_code}' -H "$A" "$B/panel/api/epg/viewer-channels")"
+check "面板频道接口 200" "200" "$(curl -s -o "$WORK/channels.json" -w '%{http_code}' -H "$A" "$B/api/panel/epg/viewer-channels")"
 check "面板频道接口计数" "1" \
   "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));rows=d.get("channels") or [];print(1 if len(rows)==1 and rows[0]["id"]=="c1" else 0)' "$WORK/channels.json")"
-check "面板节目接口 200" "200" "$(curl -s -o "$WORK/prog.json" -w '%{http_code}' -H "$A" "$B/panel/api/epg/programmes/c1")"
+check "面板节目接口 200" "200" "$(curl -s -o "$WORK/prog.json" -w '%{http_code}' -H "$A" "$B/api/panel/epg/programmes/c1")"
 check "面板节目含标题" "1" \
   "$(python3 -c 'import json,sys;rows=json.load(open(sys.argv[1])).get("programmes") or [];print(1 if any(r["title"]=="新闻" for r in rows) else 0)' "$WORK/prog.json")"
-curl -s -H "$A" "$B/panel/api/epg/search?q=%E6%96%B0%E9%97%BB" > "$WORK/search.json"
+curl -s -H "$A" "$B/api/panel/epg/search?q=%E6%96%B0%E9%97%BB" > "$WORK/search.json"
 check "面板搜索命中" "1" \
   "$(python3 -c 'import json,sys;rows=json.load(open(sys.argv[1])).get("programmes") or [];print(1 if len(rows)==1 and rows[0]["title"]=="新闻" else 0)' "$WORK/search.json")"
 
-check "EPG 状态 200" "200" "$(curl -s -o "$WORK/status.json" -w '%{http_code}' -H "$A" "$B/panel/api/epg/status")"
+check "EPG 状态 200" "200" "$(curl -s -o "$WORK/status.json" -w '%{http_code}' -H "$A" "$B/api/panel/epg/status")"
 check "EPG 状态已匹配频道" "1" "$(python3 -c 'import json,sys;print(1 if json.load(open(sys.argv[1]))["channels"]>=1 else 0)' "$WORK/status.json")"
-check "EPG 刷新 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/refresh")"
+check "EPG 刷新 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" "$B/api/panel/epg/refresh")"
 
-check "EPG 映射设置 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"gid":"g1","cid":"c1","source_id":"s1","source_channel_id":"cctv1"}' "$B/panel/api/epg/mapping")"
-check "EPG 刷新后映射" "1" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/refresh" >/dev/null; curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/mappings" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if d["mappings"]["g1/c1"]["source_id"]=="s1" else 0)')"
-check "EPG 匹配报告 200" "200" "$(curl -s -o "$WORK/report.txt" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$B/panel/api/epg/match-report")"
+check "EPG 映射设置 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"gid":"g1","cid":"c1","source_id":"s1","source_channel_id":"cctv1"}' "$B/api/panel/epg/mapping")"
+check "EPG 刷新后映射" "1" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" "$B/api/panel/epg/refresh" >/dev/null; curl -s -H "Authorization: Bearer $TOKEN" "$B/api/panel/epg/mappings" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if d["mappings"]["g1/c1"]["source_id"]=="s1" else 0)')"
+check "EPG 匹配报告 200" "200" "$(curl -s -o "$WORK/report.txt" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$B/api/panel/epg/match-report")"
 check "EPG 报告含 manual" "1" "$(grep -c 'manual' "$WORK/report.txt")"
-check "EPG 映射清除 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"gid":"g1","cid":"c1","source_id":"","source_channel_id":""}' "$B/panel/api/epg/mapping")"
+check "EPG 映射清除 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"gid":"g1","cid":"c1","source_id":"","source_channel_id":""}' "$B/api/panel/epg/mapping")"
 
 # --- 采集节奏与翻译设置（A5） ---
 A="Authorization: Bearer $TOKEN"
 
 check "cron 预览合法" "True" \
-  "$(curl -s -X POST "$B/panel/api/epg/cron-preview" -H "$A" -H 'content-type: application/json' \
+  "$(curl -s -X POST "$B/api/panel/epg/cron-preview" -H "$A" -H 'content-type: application/json' \
     -d '{"expr":"*/30 * * * *"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["ok"])')"
 check "cron 预览返回 3 个时间点" "3" \
-  "$(curl -s -X POST "$B/panel/api/epg/cron-preview" -H "$A" -H 'content-type: application/json' \
+  "$(curl -s -X POST "$B/api/panel/epg/cron-preview" -H "$A" -H 'content-type: application/json' \
     -d '{"expr":"*/30 * * * *"}' | python3 -c 'import json,sys;print(len(json.load(sys.stdin).get("next") or []))')"
 check "cron 非法表达式不通过" "False" \
-  "$(curl -s -X POST "$B/panel/api/epg/cron-preview" -H "$A" -H 'content-type: application/json' \
+  "$(curl -s -X POST "$B/api/panel/epg/cron-preview" -H "$A" -H 'content-type: application/json' \
     -d '{"expr":"not a cron"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["ok"])')"
 
 check "翻译状态 200" "200" \
-  "$(curl -s -o "$WORK/tr.json" -w '%{http_code}' -H "$A" "$B/panel/api/epg/translate/status")"
+  "$(curl -s -o "$WORK/tr.json" -w '%{http_code}' -H "$A" "$B/api/panel/epg/translate/status")"
 check "翻译默认关闭" "False" \
   "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["enabled"])' "$WORK/tr.json")"
 check "翻译状态有 cache 计数" "0" \
   "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["cache"])' "$WORK/tr.json")"
 
 # 改写 `[epg.translate]` 后回读（面板翻译卡片就是这么保存的）。
-curl -s -H "$A" "$B/panel/api/config" > "$WORK/cfg.json"
+curl -s -H "$A" "$B/api/panel/config" > "$WORK/cfg.json"
 python3 - "$WORK/cfg.json" "$WORK/put.json" <<'PYEOF'
 import json, sys
 cfg = json.load(open(sys.argv[1]))
@@ -190,9 +190,9 @@ cfg["epg"]["cron"] = "*/30 * * * *"
 json.dump(cfg, open(sys.argv[2], "w"))
 PYEOF
 check "写翻译设置 200" "200" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" -H "$A" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/api/panel/config" -H "$A" \
     -H 'content-type: application/json' --data-binary "@$WORK/put.json")"
-curl -s -H "$A" "$B/panel/api/config" > "$WORK/after.json"
+curl -s -H "$A" "$B/api/panel/config" > "$WORK/after.json"
 check "翻译已启用" "True" \
   "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["epg"]["translate"]["enabled"])' "$WORK/after.json")"
 check "批量大小已落盘" "25" \
@@ -204,40 +204,40 @@ check "cron 已落盘" "*/30 * * * *" \
 
 # 不可达的 MTranServer：测试接口要报告失败而不是 5xx。
 check "MTran 不可达时报告失败" "False" \
-  "$(curl -s -X POST "$B/panel/api/epg/translate/mtran/test" -H "$A" \
+  "$(curl -s -X POST "$B/api/panel/epg/translate/mtran/test" -H "$A" \
     -H 'content-type: application/json' -d '{"text":"hello"}' | \
     python3 -c 'import json,sys;print(json.load(sys.stdin).get("ok"))')"
 
 # --- EPG 配置：源、绑定、关键字规则 ---
-curl -s -o /dev/null -X POST -H "$A" "$B/panel/api/epg/refresh"
+curl -s -o /dev/null -X POST -H "$A" "$B/api/panel/epg/refresh"
 check "源已写库" "1" \
-  "$(curl -s -H "$A" "$B/panel/api/epg/sources" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if len(d)==1 and d[0]["name"]=="本地源" else 0)')"
+  "$(curl -s -H "$A" "$B/api/panel/epg/sources" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if len(d)==1 and d[0]["name"]=="本地源" else 0)')"
 check "自动绑定已写入" "1" \
-  "$(curl -s -H "$A" "$B/panel/api/epg/bindings" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if any(i["origin"]=="auto" for i in d["items"]) else 0)')"
+  "$(curl -s -H "$A" "$B/api/panel/epg/bindings" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if any(i["origin"]=="auto" for i in d["items"]) else 0)')"
 
 NEW_SOURCE=$(curl -s -X POST -H "$A" -H 'content-type: application/json' \
   -d '{"name":"第二源","kind":"xml","enabled":true,"urls":[{"url":"http://127.0.0.1:'"$UP"'/epg.xml","priority":1}]}' \
-  "$B/panel/api/epg/sources" | python3 -c 'import json,sys;print(json.load(sys.stdin)["source"]["id"])')
+  "$B/api/panel/epg/sources" | python3 -c 'import json,sys;print(json.load(sys.stdin)["source"]["id"])')
 check "新增源已写库" "1" \
-  "$(curl -s -H "$A" "$B/panel/api/epg/sources" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if any(s["id"]=="'"$NEW_SOURCE"'" for s in d) else 0)')"
+  "$(curl -s -H "$A" "$B/api/panel/epg/sources" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if any(s["id"]=="'"$NEW_SOURCE"'" for s in d) else 0)')"
 check "删除源 200" "200" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "$A" "$B/panel/api/epg/sources/$NEW_SOURCE")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "$A" "$B/api/panel/epg/sources/$NEW_SOURCE")"
 
 RULE=$(curl -s -X POST -H "$A" -H 'content-type: application/json' \
   -d '{"name":"录制新闻","gid":"g1","cid":"c1","condition":{"op":"all","keywords":["新闻"],"groups":[]},"action":"record","enabled":true}' \
-  "$B/panel/api/epg/rules")
+  "$B/api/panel/epg/rules")
 RULE_ID=$(printf '%s' "$RULE" | python3 -c 'import json,sys;print(json.load(sys.stdin)["rule"]["id"])')
 check "规则已保存" "录制新闻" \
   "$(printf '%s' "$RULE" | python3 -c 'import json,sys;print(json.load(sys.stdin)["rule"]["name"])')"
 check "规则预览命中" "1" \
   "$(curl -s -X POST -H "$A" -H 'content-type: application/json' \
     -d '{"gid":"g1","cid":"c1","condition":{"op":"all","keywords":["新闻"],"groups":[]},"action":"record"}' \
-    "$B/panel/api/epg/rules/preview" | python3 -c 'import json,sys;print(1 if json.load(sys.stdin)["total"]>=1 else 0)')"
+    "$B/api/panel/epg/rules/preview" | python3 -c 'import json,sys;print(1 if json.load(sys.stdin)["total"]>=1 else 0)')"
 check "删除规则 200" "200" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "$A" "$B/panel/api/epg/rules/$RULE_ID")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "$A" "$B/api/panel/epg/rules/$RULE_ID")"
 
 # 前端已内嵌这两张卡片（ASCII needle）。
-ASSET=$(curl -s -H "$A" "$B/page/panel" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+ASSET=$(curl -s -H "$A" "$B/page" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
 PJS=$(curl -s "$B$ASSET")
 for needle in 'epg/cron-preview' 'epg/translate/run' 'epg/translate/clear-engine' \
   'epg/translate/mtran/test' 'mtran_max_per_round' 'epg/sources' 'epg/bindings' 'epg/rules'; do

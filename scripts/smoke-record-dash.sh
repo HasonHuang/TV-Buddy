@@ -90,11 +90,11 @@ JSON
 PID=$!
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 80); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
-SESSION=$(curl -fsS -X POST "$B/panel/api/login" \
+SESSION=$(curl -fsS -X POST "$B/api/panel/login" \
   -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
@@ -107,7 +107,7 @@ print(fmt(now - 2), fmt(now + 28))
 PY
 )
 
-curl -fsS -X POST "$B/panel/api/schedule" \
+curl -fsS -X POST "$B/api/panel/schedule" \
   -H "authorization: Bearer $SESSION" \
   -H 'content-type: application/json' \
   -d "{\"name\":\"dash smoke\",\"group_id\":\"dh\",\"channel_id\":\"c1\",\"start_time\":\"$START\",\"end_time\":\"$END\",\"format\":\"mkv\"}" \
@@ -116,7 +116,7 @@ curl -fsS -X POST "$B/panel/api/schedule" \
 STATUS=
 FILE=
 for _ in $(seq 1 100); do
-  curl -fsS "$B/panel/api/schedule" -H "authorization: Bearer $SESSION" >"$WORK/list.json"
+  curl -fsS "$B/api/panel/schedule" -H "authorization: Bearer $SESSION" >"$WORK/list.json"
   read -r STATUS FILE < <(python3 - "$WORK/list.json" <<'PY'
 import json
 import sys
@@ -137,7 +137,7 @@ if [ "$STATUS" != "finished" ]; then
   exit 1
 fi
 
-curl -fsS "$B/panel/api/schedule/download/$FILE" \
+curl -fsS "$B/api/panel/schedule/download/$FILE" \
   -H "authorization: Bearer $SESSION" -o "$WORK/out.mkv"
 if [ ! -s "$WORK/out.mkv" ]; then
   echo "FAIL DASH 产物为空"

@@ -68,7 +68,7 @@ trap 'kill $MPID $FPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$W
 M="http://127.0.0.1:$MPORT"
 F="http://127.0.0.1:$FPORT"
 for _ in $(seq 1 80); do
-  curl -fsS "$M/health" >/dev/null 2>&1 && curl -fsS "$F/health" >/dev/null 2>&1 && break
+  curl -fsS "$M/api/health" >/dev/null 2>&1 && curl -fsS "$F/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -76,9 +76,9 @@ fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 
-MTOK=$(curl -s -X POST "$M/panel/api/login" -H 'content-type: application/json' \
+MTOK=$(curl -s -X POST "$M/api/panel/login" -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
-FTOK=$(curl -s -X POST "$F/panel/api/login" -H 'content-type: application/json' \
+FTOK=$(curl -s -X POST "$F/api/panel/login" -H 'content-type: application/json' \
   -d '{"username":"admin","password":"admin"}' | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
 
 check "缺 key 403" "403" "$(status "$M/api/share/pull")"
@@ -86,10 +86,10 @@ check "错 key 403" "403" "$(status "$M/api/share/pull?key=WRONG")"
 check "正确 key 200" "200" "$(status "$M/api/share/pull?key=REAKEY")"
 check "POST 405" "405" "$(status -X POST "$M/api/share/pull?key=REAKEY")"
 # 全局播放令牌已废弃：轮换端点不存在。
-check "follower 轮换端点已移除" "404" "$(status -X POST "$F/panel/api/security/token/rotate" -H "Authorization: Bearer $FTOK")"
+check "follower 轮换端点已移除" "404" "$(status -X POST "$F/api/panel/security/token/rotate" -H "Authorization: Bearer $FTOK")"
 
 # 封禁后等待一个周期（follower 启动延迟 5s + 轮询 5s）。
-curl -s -X POST "$M/panel/api/security/ip/ban" -H "Authorization: Bearer $MTOK" \
+curl -s -X POST "$M/api/panel/security/ip/ban" -H "Authorization: Bearer $MTOK" \
   -H 'content-type: application/json' -d '{"ip":"203.0.113.9","seconds":3600}' >/dev/null
 
 # 令牌不再跨实例同步：载荷里的 token 恒为 null。
@@ -98,7 +98,7 @@ check "载荷不含令牌" "1" "$(curl -s "$M/api/share/pull?key=REAKEY" | pytho
 BAN=""
 for _ in $(seq 1 40); do
   sleep 0.5
-  BAN=$(curl -s "$F/panel/api/security/ip/stats" -H "Authorization: Bearer $FTOK" \
+  BAN=$(curl -s "$F/api/panel/security/ip/stats" -H "Authorization: Bearer $FTOK" \
     | python3 -c 'import json,sys;d=json.load(sys.stdin);print(1 if any(e["ip"]=="203.0.113.9" for e in d["entries"]) else 0)')
   [ "$BAN" = "1" ] && break
 done

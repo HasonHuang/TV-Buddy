@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 路径契约冒烟：自起服务，检查页面、静态资源与旧别名。
+# 路径契约冒烟：自起服务，检查页面、静态资源、新路径与旧路径 404。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -44,10 +44,15 @@ check() {
     check_method GET "$1" "$2"
 }
 
-check /page/panel 200
+# 首页固定 302 到 `/page`。
+check_method GET / 302
+
+# 内嵌页面。`/page/panel` 已删除。
+check /page 200
+check /page/ 200
 check /page/unban 200
+check /page/panel 404
 check /static/panel/panel.html 200
-check /logo/does-not-exist.png 404
 check /static/logo/does-not-exist.png 404
 check /static/assets/does-not-exist.png 404
 
@@ -56,15 +61,17 @@ check /api/play/g/c/seg.png 404
 check /media/g/c/index.m3u8 404
 check /media/g/c/video/index.txt 404
 
-# 公开接口新前缀。未登录时 whoami 与 unban 都返回 401。
+# 公开接口新前缀。未登录时面板与 whoami 返回 401，坏令牌订阅返回 404。
 check /api/health 200
+check /api/panel/status 401
+check /api/sub/nope/playlist.m3u 404
 check /api/unban/whoami 401
 check_method POST /api/unban 401
 # `/api/unban` 只有 POST；页面入口是 `/page/unban`。
 check_method GET /api/unban 405
-# 旧路径迁移期内仍可用，响应由改写层提供。它们与新路径一致。
-check /health 200
-check /panel 200
-check /unban 200
-check /unban/whoami 401
-check_method POST /unban 401
+
+# 旧路径已全部删除，必须返回 404。
+check /health 404
+check /panel 404
+check /unban 404
+check_method GET /panel/api/status 404

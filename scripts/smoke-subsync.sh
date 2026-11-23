@@ -93,20 +93,20 @@ JSON
 PID=$!
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 80); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
 fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 
-T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+T=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 A=(-H "Authorization: Bearer $T" -H 'Content-Type: application/json')
 
 status_json() {
-  curl -s "${A[@]}" "$B/panel/api/subs/status" \
+  curl -s "${A[@]}" "$B/api/panel/subs/status" \
     | python3 -c 'import sys,json;d=json.load(sys.stdin)["sources"];print(json.dumps(next(x for x in d if x["id"]=="s1")))'
 }
 field() { status_json | python3 -c "import sys,json;print(json.load(sys.stdin).get('$1'))"; }
@@ -132,11 +132,11 @@ cooldown() {
 
 sync_s1() {
   cooldown
-  curl -s -o /dev/null "${A[@]}" -X POST "$B/panel/api/subs/sync" -d '{"id":"s1"}'
+  curl -s -o /dev/null "${A[@]}" -X POST "$B/api/panel/subs/sync" -d '{"id":"s1"}'
   wait_done
 }
 
-export_json() { curl -s "${A[@]}" "$B/panel/api/groups/export"; }
+export_json() { curl -s "${A[@]}" "$B/api/panel/groups/export"; }
 
 gid_of_sync() {
   export_json | python3 -c 'import sys,json;g=json.load(sys.stdin);print(next(x["id"] for x in g if x.get("origin")=="sync"))'
@@ -157,7 +157,7 @@ for group in g:
 }
 
 # 1) 预检与首次同步
-PV=$(curl -s "${A[@]}" -X POST "$B/panel/api/subs/preview" -d '{"id":"s1"}')
+PV=$(curl -s "${A[@]}" -X POST "$B/api/panel/subs/preview" -d '{"id":"s1"}')
 check "预检新增 2 条" "2" "$(printf '%s' "$PV" | python3 -c 'import sys,json;print(json.load(sys.stdin)["sync"]["add"])')"
 check "预检不写配置" "0" "$(export_json | python3 -c 'import sys,json;print(sum(1 for g in json.load(sys.stdin) if g.get("origin")=="sync"))')"
 sync_s1
@@ -168,8 +168,8 @@ GID=$(gid_of_sync)
 check "分组归属 sync" "1" "$(export_json | python3 -c 'import sys,json;print(sum(1 for g in json.load(sys.stdin) if g.get("origin")=="sync"))')"
 
 # 订阅包含同步频道，播放地址带令牌。
-PTOK=$(curl -s "${A[@]}" "$B/panel/api/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-SUB=$(curl -s "$B/sub/$PTOK/playlist.m3u")
+PTOK=$(curl -s "${A[@]}" "$B/api/panel/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+SUB=$(curl -s "$B/api/sub/$PTOK/playlist.m3u")
 check "订阅含同步频道" "1" "$(printf '%s' "$SUB" | grep -c ',C1$' || true)"
 check "订阅含手工频道" "1" "$(printf '%s' "$SUB" | grep -c ',手工频道$' || true)"
 check "托管频道走令牌入口" "1" "$(printf '%s' "$SUB" | PTOK="$PTOK" python3 -c '
@@ -204,7 +204,7 @@ check "C1 地址已更新" "1" "$(export_json | python3 -c 'import sys,json;g=js
 C1=$(channel_json "C1")
 C1_GID=$(printf '%s' "$C1" | python3 -c 'import sys,json;print(json.load(sys.stdin)["gid"])')
 C1_CID=$(printf '%s' "$C1" | python3 -c 'import sys,json;print(json.load(sys.stdin)["cid"])')
-curl -s -o /dev/null "${A[@]}" -X PUT "$B/panel/api/groups/$C1_GID/channels/$C1_CID" \
+curl -s -o /dev/null "${A[@]}" -X PUT "$B/api/panel/groups/$C1_GID/channels/$C1_CID" \
   -d '{"name":"C1 手工名"}'
 check "改名后固定" "False" "$(channel_json "C1 手工名" | python3 -c 'import sys,json;print(json.load(sys.stdin)["channel"].get("sync_follow", True))')"
 python3 - "$WORK/up/sync.m3u" <<'PY'
@@ -230,18 +230,18 @@ check "固定频道计入跳过" "1" "$(field skipped_removals)"
 C3=$(channel_json "C3")
 C3_GID=$(printf '%s' "$C3" | python3 -c 'import sys,json;print(json.load(sys.stdin)["gid"])')
 C3_CID=$(printf '%s' "$C3" | python3 -c 'import sys,json;print(json.load(sys.stdin)["cid"])')
-curl -s -o /dev/null "${A[@]}" -X DELETE "$B/panel/api/groups/$C3_GID/channels/$C3_CID"
-check "删除写入排除" "1" "$(curl -s "${A[@]}" "$B/panel/api/playlist" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(sum(1 for s in d["sources"] if s["id"]=="s1" and any(x.startswith("id:c3") for x in s.get("exclude",[]))))')"
+curl -s -o /dev/null "${A[@]}" -X DELETE "$B/api/panel/groups/$C3_GID/channels/$C3_CID"
+check "删除写入排除" "1" "$(curl -s "${A[@]}" "$B/api/panel/playlist" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(sum(1 for s in d["sources"] if s["id"]=="s1" and any(x.startswith("id:c3") for x in s.get("exclude",[]))))')"
 printf '#EXTINF:-1 tvg-id="c3" group-title="G",C3\nhttp://127.0.0.1:%s/c3.m3u8\n' "$UP" >> "$WORK/up/sync.m3u"
 sync_s1
 check "删除后不回流" "0" "$(export_json | python3 -c 'import sys,json;print(sum(1 for g in json.load(sys.stdin) for c in g["channels"] if c["name"]=="C3"))')"
 
 # 6) 抓取失败不改配置。用第二个源验证。
-curl -s -o /dev/null "${A[@]}" -X POST "$B/panel/api/playlist/sources" \
+curl -s -o /dev/null "${A[@]}" -X POST "$B/api/panel/playlist/sources" \
   -d "{\"id\":\"bad\",\"name\":\"坏源\",\"url\":\"http://127.0.0.1:1/bad.m3u\",\"mode\":\"sync\",\"unlisted_groups\":\"keep\"}"
-curl -s -o /dev/null "${A[@]}" -X POST "$B/panel/api/subs/sync" -d '{"id":"bad"}'
+curl -s -o /dev/null "${A[@]}" -X POST "$B/api/panel/subs/sync" -d '{"id":"bad"}'
 sleep 1
-check "坏源记录错误" "1" "$(curl -s "${A[@]}" "$B/panel/api/subs/status" | python3 -c 'import sys,json;d=json.load(sys.stdin)["sources"];print(1 if next(x for x in d if x["id"]=="bad")["error"] else 0)')"
+check "坏源记录错误" "1" "$(curl -s "${A[@]}" "$B/api/panel/subs/status" | python3 -c 'import sys,json;d=json.load(sys.stdin)["sources"];print(1 if next(x for x in d if x["id"]=="bad")["error"] else 0)')"
 check "坏源不改内容" "1" "$(export_json | python3 -c 'import sys,json;print(sum(1 for g in json.load(sys.stdin) for c in g["channels"] if c["name"]=="C1 手工名"))')"
 
 # 7) 空清单默认拦截。开启 sync_allow_empty 后清空。
@@ -250,7 +250,7 @@ sync_s1
 check "空清单待确认" "True" "$(field needs_review)"
 check "空清单未清空" "0/0/0" "$(field added)/$(field updated)/$(field removed)"
 check "空清单内容保留" "1" "$(export_json | python3 -c 'import sys,json;print(sum(1 for g in json.load(sys.stdin) for c in g["channels"] if c["name"]=="C1 手工名"))')"
-curl -s "${A[@]}" "$B/panel/api/playlist" > "$WORK/playlist.json"
+curl -s "${A[@]}" "$B/api/panel/playlist" > "$WORK/playlist.json"
 python3 - "$WORK/playlist.json" <<'PY'
 import json, sys
 path = sys.argv[1]
@@ -258,7 +258,7 @@ data = json.load(open(path, encoding="utf-8"))
 data["sync_allow_empty"] = True
 json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False)
 PY
-curl -s -o /dev/null "${A[@]}" -X PUT "$B/panel/api/playlist/settings" --data-binary "@$WORK/playlist.json"
+curl -s -o /dev/null "${A[@]}" -X PUT "$B/api/panel/playlist/settings" --data-binary "@$WORK/playlist.json"
 sync_s1
 check "空清单保留固定频道" "1" "$(field channels)"
 check "空同步分组已删除" "0" "$(export_json | python3 -c 'import sys,json;print(sum(1 for g in json.load(sys.stdin) if g.get("origin")=="sync"))')"
@@ -268,17 +268,17 @@ check "手工分组保留" "1" "$(export_json | python3 -c 'import sys,json;prin
 write_m3u "http://127.0.0.1:$UP/c1-new.m3u8"
 sync_s1
 check "恢复同步" "2" "$(field channels)"
-check "删除未选方式 409" "409" "$(curl -s -o /dev/null -w '%{http_code}' "${A[@]}" -X DELETE "$B/panel/api/playlist/sources/s1")"
-check "409 带 content_exists" "1" "$(curl -s "${A[@]}" -X DELETE "$B/panel/api/playlist/sources/s1" | grep -c 'content_exists' || true)"
-curl -s -o /dev/null "${A[@]}" -X DELETE "$B/panel/api/playlist/sources/s1?keep_content=1"
+check "删除未选方式 409" "409" "$(curl -s -o /dev/null -w '%{http_code}' "${A[@]}" -X DELETE "$B/api/panel/playlist/sources/s1")"
+check "409 带 content_exists" "1" "$(curl -s "${A[@]}" -X DELETE "$B/api/panel/playlist/sources/s1" | grep -c 'content_exists' || true)"
+curl -s -o /dev/null "${A[@]}" -X DELETE "$B/api/panel/playlist/sources/s1?keep_content=1"
 check "保留为手工" "1" "$(export_json | python3 -c 'import sys,json;print(sum(1 for g in json.load(sys.stdin) for c in g["channels"] if c["name"]=="C2" and not c.get("source_id")))')"
 
 # 9) 聚合源行为不变。聚合频道只在订阅里，不物化。
 check "聚合频道不物化" "0" "$(export_json | python3 -c 'import sys,json;print(sum(1 for g in json.load(sys.stdin) for c in g["channels"] if c["name"]=="聚合频道"))')"
-SUB=$(curl -s "$B/sub/$PTOK/playlist.m3u")
+SUB=$(curl -s "$B/api/sub/$PTOK/playlist.m3u")
 check "聚合频道进订阅" "1" "$(printf '%s' "$SUB" | grep -c '聚合频道' || true)"
 
 # 10) 鉴权：未登录状态接口 401。
-check "状态接口需登录" "401" "$(curl -s -o /dev/null -w '%{http_code}' "$B/panel/api/subs/status")"
+check "状态接口需登录" "401" "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/panel/subs/status")"
 
 if [ "$fail" = "0" ]; then echo "订阅托管冒烟测试全部通过"; else echo "订阅托管冒烟测试有失败项"; exit 1; fi

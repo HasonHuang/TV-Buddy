@@ -54,13 +54,13 @@ JSON
 PID=$!
 trap 'kill $PID $UPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' EXIT
 B="http://127.0.0.1:$PORT"
-for _ in $(seq 1 60); do curl -fsS "$B/health" >/dev/null 2>&1 && break; sleep 0.1; done
+for _ in $(seq 1 60); do curl -fsS "$B/api/health" >/dev/null 2>&1 && break; sleep 0.1; done
 
 fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 
 NOW=$(date +%s)
-URL="$B/ts/c1.m3u8?start=$((NOW - 60))&end=$((NOW + 60))"
+URL="$B/api/play/ts/c1.m3u8?start=$((NOW - 60))&end=$((NOW + 60))"
 CODE=0
 for _ in $(seq 1 30); do
   CODE=$(curl -s -o "$WORK/list.m3u8" -w '%{http_code}' "$URL")
@@ -70,14 +70,14 @@ done
 check "回看清单 200" "200" "$CODE"
 check "VOD 类型" "1" "$(grep -c '#EXT-X-PLAYLIST-TYPE:VOD' "$WORK/list.m3u8" || true)"
 check "含结束标记" "1" "$(grep -c '#EXT-X-ENDLIST' "$WORK/list.m3u8" || true)"
-check "含回看切片" "yes" "$(grep -q '/ts/c1/timeshift/[0-9a-f]*[.]' "$WORK/list.m3u8" && echo yes || echo no)"
+check "含回看切片" "yes" "$(grep -q '/media/ts/c1/timeshift/[0-9a-f]*[.]' "$WORK/list.m3u8" && echo yes || echo no)"
 
-SEG=$(grep -o '/ts/c1/timeshift/[0-9a-f]*[.][a-z]*' "$WORK/list.m3u8" | head -1)
+SEG=$(grep -o '/media/ts/c1/timeshift/[0-9a-f]*[.][a-z]*' "$WORK/list.m3u8" | head -1)
 check "切片 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$B$SEG")"
 check "切片类型为图片" "1" "$(curl -s -o /dev/null -D - "$B$SEG" | grep -ci '^content-type: image/')"
 check "切片缓存头" "1" "$(curl -s -o /dev/null -D - "$B$SEG" | grep -ci '^cache-control: private, max-age=3600')"
 
-curl -s -o "$WORK/live.m3u8" "$B/ts/c1.m3u8?start=0&end=60"
+curl -s -o "$WORK/live.m3u8" "$B/api/play/ts/c1.m3u8?start=0&end=60"
 check "越界落回实时" "0" "$(grep -c '#EXT-X-PLAYLIST-TYPE:VOD' "$WORK/live.m3u8" || true)"
 
 if [ "$fail" = "0" ]; then echo "回看冒烟测试全部通过"; else echo "回看冒烟测试有失败项"; exit 1; fi

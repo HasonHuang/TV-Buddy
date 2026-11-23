@@ -357,7 +357,7 @@ struct Fixture {
 impl Fixture {
     /// 用户订阅路径（不含主机），供 [`fetch`] 使用。
     fn sub(&self, token: &str, rest: &str) -> String {
-        format!("/sub/{token}/{rest}")
+        format!("/api/sub/{token}/{rest}")
     }
 
     /// 用户订阅完整地址，供 `client.get` 使用。
@@ -390,7 +390,7 @@ async fn serve(app: Router) -> String {
 async fn wait_ready(client: &Client, base: &str) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if let Ok(response) = client.get(format!("{base}/health")).send().await {
+        if let Ok(response) = client.get(format!("{base}/api/health")).send().await {
             if response.status() == StatusCode::OK {
                 return;
             }
@@ -664,7 +664,7 @@ async fn fixture_with_options(
 
     // 预热：一次用户订阅请求会抓取聚合源并写状态。
     let _ = client
-        .get(format!("{base}/sub/{token}/playlist.m3u"))
+        .get(format!("{base}/api/sub/{token}/playlist.m3u"))
         .send()
         .await;
 
@@ -828,7 +828,7 @@ fn assert_disguised(fixture: &Fixture, url: &str) {
 async fn health_and_user_playlist() {
     let fixture = fixture().await;
 
-    let response = fetch(&fixture, "/health").await;
+    let response = fetch(&fixture, "/api/health").await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.text().await.expect("读正文"), "ok");
 
@@ -850,10 +850,7 @@ async fn health_and_user_playlist() {
     );
     // 归档组停播，不进订阅；其余组都进。
     assert!(body.contains(&format!("/api/play/token/{}/pg/c1.m3u8", fixture.token)));
-    assert!(
-        body.contains(&"/op/c1.m3u8\n".to_string()),
-        "open 组不带令牌"
-    );
+    assert!(body.contains(&format!("/api/play/token/{}/op/c1.m3u8", fixture.token)));
     // 直通组在订阅里直接给上游地址。
     assert!(body.contains(&format!("{}/live.m3u8", fixture.upstream)));
     assert!(!body.contains("/pt/"));
@@ -873,44 +870,6 @@ async fn subscription_uses_new_paths() {
     let body = response.text().await.expect("读正文");
     assert!(body.contains(&format!("/api/play/token/{}/", fx.token)));
     assert!(!body.contains("/l/"));
-}
-
-#[tokio::test]
-async fn subscription_old_and_new_paths_agree() {
-    let fixture = fixture_with(true).await;
-    epg::refresh(&fixture.state).await.expect("采集应成功");
-
-    // 四类订阅端点：旧路径与新路径必须返回同一响应。
-    for (old, new) in [
-        (
-            fixture.sub(&fixture.token, "playlist.m3u"),
-            format!("/api/sub/{}/playlist.m3u", fixture.token),
-        ),
-        (
-            fixture.sub(&fixture.token, "pg/playlist.m3u"),
-            format!("/api/sub/{}/pg/playlist.m3u", fixture.token),
-        ),
-        (
-            fixture.sub(&fixture.token, "epg.xml"),
-            format!("/api/sub/{}/epg.xml", fixture.token),
-        ),
-        (
-            fixture.sub(&fixture.token, "epg.xml.gz"),
-            format!("/api/sub/{}/epg.xml.gz", fixture.token),
-        ),
-    ] {
-        let old_response = fetch(&fixture, &old).await;
-        let new_response = fetch(&fixture, &new).await;
-        assert_eq!(old_response.status(), new_response.status(), "{new}");
-        assert_eq!(
-            header(&old_response, "content-type"),
-            header(&new_response, "content-type"),
-            "{new}"
-        );
-        let old_body = old_response.bytes().await.expect("旧正文");
-        let new_body = new_response.bytes().await.expect("新正文");
-        assert_eq!(old_body, new_body, "{new}");
-    }
 }
 
 #[tokio::test]
@@ -1086,9 +1045,9 @@ async fn slice_signature_path_token_and_rejections() {
 async fn sub_routes_404_on_bad_token() {
     let fixture = fixture().await;
     for path in [
-        "/sub/nope/playlist.m3u",
-        "/sub/nope/epg.xml",
-        "/sub/nope/epg.xml.gz",
+        "/api/sub/nope/playlist.m3u",
+        "/api/sub/nope/epg.xml",
+        "/api/sub/nope/epg.xml.gz",
     ] {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
@@ -1110,7 +1069,7 @@ async fn device_token_can_be_customized() {
         fixture
             .client
             .post(format!(
-                "{}/panel/api/users/{}/tokens",
+                "{}/api/panel/users/{}/tokens",
                 fixture.base, admin.id
             ))
             .header("authorization", &auth)
@@ -1134,7 +1093,7 @@ async fn device_token_can_be_customized() {
 
     let old = fixture
         .client
-        .get(format!("{}/sub/living-room/playlist.m3u", fixture.base))
+        .get(format!("{}/api/sub/living-room/playlist.m3u", fixture.base))
         .send()
         .await
         .expect("旧凭证订阅");
@@ -1143,7 +1102,7 @@ async fn device_token_can_be_customized() {
     let rejected = fixture
         .client
         .put(format!(
-            "{}/panel/api/users/{}/tokens/living-room",
+            "{}/api/panel/users/{}/tokens/living-room",
             fixture.base, admin.id
         ))
         .header("authorization", &auth)
@@ -1157,7 +1116,7 @@ async fn device_token_can_be_customized() {
     let rejected_null = fixture
         .client
         .put(format!(
-            "{}/panel/api/users/{}/tokens/living-room",
+            "{}/api/panel/users/{}/tokens/living-room",
             fixture.base, admin.id
         ))
         .header("authorization", &auth)
@@ -1170,7 +1129,7 @@ async fn device_token_can_be_customized() {
 
     let old = fixture
         .client
-        .get(format!("{}/sub/living-room/playlist.m3u", fixture.base))
+        .get(format!("{}/api/sub/living-room/playlist.m3u", fixture.base))
         .send()
         .await
         .expect("原凭证订阅");
@@ -1179,7 +1138,7 @@ async fn device_token_can_be_customized() {
     let relabeled = fixture
         .client
         .put(format!(
-            "{}/panel/api/users/{}/tokens/living-room",
+            "{}/api/panel/users/{}/tokens/living-room",
             fixture.base, admin.id
         ))
         .header("authorization", &auth)
@@ -1213,7 +1172,7 @@ async fn non_admin_is_forbidden_on_admin_api() {
     let fixture = fixture().await;
     let login = fixture
         .client
-        .post(format!("{}/panel/api/login", fixture.base))
+        .post(format!("{}/api/panel/login", fixture.base))
         .header("content-type", "application/json")
         .body(r#"{"username":"viewer","password":"viewer"}"#)
         .send()
@@ -1245,24 +1204,28 @@ async fn non_admin_is_forbidden_on_admin_api() {
     };
 
     assert_eq!(
-        call("GET", "/panel/api/config").await.status(),
+        call("GET", "/api/panel/config").await.status(),
         StatusCode::FORBIDDEN
     );
     assert_eq!(
-        call("GET", "/panel/api/users").await.status(),
+        call("GET", "/api/panel/users").await.status(),
         StatusCode::FORBIDDEN
     );
     assert_eq!(
-        call("GET", "/panel/api/groups/export").await.status(),
+        call("GET", "/api/panel/groups/export").await.status(),
         StatusCode::FORBIDDEN
     );
-    assert_eq!(call("GET", "/panel/api/me").await.status(), StatusCode::OK);
+    assert_eq!(call("GET", "/api/panel/me").await.status(), StatusCode::OK);
 }
 
 #[tokio::test]
 async fn media_upstream_entry_is_rewritten_media_playlist() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         header(&response, "content-type"),
@@ -1285,7 +1248,11 @@ async fn media_upstream_entry_is_rewritten_media_playlist() {
 #[tokio::test]
 async fn prefetch_caches_media_playlist_segments_except_tail() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let dir = fixture.dir.join("cache/seg_bytes");
     let mut count = 0;
@@ -1310,7 +1277,7 @@ async fn upstream_playlist_failure_redirects_to_error_url() {
     let fixture = fixture().await;
     let response = fetch(
         &fixture,
-        &format!("/badlist/c1.m3u8?token={}", fixture.token),
+        &format!("/api/play/badlist/c1.m3u8?token={}", fixture.token),
     )
     .await;
     assert_eq!(response.status(), StatusCode::FOUND);
@@ -1325,7 +1292,7 @@ async fn missing_upstream_segment_returns_empty_200() {
     let fixture = fixture().await;
     let response = fetch(
         &fixture,
-        &format!("/badseg/c1.m3u8?token={}", fixture.token),
+        &format!("/api/play/badseg/c1.m3u8?token={}", fixture.token),
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -1342,7 +1309,7 @@ async fn missing_upstream_segment_returns_empty_200() {
 #[tokio::test]
 async fn media_upstream_variant_path_redirects_to_error_url() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, "/pg/c1/video/index.txt").await;
+    let response = fetch(&fixture, "/api/play/pg/c1/video/index.txt").await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
         header(&response, "location"),
@@ -1353,7 +1320,11 @@ async fn media_upstream_variant_path_redirects_to_error_url() {
 #[tokio::test]
 async fn master_upstream_entry_is_synthetic_master_playlist() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, &format!("/pm/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pm/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         header(&response, "content-type"),
@@ -1370,7 +1341,7 @@ async fn master_upstream_entry_is_synthetic_master_playlist() {
 #[tokio::test]
 async fn master_upstream_variant_playlist_and_index_alias() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, "/pm/c1/video/index.txt").await;
+    let response = fetch(&fixture, "/api/play/pm/c1/video/index.txt").await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         header(&response, "content-type"),
@@ -1388,7 +1359,7 @@ async fn master_upstream_variant_playlist_and_index_alias() {
     // `index.m3u8` 是入口别名。
     let response = fetch(
         &fixture,
-        &format!("/pm/c1/index.m3u8?token={}", fixture.token),
+        &format!("/api/play/pm/c1/index.m3u8?token={}", fixture.token),
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -1406,7 +1377,11 @@ async fn master_upstream_variant_playlist_and_index_alias() {
 #[tokio::test]
 async fn segment_served_from_cache_with_hit_headers() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     let body = response.text().await.expect("读正文");
     let path = segment_path(&body, &fixture.base, 1);
 
@@ -1426,13 +1401,17 @@ async fn token_and_unknown_path_semantics() {
     let fixture = fixture().await;
 
     // 未知频道：无 Token → failure；合法 Token → not_found。
-    let response = fetch(&fixture, "/pg/ghost.m3u8").await;
+    let response = fetch(&fixture, "/api/play/pg/ghost.m3u8").await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
         header(&response, "location"),
         "http://placeholder.test/Failure.mp4"
     );
-    let response = fetch(&fixture, &format!("/pg/ghost.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/ghost.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
         header(&response, "location"),
@@ -1440,14 +1419,18 @@ async fn token_and_unknown_path_semantics() {
     );
 
     // 未知分组同理。
-    let response = fetch(&fixture, &format!("/ghost/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/ghost/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(
         header(&response, "location"),
         "http://placeholder.test/404.mp4"
     );
 
     // 其它未知路径不看 Token。
-    let response = fetch(&fixture, "/nope/nope/nope").await;
+    let response = fetch(&fixture, "/media/nope/nope/nope").await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
         header(&response, "location"),
@@ -1455,52 +1438,64 @@ async fn token_and_unknown_path_semantics() {
     );
 
     // 错 Token。
-    let response = fetch(&fixture, "/pg/c1.m3u8?token=deadbeef").await;
+    let response = fetch(&fixture, "/api/play/pg/c1.m3u8?token=deadbeef").await;
     assert_eq!(
         header(&response, "location"),
         "http://placeholder.test/Failure.mp4"
     );
 
     // 旧 `open` 组不再免 Token：缺令牌与错令牌都跳失败视频。
-    let response = fetch(&fixture, "/op/c1.m3u8").await;
+    let response = fetch(&fixture, "/api/play/op/c1.m3u8").await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
         header(&response, "location"),
         "http://placeholder.test/Failure.mp4"
     );
-    let response = fetch(&fixture, &format!("/op/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/op/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
 async fn archived_entry_redirects_to_not_found() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, &format!("/ar/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/ar/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
         header(&response, "location"),
         "http://placeholder.test/404.mp4"
     );
 
-    let response = fetch(&fixture, "/ar/playlist.m3u").await;
+    let response = fetch(&fixture, &fixture.sub(&fixture.token, "ar/playlist.m3u")).await;
     assert_eq!(
         response.status(),
         StatusCode::NOT_FOUND,
-        "全局分组订阅已停用"
+        "归档分组不提供订阅"
     );
 }
 
 #[tokio::test]
 async fn passthrough_requires_token() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, "/pt/c1.m3u8").await;
+    let response = fetch(&fixture, "/api/play/pt/c1.m3u8").await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
         header(&response, "location"),
         "http://placeholder.test/Failure.mp4"
     );
 
-    let response = fetch(&fixture, &format!("/pt/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pt/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
         header(&response, "location"),
@@ -1526,7 +1521,7 @@ async fn mixed_group_routes_each_channel_by_its_mode() {
     }]);
     let response = fixture
         .client
-        .post(format!("{}/panel/api/groups/import", fixture.base))
+        .post(format!("{}/api/panel/groups/import", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .header("content-type", "application/json")
         .body(body.to_string())
@@ -1535,21 +1530,33 @@ async fn mixed_group_routes_each_channel_by_its_mode() {
         .expect("导入分组");
     assert_eq!(response.status(), StatusCode::OK);
 
-    let inherit = fetch(&fixture, &format!("/mix/inherit.m3u8?token={token}")).await;
+    let inherit = fetch(
+        &fixture,
+        &format!("/api/play/mix/inherit.m3u8?token={token}"),
+    )
+    .await;
     assert_eq!(inherit.status(), StatusCode::FOUND);
     assert_eq!(
         header(&inherit, "location"),
         format!("{}/live.m3u8", fixture.upstream)
     );
 
-    let direct = fetch(&fixture, &format!("/mix/direct.m3u8?token={token}")).await;
+    let direct = fetch(
+        &fixture,
+        &format!("/api/play/mix/direct.m3u8?token={token}"),
+    )
+    .await;
     assert_eq!(direct.status(), StatusCode::FOUND);
     assert_eq!(
         header(&direct, "location"),
         format!("{}/live2.m3u8", fixture.upstream)
     );
 
-    let proxied = fetch(&fixture, &format!("/mix/proxied.m3u8?token={token}")).await;
+    let proxied = fetch(
+        &fixture,
+        &format!("/api/play/mix/proxied.m3u8?token={token}"),
+    )
+    .await;
     assert_eq!(proxied.status(), StatusCode::OK);
     assert!(proxied.text().await.expect("读正文").contains("#EXTM3U"));
 }
@@ -1569,7 +1576,7 @@ async fn backfill_mode_endpoint_stamps_unset_sync_channels() {
     });
     let response = fixture
         .client
-        .post(format!("{}/panel/api/playlist/sources", fixture.base))
+        .post(format!("{}/api/panel/playlist/sources", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(source.to_string())
@@ -1593,7 +1600,7 @@ async fn backfill_mode_endpoint_stamps_unset_sync_channels() {
     }]);
     let response = fixture
         .client
-        .post(format!("{}/panel/api/groups/import", fixture.base))
+        .post(format!("{}/api/panel/groups/import", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(groups.to_string())
@@ -1604,7 +1611,7 @@ async fn backfill_mode_endpoint_stamps_unset_sync_channels() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/subs/s1/backfill-mode", fixture.base))
+        .post(format!("{}/api/panel/subs/s1/backfill-mode", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -1617,7 +1624,7 @@ async fn backfill_mode_endpoint_stamps_unset_sync_channels() {
 
     let groups = fixture
         .client
-        .get(format!("{}/panel/api/groups/export", fixture.base))
+        .get(format!("{}/api/panel/groups/export", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -1643,7 +1650,7 @@ async fn channel_mode_override_and_clear() {
     let put = |body: serde_json::Value| {
         fixture
             .client
-            .put(format!("{}/panel/api/groups/pg/channels/c1", fixture.base))
+            .put(format!("{}/api/panel/groups/pg/channels/c1", fixture.base))
             .header("authorization", &auth)
             .header("content-type", "application/json")
             .body(body.to_string())
@@ -1656,7 +1663,7 @@ async fn channel_mode_override_and_clear() {
     let groups: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/groups/export", fixture.base))
+            .get(format!("{}/api/panel/groups/export", fixture.base))
             .header("authorization", &auth)
             .send()
             .await
@@ -1680,7 +1687,7 @@ async fn channel_mode_override_and_clear() {
     let groups: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/groups/export", fixture.base))
+            .get(format!("{}/api/panel/groups/export", fixture.base))
             .header("authorization", &auth)
             .send()
             .await
@@ -1724,7 +1731,7 @@ async fn invalid_and_sync_passthrough_modes_are_rejected() {
     };
 
     let response = put(
-        "/panel/api/groups/sg/channels/c1",
+        "/api/panel/groups/sg/channels/c1",
         json!({ "mode": "magic" }),
     )
     .await
@@ -1732,31 +1739,31 @@ async fn invalid_and_sync_passthrough_modes_are_rejected() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let response = put(
-        "/panel/api/groups/sg/channels/c1",
+        "/api/panel/groups/sg/channels/c1",
         json!({ "mode": "passthrough" }),
     )
     .await
     .expect("请求");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let response = put("/panel/api/groups/sg", json!({ "mode": "passthrough" }))
+    let response = put("/api/panel/groups/sg", json!({ "mode": "passthrough" }))
         .await
         .expect("请求");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let response = put(
-        "/panel/api/groups/sg/channels/c1",
+        "/api/panel/groups/sg/channels/c1",
         json!({ "mode": "redirect" }),
     )
     .await
     .expect("请求");
     assert_eq!(response.status(), StatusCode::OK);
-    let response = put("/panel/api/groups/sg", json!({ "mode": "passthrough" }))
+    let response = put("/api/panel/groups/sg", json!({ "mode": "passthrough" }))
         .await
         .expect("请求");
     assert_eq!(response.status(), StatusCode::OK);
 
-    let response = put("/panel/api/groups/sg/channels/c1", json!({ "mode": null }))
+    let response = put("/api/panel/groups/sg/channels/c1", json!({ "mode": null }))
         .await
         .expect("请求");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -1775,7 +1782,7 @@ async fn status_counts_channels_by_effective_mode() {
     let status: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/status", fixture.base))
+            .get(format!("{}/api/panel/status", fixture.base))
             .header("authorization", format!("Bearer {session}"))
             .send()
             .await
@@ -1795,7 +1802,7 @@ async fn unknown_panel_api_is_404() {
     let session = login(&fixture).await;
     let response = fixture
         .client
-        .get(format!("{}/panel/api/nope", fixture.base))
+        .get(format!("{}/api/panel/nope", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -1837,300 +1844,35 @@ async fn panel_api_unknown_path_returns_json() {
     }
 }
 
+/// 旧路径已全部删除，必须返回 404。
+///
+/// `/playlist.m3u` 与 `/<gid>/playlist.m3u` 是故意保留的指路路由，不在此列。
 #[tokio::test]
-async fn panel_api_old_and_new_prefixes_agree() {
-    let fx = fixture_with(true).await;
-    let session = login(&fx).await;
-    for (old, new) in [
-        ("/panel/api/status", "/api/panel/status"),
-        ("/panel/api/subs/status", "/api/panel/subs/status"),
-        (
-            "/panel/api/epg/translate/status",
-            "/api/panel/epg/translate/status",
-        ),
-        ("/subs/status", "/api/panel/subs/status"),
-    ] {
-        let old_response = fx
-            .client
-            .get(format!("{}{old}", fx.base))
-            .bearer_auth(&session)
-            .send()
-            .await
-            .expect("旧路径请求");
-        let new_response = fx
-            .client
-            .get(format!("{}{new}", fx.base))
-            .bearer_auth(&session)
-            .send()
-            .await
-            .expect("新路径请求");
-        assert_eq!(old_response.status(), new_response.status(), "{new}");
-        let old_body: serde_json::Value =
-            serde_json::from_str(&old_response.text().await.expect("旧正文")).expect("旧 JSON");
-        let new_body: serde_json::Value =
-            serde_json::from_str(&new_response.text().await.expect("新正文")).expect("新 JSON");
-        let keys = |value: &serde_json::Value| {
-            let mut keys: Vec<String> = value
-                .as_object()
-                .expect("JSON 对象")
-                .keys()
-                .cloned()
-                .collect();
-            keys.sort();
-            keys
-        };
-        assert_eq!(keys(&old_body), keys(&new_body), "{new}");
-    }
-}
-
-/// 绝对地址原样使用，其余路径拼上夹具基址。
-fn fixture_url(fixture: &Fixture, path: &str) -> String {
-    if path.starts_with("http://") || path.starts_with("https://") {
-        path.to_string()
-    } else {
-        format!("{}{path}", fixture.base)
-    }
-}
-
-/// 带可选会话头请求一个路径或绝对地址。
-async fn get_with_session(fixture: &Fixture, path: &str, session: Option<&str>) -> HttpResponse {
-    let mut request = fixture.client.get(fixture_url(fixture, path));
-    if let Some(session) = session {
-        request = request.bearer_auth(session);
-    }
-    request.send().await.expect("发请求")
-}
-
-/// 断言旧路径与新路径的响应一致：状态码、`cache-control` 与正文。
-async fn assert_legacy_matches_new(fixture: &Fixture, old: &str, new: &str, session: Option<&str>) {
-    let old_response = get_with_session(fixture, old, session).await;
-    let new_response = get_with_session(fixture, new, session).await;
-    assert_eq!(
-        old_response.status(),
-        new_response.status(),
-        "{old} vs {new}"
-    );
-    assert_eq!(
-        header(&old_response, "cache-control"),
-        header(&new_response, "cache-control"),
-        "{old} vs {new}"
-    );
-    assert_eq!(
-        old_response.bytes().await.expect("旧正文"),
-        new_response.bytes().await.expect("新正文"),
-        "{old} vs {new}"
-    );
-}
-
-/// 旧路径只由改写层提供，响应必须与新路径一致。
-#[tokio::test]
-async fn legacy_paths_match_new_paths() {
+async fn legacy_paths_are_gone() {
     let fixture = fixture().await;
-    let session = login(&fixture).await;
-
-    // 公开路径：无会话。
-    assert_legacy_matches_new(&fixture, "/health", "/api/health", None).await;
-    assert_legacy_matches_new(&fixture, "/panel", "/page/panel", None).await;
-
-    // HEAD 与 GET 使用同一套改写规则。
-    let old_head = fixture
-        .client
-        .head(format!("{}/health", fixture.base))
-        .send()
-        .await
-        .expect("旧 HEAD");
-    let new_head = fixture
-        .client
-        .head(format!("{}/api/health", fixture.base))
-        .send()
-        .await
-        .expect("新 HEAD");
-    assert_eq!(old_head.status(), new_head.status(), "HEAD /health");
-    assert_eq!(
-        header(&old_head, "content-type"),
-        header(&new_head, "content-type"),
-        "HEAD /health"
-    );
-
-    // 订阅与播放入口。
-    let sub_old = fixture.sub(&fixture.token, "playlist.m3u");
-    let sub_new = format!("/api/sub/{}/playlist.m3u", fixture.token);
-    assert_legacy_matches_new(&fixture, &sub_old, &sub_new, None).await;
-
-    // `/l/<token>/...` 是订阅条目的旧路径令牌入口。
-    let token_entry_old = format!("/l/{}/pm/c1.m3u8?token={}", fixture.token, fixture.token);
-    let token_entry_new = format!(
-        "/api/play/token/{}/pm/c1.m3u8?token={}",
-        fixture.token, fixture.token
-    );
-    assert_legacy_matches_new(&fixture, &token_entry_old, &token_entry_new, None).await;
-
-    let entry_old = format!("/pm/c1.m3u8?token={}", fixture.token);
-    let entry_new = format!("/api/play/pm/c1.m3u8?token={}", fixture.token);
-    assert_legacy_matches_new(&fixture, &entry_old, &entry_new, None).await;
-
-    // 非入口扩展名的旧入口形状也由改写层提供，仍返回旧的占位 302。
-    let bad_entry_old = format!("/pt/c1.mp4?token={}", fixture.token);
-    let bad_entry_new = format!("/api/play/pt/c1.mp4?token={}", fixture.token);
-    assert_legacy_matches_new(&fixture, &bad_entry_old, &bad_entry_new, None).await;
-
-    // 面板状态：带会话。正文含运行时数值，两次请求之间会变化；
-    // 归零这些字段后再比较其余正文，避免秒级边界与后台统计造成抖动。
-    let old_status = get_with_session(&fixture, "/panel/api/status", Some(&session)).await;
-    let new_status = get_with_session(&fixture, "/api/panel/status", Some(&session)).await;
-    assert_eq!(old_status.status(), new_status.status());
-    assert_eq!(
-        header(&old_status, "cache-control"),
-        header(&new_status, "cache-control")
-    );
-    let mut old_body: serde_json::Value =
-        serde_json::from_str(&old_status.text().await.expect("旧正文")).expect("旧 JSON");
-    let mut new_body: serde_json::Value =
-        serde_json::from_str(&new_status.text().await.expect("新正文")).expect("新 JSON");
-    for key in [
-        "uptime_secs",
-        "mem_rss_mb",
-        "cpu_seconds",
-        "host_cpu_percent",
-        "load_avg",
-        "disk_free_mb",
-        "host_net_rx_bytes",
-        "host_net_tx_bytes",
-        "traffic_out_bytes",
+    for path in [
+        "/health",
+        "/panel",
+        "/page/panel",
+        "/panel/api/status",
+        "/sub/nope/playlist.m3u",
+        "/logo/missing.png",
+        "/assets/missing.png",
+        "/l/t/g/c.m3u8",
+        "/unban",
+        "/pm/c1.m3u8",
     ] {
-        if let Some(value) = old_body.get_mut(key) {
-            *value = json!(0);
-        }
-        if let Some(value) = new_body.get_mut(key) {
-            *value = json!(0);
-        }
-    }
-    assert_eq!(old_body, new_body, "/panel/api/status vs /api/panel/status");
-
-    // 从主清单沿变体取第一个 `/media/` 切片。
-    let master = get_with_session(
-        &fixture,
-        &format!("/pm/c1.m3u8?token={}", fixture.token),
-        None,
-    )
-    .await
-    .text()
-    .await
-    .expect("主清单");
-    let variant = master
-        .lines()
-        .find(|line| line.contains("/api/play/pm/c1/video/index.txt"))
-        .expect("变体地址");
-    let media_list = fixture
-        .client
-        .get(variant)
-        .send()
-        .await
-        .expect("变体请求")
-        .text()
-        .await
-        .expect("媒体清单");
-    let media_url = media_list
-        .lines()
-        .find(|line| line.contains("/media/"))
-        .expect("切片地址")
-        .to_string();
-    let old_media_url = media_url.replacen("/media/", "/", 1);
-
-    // 预热：首包 `public`，命中包 `private`。命中后两条路径的头才一致。
-    let warm = fixture
-        .client
-        .get(&media_url)
-        .send()
-        .await
-        .expect("预热切片");
-    assert_eq!(warm.status(), StatusCode::OK);
-    let _ = warm.bytes().await.expect("预热正文");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let probe = fixture
-            .client
-            .get(&media_url)
-            .send()
-            .await
-            .expect("探测切片");
-        assert_eq!(probe.status(), StatusCode::OK);
-        let hit = header(&probe, "cache-control").starts_with("private");
-        let _ = probe.bytes().await.expect("探测正文");
-        if hit {
-            break;
-        }
-        assert!(Instant::now() < deadline, "切片未在限期内写入缓存");
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        let response = fetch(&fixture, path).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "GET {path}");
     }
 
-    assert_legacy_matches_new(&fixture, &old_media_url, &media_url, None).await;
-}
-
-/// 旧 `/subtitle/*` 别名由改写层提供，必须与新面板路径一致。
-#[tokio::test]
-async fn legacy_subtitle_aliases_match_new_paths() {
-    let fixture = fixture().await;
-    let session = login(&fixture).await;
-    let upload = serde_json::json!({
-        "items": [{
-            "name": "legacy-demo.srt",
-            "data": "data:application/x-subrip;base64,MSAwOjAwOjAw"
-        }]
-    });
-
-    // 旧上传别名可用。
     let response = fixture
         .client
-        .post(format!("{}/subtitle/upload", fixture.base))
-        .bearer_auth(&session)
-        .header("content-type", "application/json")
-        .body(upload.to_string())
+        .post(format!("{}/unban", fixture.base))
         .send()
         .await
-        .expect("旧上传");
-    assert_eq!(response.status(), StatusCode::OK);
-    let body: serde_json::Value =
-        serde_json::from_str(&response.text().await.expect("读正文")).expect("JSON");
-    assert_eq!(body["added"][0]["file"], "legacy-demo.srt");
-
-    // 列表 A/B：状态与正文一致。
-    let old_list = get_with_session(&fixture, "/subtitle/list", Some(&session)).await;
-    let new_list = get_with_session(&fixture, "/api/panel/subtitle/list", Some(&session)).await;
-    assert_eq!(old_list.status(), StatusCode::OK);
-    assert_eq!(new_list.status(), StatusCode::OK);
-    assert_eq!(
-        old_list.bytes().await.expect("旧正文"),
-        new_list.bytes().await.expect("新正文")
-    );
-
-    // 下载 A/B。
-    assert_legacy_matches_new(
-        &fixture,
-        "/subtitle/raw/legacy-demo.srt",
-        "/api/panel/subtitle/raw/legacy-demo.srt",
-        Some(&session),
-    )
-    .await;
-
-    // 旧删除别名可用，删除后新路径确认文件已不存在。
-    let response = fixture
-        .client
-        .post(format!("{}/subtitle/remove", fixture.base))
-        .bearer_auth(&session)
-        .header("content-type", "application/json")
-        .body(serde_json::json!({ "file": "legacy-demo.srt" }).to_string())
-        .send()
-        .await
-        .expect("旧删除");
-    assert_eq!(response.status(), StatusCode::OK);
-    let response = get_with_session(
-        &fixture,
-        "/api/panel/subtitle/raw/legacy-demo.srt",
-        Some(&session),
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        .expect("POST 旧解封");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND, "POST /unban");
 }
 
 #[tokio::test]
@@ -2158,7 +1900,7 @@ async fn clearing_epg_output_resets_last_success() {
     let body: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/epg/status", fixture.base))
+            .get(format!("{}/api/panel/epg/status", fixture.base))
             .header("authorization", format!("Bearer {session}"))
             .send()
             .await
@@ -2215,7 +1957,7 @@ async fn epg_enabled_serves_xmltv_and_filters() {
     assert_eq!(playlist.lines().next(), Some(expected.as_str()));
 
     // 面板接口需要会话。
-    let response = fetch(&fixture, "/panel/api/epg/status").await;
+    let response = fetch(&fixture, "/api/panel/epg/status").await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -2275,7 +2017,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
     // 脚本列表、上传、删除。
     let response = fixture
         .client
-        .get(format!("{}/panel/api/epg/scripts", fixture.base))
+        .get(format!("{}/api/panel/epg/scripts", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -2288,7 +2030,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/epg/script", fixture.base))
+        .post(format!("{}/api/panel/epg/script", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(r#"{"name":"demo.py","content":"print('demo')"}"#)
@@ -2299,7 +2041,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
 
     let response = fixture
         .client
-        .get(format!("{}/panel/api/epg/scripts", fixture.base))
+        .get(format!("{}/api/panel/epg/scripts", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -2314,7 +2056,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/epg/script-delete", fixture.base))
+        .post(format!("{}/api/panel/epg/script-delete", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(r#"{"name":"demo.py"}"#)
@@ -2326,7 +2068,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
     // Cron 预览：合法与非法。
     let response = fixture
         .client
-        .post(format!("{}/panel/api/epg/cron-preview", fixture.base))
+        .post(format!("{}/api/panel/epg/cron-preview", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(r#"{"expr":"*/30 * * * *"}"#)
@@ -2347,7 +2089,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/epg/cron-preview", fixture.base))
+        .post(format!("{}/api/panel/epg/cron-preview", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(r#"{"expr":"bad"}"#)
@@ -2361,7 +2103,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
     // 频道节目表包含录制缓冲。
     let response = fixture
         .client
-        .get(format!("{}/panel/api/epg/programmes/c1", fixture.base))
+        .get(format!("{}/api/panel/epg/programmes/c1", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -2381,7 +2123,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
     let response = fixture
         .client
         .get(format!(
-            "{}/panel/api/epg/source-channels/s1?q=未匹配&offset=0&limit=60",
+            "{}/api/panel/epg/source-channels/s1?q=未匹配&offset=0&limit=60",
             fixture.base
         ))
         .header("authorization", &auth)
@@ -2395,7 +2137,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
 
     let response = fixture
         .client
-        .get(format!("{}/panel/api/epg/suggest/pg/c1", fixture.base))
+        .get(format!("{}/api/panel/epg/suggest/pg/c1", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -2411,7 +2153,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
     let response = fixture
         .client
         .get(format!(
-            "{}/panel/api/epg/tz-preview/s1?shift=60",
+            "{}/api/panel/epg/tz-preview/s1?shift=60",
             fixture.base
         ))
         .header("authorization", &auth)
@@ -2426,7 +2168,7 @@ async fn epg_panel_helpers_scripts_programmes_and_sources() {
     // raw 缓存可重新生成，不重新下载。
     let response = fixture
         .client
-        .post(format!("{}/panel/api/epg/regenerate", fixture.base))
+        .post(format!("{}/api/panel/epg/regenerate", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -2443,7 +2185,7 @@ async fn epg_extra_channels_and_public_viewer_toggle() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/epg/extra", fixture.base))
+        .post(format!("{}/api/panel/epg/extra", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(r#"{"action":"add","source_id":"s1","source_channel_id":"unused","out_id":"extra1","out_name":"额外频道"}"#)
@@ -2457,7 +2199,7 @@ async fn epg_extra_channels_and_public_viewer_toggle() {
 
     let response = fixture
         .client
-        .get(format!("{}/panel/api/epg/mappings", fixture.base))
+        .get(format!("{}/api/panel/epg/mappings", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -2470,7 +2212,7 @@ async fn epg_extra_channels_and_public_viewer_toggle() {
     let body: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/epg/programmes/extra1", fixture.base))
+            .get(format!("{}/api/panel/epg/programmes/extra1", fixture.base))
             .header("authorization", &auth)
             .send()
             .await
@@ -2488,7 +2230,7 @@ async fn epg_extra_channels_and_public_viewer_toggle() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/epg/extra", fixture.base))
+        .post(format!("{}/api/panel/epg/extra", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(r#"{"action":"remove","source_id":"s1","source_channel_id":"unused"}"#)
@@ -2513,7 +2255,10 @@ async fn playseek_is_forwarded_to_upstream() {
     // 代理：上游收到 playseek，响应带注释行。
     let response = fetch(
         &fixture,
-        &format!("/pg/c1.m3u8?token={}&playseek={seek}", fixture.token),
+        &format!(
+            "/api/play/pg/c1.m3u8?token={}&playseek={seek}",
+            fixture.token
+        ),
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -2523,7 +2268,10 @@ async fn playseek_is_forwarded_to_upstream() {
     // 透传：跳转地址带 playseek。
     let response = fetch(
         &fixture,
-        &format!("/pt/c1.m3u8?token={}&playseek={seek}", fixture.token),
+        &format!(
+            "/api/play/pt/c1.m3u8?token={}&playseek={seek}",
+            fixture.token
+        ),
     )
     .await;
     assert_eq!(response.status(), StatusCode::FOUND);
@@ -2563,34 +2311,47 @@ async fn media_route_rejects_manifest_paths() {
 #[tokio::test]
 async fn disguised_segment_validation_matches_target() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     let body = response.text().await.expect("读正文");
     let url = media_lines(&body)[0].to_string();
     let tail = url.rsplit('/').next().expect("取文件名").to_string();
     let (prefix, rest) = tail.split_once('_').expect("应含下划线");
     let suffix = rest.split_once('.').expect("应含扩展名").0;
-    let path = format!("/pg/c1/{tail}");
+    let path = format!("/media/pg/c1/{tail}");
     let error_url = "http://placeholder.test/mistake.mp4";
 
     // 基线可播。
     assert_eq!(fetch(&fixture, &path).await.status(), StatusCode::OK);
 
     let cases: [(&str, String); 9] = [
-        ("缺 <P>", format!("/pg/c1/{suffix}.jpg")),
-        ("截短 <P>", format!("/pg/c1/ea86_{suffix}.jpg")),
-        ("错 <P>", format!("/pg/c1/0000000000000000_{suffix}.jpg")),
+        ("缺 <P>", format!("/media/pg/c1/{suffix}.jpg")),
+        ("截短 <P>", format!("/media/pg/c1/ea86_{suffix}.jpg")),
+        (
+            "错 <P>",
+            format!("/media/pg/c1/0000000000000000_{suffix}.jpg"),
+        ),
         (
             "大写 <P>",
-            format!("/pg/c1/{}_{suffix}.jpg", prefix.to_uppercase()),
+            format!("/media/pg/c1/{}_{suffix}.jpg", prefix.to_uppercase()),
         ),
         (
             "错 <S>",
-            format!("/pg/c1/{prefix}_00000000000000000000000000000000.jpg"),
+            format!("/media/pg/c1/{prefix}_00000000000000000000000000000000.jpg"),
         ),
-        ("扩展名两点", format!("/pg/c1/{prefix}_{suffix}.a.b")),
-        ("双下划线", format!("/pg/c1/{prefix}__{suffix}.jpg")),
-        ("前缀前多一段", format!("/pg/c1/x_{prefix}_{suffix}.jpg")),
-        ("前缀后多一段", format!("/pg/c1/{prefix}_{suffix}_x.jpg")),
+        ("扩展名两点", format!("/media/pg/c1/{prefix}_{suffix}.a.b")),
+        ("双下划线", format!("/media/pg/c1/{prefix}__{suffix}.jpg")),
+        (
+            "前缀前多一段",
+            format!("/media/pg/c1/x_{prefix}_{suffix}.jpg"),
+        ),
+        (
+            "前缀后多一段",
+            format!("/media/pg/c1/{prefix}_{suffix}_x.jpg"),
+        ),
     ];
     for (label, path) in cases {
         let response = fetch(&fixture, &path).await;
@@ -2600,7 +2361,7 @@ async fn disguised_segment_validation_matches_target() {
 
     // 扩展名不参与校验（S-DIS-05）；整段扩展名可省略。
     for ext in ["", ".", ".png", ".ts", ".txt"] {
-        let response = fetch(&fixture, &format!("/pg/c1/{prefix}_{suffix}{ext}")).await;
+        let response = fetch(&fixture, &format!("/media/pg/c1/{prefix}_{suffix}{ext}")).await;
         assert_eq!(response.status(), StatusCode::OK, "ext={ext} 应可播");
     }
 }
@@ -2611,7 +2372,11 @@ async fn non_proxy_modes_have_no_disguised_segment_surface() {
     let fixture = fixture().await;
     // `pt` 是 passthrough，`badlist` 是 proxy 但上游坏；先确认 `ar`（归档）之外的
     // passthrough 组在子路径上都是 not_found。
-    for path in ["/pt/c1/video/index.txt", "/pt/c1/foo.jpg", "/pt/c1/a/b"] {
+    for path in [
+        "/api/play/pt/c1/video/index.txt",
+        "/media/pt/c1/foo.jpg",
+        "/media/pt/c1/a/b",
+    ] {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::FOUND, "{path}");
         assert_eq!(
@@ -2627,7 +2392,11 @@ async fn non_proxy_modes_have_no_disguised_segment_surface() {
 async fn entry_extension_allowlist() {
     let fixture = fixture().await;
     for ext in ["", ".m3u8", ".mpd", ".txt"] {
-        let response = fetch(&fixture, &format!("/pt/c1{ext}?token={}", fixture.token)).await;
+        let response = fetch(
+            &fixture,
+            &format!("/api/play/pt/c1{ext}?token={}", fixture.token),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::FOUND, "pt/c1{ext}");
         assert_eq!(
             header(&response, "location"),
@@ -2636,7 +2405,11 @@ async fn entry_extension_allowlist() {
         );
     }
     for ext in [".mp4", ".ts", ".M3U8", ".", ".m3u8.txt"] {
-        let response = fetch(&fixture, &format!("/pt/c1{ext}?token={}", fixture.token)).await;
+        let response = fetch(
+            &fixture,
+            &format!("/api/play/pt/c1{ext}?token={}", fixture.token),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::FOUND, "pt/c1{ext} 应 302");
         assert_eq!(
             header(&response, "location"),
@@ -2662,7 +2435,7 @@ async fn epg_manual_mapping_and_match_report() {
     };
 
     let response = post(
-        "/panel/api/epg/mapping",
+        "/api/panel/epg/mapping",
         serde_json::json!({
             "gid": "pg", "cid": "c1", "source_id": "s1", "source_channel_id": "unused"
         }),
@@ -2674,7 +2447,7 @@ async fn epg_manual_mapping_and_match_report() {
     let mappings: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/epg/mappings", fixture.base))
+            .get(format!("{}/api/panel/epg/mappings", fixture.base))
             .header("authorization", auth.clone())
             .send()
             .await
@@ -2688,7 +2461,7 @@ async fn epg_manual_mapping_and_match_report() {
     assert_eq!(mappings["mappings"]["pg/c1"]["source_channel_id"], "unused");
 
     assert_eq!(
-        post("/panel/api/epg/refresh", serde_json::json!({}))
+        post("/api/panel/epg/refresh", serde_json::json!({}))
             .await
             .expect("刷新")
             .status(),
@@ -2706,7 +2479,7 @@ async fn epg_manual_mapping_and_match_report() {
     let mappings: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/epg/mappings", fixture.base))
+            .get(format!("{}/api/panel/epg/mappings", fixture.base))
             .header("authorization", auth.clone())
             .send()
             .await
@@ -2723,7 +2496,7 @@ async fn epg_manual_mapping_and_match_report() {
 
     let report = fixture
         .client
-        .get(format!("{}/panel/api/epg/match-report", fixture.base))
+        .get(format!("{}/api/panel/epg/match-report", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -2741,7 +2514,7 @@ async fn epg_manual_mapping_and_match_report() {
     // 清空映射后回到自动匹配。
     assert_eq!(
         post(
-            "/panel/api/epg/mapping",
+            "/api/panel/epg/mapping",
             serde_json::json!({"gid":"pg","cid":"c1","source_id":"","source_channel_id":""})
         )
         .await
@@ -2750,7 +2523,7 @@ async fn epg_manual_mapping_and_match_report() {
         StatusCode::OK
     );
     assert_eq!(
-        post("/panel/api/epg/refresh", serde_json::json!({}))
+        post("/api/panel/epg/refresh", serde_json::json!({}))
             .await
             .expect("刷新")
             .status(),
@@ -2784,19 +2557,19 @@ async fn epg_panel_api_and_public_removal() {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
-    // `/epg/api/*` 落进播放通配路由，返回占位跳转而不是节目单。
+    // `/epg/api/*` 公开接口已删除，旧路径返回 404。
     for path in [
         "/epg/api/channels",
         "/epg/api/programmes/c1",
         "/epg/api/search?q=新闻",
     ] {
         let response = fetch(&fixture, path).await;
-        assert_ne!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
 
     // 面板频道列表。
     let body: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/epg/viewer-channels")
+        &get("/api/panel/epg/viewer-channels")
             .await
             .expect("频道")
             .text()
@@ -2817,7 +2590,7 @@ async fn epg_panel_api_and_public_removal() {
 
     // 面板节目表。
     let body: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/epg/programmes/c1")
+        &get("/api/panel/epg/programmes/c1")
             .await
             .expect("节目表")
             .text()
@@ -2835,7 +2608,7 @@ async fn epg_panel_api_and_public_removal() {
 
     // 频道 ID 大小写敏感。
     let body: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/epg/programmes/C1")
+        &get("/api/panel/epg/programmes/C1")
             .await
             .expect("节目表")
             .text()
@@ -2847,7 +2620,7 @@ async fn epg_panel_api_and_public_removal() {
 
     // 面板搜索只匹配节目标题。
     let body: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/epg/search?q=新闻")
+        &get("/api/panel/epg/search?q=新闻")
             .await
             .expect("搜索")
             .text()
@@ -2862,7 +2635,7 @@ async fn epg_panel_api_and_public_removal() {
     assert_eq!(body["tz_offset_hours"], 8);
 
     let body: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/epg/search?q=媒体")
+        &get("/api/panel/epg/search?q=媒体")
             .await
             .expect("搜索")
             .text()
@@ -2874,7 +2647,7 @@ async fn epg_panel_api_and_public_removal() {
     assert_eq!(body["programmes"].as_array().map(Vec::len), Some(0));
 
     let body: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/epg/search?q=早间")
+        &get("/api/panel/epg/search?q=早间")
             .await
             .expect("搜索")
             .text()
@@ -2885,7 +2658,7 @@ async fn epg_panel_api_and_public_removal() {
     assert_eq!(body["programmes"].as_array().map(Vec::len), Some(0));
 
     // 未登录 → 401。
-    let response = fetch(&fixture, "/panel/api/epg/viewer-channels").await;
+    let response = fetch(&fixture, "/api/panel/epg/viewer-channels").await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     // EPG 关闭时面板接口返回 404。
@@ -2893,7 +2666,7 @@ async fn epg_panel_api_and_public_removal() {
     let session = login(&disabled).await;
     let response = disabled
         .client
-        .get(format!("{}/panel/api/epg/viewer-channels", disabled.base))
+        .get(format!("{}/api/panel/epg/viewer-channels", disabled.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -2908,7 +2681,7 @@ async fn epg_panel_api_and_public_removal() {
 async fn login(fixture: &Fixture) -> String {
     let response = fixture
         .client
-        .post(format!("{}/panel/api/login", fixture.base))
+        .post(format!("{}/api/panel/login", fixture.base))
         .header("content-type", "application/json")
         .body(r#"{"username":"admin","password":"admin"}"#)
         .send()
@@ -2938,7 +2711,7 @@ async fn whoami_reports_last_forwarded_ip() {
     // 未登录 → 401。
     let response = fixture
         .client
-        .get(format!("{}/unban/whoami", fixture.base))
+        .get(format!("{}/api/unban/whoami", fixture.base))
         .header("x-forwarded-for", "1.2.3.4, 5.6.7.8")
         .send()
         .await
@@ -2947,7 +2720,7 @@ async fn whoami_reports_last_forwarded_ip() {
 
     let response = fixture
         .client
-        .get(format!("{}/unban/whoami", fixture.base))
+        .get(format!("{}/api/unban/whoami", fixture.base))
         .header("x-forwarded-for", "1.2.3.4, 5.6.7.8")
         .header("authorization", &auth)
         .send()
@@ -2962,7 +2735,7 @@ async fn whoami_reports_last_forwarded_ip() {
 
     let response = fixture
         .client
-        .post(format!("{}/unban", fixture.base))
+        .post(format!("{}/api/unban", fixture.base))
         .header("x-forwarded-for", "5.6.7.8")
         .header("authorization", &auth)
         .send()
@@ -3004,7 +2777,7 @@ async fn group_import_adds_skips_and_overwrites() {
     // 未登录 → 401。
     let response = fixture
         .client
-        .post(format!("{}/panel/api/groups/import", fixture.base))
+        .post(format!("{}/api/panel/groups/import", fixture.base))
         .header("content-type", "application/json")
         .body(body.to_string())
         .send()
@@ -3013,7 +2786,7 @@ async fn group_import_adds_skips_and_overwrites() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     // 首次导入。
-    let response = post("/panel/api/groups/import", &body).await.expect("请求");
+    let response = post("/api/panel/groups/import", &body).await.expect("请求");
     assert_eq!(response.status(), StatusCode::OK);
     let result: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
@@ -3030,7 +2803,7 @@ async fn group_import_adds_skips_and_overwrites() {
     assert!(playlist.contains(&format!("/api/play/token/{}/imp/c1.m3u8", fixture.token)));
 
     // 重复导入 → 跳过。
-    let response = post("/panel/api/groups/import", &body).await.expect("请求");
+    let response = post("/api/panel/groups/import", &body).await.expect("请求");
     let result: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     assert_eq!(result["imported"], 0);
@@ -3039,7 +2812,7 @@ async fn group_import_adds_skips_and_overwrites() {
     // 强制导入 → 覆盖。
     let mut renamed = body.clone();
     renamed[0]["name"] = serde_json::json!("覆盖组");
-    let response = post("/panel/api/groups/import/force", &renamed)
+    let response = post("/api/panel/groups/import/force", &renamed)
         .await
         .expect("请求");
     let result: serde_json::Value =
@@ -3053,7 +2826,7 @@ async fn group_import_adds_skips_and_overwrites() {
     assert!(playlist.contains("覆盖组"));
 
     // 非数组 → 400。
-    let response = post("/panel/api/groups/import", &serde_json::json!({}))
+    let response = post("/api/panel/groups/import", &serde_json::json!({}))
         .await
         .expect("请求");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -3084,7 +2857,7 @@ async fn m3u_import_creates_groups_and_channels() {
         http://up/3.mpd\n";
 
     let body = serde_json::json!({ "text": text, "mode": "append", "group_mode": "auto" });
-    let response = post("/panel/api/groups/import/m3u", &body)
+    let response = post("/api/panel/groups/import/m3u", &body)
         .await
         .expect("请求");
     assert_eq!(response.status(), StatusCode::OK);
@@ -3098,7 +2871,7 @@ async fn m3u_import_creates_groups_and_channels() {
     // 落库检查：auto 按扩展名判定模式，tvg-id 作为频道 id。
     let response = fixture
         .client
-        .get(format!("{}/panel/api/config", fixture.base))
+        .get(format!("{}/api/panel/config", fixture.base))
         .header("authorization", format!("Bearer {token}"))
         .send()
         .await
@@ -3127,7 +2900,7 @@ async fn m3u_import_creates_groups_and_channels() {
     assert_eq!(group_d["format"], "mpd");
 
     // append 再导入 → 全部跳过。
-    let response = post("/panel/api/groups/import/m3u", &body)
+    let response = post("/api/panel/groups/import/m3u", &body)
         .await
         .expect("请求");
     let result: serde_json::Value =
@@ -3140,7 +2913,7 @@ async fn m3u_import_creates_groups_and_channels() {
         "mode": "merge",
         "group_mode": "auto"
     });
-    let response = post("/panel/api/groups/import/m3u", &merge)
+    let response = post("/api/panel/groups/import/m3u", &merge)
         .await
         .expect("请求");
     let result: serde_json::Value =
@@ -3148,7 +2921,7 @@ async fn m3u_import_creates_groups_and_channels() {
     assert_eq!(result["merged_channels"], 1);
 
     // replace 整体替换。
-    let response = post("/panel/api/groups/import/m3u", &merge)
+    let response = post("/api/panel/groups/import/m3u", &merge)
         .await
         .expect("请求");
     let _ = response;
@@ -3157,7 +2930,7 @@ async fn m3u_import_creates_groups_and_channels() {
         "mode": "replace",
         "group_mode": "auto"
     });
-    let response = post("/panel/api/groups/import/m3u", &replace)
+    let response = post("/api/panel/groups/import/m3u", &replace)
         .await
         .expect("请求");
     let result: serde_json::Value =
@@ -3166,7 +2939,7 @@ async fn m3u_import_creates_groups_and_channels() {
 
     // 非法 mode → 400。
     let bad = serde_json::json!({ "text": text, "mode": "upsert" });
-    let response = post("/panel/api/groups/import/m3u", &bad)
+    let response = post("/api/panel/groups/import/m3u", &bad)
         .await
         .expect("请求");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -3181,7 +2954,7 @@ async fn offline_switch_round_trips_through_group_api() {
     // 分组开关。
     let response = fixture
         .client
-        .put(format!("{}/panel/api/groups/pg", fixture.base))
+        .put(format!("{}/api/panel/groups/pg", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(json!({ "offline_on_fail": true }).to_string())
@@ -3193,7 +2966,7 @@ async fn offline_switch_round_trips_through_group_api() {
     // 频道显式关闭。
     let response = fixture
         .client
-        .put(format!("{}/panel/api/groups/pg/channels/c1", fixture.base))
+        .put(format!("{}/api/panel/groups/pg/channels/c1", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(json!({ "offline_on_fail": false }).to_string())
@@ -3205,7 +2978,7 @@ async fn offline_switch_round_trips_through_group_api() {
     let export = |fixture: &Fixture, auth: &str| {
         fixture
             .client
-            .get(format!("{}/panel/api/groups/export", fixture.base))
+            .get(format!("{}/api/panel/groups/export", fixture.base))
             .header("authorization", auth)
             .send()
     };
@@ -3230,7 +3003,7 @@ async fn offline_switch_round_trips_through_group_api() {
     // `null` 清空频道覆盖，回到继承分组。
     let response = fixture
         .client
-        .put(format!("{}/panel/api/groups/pg/channels/c1", fixture.base))
+        .put(format!("{}/api/panel/groups/pg/channels/c1", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(json!({ "offline_on_fail": null }).to_string())
@@ -3273,7 +3046,7 @@ async fn logo_library_upload_serve_and_delete() {
     let upload = |body: &serde_json::Value| {
         fixture
             .client
-            .post(format!("{}/panel/api/logo/upload", fixture.base))
+            .post(format!("{}/api/panel/logo/upload", fixture.base))
             .header("content-type", "application/json")
             .header("authorization", format!("Bearer {token}"))
             .body(body.to_string())
@@ -3283,7 +3056,7 @@ async fn logo_library_upload_serve_and_delete() {
     // 未登录 → 401。
     let response = fixture
         .client
-        .post(format!("{}/panel/api/logo/upload", fixture.base))
+        .post(format!("{}/api/panel/logo/upload", fixture.base))
         .header("content-type", "application/json")
         .body(body.to_string())
         .send()
@@ -3300,10 +3073,14 @@ async fn logo_library_upload_serve_and_delete() {
 
     // 公开列表已删除；面板列表需要会话。
     let response = fetch(&fixture, "/logo/api/list").await;
-    assert_ne!(response.status(), StatusCode::OK, "公开台标列表应已删除");
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "公开台标列表应已删除"
+    );
     let response = fixture
         .client
-        .get(format!("{}/panel/api/logo/list", fixture.base))
+        .get(format!("{}/api/panel/logo/list", fixture.base))
         .header("authorization", format!("Bearer {token}"))
         .send()
         .await
@@ -3314,23 +3091,19 @@ async fn logo_library_upload_serve_and_delete() {
     assert_eq!(list["count"], 1);
     assert_eq!(list["logos"][0]["url"], "/static/logo/cctv1.png");
 
-    // 公开取图：新旧前缀都可用，响应一致。
-    let response = fetch(&fixture, "/logo/cctv1.png").await;
+    // 公开取图只走 `/static/logo` 前缀。
+    let response = fetch(&fixture, "/static/logo/cctv1.png").await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(header(&response, "content-type"), "image/png");
     assert_eq!(header(&response, "cache-control"), "public, max-age=3600");
     let bytes = response.bytes().await.expect("读字节");
     assert_eq!(&bytes[..4], &[0x89, 0x50, 0x4e, 0x47], "应为 PNG 魔数");
-    let response = fetch(&fixture, "/static/logo/cctv1.png").await;
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(header(&response, "content-type"), "image/png");
-    assert_eq!(header(&response, "cache-control"), "public, max-age=3600");
 
     // 缺文件与越界名 → 404。
     for path in [
-        "/logo/missing.png",
-        "/logo/..%2F..%2Ftv-buddy.db",
-        "/logo/evil.exe",
+        "/static/logo/missing.png",
+        "/static/logo/..%2F..%2Ftv-buddy.db",
+        "/static/logo/evil.exe",
     ] {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
@@ -3339,7 +3112,7 @@ async fn logo_library_upload_serve_and_delete() {
     // 动效请求校验：quality 必须是字符串。
     let response = fixture
         .client
-        .post(format!("{}/panel/api/logo/animate", fixture.base))
+        .post(format!("{}/api/panel/logo/animate", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .body(
@@ -3361,7 +3134,7 @@ async fn logo_library_upload_serve_and_delete() {
     std::fs::write(&original, b"static-original").expect("写原图");
     let response = fixture
         .client
-        .post(format!("{}/panel/api/logo/restore", fixture.base))
+        .post(format!("{}/api/panel/logo/restore", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .body(serde_json::json!({ "file": "cctv1.png" }).to_string())
@@ -3375,7 +3148,7 @@ async fn logo_library_upload_serve_and_delete() {
     );
     let response = fixture
         .client
-        .post(format!("{}/panel/api/logo/restore", fixture.base))
+        .post(format!("{}/api/panel/logo/restore", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .body(serde_json::json!({ "file": "missing.png" }).to_string())
@@ -3387,7 +3160,7 @@ async fn logo_library_upload_serve_and_delete() {
     // 删除。
     let response = fixture
         .client
-        .post(format!("{}/panel/api/logo/delete", fixture.base))
+        .post(format!("{}/api/panel/logo/delete", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .body(serde_json::json!({ "file": "cctv1.png" }).to_string())
@@ -3396,7 +3169,7 @@ async fn logo_library_upload_serve_and_delete() {
         .expect("请求");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        fetch(&fixture, "/logo/cctv1.png").await.status(),
+        fetch(&fixture, "/static/logo/cctv1.png").await.status(),
         StatusCode::NOT_FOUND
     );
 }
@@ -3442,7 +3215,7 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
 
     let response = fixture
         .client
-        .get(format!("{}/panel/api/assets/list", fixture.base))
+        .get(format!("{}/api/panel/assets/list", fixture.base))
         .header("authorization", format!("Bearer {token}"))
         .send()
         .await
@@ -3466,7 +3239,7 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
     // 候选列表读取同一份 map，也必须归一化。
     let response = fixture
         .client
-        .get(format!("{}/panel/api/assets/candidates", fixture.base))
+        .get(format!("{}/api/panel/assets/candidates", fixture.base))
         .header("authorization", format!("Bearer {token}"))
         .send()
         .await
@@ -3488,7 +3261,7 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/assets/convert", fixture.base))
+        .post(format!("{}/api/panel/assets/convert", fixture.base))
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
         .body(serde_json::json!({ "url": "ftp://example/x.mp4" }).to_string())
@@ -3497,8 +3270,6 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
         .expect("转换请求");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let response = fetch(&fixture, "/assets/convert/demo/index.m3u8").await;
-    assert_eq!(response.status(), StatusCode::OK);
     let response = fetch(&fixture, "/static/assets/convert/demo/index.m3u8").await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -3509,7 +3280,7 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/assets/remove", fixture.base))
+        .post(format!("{}/api/panel/assets/remove", fixture.base))
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
         .body(serde_json::json!({ "url": "http://placeholder.test/404.mp4" }).to_string())
@@ -3517,12 +3288,6 @@ async fn assets_map_lists_serves_and_removes_local_hls() {
         .await
         .expect("移除资源");
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        fetch(&fixture, "/assets/convert/demo/index.m3u8")
-            .await
-            .status(),
-        StatusCode::NOT_FOUND
-    );
     assert_eq!(
         fetch(&fixture, "/static/assets/convert/demo/index.m3u8")
             .await
@@ -3540,7 +3305,7 @@ async fn backup_and_restore_roundtrip() {
     // 备份。
     let response = fixture
         .client
-        .get(format!("{}/panel/api/backup?include=all", fixture.base))
+        .get(format!("{}/api/panel/backup?include=all", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -3555,7 +3320,7 @@ async fn backup_and_restore_roundtrip() {
     let import = serde_json::json!([{ "id": "tmp", "name": "临时组", "mode": "proxy" }]);
     let response = fixture
         .client
-        .post(format!("{}/panel/api/groups/import", fixture.base))
+        .post(format!("{}/api/panel/groups/import", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", &auth)
         .body(import.to_string())
@@ -3566,7 +3331,7 @@ async fn backup_and_restore_roundtrip() {
     let groups = |fixture: &Fixture| {
         let request = fixture
             .client
-            .get(format!("{}/panel/api/config", fixture.base))
+            .get(format!("{}/api/panel/config", fixture.base))
             .header("authorization", &auth);
         request.send()
     };
@@ -3591,7 +3356,7 @@ async fn backup_and_restore_roundtrip() {
     // 恢复。
     let response = fixture
         .client
-        .post(format!("{}/panel/api/restore", fixture.base))
+        .post(format!("{}/api/panel/restore", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/gzip")
         .body(data)
@@ -3626,7 +3391,7 @@ async fn backup_and_restore_roundtrip() {
     // 非法内容 → 400。
     let response = fixture
         .client
-        .post(format!("{}/panel/api/restore", fixture.base))
+        .post(format!("{}/api/panel/restore", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/gzip")
         .body("not gzip")
@@ -3639,7 +3404,11 @@ async fn backup_and_restore_roundtrip() {
 #[tokio::test]
 async fn channel_headers_are_sent_upstream() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.expect("读正文");
     assert!(body.contains("# x-token=abc123"), "{body}");
@@ -3659,7 +3428,7 @@ async fn self_service_unban_respects_quota() {
     let ban = |ip: &str| {
         fixture
             .client
-            .post(format!("{}/panel/api/security/ip/ban", fixture.base))
+            .post(format!("{}/api/panel/security/ip/ban", fixture.base))
             .header("content-type", "application/json")
             .header("authorization", &auth)
             .body(format!(r#"{{"ip":"{ip}","seconds":60}}"#))
@@ -3667,7 +3436,7 @@ async fn self_service_unban_respects_quota() {
     let whoami = || {
         fixture
             .client
-            .get(format!("{}/unban/whoami", fixture.base))
+            .get(format!("{}/api/unban/whoami", fixture.base))
             .header("x-forwarded-for", "8.8.8.8")
             .header("authorization", &auth)
             .send()
@@ -3676,7 +3445,7 @@ async fn self_service_unban_respects_quota() {
     // 未登录不能解封。
     let response = fixture
         .client
-        .post(format!("{}/unban", fixture.base))
+        .post(format!("{}/api/unban", fixture.base))
         .header("x-forwarded-for", "8.8.8.8")
         .send()
         .await
@@ -3686,7 +3455,7 @@ async fn self_service_unban_respects_quota() {
     // 未封禁时只报告状态，不消耗配额。
     let response = fixture
         .client
-        .post(format!("{}/unban", fixture.base))
+        .post(format!("{}/api/unban", fixture.base))
         .header("x-forwarded-for", "8.8.8.8")
         .header("authorization", &auth)
         .send()
@@ -3712,7 +3481,7 @@ async fn self_service_unban_respects_quota() {
         // 封禁期内仍可打开解封页。
         let response = fixture
             .client
-            .get(format!("{}/unban", fixture.base))
+            .get(format!("{}/page/unban", fixture.base))
             .header("x-forwarded-for", "8.8.8.8")
             .send()
             .await
@@ -3721,7 +3490,7 @@ async fn self_service_unban_respects_quota() {
 
         let response = fixture
             .client
-            .post(format!("{}/unban", fixture.base))
+            .post(format!("{}/api/unban", fixture.base))
             .header("x-forwarded-for", "8.8.8.8")
             .header("authorization", &auth)
             .send()
@@ -3746,7 +3515,7 @@ async fn self_service_unban_respects_quota() {
     );
     let response = fixture
         .client
-        .post(format!("{}/unban", fixture.base))
+        .post(format!("{}/api/unban", fixture.base))
         .header("x-forwarded-for", "8.8.8.8")
         .header("authorization", &auth)
         .send()
@@ -3774,7 +3543,7 @@ async fn login_locks_after_repeated_failures() {
     for _ in 0..21 {
         let response = fixture
             .client
-            .post(format!("{}/panel/api/login", fixture.base))
+            .post(format!("{}/api/panel/login", fixture.base))
             .header("content-type", "application/json")
             .body(r#"{"username":"admin","password":"wrong"}"#)
             .send()
@@ -3784,7 +3553,7 @@ async fn login_locks_after_repeated_failures() {
     }
     let response = fixture
         .client
-        .post(format!("{}/panel/api/login", fixture.base))
+        .post(format!("{}/api/panel/login", fixture.base))
         .header("content-type", "application/json")
         .body(r#"{"username":"admin","password":"admin"}"#)
         .send()
@@ -3799,7 +3568,7 @@ async fn login_locks_after_repeated_failures() {
     // 既有会话不受登录锁影响。
     let response = fixture
         .client
-        .get(format!("{}/panel/api/status", fixture.base))
+        .get(format!("{}/api/panel/status", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -3813,7 +3582,7 @@ async fn link_info_matches_target_shape() {
     let session = login(&fixture).await;
     let response = fixture
         .client
-        .get(format!("{}/panel/api/link-info", fixture.base))
+        .get(format!("{}/api/panel/link-info", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -3828,7 +3597,7 @@ async fn link_info_matches_target_shape() {
     // 全局播放令牌已废弃：字段保留，值恒为空（docs/design/09-users-and-devices.md §9.2）。
     assert_eq!(body["token"], "");
 
-    let response = fetch(&fixture, "/panel/api/link-info").await;
+    let response = fetch(&fixture, "/api/panel/link-info").await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -3846,11 +3615,11 @@ async fn security_token_rotation_and_ip_ban() {
     };
 
     // 全局播放令牌已废弃：两个端点都不存在。
-    let response = panel("/panel/api/security/token").await.expect("请求");
+    let response = panel("/api/panel/security/token").await.expect("请求");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let response = fixture
         .client
-        .post(format!("{}/panel/api/security/token/rotate", fixture.base))
+        .post(format!("{}/api/panel/security/token/rotate", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -3870,7 +3639,7 @@ async fn security_token_rotation_and_ip_ban() {
     // 封禁后用同一地址请求 → 403。
     let response = fixture
         .client
-        .post(format!("{}/panel/api/security/ip/ban", fixture.base))
+        .post(format!("{}/api/panel/security/ip/ban", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", &auth)
         .body(r#"{"ip":"7.7.7.7","seconds":60}"#)
@@ -3890,7 +3659,7 @@ async fn security_token_rotation_and_ip_ban() {
     // 面板面不受封禁影响（未登录仍是 401）。
     let response = fixture
         .client
-        .get(format!("{}/panel/api/status", fixture.base))
+        .get(format!("{}/api/panel/status", fixture.base))
         .header("x-forwarded-for", "7.7.7.7")
         .send()
         .await
@@ -3908,7 +3677,7 @@ async fn security_token_rotation_and_ip_ban() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     // 统计反映封禁状态。
-    let response = panel("/panel/api/security/ip/stats").await.expect("请求");
+    let response = panel("/api/panel/security/ip/stats").await.expect("请求");
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     assert!(body["banned"].as_u64().expect("banned") >= 1);
@@ -3924,7 +3693,7 @@ async fn security_token_rotation_and_ip_ban() {
     // 解封后恢复。
     let response = fixture
         .client
-        .post(format!("{}/panel/api/security/ip/unban", fixture.base))
+        .post(format!("{}/api/panel/security/ip/unban", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", &auth)
         .body(r#"{"ip":"7.7.7.7"}"#)
@@ -3993,7 +3762,7 @@ async fn subs_preview_supports_wildcards() {
     });
     let response = fixture
         .client
-        .post(format!("{}/panel/api/subs/preview", fixture.base))
+        .post(format!("{}/api/panel/subs/preview", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(request.to_string())
@@ -4022,7 +3791,7 @@ async fn playlist_dedups_urls_across_sources() {
     let status: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/subs/status", fixture.base))
+            .get(format!("{}/api/panel/subs/status", fixture.base))
             .header("authorization", &auth)
             .send()
             .await
@@ -4081,7 +3850,11 @@ async fn channel_proxy_is_used_for_upstream() {
         r#"{{"groups":[{{"id":"px","name":"代理组","mode":"proxy","access":"open","proxy":{{"kind":"http","addr":"{proxy}"}},"channels":[{{"id":"c1","name":"代理频道","url":"{{upstream}}/live.m3u8"}}]}}]}}"#
     );
     let fixture = fixture_with_extra(&extra).await;
-    let response = fetch(&fixture, &format!("/px/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/px/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert!(counter.load(Ordering::SeqCst) > 0, "上游请求应经过频道代理");
 }
@@ -4094,14 +3867,14 @@ async fn subs_status_lists_configured_sources() {
     let status = |fixture: &Fixture, auth: &str| {
         fixture
             .client
-            .get(format!("{}/subs/status", fixture.base))
+            .get(format!("{}/api/panel/subs/status", fixture.base))
             .header("authorization", auth)
             .send()
     };
 
     // 未登录 → 401。
     assert_eq!(
-        fetch(&fixture, "/subs/status").await.status(),
+        fetch(&fixture, "/api/panel/subs/status").await.status(),
         StatusCode::UNAUTHORIZED
     );
 
@@ -4142,15 +3915,15 @@ async fn stats_ignore_unknown_channels_and_deleted_groups() {
 
     // 路径统计只认配置里的分组与频道。未知 cid 不登记。
     fetch(&fixture, "/pg").await;
-    fetch(&fixture, "/pg/c1").await;
-    fetch(&fixture, "/pg/unknown").await;
+    fetch(&fixture, "/api/play/pg/c1").await;
+    fetch(&fixture, "/api/play/pg/unknown").await;
     assert!(fixture.state.channel_configured("pg/c1"));
     assert!(!fixture.state.channel_configured("pg/unknown"));
 
     let stats = |fixture: &Fixture, auth: &str| {
         fixture
             .client
-            .get(format!("{}/panel/api/stats", fixture.base))
+            .get(format!("{}/api/panel/stats", fixture.base))
             .header("authorization", auth)
             .send()
     };
@@ -4172,7 +3945,7 @@ async fn stats_ignore_unknown_channels_and_deleted_groups() {
     // 删除分组后，统计响应和频道校验集都不再包含旧键。
     let response = fixture
         .client
-        .delete(format!("{}/panel/api/groups/pg", fixture.base))
+        .delete(format!("{}/api/panel/groups/pg", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -4199,7 +3972,7 @@ async fn stats_ignore_unknown_channels_and_deleted_groups() {
 #[tokio::test]
 async fn panel_subs_aliases_require_session_and_share_logic() {
     let fixture = fixture().await;
-    let path = format!("{}/panel/api/subs/preview", fixture.base);
+    let path = format!("{}/api/panel/subs/preview", fixture.base);
     let body = serde_json::json!({
         "source": {
             "url": format!("{}/extra.m3u8", fixture.upstream),
@@ -4240,7 +4013,7 @@ async fn subs_groups_lists_upstream_groups() {
     let auth = format!("Bearer {}", login(&fixture).await);
     let response = fixture
         .client
-        .post(format!("{}/subs/groups", fixture.base))
+        .post(format!("{}/api/panel/subs/groups", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "url": format!("{}/extra.m3u8", fixture.upstream) }).to_string())
@@ -4262,7 +4035,7 @@ async fn subs_preview_applies_group_map_and_filters() {
     let auth = format!("Bearer {}", login(&fixture).await);
     let response = fixture
         .client
-        .post(format!("{}/subs/preview", fixture.base))
+        .post(format!("{}/api/panel/subs/preview", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(
@@ -4299,7 +4072,7 @@ async fn subs_preview_drops_mapped_group_and_rejects_bad_url() {
     let auth = format!("Bearer {}", login(&fixture).await);
     let response = fixture
         .client
-        .post(format!("{}/subs/preview", fixture.base))
+        .post(format!("{}/api/panel/subs/preview", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(
@@ -4325,7 +4098,7 @@ async fn subs_preview_drops_mapped_group_and_rejects_bad_url() {
 
     let response = fixture
         .client
-        .post(format!("{}/subs/preview", fixture.base))
+        .post(format!("{}/api/panel/subs/preview", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(
@@ -4344,7 +4117,7 @@ async fn subs_preview_drops_mapped_group_and_rejects_bad_url() {
 
     let response = fixture
         .client
-        .post(format!("{}/subs/preview", fixture.base))
+        .post(format!("{}/api/panel/subs/preview", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "source": { "url": "file:///etc/passwd" } }).to_string())
@@ -4378,7 +4151,7 @@ async fn logo_rename_apply_and_match_report() {
             "items": [{ "name": name, "data": format!("data:image/png;base64,{png}") }]
         });
         assert_eq!(
-            post("/panel/api/logo/upload", body)
+            post("/api/panel/logo/upload", body)
                 .await
                 .expect("上传")
                 .status(),
@@ -4388,7 +4161,7 @@ async fn logo_rename_apply_and_match_report() {
 
     // 应用到频道。
     let response = post(
-        "/panel/api/logo/apply",
+        "/api/panel/logo/apply",
         serde_json::json!({ "gid": "pg", "cid": "c1", "file": "cctv1.png" }),
     )
     .await
@@ -4406,7 +4179,7 @@ async fn logo_rename_apply_and_match_report() {
 
     // 缺文件 → 404。
     let response = post(
-        "/panel/api/logo/apply",
+        "/api/panel/logo/apply",
         serde_json::json!({ "gid": "pg", "cid": "c1", "file": "missing.png" }),
     )
     .await
@@ -4417,7 +4190,7 @@ async fn logo_rename_apply_and_match_report() {
     let report: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/logo/match-report", fixture.base))
+            .get(format!("{}/api/panel/logo/match-report", fixture.base))
             .header("authorization", &auth)
             .send()
             .await
@@ -4433,7 +4206,7 @@ async fn logo_rename_apply_and_match_report() {
 
     // 重命名（保留扩展名，支持中文）。
     let response = post(
-        "/panel/api/logo/rename",
+        "/api/panel/logo/rename",
         serde_json::json!({ "file": "cctv1.png", "name": "央视一套" }),
     )
     .await
@@ -4443,13 +4216,13 @@ async fn logo_rename_apply_and_match_report() {
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     assert_eq!(body["logo"]["file"], "央视一套.png");
     assert_eq!(
-        fetch(&fixture, "/logo/央视一套.png").await.status(),
+        fetch(&fixture, "/static/logo/央视一套.png").await.status(),
         StatusCode::OK
     );
 
     // 推荐：无台标频道返回数组。
     let response = post(
-        "/panel/api/logo/suggest",
+        "/api/panel/logo/suggest",
         serde_json::json!({ "threshold": 0.1 }),
     )
     .await
@@ -4484,7 +4257,7 @@ async fn media_assets_subtitles_and_resolver_scripts() {
 
     // ffmpeg 检测：只要求字段存在。
     let body: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/assets/ffmpeg-status")
+        &get("/api/panel/assets/ffmpeg-status")
             .await
             .expect("请求")
             .text()
@@ -4499,14 +4272,14 @@ async fn media_assets_subtitles_and_resolver_scripts() {
         "items": [{ "name": "花絮.mp4", "data": "data:video/mp4;base64,AAAA" }]
     });
     assert_eq!(
-        post("/panel/api/assets/upload", payload)
+        post("/api/panel/assets/upload", payload)
             .await
             .expect("上传")
             .status(),
         StatusCode::OK
     );
     let list: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/assets/list")
+        &get("/api/panel/assets/list")
             .await
             .expect("列表")
             .text()
@@ -4517,19 +4290,19 @@ async fn media_assets_subtitles_and_resolver_scripts() {
     assert_eq!(list["count"], 1);
     assert_eq!(list["files"][0]["file"], "花絮.mp4");
 
-    let response = get("/panel/api/assets/raw/花絮.mp4").await.expect("下载");
+    let response = get("/api/panel/assets/raw/花絮.mp4").await.expect("下载");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.bytes().await.expect("字节").as_ref(), b"\0\0\0");
 
     let removed = post(
-        "/panel/api/assets/remove",
+        "/api/panel/assets/remove",
         serde_json::json!({ "file": "花絮.mp4" }),
     )
     .await
     .expect("删除");
     assert_eq!(removed.status(), StatusCode::OK);
     assert_eq!(
-        get("/panel/api/assets/raw/花絮.mp4")
+        get("/api/panel/assets/raw/花絮.mp4")
             .await
             .expect("再取")
             .status(),
@@ -4541,14 +4314,14 @@ async fn media_assets_subtitles_and_resolver_scripts() {
         "items": [{ "name": "第1集.srt", "data": "data:application/x-subrip;base64,MSAwOjAwOjAw" }]
     });
     assert_eq!(
-        post("/panel/api/subtitle/upload", srt)
+        post("/api/panel/subtitle/upload", srt)
             .await
             .expect("上传")
             .status(),
         StatusCode::OK
     );
     let list: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/subtitle/list")
+        &get("/api/panel/subtitle/list")
             .await
             .expect("列表")
             .text()
@@ -4560,14 +4333,14 @@ async fn media_assets_subtitles_and_resolver_scripts() {
 
     // 解析脚本：保存、列出、删除。
     let saved = post(
-        "/panel/api/resolver/script",
+        "/api/panel/resolver/script",
         serde_json::json!({ "name": "demo", "content": "print(1)" }),
     )
     .await
     .expect("保存");
     assert_eq!(saved.status(), StatusCode::OK);
     let scripts: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/resolver/scripts")
+        &get("/api/panel/resolver/scripts")
             .await
             .expect("列表")
             .text()
@@ -4578,7 +4351,7 @@ async fn media_assets_subtitles_and_resolver_scripts() {
     assert_eq!(scripts["count"], 1);
     assert_eq!(scripts["scripts"][0]["name"], "demo.py");
     let removed = post(
-        "/panel/api/resolver/remove",
+        "/api/panel/resolver/remove",
         serde_json::json!({ "name": "demo.py" }),
     )
     .await
@@ -4587,7 +4360,7 @@ async fn media_assets_subtitles_and_resolver_scripts() {
 
     // 未知素材类型 → 404。
     assert_eq!(
-        get("/panel/api/unknown/list").await.expect("请求").status(),
+        get("/api/panel/unknown/list").await.expect("请求").status(),
         StatusCode::NOT_FOUND
     );
 }
@@ -4672,7 +4445,7 @@ async fn share_disabled_returns_404_and_follower_cannot_rotate() {
     let session = login(&follower).await;
     let response = follower
         .client
-        .post(format!("{}/panel/api/security/token/rotate", follower.base))
+        .post(format!("{}/api/panel/security/token/rotate", follower.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -4698,7 +4471,7 @@ async fn dash_tracks_scan_url_health_and_timeshift_status() {
     };
 
     let body: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/dash/tracks/dg/c1")
+        &get("/api/panel/dash/tracks/dg/c1")
             .await
             .expect("请求")
             .text()
@@ -4712,7 +4485,7 @@ async fn dash_tracks_scan_url_health_and_timeshift_status() {
     assert_eq!(body["tracks"][1]["lang"], "zh");
 
     assert_eq!(
-        get("/panel/api/dash/tracks/none/c1")
+        get("/api/panel/dash/tracks/none/c1")
             .await
             .expect("请求")
             .status(),
@@ -4722,7 +4495,7 @@ async fn dash_tracks_scan_url_health_and_timeshift_status() {
     let scan = serde_json::json!({ "url": format!("{}/manifest.mpd", fixture.upstream) });
     let response = fixture
         .client
-        .post(format!("{}/panel/api/dash/scan-url", fixture.base))
+        .post(format!("{}/api/panel/dash/scan-url", fixture.base))
         .header("authorization", auth.clone())
         .header("content-type", "application/json")
         .body(scan.to_string())
@@ -4737,7 +4510,7 @@ async fn dash_tracks_scan_url_health_and_timeshift_status() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/dash/scan-url", fixture.base))
+        .post(format!("{}/api/panel/dash/scan-url", fixture.base))
         .header("authorization", auth.clone())
         .header("content-type", "application/json")
         .body(serde_json::json!({ "url": "file:///etc/passwd" }).to_string())
@@ -4747,7 +4520,7 @@ async fn dash_tracks_scan_url_health_and_timeshift_status() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let body: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/health")
+        &get("/api/panel/health")
             .await
             .expect("请求")
             .text()
@@ -4759,7 +4532,7 @@ async fn dash_tracks_scan_url_health_and_timeshift_status() {
     assert!(body["channels"].as_u64().unwrap_or(0) >= 1);
 
     let body: serde_json::Value = serde_json::from_str(
-        &get("/panel/api/dash-timeshift/status")
+        &get("/api/panel/dash-timeshift/status")
             .await
             .expect("请求")
             .text()
@@ -4777,7 +4550,11 @@ async fn dash_mode_converts_mpd_to_hls_and_proxies_segments() {
     )
     .await;
 
-    let master = fetch(&fixture, &format!("/dg2/c1.m3u8?token={}", fixture.token)).await;
+    let master = fetch(
+        &fixture,
+        &format!("/api/play/dg2/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(master.status(), StatusCode::OK);
     assert_eq!(
         master
@@ -4788,9 +4565,12 @@ async fn dash_mode_converts_mpd_to_hls_and_proxies_segments() {
     );
     let body = master.text().await.expect("读主清单");
     assert!(body.contains("#EXT-X-STREAM-INF"), "{body}");
-    assert!(body.contains("/dg2/c1/video_720p/index.txt"), "{body}");
+    assert!(
+        body.contains("/api/play/dg2/c1/video_720p/index.txt"),
+        "{body}"
+    );
 
-    let media = fetch(&fixture, "/dg2/c1/video_720p/index.txt").await;
+    let media = fetch(&fixture, "/api/play/dg2/c1/video_720p/index.txt").await;
     assert_eq!(media.status(), StatusCode::OK);
     let body = media.text().await.expect("读媒体清单");
     assert!(body.contains("#EXT-X-MAP:URI="), "{body}");
@@ -4802,7 +4582,7 @@ async fn dash_mode_converts_mpd_to_hls_and_proxies_segments() {
     let status: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/dash/status", fixture.base))
+            .get(format!("{}/api/panel/dash/status", fixture.base))
             .header("authorization", format!("Bearer {session}"))
             .send()
             .await
@@ -4825,7 +4605,8 @@ async fn dash_mode_converts_mpd_to_hls_and_proxies_segments() {
     let segment_url = body
         .lines()
         .find(|line| {
-            line.contains("/dg2/c1/video_720p/") && line.ends_with(".jpg") || line.ends_with(".png")
+            line.contains("/media/dg2/c1/video_720p/") && line.ends_with(".jpg")
+                || line.ends_with(".png")
         })
         .expect("切片地址")
         .to_string();
@@ -4876,7 +4657,7 @@ async fn dash_pool_falls_back_and_remembers_success() {
     )
     .await;
 
-    let media = fetch(&pooled, "/pool/c1/video_720p/index.txt").await;
+    let media = fetch(&pooled, "/api/play/pool/c1/video_720p/index.txt").await;
     assert_eq!(media.status(), StatusCode::OK);
     let body = media.text().await.expect("读媒体清单");
     let segments: Vec<String> = body
@@ -4919,7 +4700,7 @@ async fn dash_pool_falls_back_and_remembers_success() {
         r#"{"cache":{"dash":{"retry_max":2,"retry_initial_ms":1}},"groups":[{"id":"pool","name":"池组","mode":"dash","access":"open","channels":[{"id":"c1","name":"池频道","url":"{upstream}/dash/pool/live.mpd"}]}]}"#
     )
     .await;
-    let media = fetch(&single, "/pool/c1/video_720p/index.txt").await;
+    let media = fetch(&single, "/api/play/pool/c1/video_720p/index.txt").await;
     assert_eq!(media.status(), StatusCode::OK);
     let body = media.text().await.expect("读媒体清单");
     let first = body
@@ -4949,16 +4730,16 @@ async fn play_session_limit_only_when_guard_enabled() {
 
     // 夹具显式关闭：两个频道都能播，没有踢人。
     let off = fixture_with_extra_and_auth(groups, "").await;
-    let a = format!("/sl/a.m3u8?token={}", off.token);
-    let b = format!("/sl/b.m3u8?token={}", off.token);
+    let a = format!("/api/play/sl/a.m3u8?token={}", off.token);
+    let b = format!("/api/play/sl/b.m3u8?token={}", off.token);
     assert_eq!(fetch(&off, &a).await.status(), StatusCode::OK);
     assert_eq!(fetch(&off, &b).await.status(), StatusCode::OK);
     assert_eq!(fetch(&off, &a).await.status(), StatusCode::OK);
 
     // 打开守卫：第二个频道入，第一个频道被踢。
     let on = fixture_with_extra_and_auth(groups, r#"{"ip_guard_enabled":true}"#).await;
-    let a = format!("/sl/a.m3u8?token={}", on.token);
-    let b = format!("/sl/b.m3u8?token={}", on.token);
+    let a = format!("/api/play/sl/a.m3u8?token={}", on.token);
+    let b = format!("/api/play/sl/b.m3u8?token={}", on.token);
     assert_eq!(fetch(&on, &a).await.status(), StatusCode::OK);
     assert_eq!(fetch(&on, &b).await.status(), StatusCode::OK);
     let kicked = fetch(&on, &a).await;
@@ -4973,8 +4754,8 @@ async fn play_session_limit_only_when_guard_enabled() {
         r#"{"ip_guard_enabled":true,"whitelist":["127.0.0.1"]}"#,
     )
     .await;
-    let a = format!("/sl/a.m3u8?token={}", exempt.token);
-    let b = format!("/sl/b.m3u8?token={}", exempt.token);
+    let a = format!("/api/play/sl/a.m3u8?token={}", exempt.token);
+    let b = format!("/api/play/sl/b.m3u8?token={}", exempt.token);
     assert_eq!(fetch(&exempt, &a).await.status(), StatusCode::OK);
     assert_eq!(fetch(&exempt, &b).await.status(), StatusCode::OK);
     assert_eq!(fetch(&exempt, &a).await.status(), StatusCode::OK);
@@ -4987,7 +4768,7 @@ async fn play_session_limit_only_when_guard_enabled() {
 async fn play_rate_limit_only_when_guard_enabled() {
     let groups = r#"{"groups":[{"id":"rl","name":"限流组","mode":"proxy","access":"open","channels":[{"id":"a","name":"A","url":"{upstream}/live.m3u8"}]}]}"#;
     let off = fixture_with_extra_and_auth(groups, "").await;
-    let path = format!("/rl/a.m3u8?token={}", off.token);
+    let path = format!("/api/play/rl/a.m3u8?token={}", off.token);
     for _ in 0..5 {
         assert_eq!(fetch(&off, &path).await.status(), StatusCode::OK);
     }
@@ -4997,7 +4778,7 @@ async fn play_rate_limit_only_when_guard_enabled() {
         r#"{"ip_guard_enabled":true,"l2_window_secs":30,"l2_limit":1,"l1_limit":100,"cooldown_secs":5}"#,
     )
     .await;
-    let path = format!("/rl/a.m3u8?token={}", on.token);
+    let path = format!("/api/play/rl/a.m3u8?token={}", on.token);
     assert_eq!(fetch(&on, &path).await.status(), StatusCode::OK);
     let throttled = fetch(&on, &path).await;
     assert_eq!(throttled.status(), StatusCode::TOO_MANY_REQUESTS);
@@ -5009,7 +4790,7 @@ async fn import_m3u(fixture: &Fixture, text: &str) {
     let session = login(fixture).await;
     let response = fixture
         .client
-        .post(format!("{}/panel/api/groups/import/m3u", fixture.base))
+        .post(format!("{}/api/panel/groups/import/m3u", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .header("content-type", "application/json")
         .body(serde_json::json!({ "text": text, "mode": "append" }).to_string())
@@ -5024,7 +4805,7 @@ async fn channel_ids(fixture: &Fixture) -> Vec<String> {
     let session = login(fixture).await;
     let text = fixture
         .client
-        .get(format!("{}/panel/api/config", fixture.base))
+        .get(format!("{}/api/panel/config", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -5077,7 +4858,11 @@ async fn dash_timeshift_serves_recorded_playlist_and_segments() {
     .await;
 
     // 缺 playseek → 400。
-    let response = fetch(&fixture, "/dts/c1/dash-timeshift/video_720p/playlist.txt").await;
+    let response = fetch(
+        &fixture,
+        "/api/play/dts/c1/dash-timeshift/video_720p/playlist.txt",
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert!(response
         .text()
@@ -5088,7 +4873,7 @@ async fn dash_timeshift_serves_recorded_playlist_and_segments() {
     // 区间不重叠 → 404。
     let response = fetch(
         &fixture,
-        "/dts/c1/dash-timeshift/video_720p/playlist.txt?playseek=20200101000000-20200101000100",
+        "/api/play/dts/c1/dash-timeshift/video_720p/playlist.txt?playseek=20200101000000-20200101000100",
     )
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -5109,7 +4894,7 @@ async fn dash_timeshift_serves_recorded_playlist_and_segments() {
     loop {
         let response = fetch(
             &fixture,
-            &format!("/dts/c1/dash-timeshift/video_720p/playlist.txt?playseek={seek}"),
+            &format!("/api/play/dts/c1/dash-timeshift/video_720p/playlist.txt?playseek={seek}"),
         )
         .await;
         if response.status() == StatusCode::OK {
@@ -5155,7 +4940,7 @@ async fn dash_timeshift_serves_recorded_playlist_and_segments() {
     // 未知轨道 → 404。
     let response = fetch(
         &fixture,
-        &format!("/dts/c1/dash-timeshift/nosuch/playlist.txt?playseek={seek}"),
+        &format!("/api/play/dts/c1/dash-timeshift/nosuch/playlist.txt?playseek={seek}"),
     )
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -5170,7 +4955,7 @@ async fn dash_timeshift_requires_channel_flag() {
     .await;
     let response = fetch(
         &fixture,
-        "/dnt/c1/dash-timeshift/video_720p/playlist.txt?playseek=20200101000000-20200101000100",
+        "/api/play/dnt/c1/dash-timeshift/video_720p/playlist.txt?playseek=20200101000000-20200101000100",
     )
     .await;
     // 未点亮时落回通用子路径分流：`dash` 模式 → 404。
@@ -5186,7 +4971,7 @@ async fn dash_timeshift_uses_channel_mode() {
     let session = login(&fixture).await;
     let response = fixture
         .client
-        .get(format!("{}/panel/api/dash-timeshift/status", fixture.base))
+        .get(format!("{}/api/panel/dash-timeshift/status", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -5218,7 +5003,11 @@ async fn proxy_mode_rewrites_mpd_base_url_and_proxies_segments() {
             .map(|group| group.mpd_keep_seconds),
         Some(4)
     );
-    let manifest = fetch(&fixture, &format!("/mpg/c1.mpd?token={}", fixture.token)).await;
+    let manifest = fetch(
+        &fixture,
+        &format!("/api/play/mpg/c1.mpd?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(manifest.status(), StatusCode::OK);
     assert_eq!(
         manifest
@@ -5270,11 +5059,14 @@ async fn proxy_mode_rewrites_mpd_base_url_and_proxies_segments() {
     );
 
     // 已有的相对 BaseURL 改写后仍指向本服务，切片继续经本服务代理。
-    let body = fetch(&fixture, &format!("/mpg/c2.mpd?token={}", fixture.token))
-        .await
-        .text()
-        .await
-        .expect("读 MPD");
+    let body = fetch(
+        &fixture,
+        &format!("/api/play/mpg/c2.mpd?token={}", fixture.token),
+    )
+    .await
+    .text()
+    .await
+    .expect("读 MPD");
     assert!(
         body.contains(&format!("<BaseURL>{}/media/mpg/c2/mpd/", fixture.base)),
         "{body}"
@@ -5302,16 +5094,20 @@ async fn dash_mode_resolver_url_is_used_for_media_playlist() {
     )
     .expect("写脚本");
 
-    let master = fetch(&fixture, &format!("/dgr/c1.m3u8?token={}", fixture.token)).await;
+    let master = fetch(
+        &fixture,
+        &format!("/api/play/dgr/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(master.status(), StatusCode::OK);
     assert!(master
         .text()
         .await
         .expect("主清单")
-        .contains("/dgr/c1/video_720p/index.txt"));
+        .contains("/api/play/dgr/c1/video_720p/index.txt"));
 
     // 媒体清单必须沿用解析脚本算出的地址，而不是频道原始死地址。
-    let media = fetch(&fixture, "/dgr/c1/video_720p/index.txt").await;
+    let media = fetch(&fixture, "/api/play/dgr/c1/video_720p/index.txt").await;
     assert_eq!(media.status(), StatusCode::OK);
     assert!(media.text().await.expect("媒体清单").contains("#EXTINF:"));
 }
@@ -5338,7 +5134,7 @@ async fn resolver_script_overrides_channel_url_with_ttl_cache() {
     let response = fixture
         .client
         .get(format!(
-            "{}/rg/c1.m3u8?token={}",
+            "{}/api/play/rg/c1.m3u8?token={}",
             fixture.base, fixture.token
         ))
         .send()
@@ -5352,7 +5148,7 @@ async fn resolver_script_overrides_channel_url_with_ttl_cache() {
     let response = fixture
         .client
         .get(format!(
-            "{}/rg/c1.m3u8?token={}",
+            "{}/api/play/rg/c1.m3u8?token={}",
             fixture.base, fixture.token
         ))
         .send()
@@ -5371,7 +5167,7 @@ async fn resolver_script_overrides_channel_url_with_ttl_cache() {
     let response = fixture
         .client
         .get(format!(
-            "{}/rg/c2.m3u8?token={}",
+            "{}/api/play/rg/c2.m3u8?token={}",
             fixture.base, fixture.token
         ))
         .send()
@@ -5390,7 +5186,7 @@ async fn resolver_script_overrides_channel_url_with_ttl_cache() {
     let response = fixture
         .client
         .get(format!(
-            "{}/rg/c3.m3u8?token={}",
+            "{}/api/play/rg/c3.m3u8?token={}",
             fixture.base, fixture.token
         ))
         .send()
@@ -5469,7 +5265,7 @@ async fn remux_segments_continuous_ts_and_serves_disguised_slices() {
     let first = fixture
         .client
         .get(format!(
-            "{}/rx/c1.m3u8?token={}",
+            "{}/api/play/rx/c1.m3u8?token={}",
             fixture.base, fixture.token
         ))
         .send()
@@ -5487,7 +5283,10 @@ async fn remux_segments_continuous_ts_and_serves_disguised_slices() {
 
     let response = wait_remux_playlist(
         &fixture.client,
-        &format!("{}/rx/c1.m3u8?token={}", fixture.base, fixture.token),
+        &format!(
+            "{}/api/play/rx/c1.m3u8?token={}",
+            fixture.base, fixture.token
+        ),
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -5534,7 +5333,7 @@ async fn schedule_crud_and_livestream_toggle() {
         "end_time": "2099-01-01T00:10:00",
         "format": "mkv"
     });
-    let response = post("/panel/api/schedule", task).await.expect("新增");
+    let response = post("/api/panel/schedule", task).await.expect("新增");
     assert_eq!(response.status(), StatusCode::OK);
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
@@ -5544,7 +5343,7 @@ async fn schedule_crud_and_livestream_toggle() {
     let list: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/schedule", fixture.base))
+            .get(format!("{}/api/panel/schedule", fixture.base))
             .header("authorization", auth.clone())
             .send()
             .await
@@ -5560,7 +5359,7 @@ async fn schedule_crud_and_livestream_toggle() {
 
     let response = fixture
         .client
-        .put(format!("{}/panel/api/schedule/0", fixture.base))
+        .put(format!("{}/api/panel/schedule/0", fixture.base))
         .header("authorization", auth.clone())
         .header("content-type", "application/json")
         .body(serde_json::json!({ "name": "改名任务" }).to_string())
@@ -5569,7 +5368,7 @@ async fn schedule_crud_and_livestream_toggle() {
         .expect("更新");
     assert_eq!(response.status(), StatusCode::OK);
 
-    let response = post("/panel/api/schedule/0/stop", serde_json::json!({}))
+    let response = post("/api/panel/schedule/0/stop", serde_json::json!({}))
         .await
         .expect("停止");
     assert_eq!(response.status(), StatusCode::OK);
@@ -5580,7 +5379,7 @@ async fn schedule_crud_and_livestream_toggle() {
         "start_time": "2099-01-01T00:00:00", "end_time": "2099-01-01T00:10:00"
     });
     assert_eq!(
-        post("/panel/api/schedule", bad)
+        post("/api/panel/schedule", bad)
             .await
             .expect("新增")
             .status(),
@@ -5589,7 +5388,7 @@ async fn schedule_crud_and_livestream_toggle() {
 
     let response = fixture
         .client
-        .delete(format!("{}/panel/api/schedule/0", fixture.base))
+        .delete(format!("{}/api/panel/schedule/0", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -5597,14 +5396,14 @@ async fn schedule_crud_and_livestream_toggle() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // 直播开关：改写频道 livestream。
-    let response = post("/panel/api/livestream/pg/c1/start", serde_json::json!({}))
+    let response = post("/api/panel/livestream/pg/c1/start", serde_json::json!({}))
         .await
         .expect("点亮");
     assert_eq!(response.status(), StatusCode::OK);
     let list: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/livestream", fixture.base))
+            .get(format!("{}/api/panel/livestream", fixture.base))
             .header("authorization", auth.clone())
             .send()
             .await
@@ -5616,7 +5415,7 @@ async fn schedule_crud_and_livestream_toggle() {
     .expect("JSON");
     assert_eq!(list["count"], 1);
 
-    let response = post("/panel/api/livestream/pg/c1/stop", serde_json::json!({}))
+    let response = post("/api/panel/livestream/pg/c1/stop", serde_json::json!({}))
         .await
         .expect("熄灭");
     assert_eq!(response.status(), StatusCode::OK);
@@ -5718,7 +5517,7 @@ async fn dash_schedule_rejects_static_mpd() {
     });
     let response = fixture
         .client
-        .post(format!("{}/panel/api/schedule", fixture.base))
+        .post(format!("{}/api/panel/schedule", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .header("content-type", "application/json")
         .body(task.to_string())
@@ -5733,7 +5532,7 @@ async fn dash_schedule_rejects_static_mpd() {
         let list: serde_json::Value = serde_json::from_str(
             &fixture
                 .client
-                .get(format!("{}/panel/api/schedule", fixture.base))
+                .get(format!("{}/api/panel/schedule", fixture.base))
                 .header("authorization", format!("Bearer {session}"))
                 .send()
                 .await
@@ -5760,7 +5559,7 @@ async fn schedule_from_epg_batch_creates_tasks_and_reports_failures() {
     let session = login(&fixture).await;
     let response = fixture
         .client
-        .post(format!("{}/panel/api/schedule/from-epg", fixture.base))
+        .post(format!("{}/api/panel/schedule/from-epg", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .header("content-type", "application/json")
         .body(
@@ -5791,7 +5590,7 @@ async fn schedule_from_epg_batch_creates_tasks_and_reports_failures() {
 
     let response = fixture
         .client
-        .delete(format!("{}/panel/api/schedule/0", fixture.base))
+        .delete(format!("{}/api/panel/schedule/0", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -5808,7 +5607,7 @@ async fn subtitle_translate_endpoints_report_missing_engine() {
     // 未登录 → 401。
     let response = fixture
         .client
-        .post(format!("{}/subtitle/mtran/test", fixture.base))
+        .post(format!("{}/api/panel/subtitle/mtran/test", fixture.base))
         .header("content-type", "application/json")
         .body(serde_json::json!({ "text": "hello" }).to_string())
         .send()
@@ -5818,7 +5617,7 @@ async fn subtitle_translate_endpoints_report_missing_engine() {
 
     let response = fixture
         .client
-        .post(format!("{}/subtitle/mtran/test", fixture.base))
+        .post(format!("{}/api/panel/subtitle/mtran/test", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "text": "hello" }).to_string())
@@ -5835,7 +5634,10 @@ async fn subtitle_translate_endpoints_report_missing_engine() {
 
     let response = fixture
         .client
-        .post(format!("{}/subtitle/translate/clear", fixture.base))
+        .post(format!(
+            "{}/api/panel/subtitle/translate/clear",
+            fixture.base
+        ))
         .header("authorization", &auth)
         .send()
         .await
@@ -5847,7 +5649,7 @@ async fn subtitle_translate_endpoints_report_missing_engine() {
 
     let response = fixture
         .client
-        .get(format!("{}/epg/translate/status", fixture.base))
+        .get(format!("{}/api/panel/epg/translate/status", fixture.base))
         .header("authorization", &auth)
         .send()
         .await
@@ -5859,7 +5661,10 @@ async fn subtitle_translate_endpoints_report_missing_engine() {
 
     let response = fixture
         .client
-        .post(format!("{}/epg/translate/clear-engine", fixture.base))
+        .post(format!(
+            "{}/api/panel/epg/translate/clear-engine",
+            fixture.base
+        ))
         .header("authorization", &auth)
         .send()
         .await
@@ -5875,7 +5680,7 @@ async fn subtitle_mtran_reports_connection_failure_when_configured() {
 
     let response = fixture
         .client
-        .post(format!("{}/subtitle/mtran/test", fixture.base))
+        .post(format!("{}/api/panel/subtitle/mtran/test", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "text": "hello" }).to_string())
@@ -5905,7 +5710,7 @@ async fn timeshift_buffers_livestream_and_serves_vod_playlist() {
         .expect("时钟")
         .as_secs() as i64;
     let url = format!(
-        "{}/ts/c1.m3u8?start={}&end={}&token={}",
+        "{}/api/play/ts/c1.m3u8?start={}&end={}&token={}",
         fixture.base,
         now - 60,
         now + 60,
@@ -5950,7 +5755,7 @@ async fn timeshift_buffers_livestream_and_serves_vod_playlist() {
     let response = fixture
         .client
         .get(format!(
-            "{}/ts/c1.m3u8?start=0&end=60&token={}",
+            "{}/api/play/ts/c1.m3u8?start=0&end=60&token={}",
             fixture.base, fixture.token
         ))
         .send()
@@ -5972,7 +5777,7 @@ async fn playlist_config_roundtrip_and_validation() {
 
     let response = fixture
         .client
-        .get(format!("{}/panel/api/playlist", fixture.base))
+        .get(format!("{}/api/panel/playlist", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -6002,7 +5807,7 @@ async fn playlist_config_roundtrip_and_validation() {
     });
     let response = fixture
         .client
-        .put(format!("{}/panel/api/playlist", fixture.base))
+        .put(format!("{}/api/panel/playlist", fixture.base))
         .header("authorization", auth.clone())
         .header("content-type", "application/json")
         .body(cfg.to_string())
@@ -6013,7 +5818,7 @@ async fn playlist_config_roundtrip_and_validation() {
 
     let response = fixture
         .client
-        .get(format!("{}/panel/api/playlist", fixture.base))
+        .get(format!("{}/api/panel/playlist", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -6036,7 +5841,7 @@ async fn playlist_config_roundtrip_and_validation() {
     });
     let response = fixture
         .client
-        .put(format!("{}/panel/api/playlist", fixture.base))
+        .put(format!("{}/api/panel/playlist", fixture.base))
         .header("authorization", auth)
         .header("content-type", "application/json")
         .body(bad.to_string())
@@ -6063,7 +5868,7 @@ async fn subtitle_translation_engine_translates_and_caches() {
     let response = fixture
         .client
         .get(format!(
-            "{}/panel/api/subtitle/translate/status",
+            "{}/api/panel/subtitle/translate/status",
             fixture.base
         ))
         .header("authorization", &auth)
@@ -6079,7 +5884,7 @@ async fn subtitle_translation_engine_translates_and_caches() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/subtitle/translate", fixture.base))
+        .post(format!("{}/api/panel/subtitle/translate", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "file": "demo.srt" }).to_string())
@@ -6117,7 +5922,7 @@ async fn subtitle_translation_engine_translates_and_caches() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/subtitle/translate", fixture.base))
+        .post(format!("{}/api/panel/subtitle/translate", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "file": "demo.srt" }).to_string())
@@ -6144,7 +5949,7 @@ async fn subtitle_translation_accepts_mtran_v5_and_token() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/subtitle/translate", fixture.base))
+        .post(format!("{}/api/panel/subtitle/translate", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "file": "v5.srt" }).to_string())
@@ -6169,7 +5974,7 @@ async fn subtitle_translation_accepts_mtran_v5_and_token() {
 
     let response = fixture
         .client
-        .post(format!("{}/subtitle/mtran/test", fixture.base))
+        .post(format!("{}/api/panel/subtitle/mtran/test", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "text": "Hello" }).to_string())
@@ -6191,7 +5996,7 @@ async fn subtitle_mtran_falls_back_to_single_endpoint() {
 
     let response = fixture
         .client
-        .post(format!("{}/subtitle/mtran/test", fixture.base))
+        .post(format!("{}/api/panel/subtitle/mtran/test", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "text": "Hello" }).to_string())
@@ -6221,7 +6026,7 @@ async fn subtitle_translation_converts_ass_to_vtt() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/subtitle/translate", fixture.base))
+        .post(format!("{}/api/panel/subtitle/translate", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "file": "demo.ass" }).to_string())
@@ -6259,7 +6064,7 @@ async fn subtitle_translation_requires_engine_config() {
     let auth = format!("Bearer {}", login(&fixture).await);
     let response = fixture
         .client
-        .post(format!("{}/panel/api/subtitle/translate", fixture.base))
+        .post(format!("{}/api/panel/subtitle/translate", fixture.base))
         .header("authorization", &auth)
         .header("content-type", "application/json")
         .body(serde_json::json!({ "file": "demo.srt" }).to_string())
@@ -6277,7 +6082,7 @@ async fn epg_translate_endpoints_report_unconfigured_engine() {
 
     let response = fixture
         .client
-        .get(format!("{}/epg/translate/models", fixture.base))
+        .get(format!("{}/api/panel/epg/translate/models", fixture.base))
         .header("authorization", format!("Bearer {auth}"))
         .send()
         .await
@@ -6287,17 +6092,10 @@ async fn epg_translate_endpoints_report_unconfigured_engine() {
         serde_json::from_str(&response.text().await.expect("正文")).expect("JSON");
     assert_eq!(body["models"].as_array().map(Vec::len), Some(0));
 
-    // 面板 `api()` 使用 `/panel/api` 前缀，别名必须同样可用。
-    let response = fixture
-        .client
-        .get(format!("{}/panel/api/epg/translate/models", fixture.base))
-        .header("authorization", format!("Bearer {auth}"))
-        .send()
-        .await
-        .expect("面板模型别名");
-    assert_eq!(response.status(), StatusCode::OK);
-
-    for path in ["/epg/translate/run", "/epg/translate/probe"] {
+    for path in [
+        "/api/panel/epg/translate/run",
+        "/api/panel/epg/translate/probe",
+    ] {
         let response = fixture
             .client
             .post(format!("{}{path}", fixture.base))
@@ -6312,7 +6110,10 @@ async fn epg_translate_endpoints_report_unconfigured_engine() {
 
     let response = fixture
         .client
-        .post(format!("{}/epg/translate/mtran/test", fixture.base))
+        .post(format!(
+            "{}/api/panel/epg/translate/mtran/test",
+            fixture.base
+        ))
         .header("authorization", format!("Bearer {auth}"))
         .header("content-type", "application/json")
         .body(serde_json::json!({ "text": "hello" }).to_string())
@@ -6323,7 +6124,7 @@ async fn epg_translate_endpoints_report_unconfigured_engine() {
 
     let response = fixture
         .client
-        .post(format!("{}/epg/translate/clear", fixture.base))
+        .post(format!("{}/api/panel/epg/translate/clear", fixture.base))
         .header("authorization", format!("Bearer {auth}"))
         .send()
         .await
@@ -6342,7 +6143,7 @@ async fn epg_translation_engine_appends_target_texts_and_reuses_cache() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/epg/refresh", fixture.base))
+        .post(format!("{}/api/panel/epg/refresh", fixture.base))
         .header("authorization", format!("Bearer {auth}"))
         .send()
         .await
@@ -6357,7 +6158,10 @@ async fn epg_translation_engine_appends_target_texts_and_reuses_cache() {
 
     let xml = fixture
         .client
-        .get(format!("{}/sub/{}/epg.xml", fixture.base, fixture.token))
+        .get(format!(
+            "{}/api/sub/{}/epg.xml",
+            fixture.base, fixture.token
+        ))
         .send()
         .await
         .expect("取节目单")
@@ -6380,7 +6184,7 @@ async fn epg_translation_engine_appends_target_texts_and_reuses_cache() {
 
     let response = fixture
         .client
-        .post(format!("{}/epg/translate/run", fixture.base))
+        .post(format!("{}/api/panel/epg/translate/run", fixture.base))
         .header("authorization", format!("Bearer {auth}"))
         .send()
         .await
@@ -6399,7 +6203,7 @@ async fn logo_animate_generates_animated_webp() {
     let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
     let response = fixture
         .client
-        .post(format!("{}/panel/api/logo/upload", fixture.base))
+        .post(format!("{}/api/panel/logo/upload", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .body(
@@ -6415,7 +6219,7 @@ async fn logo_animate_generates_animated_webp() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/logo/animate", fixture.base))
+        .post(format!("{}/api/panel/logo/animate", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .body(
@@ -6450,7 +6254,7 @@ async fn logo_animate_generates_animated_webp() {
 
     let response = fixture
         .client
-        .get(format!("{}/panel/api/logo/list", fixture.base))
+        .get(format!("{}/api/panel/logo/list", fixture.base))
         .header("authorization", format!("Bearer {token}"))
         .send()
         .await
@@ -6468,7 +6272,7 @@ async fn logo_animate_generates_animated_webp() {
 
     let response = fixture
         .client
-        .get(format!("{}/logo/anim.png", fixture.base))
+        .get(format!("{}/static/logo/anim.png", fixture.base))
         .send()
         .await
         .expect("取动图");
@@ -6485,7 +6289,7 @@ async fn logo_animate_generates_animated_webp() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/logo/animate", fixture.base))
+        .post(format!("{}/api/panel/logo/animate", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .body(
@@ -6504,7 +6308,7 @@ async fn logo_animate_generates_animated_webp() {
     let webp = "UklGRhwAAABXRUJQVlA4TA8AAAAvAUAAAAcQ/Y/+ByKi/wEA";
     let response = fixture
         .client
-        .post(format!("{}/panel/api/logo/upload", fixture.base))
+        .post(format!("{}/api/panel/logo/upload", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .body(
@@ -6519,7 +6323,7 @@ async fn logo_animate_generates_animated_webp() {
     assert_eq!(response.status(), StatusCode::OK);
     let response = fixture
         .client
-        .post(format!("{}/panel/api/logo/animate", fixture.base))
+        .post(format!("{}/api/panel/logo/animate", fixture.base))
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .body(
@@ -6537,7 +6341,7 @@ async fn logo_animate_generates_animated_webp() {
     let list: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/logo/list", fixture.base))
+            .get(format!("{}/api/panel/logo/list", fixture.base))
             .header("authorization", format!("Bearer {token}"))
             .send()
             .await
@@ -6556,7 +6360,7 @@ async fn logo_animate_generates_animated_webp() {
     assert_eq!(item["animated"], true);
     let response = fixture
         .client
-        .get(format!("{}/logo/anim.webp", fixture.base))
+        .get(format!("{}/static/logo/anim.webp", fixture.base))
         .send()
         .await
         .expect("取 WebP");
@@ -6616,7 +6420,11 @@ fn segment_path(body: &str, base: &str, index: usize) -> String {
 #[tokio::test]
 async fn prefetch_disabled_group_skips_segments() {
     let fixture = fixture_with_extra(PREFETCH_SECTION).await;
-    let response = fetch(&fixture, &format!("/npf/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/npf/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let _ = response.text().await.expect("读正文");
     assert_eq!(
@@ -6629,7 +6437,11 @@ async fn prefetch_disabled_group_skips_segments() {
 #[tokio::test]
 async fn prefetch_channel_reenables_disabled_group() {
     let fixture = fixture_with_extra(PREFETCH_SECTION).await;
-    let response = fetch(&fixture, &format!("/npfc/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/npfc/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let _ = response.text().await.expect("读正文");
     assert!(
@@ -6643,7 +6455,11 @@ async fn cdn_explicit_ttl_wins() {
     let fixture =
         fixture_with_extra(r#"{"cache":{"ttl":{"segment_secs":777}},"cdn":{"enabled":true}}"#)
             .await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     let body = response.text().await.expect("读正文");
     let path = segment_path(&body, &fixture.base, 1);
     let response = fetch(&fixture, &path).await;
@@ -6654,7 +6470,11 @@ async fn cdn_explicit_ttl_wins() {
 #[tokio::test]
 async fn manual_ttl_applies_when_cdn_disabled() {
     let fixture = fixture_with_extra(r#"{"cache":{"ttl":{"segment_secs":777}}}"#).await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     let body = response.text().await.expect("读正文");
     let path = segment_path(&body, &fixture.base, 1);
     let response = fetch(&fixture, &path).await;
@@ -6664,7 +6484,11 @@ async fn manual_ttl_applies_when_cdn_disabled() {
 #[tokio::test]
 async fn cdn_auto_ttl_uses_measurement() {
     let fixture = fixture_with_extra(CDN_AUTO).await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     let body = response.text().await.expect("读正文");
     // 清单解析即完成一次被动实测：T=4、N=2、W=8 → ceil60(16) = 60 → 下限 300。
     assert_eq!(fixture.state.estimate.ttl_secs(), Some(300));
@@ -6676,7 +6500,11 @@ async fn cdn_auto_ttl_uses_measurement() {
 #[tokio::test]
 async fn cdn_shared_cache_hits_makes_hit_public() {
     let fixture = fixture_with_extra(r#"{"cdn":{"enabled":true,"shared_cache_hits":true}}"#).await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     let body = response.text().await.expect("读正文");
     let path = segment_path(&body, &fixture.base, 1);
     let response = fetch(&fixture, &path).await;
@@ -6692,12 +6520,20 @@ async fn cdn_shared_cache_hits_makes_hit_public() {
 async fn cdn_public_base_overrides_host() {
     let fixture =
         fixture_with_extra(r#"{"cdn":{"enabled":true,"public_base":"https://cdn.example"}}"#).await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     let body = response.text().await.expect("读正文");
     for url in media_lines(&body) {
         assert!(url.starts_with("https://cdn.example/media/pg/c1/"), "{url}");
     }
-    let response = fetch(&fixture, &format!("/pm/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pm/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     let body = response.text().await.expect("读正文");
     assert!(
         body.contains("https://cdn.example/api/play/pm/c1/video/index.txt"),
@@ -6710,7 +6546,7 @@ async fn cdn_empty_body_becomes_502() {
     let fixture = fixture_with_extra(CDN_AUTO).await;
     let response = fetch(
         &fixture,
-        &format!("/badseg/c1.m3u8?token={}", fixture.token),
+        &format!("/api/play/badseg/c1.m3u8?token={}", fixture.token),
     )
     .await;
     let body = response.text().await.expect("读正文");
@@ -6729,7 +6565,7 @@ async fn cdn_dont_cache_empty_keeps_200() {
             .await;
     let response = fetch(
         &fixture,
-        &format!("/badseg/c1.m3u8?token={}", fixture.token),
+        &format!("/api/play/badseg/c1.m3u8?token={}", fixture.token),
     )
     .await;
     let body = response.text().await.expect("读正文");
@@ -6743,7 +6579,11 @@ async fn cdn_dont_cache_empty_keeps_200() {
 #[tokio::test]
 async fn cdn_disabled_uses_default_headers() {
     let fixture = fixture().await;
-    let response = fetch(&fixture, &format!("/pg/c1.m3u8?token={}", fixture.token)).await;
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
     let body = response.text().await.expect("读正文");
     let path = segment_path(&body, &fixture.base, 1);
     let response = fetch(&fixture, &path).await;
@@ -6760,7 +6600,7 @@ async fn cdn_disabled_uses_default_headers() {
     // 空体仍是 200（默认行为）。
     let response = fetch(
         &fixture,
-        &format!("/badseg/c1.m3u8?token={}", fixture.token),
+        &format!("/api/play/badseg/c1.m3u8?token={}", fixture.token),
     )
     .await;
     let body = response.text().await.expect("读正文");
@@ -6826,7 +6666,7 @@ async fn estimate(session: &str, base: &str) -> HttpResponse {
         .timeout(Duration::from_secs(30))
         .build()
         .expect("建客户端")
-        .post(format!("{base}/panel/api/cdn/estimate"))
+        .post(format!("{base}/api/panel/cdn/estimate"))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -7044,7 +6884,7 @@ async fn cache_stats_includes_recommendation() {
     let session = login(&fixture).await;
     let response = fixture
         .client
-        .get(format!("{}/panel/api/cache/stats", fixture.base))
+        .get(format!("{}/api/panel/cache/stats", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -7093,14 +6933,14 @@ async fn unknown_channel_is_not_counted_as_active() {
     // 未配置的频道与路径：服务照常答复，但不能进入活动频道表。
     fixture
         .client
-        .get(format!("{}/unknown/unknown/x", fixture.base))
+        .get(format!("{}/media/unknown/unknown/x", fixture.base))
         .send()
         .await
         .expect("未知频道请求");
 
     let response = fixture
         .client
-        .get(format!("{}/panel/api/cache/stats", fixture.base))
+        .get(format!("{}/api/panel/cache/stats", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -7124,7 +6964,7 @@ async fn epg_config_sources_bindings_and_rules() {
 
     // 启动时已建好的源出现在列表里。
     let sources: serde_json::Value = client
-        .get(format!("{}/panel/api/epg/sources", fixture.base))
+        .get(format!("{}/api/panel/epg/sources", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -7138,7 +6978,7 @@ async fn epg_config_sources_bindings_and_rules() {
 
     // 新源可写库并立即出现在列表里。
     let created: serde_json::Value = client
-        .post(format!("{}/panel/api/epg/sources", fixture.base))
+        .post(format!("{}/api/panel/epg/sources", fixture.base))
         .header("authorization", auth.clone())
         .body(
             serde_json::to_string(&serde_json::json!({
@@ -7165,7 +7005,7 @@ async fn epg_config_sources_bindings_and_rules() {
 
     // 手工绑定覆盖自动匹配。
     let bound: serde_json::Value = client
-        .put(format!("{}/panel/api/epg/bindings/pg/c1", fixture.base))
+        .put(format!("{}/api/panel/epg/bindings/pg/c1", fixture.base))
         .header("authorization", auth.clone())
         .body(
             serde_json::to_string(&serde_json::json!({
@@ -7185,7 +7025,7 @@ async fn epg_config_sources_bindings_and_rules() {
     assert_eq!(bound["mapping"]["source_channel_id"], "cctv1");
 
     let bindings: serde_json::Value = client
-        .get(format!("{}/panel/api/epg/bindings", fixture.base))
+        .get(format!("{}/api/panel/epg/bindings", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -7208,7 +7048,7 @@ async fn epg_config_sources_bindings_and_rules() {
         "enabled": true
     });
     let saved: serde_json::Value = client
-        .post(format!("{}/panel/api/epg/rules", fixture.base))
+        .post(format!("{}/api/panel/epg/rules", fixture.base))
         .header("authorization", auth.clone())
         .body(serde_json::to_string(&rule_body).expect("序列化规则"))
         .header("content-type", "application/json")
@@ -7223,7 +7063,7 @@ async fn epg_config_sources_bindings_and_rules() {
     let rule_id = saved["rule"]["id"].as_str().expect("规则 ID").to_string();
 
     let preview: serde_json::Value = client
-        .post(format!("{}/panel/api/epg/rules/preview", fixture.base))
+        .post(format!("{}/api/panel/epg/rules/preview", fixture.base))
         .header("authorization", auth.clone())
         .body(serde_json::to_string(&rule_body).expect("序列化规则"))
         .header("content-type", "application/json")
@@ -7238,7 +7078,7 @@ async fn epg_config_sources_bindings_and_rules() {
     assert!(preview["total"].as_u64().unwrap_or(0) >= 1);
 
     let rules: serde_json::Value = client
-        .get(format!("{}/panel/api/epg/rules", fixture.base))
+        .get(format!("{}/api/panel/epg/rules", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -7251,7 +7091,7 @@ async fn epg_config_sources_bindings_and_rules() {
 
     // 删除规则。
     let removed: serde_json::Value = client
-        .delete(format!("{}/panel/api/epg/rules/{rule_id}", fixture.base))
+        .delete(format!("{}/api/panel/epg/rules/{rule_id}", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -7265,7 +7105,7 @@ async fn epg_config_sources_bindings_and_rules() {
     // 删除源会清掉绑定。
     let deleted: serde_json::Value = client
         .delete(format!(
-            "{}/panel/api/epg/sources/{second_id}",
+            "{}/api/panel/epg/sources/{second_id}",
             fixture.base
         ))
         .header("authorization", auth.clone())
@@ -7287,7 +7127,7 @@ async fn deleting_last_epg_source_clears_output() {
     let auth = format!("Bearer {session}");
     let sources: serde_json::Value = fixture
         .client
-        .get(format!("{}/panel/api/epg/sources", fixture.base))
+        .get(format!("{}/api/panel/epg/sources", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -7299,7 +7139,7 @@ async fn deleting_last_epg_source_clears_output() {
     let id = sources[0]["id"].as_str().expect("源 ID").to_string();
     let response = fixture
         .client
-        .delete(format!("{}/panel/api/epg/sources/{id}", fixture.base))
+        .delete(format!("{}/api/panel/epg/sources/{id}", fixture.base))
         .header("authorization", auth)
         .send()
         .await
@@ -7811,7 +7651,7 @@ async fn detach_channel_clears_quality_result() {
     let response = fixture
         .client
         .post(format!(
-            "{}/panel/api/groups/pg/channels/c1/detach",
+            "{}/api/panel/groups/pg/channels/c1/detach",
             fixture.base
         ))
         .header("authorization", &auth)
@@ -7870,7 +7710,7 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
 
     let status: serde_json::Value = fixture
         .client
-        .get(format!("{}/panel/api/quality/status", fixture.base))
+        .get(format!("{}/api/panel/quality/status", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -7893,7 +7733,7 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
     });
     let status: serde_json::Value = fixture
         .client
-        .get(format!("{}/panel/api/quality/status", fixture.base))
+        .get(format!("{}/api/panel/quality/status", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -7906,7 +7746,7 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
 
     let results: serde_json::Value = fixture
         .client
-        .get(format!("{}/panel/api/quality/results", fixture.base))
+        .get(format!("{}/api/panel/quality/results", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -7930,7 +7770,7 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
 
     let sources: serde_json::Value = fixture
         .client
-        .get(format!("{}/panel/api/quality/sources", fixture.base))
+        .get(format!("{}/api/panel/quality/sources", fixture.base))
         .header("authorization", auth.clone())
         .send()
         .await
@@ -7948,7 +7788,7 @@ async fn quality_api_returns_status_results_sources_and_effective_rules() {
     let effective: serde_json::Value = fixture
         .client
         .get(format!(
-            "{}/panel/api/quality/effective?gid=pg&cid=c1",
+            "{}/api/panel/quality/effective?gid=pg&cid=c1",
             fixture.base
         ))
         .header("authorization", auth)
@@ -7973,7 +7813,7 @@ async fn quality_run_api_reports_measure_only_and_rejects_bad_input() {
     let preview: serde_json::Value = fixture
         .client
         .post(format!(
-            "{}/panel/api/quality/schedule/preview",
+            "{}/api/panel/quality/schedule/preview",
             fixture.base
         ))
         .header("authorization", auth.clone())
@@ -7993,7 +7833,7 @@ async fn quality_run_api_reports_measure_only_and_rejects_bad_input() {
     let bad_cron = fixture
         .client
         .post(format!(
-            "{}/panel/api/quality/schedule/preview",
+            "{}/api/panel/quality/schedule/preview",
             fixture.base
         ))
         .header("authorization", auth.clone())
@@ -8006,7 +7846,7 @@ async fn quality_run_api_reports_measure_only_and_rejects_bad_input() {
 
     let started: serde_json::Value = fixture
         .client
-        .post(format!("{}/panel/api/quality/run", fixture.base))
+        .post(format!("{}/api/panel/quality/run", fixture.base))
         .header("authorization", auth.clone())
         .header("content-type", "application/json")
         .body(r#"{"scope":"channel","id":"pg/c1"}"#)
@@ -8022,7 +7862,7 @@ async fn quality_run_api_reports_measure_only_and_rejects_bad_input() {
 
     let empty = fixture
         .client
-        .post(format!("{}/panel/api/quality/run", fixture.base))
+        .post(format!("{}/api/panel/quality/run", fixture.base))
         .header("authorization", auth)
         .header("content-type", "application/json")
         .body(r#"{"scope":"group","id":"missing"}"#)
@@ -8143,7 +7983,7 @@ async fn ffmpeg_status_reports_source_and_job() {
     let body: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+            .get(format!("{}/api/panel/assets/ffmpeg-status", fixture.base))
             .header("authorization", format!("Bearer {session}"))
             .send()
             .await
@@ -8175,7 +8015,7 @@ async fn ffmpeg_install_requires_admin() {
     };
     let session: String = serde_json::from_str::<serde_json::Value>(
         &login(
-            "/panel/api/login",
+            "/api/panel/login",
             r#"{"username":"viewer","password":"viewer"}"#,
         )
         .await
@@ -8190,7 +8030,7 @@ async fn ffmpeg_install_requires_admin() {
         .to_string();
     let response = fixture
         .client
-        .post(format!("{}/panel/api/tools/ffmpeg/install", fixture.base))
+        .post(format!("{}/api/panel/tools/ffmpeg/install", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -8210,7 +8050,7 @@ async fn ffmpeg_remove_deletes_managed_binary() {
 
     let response = fixture
         .client
-        .post(format!("{}/panel/api/tools/ffmpeg/remove", fixture.base))
+        .post(format!("{}/api/panel/tools/ffmpeg/remove", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -8231,7 +8071,7 @@ async fn ffmpeg_install_job_fails_on_unreachable_source() {
         .set_base_url("http://127.0.0.1:1");
     let response = fixture
         .client
-        .post(format!("{}/panel/api/tools/ffmpeg/install", fixture.base))
+        .post(format!("{}/api/panel/tools/ffmpeg/install", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -8243,7 +8083,7 @@ async fn ffmpeg_install_job_fails_on_unreachable_source() {
         let body: serde_json::Value = serde_json::from_str(
             &fixture
                 .client
-                .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+                .get(format!("{}/api/panel/assets/ffmpeg-status", fixture.base))
                 .header("authorization", format!("Bearer {session}"))
                 .send()
                 .await
@@ -8286,7 +8126,7 @@ async fn ffmpeg_install_rejects_second_job() {
     let post = || {
         fixture
             .client
-            .post(format!("{}/panel/api/tools/ffmpeg/install", fixture.base))
+            .post(format!("{}/api/panel/tools/ffmpeg/install", fixture.base))
             .header("authorization", format!("Bearer {session}"))
             .send()
     };
@@ -8315,7 +8155,7 @@ async fn ffmpeg_status_does_not_fall_back_from_broken_managed_binary() {
     let body: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+            .get(format!("{}/api/panel/assets/ffmpeg-status", fixture.base))
             .header("authorization", format!("Bearer {session}"))
             .send()
             .await
@@ -8346,7 +8186,7 @@ async fn ffmpeg_status_reports_non_executable_managed_file() {
     let body: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+            .get(format!("{}/api/panel/assets/ffmpeg-status", fixture.base))
             .header("authorization", format!("Bearer {session}"))
             .send()
             .await
@@ -8377,7 +8217,7 @@ async fn ffprobe_status_reports_managed_version() {
     let body: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+            .get(format!("{}/api/panel/assets/ffmpeg-status", fixture.base))
             .header("authorization", format!("Bearer {session}"))
             .send()
             .await
@@ -8412,7 +8252,7 @@ async fn ffprobe_status_reports_non_executable_managed_file() {
     let body: serde_json::Value = serde_json::from_str(
         &fixture
             .client
-            .get(format!("{}/panel/api/assets/ffmpeg-status", fixture.base))
+            .get(format!("{}/api/panel/assets/ffmpeg-status", fixture.base))
             .header("authorization", format!("Bearer {session}"))
             .send()
             .await
@@ -8434,7 +8274,7 @@ async fn ffmpeg_remove_requires_admin() {
     let session: String = serde_json::from_str::<serde_json::Value>(
         &fixture
             .client
-            .post(format!("{}/panel/api/login", fixture.base))
+            .post(format!("{}/api/panel/login", fixture.base))
             .header("content-type", "application/json")
             .body(r#"{"username":"viewer","password":"viewer"}"#)
             .send()
@@ -8450,7 +8290,7 @@ async fn ffmpeg_remove_requires_admin() {
         .to_string();
     let response = fixture
         .client
-        .post(format!("{}/panel/api/tools/ffmpeg/remove", fixture.base))
+        .post(format!("{}/api/panel/tools/ffmpeg/remove", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -8480,7 +8320,7 @@ async fn ffmpeg_remove_rejects_during_install() {
 
     let install = fixture
         .client
-        .post(format!("{}/panel/api/tools/ffmpeg/install", fixture.base))
+        .post(format!("{}/api/panel/tools/ffmpeg/install", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await
@@ -8488,7 +8328,7 @@ async fn ffmpeg_remove_rejects_during_install() {
     assert_eq!(install.status(), StatusCode::OK);
     let remove = fixture
         .client
-        .post(format!("{}/panel/api/tools/ffmpeg/remove", fixture.base))
+        .post(format!("{}/api/panel/tools/ffmpeg/remove", fixture.base))
         .header("authorization", format!("Bearer {session}"))
         .send()
         .await

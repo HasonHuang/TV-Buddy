@@ -75,7 +75,7 @@ done
 echo "/api/health = ok"
 
 # 内嵌前端：面板页引用的脚本必须含新分区。
-page=$(wget -qO- http://127.0.0.1:9900/page/panel)
+page=$(wget -qO- http://127.0.0.1:9900/page)
 asset=$(printf "%s" "$page" | grep -o "/static/panel/[^\"]*panel-[^\"]*\.js" | head -1)
 [ -n "$asset" ] || { echo "面板缺少脚本引用"; kill $pid 2>/dev/null || true; exit 1; }
 wget -qO /tmp/panel.js "http://127.0.0.1:9900$asset"
@@ -85,14 +85,14 @@ echo "面板资源 = $asset"
 # 公开台标列表已删除；面板列表需要会话。
 wget -q --server-response -O /dev/null http://127.0.0.1:9900/logo/api/list 2>/tmp/logo-public.txt || true
 grep -q " 200 " /tmp/logo-public.txt && { echo "公开台标列表未删除"; kill $pid 2>/dev/null || true; exit 1; }
-wget -q --server-response -O /dev/null http://127.0.0.1:9900/panel/api/logo/list 2>/tmp/logo-panel.txt || true
+wget -q --server-response -O /dev/null http://127.0.0.1:9900/api/panel/logo/list 2>/tmp/logo-panel.txt || true
 grep -q " 401 " /tmp/logo-panel.txt || { echo "台标面板列表未鉴权"; cat /tmp/logo-panel.txt; kill $pid 2>/dev/null || true; exit 1; }
 echo "/logo/api/list = removed"
 
 # 面板健康接口需要会话；未登录应为 401。
-wget -q --server-response -O /dev/null http://127.0.0.1:9900/panel/api/health 2>/tmp/head.txt || true
+wget -q --server-response -O /dev/null http://127.0.0.1:9900/api/panel/health 2>/tmp/head.txt || true
 grep -q " 401 " /tmp/head.txt || { echo "健康接口未鉴权"; cat /tmp/head.txt; kill $pid 2>/dev/null || true; exit 1; }
-echo "/panel/api/health = 401"
+echo "/api/panel/health = 401"
 
 # 分享默认关闭 → 404。
 wget -q --server-response -O /dev/null "http://127.0.0.1:9900/api/share/pull?key=x" 2>/tmp/share.txt || true

@@ -210,7 +210,7 @@ OUR_PID=$!
 
 ready() { # 参数：base
   for _ in $(seq 1 150); do
-    curl -fsS "$1/health" >/dev/null 2>&1 && return 0
+    curl -fsS "$1/api/health" >/dev/null 2>&1 && return 0
     sleep 0.1
   done
   return 1

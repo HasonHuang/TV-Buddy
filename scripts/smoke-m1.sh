@@ -106,7 +106,7 @@ trap 'kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true; rm -rf "$WOR
 
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 50); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -122,67 +122,67 @@ check() { # 名称 期望 实际
 code() { curl -s -o "$WORK/body" -w '%{http_code}' "$@"; }
 jget() { python3 -c "import sys,json;d=json.load(open('$WORK/body'));print($1)"; }
 
-T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+T=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 A=(-H "Authorization: Bearer $T" -H 'Content-Type: application/json')
 
 # --- 导出 ---
-check "导出总表 200" "200" "$(code "${A[@]}" "$B/panel/api/groups/export")"
+check "导出总表 200" "200" "$(code "${A[@]}" "$B/api/panel/groups/export")"
 check "导出总表是数组" "5" "$(jget 'len(d)')"
 check "导出总表首项 id" "pub" "$(jget 'd[0]["id"]')"
-check "单组导出 200" "200" "$(code "${A[@]}" "$B/panel/api/groups/pub/export")"
+check "单组导出 200" "200" "$(code "${A[@]}" "$B/api/panel/groups/pub/export")"
 check "单组导出 id" "pub" "$(jget 'd["id"]')"
-check "缺组导出 404" "404" "$(code "${A[@]}" "$B/panel/api/groups/ghost/export")"
+check "缺组导出 404" "404" "$(code "${A[@]}" "$B/api/panel/groups/ghost/export")"
 check "缺组导出错误串" "Group not found" "$(jget 'd["error"]')"
 
 # --- 分组 CRUD ---
 check "未登录拒绝建组" "401" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/groups" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/groups" \
     -H 'Content-Type: application/json' -d '{"id":"x"}')"
 check "新建分组 200" "200" \
-  "$(code -X POST "${A[@]}" -d '{"id":"new1","name":"新组","mode":"proxy","access":"hidden"}' "$B/panel/api/groups")"
+  "$(code -X POST "${A[@]}" -d '{"id":"new1","name":"新组","mode":"proxy","access":"hidden"}' "$B/api/panel/groups")"
 check "重复 id 409" "409" \
-  "$(code -X POST "${A[@]}" -d '{"id":"new1"}' "$B/panel/api/groups")"
+  "$(code -X POST "${A[@]}" -d '{"id":"new1"}' "$B/api/panel/groups")"
 check "重复 id 错误串" "Group id already exists" "$(jget 'd["error"]')"
 check "落库含新组" "1" "$("$BIN" config get groups --db "$DB" | grep -c '"id":"new1"' || true)"
 check "空 id 400" "400" \
-  "$(code -X POST "${A[@]}" -d '{"name":"无 id"}' "$B/panel/api/groups")"
+  "$(code -X POST "${A[@]}" -d '{"name":"无 id"}' "$B/api/panel/groups")"
 
 check "局部改名 200" "200" \
-  "$(code -X PUT "${A[@]}" -d '{"name":"改名后"}' "$B/panel/api/groups/new1")"
-code "${A[@]}" "$B/panel/api/groups/new1/export" >/dev/null
+  "$(code -X PUT "${A[@]}" -d '{"name":"改名后"}' "$B/api/panel/groups/new1")"
+code "${A[@]}" "$B/api/panel/groups/new1/export" >/dev/null
 check "改名生效" "改名后" "$(jget 'd["name"]')"
 check "改名后 mode 保留" "proxy" "$(jget 'd["mode"]')"
 check "改缺组 404" "404" \
-  "$(code -X PUT "${A[@]}" -d '{"name":"x"}' "$B/panel/api/groups/ghost")"
+  "$(code -X PUT "${A[@]}" -d '{"name":"x"}' "$B/api/panel/groups/ghost")"
 check "改缺组错误串" "Group not found" "$(jget 'd["error"]')"
 
 # --- 频道 CRUD ---
 check "新建频道 200" "200" \
   "$(code -X POST "${A[@]}" -d '{"id":"n1","name":"新频道","url":"http://example.invalid/n1.m3u8"}' \
-    "$B/panel/api/groups/new1/channels")"
+    "$B/api/panel/groups/new1/channels")"
 check "重复频道 409" "409" \
-  "$(code -X POST "${A[@]}" -d '{"id":"n1"}' "$B/panel/api/groups/new1/channels")"
+  "$(code -X POST "${A[@]}" -d '{"id":"n1"}' "$B/api/panel/groups/new1/channels")"
 check "重复频道错误串" "Channel id already exists" "$(jget 'd["error"]')"
 check "局部改频道 200" "200" \
-  "$(code -X PUT "${A[@]}" -d '{"name":"改名频道"}' "$B/panel/api/groups/new1/channels/n1")"
-code "${A[@]}" "$B/panel/api/groups/new1/export" >/dev/null
+  "$(code -X PUT "${A[@]}" -d '{"name":"改名频道"}' "$B/api/panel/groups/new1/channels/n1")"
+code "${A[@]}" "$B/api/panel/groups/new1/export" >/dev/null
 check "改频道保 url" "http://example.invalid/n1.m3u8" "$(jget 'd["channels"][0]["url"]')"
 check "改频道改名" "改名频道" "$(jget 'd["channels"][0]["name"]')"
 check "改缺频道 404" "404" \
-  "$(code -X PUT "${A[@]}" -d '{"name":"x"}' "$B/panel/api/groups/new1/channels/nope")"
+  "$(code -X PUT "${A[@]}" -d '{"name":"x"}' "$B/api/panel/groups/new1/channels/nope")"
 check "改缺频道错误串" "Channel not found" "$(jget 'd["error"]')"
 check "删缺频道 404" "404" \
-  "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new1/channels/nope")"
+  "$(code -X DELETE "${A[@]}" "$B/api/panel/groups/new1/channels/nope")"
 check "删频道 200" "200" \
-  "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new1/channels/n1")"
-check "删组 200" "200" "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new1")"
-check "再删组 404" "404" "$(code -X DELETE "${A[@]}" "$B/panel/api/groups/new1")"
+  "$(code -X DELETE "${A[@]}" "$B/api/panel/groups/new1/channels/n1")"
+check "删组 200" "200" "$(code -X DELETE "${A[@]}" "$B/api/panel/groups/new1")"
+check "再删组 404" "404" "$(code -X DELETE "${A[@]}" "$B/api/panel/groups/new1")"
 
 # --- 用户订阅 ---
-# 订阅入口在 `/api/sub/<令牌>/` 下：用户订阅与分组订阅。令牌从 `/panel/api/me` 取。
-PTOK=$(curl -s "${A[@]}" "$B/panel/api/me" \
+# 订阅入口在 `/api/sub/<令牌>/` 下：用户订阅与分组订阅。令牌从 `/api/panel/me` 取。
+PTOK=$(curl -s "${A[@]}" "$B/api/panel/me" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 SUB="$B/api/sub/$PTOK/playlist.m3u"
 
@@ -190,7 +190,7 @@ check "全局订阅已停用" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$
 check "全局分组订阅已停用" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$B/pub/playlist.m3u")"
 check "用户订阅 200" "200" "$(curl -s -o "$WORK/body" -w '%{http_code}' "$SUB")"
 check "旧订阅别名 200" "200" \
-  "$(curl -s -o /dev/null -w '%{http_code}' "$B/sub/$PTOK/playlist.m3u")"
+  "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/sub/$PTOK/playlist.m3u")"
 check "用户订阅类型" "application/vnd.apple.mpegurl; charset=utf-8" \
   "$(curl -s -o "$WORK/body" -w '%{content_type}' "$SUB")"
 # `[epg].enabled = true` 时首行带该用户自己的 `x-tvg-url`（S-EPG-01）。
@@ -221,7 +221,7 @@ check "未知分组订阅 404" "404" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/sub/$PTOK/nope/playlist.m3u")"
 
 # --- 播放 Token ---
-curl -s "${A[@]}" "$B/panel/api/config" > "$WORK/cfg.json"
+curl -s "${A[@]}" "$B/api/panel/config" > "$WORK/cfg.json"
 python3 -c '
 import json
 cfg = json.load(open("'"$WORK"'/cfg.json"))
@@ -229,7 +229,7 @@ cfg["auth"]["token_enabled"] = True
 json.dump(cfg, open("'"$WORK"'/put.json", "w"))
 '
 check "开启 Token 200" "200" \
-  "$(code -X PUT "${A[@]}" --data-binary "@$WORK/put.json" "$B/panel/api/config")"
+  "$(code -X PUT "${A[@]}" --data-binary "@$WORK/put.json" "$B/api/panel/config")"
 curl -s -o "$WORK/body" "$SUB"
 check "订阅下发路径令牌" "3" "$(grep -c "/api/play/token/$PTOK/" "$WORK/body" || true)"
 check "开放组带 Token" "1" "$(grep -c "/api/play/token/$PTOK/op/c3.m3u8" "$WORK/body" || true)"

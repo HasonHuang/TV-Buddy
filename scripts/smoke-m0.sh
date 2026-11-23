@@ -47,7 +47,7 @@ trap 'kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true; rm -rf "$WOR
 
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 50); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -61,30 +61,30 @@ check() { # 名称 期望 实际
   fi
 }
 
-code=$(curl -s -o "$WORK/health" -w '%{http_code}' "$B/health")
+code=$(curl -s -o "$WORK/health" -w '%{http_code}' "$B/api/health")
 check "健康检查 200 ok" "200 ok" "$code $(cat "$WORK/health")"
 
-code=$(curl -s -o /dev/null -w '%{http_code}' "$B/panel/api/status")
+code=$(curl -s -o /dev/null -w '%{http_code}' "$B/api/panel/status")
 check "未登录拒绝" "401" "$code"
 
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/panel/api/login" \
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/panel/login" \
   -H 'Content-Type: application/json' -d '{"username":"admin","password":"bad"}')
 check "错误口令拒绝" "401" "$code"
 
-T=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+T=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 check "登录返回 token" "1" "$([ -n "$T" ] && echo 1 || echo 0)"
 
-V=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/status" \
+V=$(curl -s -H "Authorization: Bearer $T" "$B/api/panel/status" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("version",""))')
 EXPECTV=$("$BIN" version | awk '{print $2}')
 check "状态版本" "$EXPECTV" "$V"
 
-code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Token: $T" "$B/panel/api/status")
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Token: $T" "$B/api/panel/status")
 check "X-Token 可用" "200" "$code"
 
-C=$(curl -s -H "Authorization: Bearer $T" "$B/panel/api/config")
+C=$(curl -s -H "Authorization: Bearer $T" "$B/api/panel/config")
 GID=$(printf '%s' "$C" | python3 -c 'import sys,json;print(json.load(sys.stdin)["groups"][0]["id"])')
 check "配置含分组" "test1" "$GID"
 
@@ -95,13 +95,13 @@ cfg["server"]["log_level"] = "debug"
 print(json.dumps(cfg))
 ' > "$WORK/put.json"
 
-code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" \
+code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/api/panel/config" \
   -H "Authorization: Bearer $T" -H 'Content-Type: application/json' --data-binary "@$WORK/put.json")
 check "配置保存成功" "200" "$code"
 check "改动已入数据库" "debug" "$("$BIN" config get server.log_level --db "$DB")"
 check "未建模段保留" "* * * * *" "$("$BIN" config get epg.cron --db "$DB")"
 
-code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/panel/api/config" \
+code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/api/panel/config" \
   -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"groups":"bad"}')
 check "非法配置拒绝" "400" "$code"
 
@@ -112,7 +112,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "$B/definitely/missing")
 check "未知路径 302" "302" "$code"
 
 # 未知面板接口先被管理员门拦下：未登录 401。登录后的 404 由契约测试覆盖。
-code=$(curl -s -o /dev/null -w '%{http_code}' "$B/panel/api/nope")
+code=$(curl -s -o /dev/null -w '%{http_code}' "$B/api/panel/nope")
 check "未知接口未登录 401" "401" "$code"
 
 # 类型错必须被拒绝。JSON 重复键由 serde_json 取最后一个，不报错。

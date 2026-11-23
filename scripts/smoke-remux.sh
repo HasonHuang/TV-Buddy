@@ -53,32 +53,32 @@ trap 'kill $PID $UPID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WO
 B="http://127.0.0.1:$PORT"
 
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
 fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 
-check "预热 503" "503" "$(curl -s -o /dev/null -w '%{http_code}' "$B/rx/c1.m3u8")"
+check "预热 503" "503" "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/play/rx/c1.m3u8")"
 
 CODE=503
 for _ in $(seq 1 60); do
   sleep 0.5
-  CODE=$(curl -s -o "$WORK/list.m3u8" -w '%{http_code}' "$B/rx/c1.m3u8")
+  CODE=$(curl -s -o "$WORK/list.m3u8" -w '%{http_code}' "$B/api/play/rx/c1.m3u8")
   [ "$CODE" = "200" ] && break
 done
 check "清单 200" "200" "$CODE"
 check "目标时长 5" "1" "$(grep -c '#EXT-X-TARGETDURATION:5' "$WORK/list.m3u8" || true)"
-check "含伪装切片" "yes" "$(grep -q '/rx/c1/seg_.*[.][a-z]*' "$WORK/list.m3u8" && echo yes || echo no)"
+check "含伪装切片" "yes" "$(grep -q '/media/rx/c1/seg_.*[.][a-z]*' "$WORK/list.m3u8" && echo yes || echo no)"
 
-SEG=$(grep -o '/rx/c1/seg_[0-9]*\.[a-z]*' "$WORK/list.m3u8" | head -1)
+SEG=$(grep -o '/media/rx/c1/seg_[0-9]*\.[a-z]*' "$WORK/list.m3u8" | head -1)
 check "切片 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$B$SEG")"
 check "切片类型为图片" "1" "$(curl -s -o /dev/null -D - "$B$SEG" | grep -ci '^content-type: image/')"
 # 非 proxy 模式的切片分支：目标实测（2026-10-25）未知切片名一律 302 not_found_url。
-check "未知切片 302" "302" "$(curl -s -o /dev/null -w '%{http_code}' "$B/rx/c1/seg_999999999999.png")"
+check "未知切片 302" "302" "$(curl -s -o /dev/null -w '%{http_code}' "$B/media/rx/c1/seg_999999999999.png")"
 check "未知切片跳占位" "yes" \
-  "$(curl -s -o /dev/null -D - "$B/rx/c1/seg_999999999999.png" | grep -qi '^location:.*404\.mp4' && echo yes || echo no)"
-check "非切片子路径 302" "302" "$(curl -s -o /dev/null -w '%{http_code}' "$B/rx/c1/video/index.txt")"
+  "$(curl -s -o /dev/null -D - "$B/media/rx/c1/seg_999999999999.png" | grep -qi '^location:.*404\.mp4' && echo yes || echo no)"
+check "非切片子路径 302" "302" "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/play/rx/c1/video/index.txt")"
 
 if [ "$fail" = "0" ]; then echo "Remux 冒烟测试全部通过"; else echo "Remux 冒烟测试有失败项"; exit 1; fi

@@ -46,7 +46,7 @@ trap 'kill $PID 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$WORK"' E
 B="http://127.0.0.1:$PORT"
 
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -54,7 +54,7 @@ fail=0
 check() { if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fail=1; fi; }
 
 login() {
-  curl -s -X POST "$B/panel/api/login" -H 'content-type: application/json' \
+  curl -s -X POST "$B/api/panel/login" -H 'content-type: application/json' \
     -d "{\"username\":\"admin\",\"password\":\"$1\"}" |
     python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))'
 }
@@ -64,9 +64,9 @@ AUTH="Authorization: Bearer $TOKEN"
 check "登录拿到 token" "yes" "$([ -n "$TOKEN" ] && echo yes || echo no)"
 
 canon() { python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));d.pop("revision",None);print(json.dumps(d,sort_keys=True,ensure_ascii=False))' "$1"; }
-getcfg() { curl -s -H "$AUTH" "$B/panel/api/config" > "$1"; }
+getcfg() { curl -s -H "$AUTH" "$B/api/panel/config" > "$1"; }
 putcfg() {
-  curl -s -o "$WORK/put.out" -w '%{http_code}' -X PUT "$B/panel/api/config" \
+  curl -s -o "$WORK/put.out" -w '%{http_code}' -X PUT "$B/api/panel/config" \
     -H "$AUTH" -H 'content-type: application/json' --data-binary "@$1"
 }
 
@@ -200,17 +200,17 @@ cfg['cache']['limit_mb']=33
 json.dump(cfg,open(sys.argv[2],'w'),ensure_ascii=False)
 PY
 check "写入手动上限配置 200" "200" "$(putcfg "$WORK/c.json")"
-STATS=$(curl -s -H "$AUTH" "$B/panel/api/cache/stats")
+STATS=$(curl -s -H "$AUTH" "$B/api/panel/cache/stats")
 check "上限来源 manual" "manual" "$(echo "$STATS" | python3 -c 'import json,sys;print(json.load(sys.stdin)["recommend"]["cap_source"])')"
 check "限制因素 manual" "manual" "$(echo "$STATS" | python3 -c 'import json,sys;print(json.load(sys.stdin)["recommend"]["limited_by"])')"
 check "推荐上限 = 33" "33" "$(echo "$STATS" | python3 -c 'import json,sys;print(json.load(sys.stdin)["recommend"]["disk_cap_mb"])')"
 
 # 4) 口令：账号在 users.db，改密走 `PUT /users/:id/password`。
-ADMIN_ID=$(curl -s -H "Authorization: Bearer $TOKEN" "$B/panel/api/users" |
+ADMIN_ID=$(curl -s -H "Authorization: Bearer $TOKEN" "$B/api/panel/users" |
   python3 -c 'import json,sys;print(json.load(sys.stdin)["users"][0]["id"])')
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-  -d '{"password":"newpass-123"}' "$B/panel/api/users/$ADMIN_ID/password")
+  -d '{"password":"newpass-123"}' "$B/api/panel/users/$ADMIN_ID/password")
 check "改密 200" "200" "$CODE"
 check "新口令可登录" "yes" "$([ -n "$(login newpass-123)" ] && echo yes || echo no)"
 check "旧口令被拒" "no" "$([ -n "$(login admin)" ] && echo yes || echo no)"
@@ -219,7 +219,7 @@ check "配置里不再有旧口令键" "0" "$(grep -c 'password_sha256' "$WORK/c
 # 5) 面板资源已内嵌：新设置页的字符串出现在下发的前端包里。
 #
 # 只查 ASCII 串：esbuild 默认把非 ASCII 转成 \uXXXX，中文串查不到。
-ASSET=$(curl -s "$B/page/panel" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
+ASSET=$(curl -s "$B/page" | grep -oE '/static/panel/assets/panel-[A-Za-z0-9_.-]+\.js' | head -1)
 check "面板 HTML 引用入口 js" "yes" "$([ -n "$ASSET" ] && echo yes || echo no)"
 BUNDLE=$(curl -s "$B$ASSET")
 for needle in \
@@ -234,7 +234,7 @@ for needle in \
   '/static/assets/' \
   'cache.dash.watchdog_rebuild_stagger_ms' \
   'DraftCtx' \
-  '/subs/groups' \
+  '/api/panel/subs/groups' \
   'TRACE|DEBUG|INFO|WARN|ERROR'
 do
   case "$BUNDLE" in

@@ -94,7 +94,7 @@ JSON
 PID=$!
 B="http://127.0.0.1:$PORT"
 for _ in $(seq 1 60); do
-  curl -fsS "$B/health" >/dev/null 2>&1 && break
+  curl -fsS "$B/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
 
@@ -104,46 +104,46 @@ code() { curl -s -o "$WORK/body" -w '%{http_code}' "$@"; }
 jget() { python3 -c "import sys,json;d=json.load(open('$WORK/body'));print($1)"; }
 
 # --- 管理员登录 ---
-AT=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+AT=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 A=(-H "Authorization: Bearer $AT" -H 'Content-Type: application/json')
-check "管理员登录" "admin" "$(curl -s "${A[@]}" "$B/panel/api/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["user"]["role"])')"
+check "管理员登录" "admin" "$(curl -s "${A[@]}" "$B/api/panel/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["user"]["role"])')"
 
 # 建 EPG 源。启动后不再从配置导入源，必须走面板接口。
 curl -s -X POST "${A[@]}" \
   -d '{"id":"s1","name":"本地源","kind":"xml","enabled":true,"urls":[{"url":"http://127.0.0.1:'"$UP"'/epg.xml","priority":0}]}' \
-  "$B/panel/api/epg/sources" >/dev/null
+  "$B/api/panel/epg/sources" >/dev/null
 
 # --- 建普通用户：只看 ga，且只勾 alpha ---
 BODY='{"username":"viewer","password":"viewer123","role":"user","allowed_group_ids":["ga"],"channel_filter_enabled":true,"allowed_channel_ids":["ga/alpha"],"web_ui_access":true}'
-check "建用户 200" "200" "$(code -X POST "${A[@]}" -d "$BODY" "$B/panel/api/users")"
+check "建用户 200" "200" "$(code -X POST "${A[@]}" -d "$BODY" "$B/api/panel/users")"
 check "建用户返回 role" "user" "$(jget 'd["user"]["role"]')"
 UID_=$(jget 'd["user"]["id"]')
 
 check "普通用户至少一个分组" "400" \
-  "$(code -X POST "${A[@]}" -d '{"username":"nogroup","password":"x123","role":"user","allowed_group_ids":[]}' "$B/panel/api/users")"
+  "$(code -X POST "${A[@]}" -d '{"username":"nogroup","password":"x123","role":"user","allowed_group_ids":[]}' "$B/api/panel/users")"
 check "重名用户 400" "400" \
-  "$(code -X POST "${A[@]}" -d '{"username":"viewer","password":"x123","role":"user","allowed_group_ids":["ga"]}' "$B/panel/api/users")"
+  "$(code -X POST "${A[@]}" -d '{"username":"viewer","password":"x123","role":"user","allowed_group_ids":["ga"]}' "$B/api/panel/users")"
 
 # --- 普通用户登录 ---
-VT=$(curl -s -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+VT=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   -d '{"username":"viewer","password":"viewer123"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 V=(-H "Authorization: Bearer $VT" -H 'Content-Type: application/json')
-check "普通用户登录" "user" "$(curl -s "${V[@]}" "$B/panel/api/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["user"]["role"])')"
+check "普通用户登录" "user" "$(curl -s "${V[@]}" "$B/api/panel/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["user"]["role"])')"
 
 # --- 面板分权 ---
-check "普通用户读配置 403" "403" "$(code "${V[@]}" "$B/panel/api/config")"
-check "普通用户改配置 403" "403" "$(code -X PUT "${V[@]}" -d '{}' "$B/panel/api/config")"
-check "普通用户列分组 403" "403" "$(code "${V[@]}" "$B/panel/api/groups/export")"
-check "普通用户列用户 403" "403" "$(code "${V[@]}" "$B/panel/api/users")"
-check "普通用户重载 403" "403" "$(code -X POST "${V[@]}" "$B/panel/api/reload")"
-check "普通用户看自己的订阅 200" "200" "$(code "${V[@]}" "$B/panel/api/me")"
+check "普通用户读配置 403" "403" "$(code "${V[@]}" "$B/api/panel/config")"
+check "普通用户改配置 403" "403" "$(code -X PUT "${V[@]}" -d '{}' "$B/api/panel/config")"
+check "普通用户列分组 403" "403" "$(code "${V[@]}" "$B/api/panel/groups/export")"
+check "普通用户列用户 403" "403" "$(code "${V[@]}" "$B/api/panel/users")"
+check "普通用户重载 403" "403" "$(code -X POST "${V[@]}" "$B/api/panel/reload")"
+check "普通用户看自己的订阅 200" "200" "$(code "${V[@]}" "$B/api/panel/me")"
 
 # --- 每用户订阅 ---
-PTOK=$(jget 'd["token"]' < <(curl -s "${V[@]}" "$B/panel/api/me"))
-VSUB="$B/sub/$PTOK/playlist.m3u"
+PTOK=$(jget 'd["token"]' < <(curl -s "${V[@]}" "$B/api/panel/me"))
+VSUB="$B/api/sub/$PTOK/playlist.m3u"
 curl -s "$VSUB" > "$WORK/vpl.m3u"
 check "订阅含授权频道" "1" "$(grep -c "/api/play/token/$PTOK/ga/alpha.m3u8" "$WORK/vpl.m3u" || true)"
 check "订阅不含未授权分组" "0" "$(grep -c '/gb/' "$WORK/vpl.m3u" || true)"
@@ -153,62 +153,62 @@ check "订阅头指向自己的 EPG" \
   "#EXTM3U x-tvg-url=\"$B/api/sub/$PTOK/epg.xml.gz\"" "$(head -n1 "$WORK/vpl.m3u")"
 
 # 管理员看到全部非归档频道。
-ATOK=$(curl -s "${A[@]}" "$B/panel/api/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-curl -s "$B/sub/$ATOK/playlist.m3u" > "$WORK/apl.m3u"
+ATOK=$(curl -s "${A[@]}" "$B/api/panel/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+curl -s "$B/api/sub/$ATOK/playlist.m3u" > "$WORK/apl.m3u"
 check "管理员订阅 2 条" "2" "$(grep -c '^#EXTINF' "$WORK/apl.m3u" || true)"
 check "管理员仍不含归档组" "0" "$(grep -c '/gz/' "$WORK/apl.m3u" || true)"
 
 # --- 每用户 EPG ---
-curl -s -X POST "${A[@]}" "$B/panel/api/epg/refresh" >/dev/null || true
+curl -s -X POST "${A[@]}" "$B/api/panel/epg/refresh" >/dev/null || true
 sleep 1
-check "管理员 EPG 200" "200" "$(code "$B/sub/$ATOK/epg.xml")"
-curl -s "$B/sub/$ATOK/epg.xml" > "$WORK/aepg.xml"
+check "管理员 EPG 200" "200" "$(code "$B/api/sub/$ATOK/epg.xml")"
+curl -s "$B/api/sub/$ATOK/epg.xml" > "$WORK/aepg.xml"
 check "管理员 EPG 含两个频道" "2" "$(grep -c '<channel id=' "$WORK/aepg.xml" || true)"
-check "用户 EPG 200" "200" "$(code "$B/sub/$PTOK/epg.xml")"
+check "用户 EPG 200" "200" "$(code "$B/api/sub/$PTOK/epg.xml")"
 cp "$WORK/body" "$WORK/vepg.xml"
 check "用户 EPG 只含授权频道" "1" "$(grep -c '<channel id=' "$WORK/vepg.xml" || true)"
 check "用户 EPG 含 alpha" "1" "$(grep -c '<channel id="alpha"' "$WORK/vepg.xml" || true)"
 check "用户 EPG 不含 beta" "0" "$(grep -c 'beta' "$WORK/vepg.xml" || true)"
-check "用户 EPG gz 200" "200" "$(code "$B/sub/$PTOK/epg.xml.gz")"
+check "用户 EPG gz 200" "200" "$(code "$B/api/sub/$PTOK/epg.xml.gz")"
 check "用户 EPG gz 是 gzip" "1" \
   "$(python3 -c 'import sys;d=open(sys.argv[1],"rb").read(2);print(1 if d==b"\x1f\x8b" else 0)' "$WORK/body")"
 
 # --- 全局订阅停用 ---
 check "全局订阅 404" "404" "$(code "$B/playlist.m3u")"
 check "全局分组订阅 404" "404" "$(code "$B/ga/playlist.m3u")"
-check "全局订阅给出去向" "1" "$(grep -c '/sub/' "$WORK/body" || true)"
-check "坏令牌订阅 404" "404" "$(code "$B/sub/nope/playlist.m3u")"
-check "坏令牌 EPG 404" "404" "$(code "$B/sub/nope/epg.xml")"
+check "全局订阅给出去向" "1" "$(grep -c '/api/sub/' "$WORK/body" || true)"
+check "坏令牌订阅 404" "404" "$(code "$B/api/sub/nope/playlist.m3u")"
+check "坏令牌 EPG 404" "404" "$(code "$B/api/sub/nope/epg.xml")"
 
 # --- 令牌管理 ---
 check "建设备令牌 200" "200" \
-  "$(code -X POST "${A[@]}" -d '{"label":"电视","ttl_secs":3600,"token":"smoke-device"}' "$B/panel/api/users/$UID_/tokens")"
+  "$(code -X POST "${A[@]}" -d '{"label":"电视","ttl_secs":3600,"token":"smoke-device"}' "$B/api/panel/users/$UID_/tokens")"
 DTOK=$(jget 'd["token"]["token"]')
 check "自定义凭证生效" "smoke-device" "$DTOK"
 check "设备令牌用途" "device" "$(jget 'd["token"]["purpose"]')"
-check "设备令牌可订阅" "200" "$(code "$B/sub/$DTOK/playlist.m3u")"
+check "设备令牌可订阅" "200" "$(code "$B/api/sub/$DTOK/playlist.m3u")"
 check "改凭证被拒 400" "400" \
-  "$(code -X PUT "${A[@]}" -d '{"token":"smoke-device2"}' "$B/panel/api/users/$UID_/tokens/$DTOK")"
-check "原凭证仍可订阅" "200" "$(code "$B/sub/smoke-device/playlist.m3u")"
+  "$(code -X PUT "${A[@]}" -d '{"token":"smoke-device2"}' "$B/api/panel/users/$UID_/tokens/$DTOK")"
+check "原凭证仍可订阅" "200" "$(code "$B/api/sub/smoke-device/playlist.m3u")"
 check "撤销设备令牌 200" "200" \
-  "$(code -X DELETE "${A[@]}" "$B/panel/api/users/$UID_/tokens/$DTOK")"
-check "撤销后订阅 404" "404" "$(code "$B/sub/smoke-device/playlist.m3u")"
+  "$(code -X DELETE "${A[@]}" "$B/api/panel/users/$UID_/tokens/$DTOK")"
+check "撤销后订阅 404" "404" "$(code "$B/api/sub/smoke-device/playlist.m3u")"
 
 # --- 改密踢会话 ---
 check "重置口令 200" "200" \
-  "$(code -X PUT "${A[@]}" -d '{"password":"newpass123"}' "$B/panel/api/users/$UID_/password")"
-check "改密后旧会话失效" "401" "$(code "${V[@]}" "$B/panel/api/me")"
+  "$(code -X PUT "${A[@]}" -d '{"password":"newpass123"}' "$B/api/panel/users/$UID_/password")"
+check "改密后旧会话失效" "401" "$(code "${V[@]}" "$B/api/panel/me")"
 check "新口令可登录" "200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
-     -d '{"username":"viewer","password":"newpass123"}' "$B/panel/api/login")"
+     -d '{"username":"viewer","password":"newpass123"}' "$B/api/panel/login")"
 
 # --- 不能删最后一个管理员 ---
-ADMIN_ID=$(curl -s "${A[@]}" "$B/panel/api/users" \
+ADMIN_ID=$(curl -s "${A[@]}" "$B/api/panel/users" \
   | python3 -c 'import sys,json;print([u["id"] for u in json.load(sys.stdin)["users"] if u["role"]=="admin"][0])')
-check "删最后管理员 400" "400" "$(code -X DELETE "${A[@]}" "$B/panel/api/users/$ADMIN_ID")"
+check "删最后管理员 400" "400" "$(code -X DELETE "${A[@]}" "$B/api/panel/users/$ADMIN_ID")"
 
 # --- 删用户连带删令牌 ---
-check "删普通用户 200" "200" "$(code -X DELETE "${A[@]}" "$B/panel/api/users/$UID_")"
-check "删用户后其令牌失效" "404" "$(code "$B/sub/$PTOK/playlist.m3u")"
+check "删普通用户 200" "200" "$(code -X DELETE "${A[@]}" "$B/api/panel/users/$UID_")"
+check "删用户后其令牌失效" "404" "$(code "$B/api/sub/$PTOK/playlist.m3u")"
 
 if [ "$fail" = "0" ]; then echo "用户功能冒烟测试全部通过"; else echo "用户功能冒烟测试有失败项"; exit 1; fi
