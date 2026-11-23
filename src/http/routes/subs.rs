@@ -20,7 +20,7 @@ use crate::{
     subscription,
 };
 
-/// `GET /subs/status`——列出源最近一次抓取与同步状态。需要管理员会话。
+/// `GET /api/panel/subs/status`——列出源最近一次抓取与同步状态。需要管理员会话。
 pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     status_body(state).await
 }
@@ -82,7 +82,7 @@ async fn status_body(state: Arc<AppState>) -> Json<Value> {
     }))
 }
 
-/// `POST /subs/groups`——抓取源并列出分组。需要管理员会话。
+/// `POST /api/panel/subs/groups`——抓取源并列出分组。需要管理员会话。
 pub async fn groups(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -140,7 +140,7 @@ async fn groups_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, A
     Ok(Json(json!({ "groups": groups, "total": total })))
 }
 
-/// `POST /subs/preview`——按映射与过滤规则预检源。需要管理员会话。
+/// `POST /api/panel/subs/preview`——按映射与过滤规则预检源。需要管理员会话。
 pub async fn preview(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -351,7 +351,7 @@ async fn preview_body(state: Arc<AppState>, body: Value) -> Result<Json<Value>, 
     })))
 }
 
-/// `GET /panel/api/subs/status`——目标面板路径，需要会话。
+/// `GET /api/panel/subs/status`——目标面板路径，需要会话。
 pub async fn panel_status(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -359,7 +359,7 @@ pub async fn panel_status(
     status_body(state).await
 }
 
-/// `POST /panel/api/subs/groups`——目标面板路径，需要会话。
+/// `POST /api/panel/subs/groups`——目标面板路径，需要会话。
 pub async fn panel_groups(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -368,7 +368,7 @@ pub async fn panel_groups(
     groups_body(state, body).await
 }
 
-/// `POST /panel/api/subs/preview`——目标面板路径，需要会话。
+/// `POST /api/panel/subs/preview`——目标面板路径，需要会话。
 pub async fn panel_preview(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -377,7 +377,7 @@ pub async fn panel_preview(
     preview_body(state, body).await
 }
 
-/// `POST /panel/api/subs/sync`——异步触发同步。返回 202。
+/// `POST /api/panel/subs/sync`——异步触发同步。返回 202。
 ///
 /// `{ "id": "可选", "force": false }`。省略 `id` 时同步全部启用的托管源。
 ///
@@ -468,7 +468,7 @@ pub async fn panel_sync(
     ))
 }
 
-/// `DELETE /panel/api/subs/:id/content?to_manual=1`——清理物化内容。
+/// `DELETE /api/panel/subs/:id/content?to_manual=1`——清理物化内容。
 ///
 /// 默认转为手工；`to_manual=0` 删除。
 pub async fn panel_content(
@@ -501,7 +501,7 @@ pub async fn panel_content(
     })))
 }
 
-/// `POST /subs/:id/backfill-mode`——按源默认回填未设置模式的同步频道。
+/// `POST /api/panel/subs/:id/backfill-mode`——按源默认回填未设置模式的同步频道。
 pub async fn panel_backfill_mode(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,

@@ -152,7 +152,7 @@ fn parse_role(raw: Option<String>, fallback: Role) -> Role {
     }
 }
 
-/// `GET /panel/api/users`。
+/// `GET /api/panel/users`。
 pub async fn list(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -162,7 +162,7 @@ pub async fn list(
     Ok(Json(json!({ "users": users })))
 }
 
-/// `POST /panel/api/users`。
+/// `POST /api/panel/users`。
 pub async fn create(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -199,7 +199,7 @@ pub async fn create(
     Ok(Json(json!({ "ok": true, "user": user_view(&created) })))
 }
 
-/// `PUT /panel/api/users/:id`。
+/// `PUT /api/panel/users/:id`。
 pub async fn update(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -228,7 +228,7 @@ pub async fn update(
     Ok(Json(json!({ "ok": true, "user": user_view(&saved) })))
 }
 
-/// `PUT /panel/api/users/:id/password`。
+/// `PUT /api/panel/users/:id/password`。
 pub async fn set_password(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -258,7 +258,7 @@ pub async fn set_password(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// `DELETE /panel/api/users/:id`。
+/// `DELETE /api/panel/users/:id`。
 pub async fn remove(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -289,7 +289,7 @@ pub async fn remove(
     Ok(Json(json!({ "ok": true, "removed": removed })))
 }
 
-/// `GET /panel/api/users/channel-options`——分组与频道选项，供勾选。
+/// `GET /api/panel/users/channel-options`——分组与频道选项，供勾选。
 pub async fn channel_options(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -318,7 +318,7 @@ pub async fn channel_options(
     Ok(Json(json!({ "groups": groups })))
 }
 
-/// `GET /panel/api/users/:id/tokens`。
+/// `GET /api/panel/users/:id/tokens`。
 pub async fn list_tokens(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -334,7 +334,7 @@ pub async fn list_tokens(
     Ok(Json(json!({ "tokens": tokens })))
 }
 
-/// `POST /panel/api/users/:id/tokens`。
+/// `POST /api/panel/users/:id/tokens`。
 pub async fn create_token(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -365,7 +365,7 @@ pub async fn create_token(
     Ok(Json(json!({ "ok": true, "token": token_view(&token) })))
 }
 
-/// `PUT /panel/api/users/:id/tokens/:token`。
+/// `PUT /api/panel/users/:id/tokens/:token`。
 pub async fn update_token(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -398,7 +398,7 @@ pub async fn update_token(
     Ok(Json(json!({ "ok": true, "token": token_view(&saved) })))
 }
 
-/// `DELETE /panel/api/users/:id/tokens/:token`。
+/// `DELETE /api/panel/users/:id/tokens/:token`。
 pub async fn revoke_token(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -420,7 +420,7 @@ pub async fn revoke_token(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// `GET /panel/api/me`——当前登录者与自己的订阅地址。
+/// `GET /api/panel/me`——当前登录者与自己的订阅地址。
 ///
 /// 普通用户也能调。返回的 `groups` 只含该用户可见的分组与频道，
 /// 供面板「我的订阅」页直接渲染，不需要额外的管理权限。

@@ -19,7 +19,7 @@ use crate::{
 
 /// 未知面板接口：`404` JSON（S-EP-08）。
 ///
-/// 注册在 `/{gid}/{cid}/*path` 之前，避免面板路径被播放通配路由吞掉。
+/// 注册在 `/api/play/{gid}/{cid}/*path` 之前，避免面板路径被播放通配路由吞掉。
 pub async fn api_missing() -> Response {
     (
         StatusCode::NOT_FOUND,
@@ -34,7 +34,7 @@ pub struct LoginReq {
     pub password: String,
 }
 
-/// `POST /panel/api/login` → `{"token":"<uuid>"}`（S-AUTH-01）。
+/// `POST /api/panel/login` → `{"token":"<uuid>"}`（S-AUTH-01）。
 ///
 /// 失败次数超过窗口配额后返回 `429`，并带 `locked_for_secs`（S-AUTH-04、F-010 §4）。
 pub async fn login(
@@ -112,7 +112,7 @@ fn login_locked(secs: u64) -> ApiError {
     }))
 }
 
-/// `POST /panel/api/logout`。
+/// `POST /api/panel/logout`。
 pub async fn logout(
     PanelAuth(token): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -121,7 +121,7 @@ pub async fn logout(
     Json(json!({ "ok": true }))
 }
 
-/// `GET /panel/api/status`。
+/// `GET /api/panel/status`。
 ///
 /// 字段面按目标 v0.8.2 实测（F-021 §6）。要点：
 /// - `traffic_in_bytes` 目标恒为 0（S-BUG-01），本实现固定输出 0。
@@ -221,7 +221,7 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
     }))
 }
 
-/// `GET /panel/api/config`——全量配置。
+/// `GET /api/panel/config`——全量配置。
 pub async fn get_config(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -230,7 +230,7 @@ pub async fn get_config(
     Json(serde_json::to_value(&*cfg).unwrap_or(Value::Null))
 }
 
-/// `PUT /panel/api/config`——全量保存（S-CFG-01）。
+/// `PUT /api/panel/config`——全量保存（S-CFG-01）。
 pub async fn put_config(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -258,7 +258,7 @@ pub async fn put_config(
     Ok(Json(json!({ "ok": true, "revision": revision })))
 }
 
-/// `POST /panel/api/reload`——从数据库重读配置。
+/// `POST /api/panel/reload`——从数据库重读配置。
 ///
 /// 管理 CLI 直接改库后调用它生效。
 pub async fn reload(

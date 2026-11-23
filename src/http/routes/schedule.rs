@@ -19,12 +19,12 @@ use crate::{
     state::AppState,
 };
 
-/// `GET /panel/api/schedule`——任务数组。
+/// `GET /api/panel/schedule`——任务数组。
 pub async fn list(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!(state.schedule.list()))
 }
 
-/// `POST /panel/api/schedule`——新增。
+/// `POST /api/panel/schedule`——新增。
 pub async fn create(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -48,7 +48,7 @@ pub async fn create(
     Ok(Json(json!({ "ok": true, "id": id })))
 }
 
-/// `PUT /panel/api/schedule/:idx`。
+/// `PUT /api/panel/schedule/:idx`。
 pub async fn update(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -62,7 +62,7 @@ pub async fn update(
     Ok(Json(json!({ "ok": true, "task": task })))
 }
 
-/// `DELETE /panel/api/schedule/:idx`。
+/// `DELETE /api/panel/schedule/:idx`。
 pub async fn remove(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -75,7 +75,7 @@ pub async fn remove(
     Ok(Json(json!({ "ok": true, "was_running": was_running })))
 }
 
-/// `POST /panel/api/schedule/:idx/stop`。
+/// `POST /api/panel/schedule/:idx/stop`。
 pub async fn stop(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -88,7 +88,7 @@ pub async fn stop(
     Ok(Json(json!({ "ok": true, "was_running": was_running })))
 }
 
-/// `GET /panel/api/schedule/download/:filename`。
+/// `GET /api/panel/schedule/download/:filename`。
 pub async fn download(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -111,7 +111,7 @@ pub async fn download(
     Ok(response)
 }
 
-/// `POST /panel/api/schedule/from-epg`——按条目批量建任务。
+/// `POST /api/panel/schedule/from-epg`——按条目批量建任务。
 ///
 /// 请求：`{"items":[{name,group_id,channel_id,start_time,end_time,format}]}`。
 pub async fn from_epg(
@@ -160,7 +160,7 @@ pub async fn from_epg(
     })))
 }
 
-/// `GET /panel/api/livestream`——已点亮的频道。
+/// `GET /api/panel/livestream`——已点亮的频道。
 pub async fn livestream_list(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -194,7 +194,7 @@ pub struct ActionPath {
     pub action: String,
 }
 
-/// `POST /panel/api/livestream/:gid/:cid/{start,stop}`。
+/// `POST /api/panel/livestream/:gid/:cid/{start,stop}`。
 pub async fn livestream_switch(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,

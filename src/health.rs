@@ -1,6 +1,6 @@
 //! 逐频道上游健康探测。
 //!
-//! 证据：F-021 §7。目标 `/panel/api/health` 返回：
+//! 证据：F-021 §7。目标 `/api/panel/health` 返回：
 //!
 //! ```json
 //! {"enabled":true,"entries":{"g2/c1":{"checked_at":1792222076,
@@ -9,7 +9,7 @@
 //!
 //! 周期取 `[health].interval_secs`，超时取 `timeout_secs`，并发取 `concurrency`。
 //! 探测只读，不改配置，也不影响播放链路。
-//! 结果供 `/panel/api/health` 与「探测失败下线」使用。
+//! 结果供 `/api/panel/health` 与「探测失败下线」使用。
 
 use std::{
     collections::HashMap,

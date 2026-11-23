@@ -24,7 +24,7 @@ const MAX_GROUPS: usize = 3;
 /// 串行化：同一时刻只允许一次估算在跑。
 static ESTIMATE_LOCK: Mutex<()> = Mutex::const_new(());
 
-/// `POST /panel/api/cdn/estimate`。
+/// `POST /api/panel/cdn/estimate`。
 ///
 /// 全部失败时仍返回 `200`（`recommend.ttl_source` 回落 `fallback`）；并发请求返回 `409`。
 pub async fn estimate(

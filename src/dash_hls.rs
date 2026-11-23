@@ -1,7 +1,8 @@
 //! DASH → HLS：把 MPD 转成 HLS 主清单、媒体清单，并按需代理初始化段与切片。
 //!
 //! 证据：F-016。目标行为：
-//! - `/{gid}/{cid}.m3u8` 返回 HLS master；媒体清单为 `/{gid}/{cid}/{track}/index.txt`；
+//! - `/api/play/{gid}/{cid}.m3u8` 返回 HLS master；媒体清单为
+//!   `/api/play/{gid}/{cid}/{track}/index.txt`；
 //! - 轨道名 `video_{高}p` / `audio-{n}`；init 与切片伪装成图片扩展名；
 //! - 支持 MPD 级 `<BaseURL>` 与 `SegmentTimeline`；
 //! - 出口不含 `#EXT-X-KEY`（KID 只识别，不解密）。
@@ -57,7 +58,7 @@ impl Entry {
     }
 }
 
-/// `/panel/api/dash/status` 的轨道摘要。目标字段见 F-016 §1。
+/// `/api/panel/dash/status` 的轨道摘要。目标字段见 F-016 §1。
 #[derive(Debug, Clone, Serialize)]
 pub struct TrackStatus {
     pub name: String,
@@ -251,7 +252,7 @@ impl Manager {
         }
     }
 
-    /// `/panel/api/dash/status` 摘要。目标形状见 F-016 §1。
+    /// `/api/panel/dash/status` 摘要。目标形状见 F-016 §1。
     pub fn status(&self) -> Vec<serde_json::Value> {
         let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         sessions

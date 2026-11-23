@@ -29,7 +29,7 @@ fn list_body(cache: &str) -> Value {
     })
 }
 
-/// `GET /static/logo/<file>`（旧 `/logo/<file>`）——公开取图。
+/// `GET /static/logo/<file>`——公开取图。
 ///
 /// 文件名不带哈希，缓存窗口要短：`public, max-age=3600`。
 pub async fn file(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
@@ -59,7 +59,7 @@ pub async fn file(State(state): State<Arc<AppState>>, Path(name): Path<String>) 
     response
 }
 
-/// `GET /panel/api/logo/list`。
+/// `GET /api/panel/logo/list`。
 pub async fn panel_list(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -68,7 +68,7 @@ pub async fn panel_list(
     Json(list_body(&config.cache.disk_path))
 }
 
-/// `POST /panel/api/logo/upload`——`{"items":[{"name","ext","data":"data:image/…;base64,…"}]}`。
+/// `POST /api/panel/logo/upload`——`{"items":[{"name","ext","data":"data:image/…;base64,…"}]}`。
 pub async fn upload(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -114,7 +114,7 @@ pub async fn upload(
     ))
 }
 
-/// `POST /panel/api/logo/delete`——`{"file"}`。
+/// `POST /api/panel/logo/delete`——`{"file"}`。
 pub async fn delete(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -136,7 +136,7 @@ pub async fn delete(
     }
 }
 
-/// `POST /panel/api/logo/rename`——`{"file","name"}`；保留原扩展名。
+/// `POST /api/panel/logo/rename`——`{"file","name"}`；保留原扩展名。
 pub async fn rename(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -184,7 +184,7 @@ fn logo_file(value: &str) -> Option<String> {
     normalized.strip_prefix("/static/logo/").map(str::to_string)
 }
 
-/// `GET /panel/api/logo/match-report`——缺台标、坏引用与未使用。
+/// `GET /api/panel/logo/match-report`——缺台标、坏引用与未使用。
 pub async fn match_report(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -241,7 +241,7 @@ pub async fn match_report(
     }))
 }
 
-/// `POST /panel/api/logo/apply`——`{"gid","cid","file"}`；写入频道 `logo`。
+/// `POST /api/panel/logo/apply`——`{"gid","cid","file"}`；写入频道 `logo`。
 pub async fn apply(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -304,7 +304,7 @@ pub async fn apply(
     })))
 }
 
-/// `POST /panel/api/logo/suggest`——按名称相似度为缺台标频道推荐文件。
+/// `POST /api/panel/logo/suggest`——按名称相似度为缺台标频道推荐文件。
 pub async fn suggest(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -360,7 +360,7 @@ pub async fn suggest(
     }))
 }
 
-/// `POST /panel/api/logo/restore`——用 `.orig/` 备份还原静态原图。
+/// `POST /api/panel/logo/restore`——用 `.orig/` 备份还原静态原图。
 pub async fn restore(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -382,7 +382,7 @@ pub async fn restore(
     }
 }
 
-/// `POST /panel/api/logo/animate`——生成动画 WebP 动效并覆盖原图。
+/// `POST /api/panel/logo/animate`——生成动画 WebP 动效并覆盖原图。
 pub async fn animate(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,

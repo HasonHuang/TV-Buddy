@@ -111,7 +111,7 @@ fn run_json(run: &RunState) -> Value {
     })
 }
 
-/// `GET /panel/api/quality/status`。
+/// `GET /api/panel/quality/status`。
 pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
     let run = state.quality.run_status();
@@ -239,7 +239,7 @@ fn result_json(item: &QualityResult) -> Value {
     })
 }
 
-/// `GET /panel/api/quality/results`。
+/// `GET /api/panel/quality/results`。
 pub async fn results(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -259,7 +259,7 @@ pub async fn results(
     }
 }
 
-/// `GET /panel/api/quality/sources`。
+/// `GET /api/panel/quality/sources`。
 pub async fn sources(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
     let statuses = state.sources.statuses();
@@ -299,7 +299,7 @@ pub async fn sources(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>
     Json(json!({ "items": items }))
 }
 
-/// `GET /panel/api/quality/effective`。
+/// `GET /api/panel/quality/effective`。
 pub async fn effective(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -331,7 +331,7 @@ pub async fn effective(
     })))
 }
 
-/// `POST /panel/api/quality/run`。
+/// `POST /api/panel/quality/run`。
 pub async fn run(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -359,7 +359,7 @@ pub async fn run(
     }
 }
 
-/// `GET /panel/api/quality/runs/:run_id`。
+/// `GET /api/panel/quality/runs/:run_id`。
 pub async fn run_status(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -373,7 +373,7 @@ pub async fn run_status(
     Ok(Json(run_json(&run)))
 }
 
-/// `POST /panel/api/quality/cancel`。
+/// `POST /api/panel/quality/cancel`。
 pub async fn cancel(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let running = state.quality.run_status().is_some_and(|run| !run.finished);
     if running {
@@ -382,7 +382,7 @@ pub async fn cancel(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
     Json(json!({ "ok": true, "running": running }))
 }
 
-/// `POST /panel/api/quality/preview`。按最近结果预览将移出的频道。不写状态。
+/// `POST /api/panel/quality/preview`。按最近结果预览将移出的频道。不写状态。
 pub async fn preview(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
     let filter = QualityFilter {
@@ -460,7 +460,7 @@ impl SchedulePreviewRequest {
     }
 }
 
-/// `POST /panel/api/quality/schedule/preview`。
+/// `POST /api/panel/quality/schedule/preview`。
 pub async fn schedule_preview(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,

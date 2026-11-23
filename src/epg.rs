@@ -141,7 +141,7 @@ pub fn load_generated_cached(state: &AppState) -> Option<Arc<DocumentData>> {
     Some(data)
 }
 
-/// 额外频道（`POST /panel/api/epg/extra`）。
+/// 额外频道（`POST /api/panel/epg/extra`）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Extra {
     pub source_id: String,
@@ -1117,7 +1117,7 @@ fn channel_targets(config: &Config) -> Vec<Target> {
 /// 频道在节目单里的输出 id。
 ///
 /// 有 `tvg_id`（或 `tvg-id` / `epg_id`）时用它，否则用频道 id。两者都转小写。
-/// 面板「我的订阅」与 `/sub/:token/epg.xml` 都用这个规则对齐频道。
+/// 面板「我的订阅」与 `/api/sub/:token/epg.xml` 都用这个规则对齐频道。
 pub fn channel_out_id(channel: &crate::config::model::Channel) -> String {
     tvg_id_of(channel)
         .unwrap_or_else(|| channel.id.clone())

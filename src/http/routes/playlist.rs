@@ -18,12 +18,12 @@ use crate::{
     subscription,
 };
 
-/// `GET /panel/api/playlist`。
+/// `GET /api/panel/playlist`。
 pub async fn get(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!(state.snapshot().playlist))
 }
 
-/// `PUT /panel/api/playlist`——全量替换。
+/// `PUT /api/panel/playlist`——全量替换。
 pub async fn update(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -74,7 +74,7 @@ pub async fn update(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// `PUT /panel/api/playlist/settings`——只保存全局设置，保留源列表。
+/// `PUT /api/panel/playlist/settings`——只保存全局设置，保留源列表。
 pub async fn update_settings(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -117,7 +117,7 @@ fn apply_global_settings(target: &mut PlaylistCfg, cfg: &PlaylistCfg) {
     target.sync_fetch_timeout_secs = cfg.sync_fetch_timeout_secs;
 }
 
-/// `POST /panel/api/playlist/sources`——新建一个源。
+/// `POST /api/panel/playlist/sources`——新建一个源。
 pub async fn create_source(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -152,7 +152,7 @@ pub async fn create_source(
     Ok(Json(json!({ "ok": true, "source": source })))
 }
 
-/// `PUT /panel/api/playlist/sources/:id`——保存一个源。
+/// `PUT /api/panel/playlist/sources/:id`——保存一个源。
 ///
 /// `?keep_content=1` 保留为手工；`0` 一并删除。源不再托管且已有内容时，
 /// 缺少该参数返回 `409`，`code=content_exists`。
@@ -254,7 +254,7 @@ pub async fn update_source(
     })))
 }
 
-/// `POST /panel/api/playlist/sources/:id/disable`——停用源。
+/// `POST /api/panel/playlist/sources/:id/disable`——停用源。
 pub async fn disable_source(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -343,7 +343,7 @@ pub async fn disable_source(
     Ok(Json(json!({ "ok": true, "keep_channels": keep_channels })))
 }
 
-/// `POST /panel/api/playlist/sources/:id/enable`——启用源，sync 源会排入同步。
+/// `POST /api/panel/playlist/sources/:id/enable`——启用源，sync 源会排入同步。
 pub async fn enable_source(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -391,7 +391,7 @@ fn clear_gate(status: &mut crate::subs::SourceStatus) {
     status.gate_truncated = false;
 }
 
-/// `DELETE /panel/api/playlist/sources/:id`——删除源。
+/// `DELETE /api/panel/playlist/sources/:id`——删除源。
 ///
 /// 默认保留内容为手工。`?keep_content=0` 一并删除。已有内容且未给参数时
 /// 返回 `409`，`code=content_exists`。

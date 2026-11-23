@@ -1,4 +1,4 @@
-//! 订阅源预检：`/subs/{groups,preview}` 的纯逻辑。
+//! 订阅源预检：`/api/panel/subs/{groups,preview}` 的纯逻辑。
 //!
 //! 证据：S-GAP-07、F-020。分组模式、全局排除、白/黑名单的先后顺序见 `trace`。
 

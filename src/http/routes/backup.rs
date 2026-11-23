@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 
 use crate::{backup, http::error::ApiError, http::ext::PanelAuth, state::AppState};
 
-/// `GET /panel/api/backup?include=all|epg-scripts|resolver`。
+/// `GET /api/panel/backup?include=all|epg-scripts|resolver`。
 pub async fn backup(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -43,7 +43,7 @@ pub async fn backup(
     Ok(response)
 }
 
-/// `POST /panel/api/restore`——请求体是 gzip(tar) 原文。
+/// `POST /api/panel/restore`——请求体是 gzip(tar) 原文。
 pub async fn restore(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,

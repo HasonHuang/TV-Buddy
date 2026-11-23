@@ -30,7 +30,7 @@ fn found(url: &str) -> Response {
     response
 }
 
-/// `GET /health` → `200` `ok`（`text/plain`，S-EP-10）。
+/// `GET /api/health` → `200` `ok`（`text/plain`，S-EP-10）。
 pub async fn health() -> impl IntoResponse {
     (
         StatusCode::OK,
@@ -39,7 +39,7 @@ pub async fn health() -> impl IntoResponse {
     )
 }
 
-/// `GET /` → 跳首页（`server.home_url`）。
+/// `GET /` → 跳首页（`server.home_url`，默认 `/page`）。
 pub async fn home(State(state): State<Arc<AppState>>) -> Response {
     let cfg = state.snapshot();
     found(&cfg.server.home_url)
@@ -48,10 +48,10 @@ pub async fn home(State(state): State<Arc<AppState>>) -> Response {
 /// 兜底：面板接口返回 404 JSON；其余路径返回 404 正文。
 ///
 /// 目标把 `/status` 一类单段未知路径判为 404（S-EP-08）。
-/// 两段及以上的播放形状由 `/{gid}/{file}` 与通配路由处理。
+/// 两段及以上的播放形状由 `/api/play/{gid}/{file}` 与通配路由处理。
 pub async fn fallback(State(_): State<Arc<AppState>>, uri: Uri) -> Response {
     let path = uri.path();
-    if path.starts_with("/panel/api/") || path == "/api/panel" || path.starts_with("/api/panel/") {
+    if path == "/api/panel" || path.starts_with("/api/panel/") {
         return (
             StatusCode::NOT_FOUND,
             axum::Json(serde_json::json!({ "error": "接口不存在" })),
@@ -61,7 +61,7 @@ pub async fn fallback(State(_): State<Arc<AppState>>, uri: Uri) -> Response {
     (StatusCode::NOT_FOUND, "not found").into_response()
 }
 
-/// `GET /unban/whoami`——返回调用方地址、封禁状态与本月配额。
+/// `GET /api/unban/whoami`——返回调用方地址、封禁状态与本月配额。
 ///
 /// 目标在 IP 管控关闭时只返回 `enabled` 与 `ip`。
 pub async fn whoami(
@@ -85,7 +85,7 @@ pub async fn whoami(
     }))
 }
 
-/// `POST /unban`——调用方自助解封。
+/// `POST /api/unban`——调用方自助解封。
 ///
 /// 免登录（S-EP-07）。每个 IP 每月最多 3 次（S-AUTH-07）。
 /// 配额用完时目标仍返回 `200`，正文 `ok=false`。

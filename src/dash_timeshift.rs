@@ -713,7 +713,7 @@ impl Manager {
         Some(session.info())
     }
 
-    /// 处理 `/{gid}/{cid}/dash-timeshift/*`。
+    /// 处理 `/api/play/{gid}/{cid}/dash-timeshift/*` 与对应的 `/media` 切片路径。
     ///
     /// 目标是「只要前缀命中就由本处理器答复」：未知分组、非 `dash` 组、
     /// 未开时移的频道都返回 `404`，不落回 302 分流。

@@ -1,7 +1,7 @@
 //! EPG 公开文档与面板接口。
 //!
 //! 公开面：`/epg.xml`、`/epg.xml.gz`、`/epg`。EPG 关闭时三者都 `404`（S-EP-05）。
-//! 私有面：`/panel/api/epg/{status,refresh,mappings,mapping,match-report}`。
+//! 私有面：`/api/panel/epg/{status,refresh,mappings,mapping,match-report}`。
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -29,7 +29,7 @@ fn epg_closed() -> Response {
         .into_response()
 }
 
-/// `GET /panel/api/epg/status`。
+/// `GET /api/panel/epg/status`。
 pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
     let last_success = *state
@@ -57,7 +57,7 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
     }))
 }
 
-/// `POST /panel/api/epg/refresh`——同步跑一次采集，返回摘要。
+/// `POST /api/panel/epg/refresh`——同步跑一次采集，返回摘要。
 pub async fn refresh(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -74,7 +74,7 @@ pub async fn refresh(
     }
 }
 
-/// `GET /panel/api/epg/mappings`——手工映射表。
+/// `GET /api/panel/epg/mappings`——手工映射表。
 pub async fn mappings(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({
         "mappings": epg::mappings(&state),
@@ -82,7 +82,7 @@ pub async fn mappings(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>
     }))
 }
 
-/// `POST /panel/api/epg/mapping`——设置或清除手工映射。
+/// `POST /api/panel/epg/mapping`——设置或清除手工映射。
 pub async fn mapping(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -119,7 +119,7 @@ pub async fn mapping(
     }
 }
 
-/// `GET /panel/api/epg/match-report`——目标式文本报告。
+/// `GET /api/panel/epg/match-report`——目标式文本报告。
 pub async fn match_report(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Response {
     let rows = state
         .epg
@@ -145,7 +145,7 @@ pub async fn match_report(PanelAuth(_): PanelAuth, State(state): State<Arc<AppSt
     ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response()
 }
 
-/// `GET /panel/api/epg/scripts`——脚本列表与 Python 版本。
+/// `GET /api/panel/epg/scripts`——脚本列表与 Python 版本。
 pub async fn scripts_list(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -157,7 +157,7 @@ pub async fn scripts_list(
     }))
 }
 
-/// `POST /panel/api/epg/script`——上传或覆盖脚本。
+/// `POST /api/panel/epg/script`——上传或覆盖脚本。
 pub async fn script_save(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -178,7 +178,7 @@ pub async fn script_save(
     }
 }
 
-/// `POST /panel/api/epg/script-delete`——删除脚本。
+/// `POST /api/panel/epg/script-delete`——删除脚本。
 pub async fn script_delete(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -198,7 +198,7 @@ pub async fn script_delete(
     }
 }
 
-/// `POST /panel/api/epg/extra`——额外频道的增删。
+/// `POST /api/panel/epg/extra`——额外频道的增删。
 pub async fn extra(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -308,7 +308,7 @@ fn refresh_after_change(state: &Arc<AppState>) {
     });
 }
 
-/// `POST /panel/api/epg/regenerate`——按 raw 缓存重新匹配并生成。
+/// `POST /api/panel/epg/regenerate`——按 raw 缓存重新匹配并生成。
 pub async fn regenerate(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -323,7 +323,7 @@ pub async fn regenerate(
     }
 }
 
-/// `POST /panel/api/epg/cron-preview`——校验表达式并返回下次触发时间。
+/// `POST /api/panel/epg/cron-preview`——校验表达式并返回下次触发时间。
 pub async fn cron_preview(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -349,7 +349,7 @@ pub async fn cron_preview(
     }
 }
 
-/// `GET /panel/api/epg/programmes/{channel}`——频道节目表与录制缓冲。
+/// `GET /api/panel/epg/programmes/{channel}`——频道节目表与录制缓冲。
 pub async fn programmes(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -368,7 +368,7 @@ pub async fn programmes(
     }
 }
 
-/// `GET /panel/api/epg/suggest/{gid}/{cid}`——按名称推荐源频道。
+/// `GET /api/panel/epg/suggest/{gid}/{cid}`——按名称推荐源频道。
 pub async fn suggest(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -380,7 +380,7 @@ pub async fn suggest(
     }
 }
 
-/// `GET /panel/api/epg/source-channels/{id}`——源频道搜索与分页。
+/// `GET /api/panel/epg/source-channels/{id}`——源频道搜索与分页。
 pub async fn source_channels(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -401,7 +401,7 @@ pub async fn source_channels(
     ))
 }
 
-/// `GET /panel/api/epg/tz-preview/{id}?shift=`——时间偏移预览。
+/// `GET /api/panel/epg/tz-preview/{id}?shift=`——时间偏移预览。
 pub async fn tz_preview(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -438,7 +438,7 @@ fn search_programme_json(programme: &epg::Programme, channel_name: &str) -> Valu
     })
 }
 
-/// `GET /panel/api/epg/search?q=`——面板侧标题搜索。
+/// `GET /api/panel/epg/search?q=`——面板侧标题搜索。
 pub async fn search(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -500,7 +500,7 @@ pub async fn search(
     .into_response()
 }
 
-/// `GET /panel/api/epg/viewer-channels`——公开浏览页可见频道。
+/// `GET /api/panel/epg/viewer-channels`——公开浏览页可见频道。
 pub async fn viewer_channels(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -527,7 +527,7 @@ fn viewer_channel_json(channel: &epg::ViewerChannel) -> Value {
     })
 }
 
-/// `GET /epg/translate/status`——翻译能力与缓存状态。
+/// `GET /api/panel/epg/translate/status`——翻译能力与缓存状态。
 pub async fn translate_status(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -546,7 +546,7 @@ pub async fn translate_status(
     }))
 }
 
-/// `GET /epg/translate/models`——可用翻译目标语言。
+/// `GET /api/panel/epg/translate/models`——可用翻译目标语言。
 pub async fn translate_models(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -560,7 +560,7 @@ pub async fn translate_models(
     }))
 }
 
-/// `POST /epg/translate/run`——立即采集并翻译。
+/// `POST /api/panel/epg/translate/run`——立即采集并翻译。
 pub async fn translate_run(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -584,7 +584,7 @@ pub async fn translate_run(
     }
 }
 
-/// `POST /epg/translate/probe`——探测翻译服务。
+/// `POST /api/panel/epg/translate/probe`——探测翻译服务。
 pub async fn translate_probe(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -625,7 +625,7 @@ pub async fn translate_probe(
     }))
 }
 
-/// `POST /epg/translate/mtran/test`——机翻自检。
+/// `POST /api/panel/epg/translate/mtran/test`——机翻自检。
 pub async fn translate_mtran(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -686,7 +686,7 @@ fn translate_credentials(config: &crate::config::Config) -> (String, String) {
     )
 }
 
-/// `POST /epg/translate/clear`——清空翻译结果缓存。
+/// `POST /api/panel/epg/translate/clear`——清空翻译结果缓存。
 pub async fn translate_clear_results(
     PanelAuth(token): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -694,7 +694,7 @@ pub async fn translate_clear_results(
     translate_clear(PanelAuth(token), State(state)).await
 }
 
-/// `POST /epg/translate/clear-engine`——清空翻译缓存。
+/// `POST /api/panel/epg/translate/clear-engine`——清空翻译缓存。
 pub async fn translate_clear(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -713,7 +713,7 @@ pub async fn translate_clear(
 
 // ---- EPG 配置：源、绑定、关键字规则 ----
 
-/// `GET /panel/api/epg/sources`——源列表与运行时状态。
+/// `GET /api/panel/epg/sources`——源列表与运行时状态。
 pub async fn sources(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let statuses = state
         .epg
@@ -751,7 +751,7 @@ pub async fn sources(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>
     Json(json!(items))
 }
 
-/// `POST /panel/api/epg/sources`——新增或更新一个源。
+/// `POST /api/panel/epg/sources`——新增或更新一个源。
 pub async fn source_save(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -766,7 +766,7 @@ pub async fn source_save(
     }
 }
 
-/// `DELETE /panel/api/epg/sources/{id}`——删除源及其绑定。
+/// `DELETE /api/panel/epg/sources/{id}`——删除源及其绑定。
 pub async fn source_delete(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -783,7 +783,7 @@ pub async fn source_delete(
     }
 }
 
-/// `POST /panel/api/epg/sources/{id}/refresh`——只采集一个源。
+/// `POST /api/panel/epg/sources/{id}/refresh`——只采集一个源。
 pub async fn source_refresh(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -799,7 +799,7 @@ pub async fn source_refresh(
     }
 }
 
-/// `GET /panel/api/epg/bindings`——全部本地频道与绑定状态。
+/// `GET /api/panel/epg/bindings`——全部本地频道与绑定状态。
 pub async fn bindings(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
     let bindings: HashMap<String, Binding> = state
@@ -857,7 +857,7 @@ pub async fn bindings(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>
     Json(json!({ "items": items, "bound": bound, "total": total }))
 }
 
-/// `PUT /panel/api/epg/bindings/{gid}/{cid}`——手工绑定或清除。
+/// `PUT /api/panel/epg/bindings/{gid}/{cid}`——手工绑定或清除。
 pub async fn binding_set(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -890,7 +890,7 @@ pub async fn binding_set(
     }
 }
 
-/// `DELETE /panel/api/epg/bindings/{gid}/{cid}`——清除绑定。
+/// `DELETE /api/panel/epg/bindings/{gid}/{cid}`——清除绑定。
 pub async fn binding_delete(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -907,7 +907,7 @@ pub async fn binding_delete(
     }
 }
 
-/// `POST /panel/api/epg/bindings/{gid}/{cid}/copy`——复用另一个频道的绑定。
+/// `POST /api/panel/epg/bindings/{gid}/{cid}/copy`——复用另一个频道的绑定。
 pub async fn binding_copy(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -942,7 +942,7 @@ pub async fn binding_copy(
     }
 }
 
-/// `GET /panel/api/epg/rules`——关键字规则列表。
+/// `GET /api/panel/epg/rules`——关键字规则列表。
 pub async fn rules(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let config = state.snapshot();
     let items: Vec<Value> = state
@@ -963,7 +963,7 @@ pub async fn rules(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) 
     Json(json!(items))
 }
 
-/// `POST /panel/api/epg/rules`——新增或更新规则。
+/// `POST /api/panel/epg/rules`——新增或更新规则。
 pub async fn rule_save(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -978,7 +978,7 @@ pub async fn rule_save(
     }
 }
 
-/// `DELETE /panel/api/epg/rules/{id}`——删除规则与待执行任务。
+/// `DELETE /api/panel/epg/rules/{id}`——删除规则与待执行任务。
 pub async fn rule_delete(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -994,7 +994,7 @@ pub async fn rule_delete(
     }
 }
 
-/// `POST /panel/api/epg/rules/preview`——预览未来 48 小时的命中。
+/// `POST /api/panel/epg/rules/preview`——预览未来 48 小时的命中。
 pub async fn rule_preview(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,

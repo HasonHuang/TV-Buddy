@@ -1,6 +1,6 @@
 //! 运行指标（M4）。
 //!
-//! 形状为本实现自定（目标 `/panel/api/stats` 未逐字段采证），见
+//! 形状为本实现自定（目标 `/api/panel/stats` 未逐字段采证），见
 //! [`docs/design/03-http-contract.md`](../docs/design/03-http-contract.md) §6.4。
 
 use std::{

@@ -1,6 +1,5 @@
 //! 用户订阅入口：`/api/sub/:token/playlist.m3u`、`/api/sub/:token/epg.xml[.gz]`。
 //!
-//! 旧前缀 `/sub/...` 由改写层映射，响应与新前缀一致。
 //! 令牌来自 `access_tokens`。无效或过期一律 `404`，不区分原因，
 //! 避免探测令牌是否存在。
 //!
@@ -43,7 +42,7 @@ fn resolve(state: &AppState, token: &str) -> Option<User> {
     Some(user)
 }
 
-/// `GET /api/sub/:token/playlist.m3u`（旧 `/sub/:token/playlist.m3u` 同响应）。
+/// `GET /api/sub/:token/playlist.m3u`。
 pub async fn playlist(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

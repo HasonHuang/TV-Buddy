@@ -88,7 +88,7 @@ fn body_id(body: &Value) -> Result<String, ApiError> {
     Ok(id)
 }
 
-/// `POST /panel/api/groups`。id 重复 → `409`（F-013 §5）。
+/// `POST /api/panel/groups`。id 重复 → `409`（F-013 §5）。
 pub async fn create_group(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -111,7 +111,7 @@ pub async fn create_group(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// `PUT /panel/api/groups/{gid}`——局部更新。
+/// `PUT /api/panel/groups/{gid}`——局部更新。
 pub async fn update_group(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -142,7 +142,7 @@ pub async fn update_group(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// `DELETE /panel/api/groups/{gid}`。
+/// `DELETE /api/panel/groups/{gid}`。
 pub async fn delete_group(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -183,7 +183,7 @@ fn forget_quality_results(state: &AppState, gid: &str, channel: &Channel) {
     }
 }
 
-/// `GET /panel/api/groups/export`——顶层数组（F-013 §1）。
+/// `GET /api/panel/groups/export`——顶层数组（F-013 §1）。
 pub async fn export_all(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -192,7 +192,7 @@ pub async fn export_all(
     Json(serde_json::to_value(&config.groups).unwrap_or(Value::Array(Vec::new())))
 }
 
-/// `GET /panel/api/groups/{gid}/export`——单个分组对象。
+/// `GET /api/panel/groups/{gid}/export`——单个分组对象。
 pub async fn export_group(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -205,7 +205,7 @@ pub async fn export_group(
     Ok(Json(serde_json::to_value(group).unwrap_or(Value::Null)))
 }
 
-/// `POST /panel/api/groups/{gid}/channels`。
+/// `POST /api/panel/groups/{gid}/channels`。
 pub async fn create_channel(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -243,7 +243,7 @@ pub async fn create_channel(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// `PUT /panel/api/groups/{gid}/channels/{cid}`——局部更新。
+/// `PUT /api/panel/groups/{gid}/channels/{cid}`——局部更新。
 pub async fn update_channel(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -296,7 +296,7 @@ pub async fn update_channel(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// `DELETE /panel/api/groups/{gid}/channels/{cid}`。
+/// `DELETE /api/panel/groups/{gid}/channels/{cid}`。
 pub async fn delete_channel(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -328,7 +328,7 @@ pub async fn delete_channel(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// `POST /panel/api/groups/:gid/detach`——分组转为手工。
+/// `POST /api/panel/groups/:gid/detach`——分组转为手工。
 pub async fn detach_group(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -349,7 +349,7 @@ pub async fn detach_group(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// `POST /panel/api/groups/:gid/channels/:cid/detach`——频道转为手工。
+/// `POST /api/panel/groups/:gid/channels/:cid/detach`——频道转为手工。
 pub async fn detach_channel(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -443,7 +443,7 @@ fn import(
     })))
 }
 
-/// `POST /panel/api/groups/import`——导入分组数组，id 重复的跳过。
+/// `POST /api/panel/groups/import`——导入分组数组，id 重复的跳过。
 pub async fn import_groups(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -453,7 +453,7 @@ pub async fn import_groups(
     import(state, body, false, include_synced(&params))
 }
 
-/// `POST /panel/api/groups/import/force`——导入分组数组，id 重复的覆盖。
+/// `POST /api/panel/groups/import/force`——导入分组数组，id 重复的覆盖。
 pub async fn import_groups_force(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -478,7 +478,7 @@ struct Draft {
     channels: Vec<Channel>,
 }
 
-/// `POST /panel/api/groups/import/m3u`——按 M3U 文本导入分组与频道。
+/// `POST /api/panel/groups/import/m3u`——按 M3U 文本导入分组与频道。
 ///
 /// `mode`：`append`（默认，同名分组跳过）|`merge`（同名补频道）|`replace`（同名整体替换）。
 /// `group_mode`：`auto`（默认）或目标的工作模式。

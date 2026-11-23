@@ -13,7 +13,7 @@ use crate::{
     state::AppState,
 };
 
-/// `GET /panel/api/link-info`——播放链接与别名审计（S-GAP-04）。
+/// `GET /api/panel/link-info`——播放链接与别名审计（S-GAP-04）。
 ///
 /// 形状与目标一致：`aliases`、`random_id_enabled`、`token`、`token_enabled`、`use_alias`。
 /// Token 关闭时返回空串。
@@ -38,7 +38,7 @@ pub async fn link_info(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState
     }))
 }
 
-/// `GET /panel/api/security/ip/stats`。
+/// `GET /api/panel/security/ip/stats`。
 pub async fn ip_stats(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let entries = state.ip_guard.snapshot();
     let (total, banned) = state.ip_guard.summary();
@@ -58,7 +58,7 @@ pub async fn ip_stats(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>
     }))
 }
 
-/// `POST /panel/api/security/ip/ban`——`{"ip","seconds"}`；`seconds` 缺省 1 小时，上限 30 天。
+/// `POST /api/panel/security/ip/ban`——`{"ip","seconds"}`；`seconds` 缺省 1 小时，上限 30 天。
 pub async fn ip_ban(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -100,7 +100,7 @@ pub async fn ip_ban(
     })))
 }
 
-/// `POST /panel/api/security/ip/unban`——`{"ip"}` 或 `{"ips":[…]}`。
+/// `POST /api/panel/security/ip/unban`——`{"ip"}` 或 `{"ips":[…]}`。
 pub async fn ip_unban(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,

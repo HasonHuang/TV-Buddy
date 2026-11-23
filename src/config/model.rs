@@ -284,7 +284,7 @@ pub struct ServerCfg {
     pub catchup_tpl: String,
     pub log_level: String,
     pub trust_proxy: Vec<String>,
-    /// 低配模式开关。目标只在 `/panel/api/status` 回显，本实现同此。
+    /// 低配模式开关。目标只在 `/api/panel/status` 回显，本实现同此。
     pub low_resource_mode: bool,
     #[serde(flatten)]
     pub extra: Extra,
@@ -296,7 +296,7 @@ impl Default for ServerCfg {
             bind: "[::]:9900".into(),
             not_found_url: "https://material.yang-1989.eu.org/v/404.mp4".into(),
             error_url: "https://material.yang-1989.eu.org/v/mistake.mp4".into(),
-            home_url: "https://yang-1989.eu.org/".into(),
+            home_url: "/page".into(),
             m3u_header_lines: Vec::new(),
             timezone_offset_hours: 8,
             catchup_tpl: "guonei".into(),

@@ -42,7 +42,6 @@ pub async fn ip_guard(
 /// 该路径是否跳过 IP 统计与封禁。
 ///
 /// 面板与解封路径必须可用。`/api/health` 不在豁免内。
-/// 旧前缀由 [`crate::http::legacy`] 先改写，本函数只处理新前缀。
 fn ip_guard_exempt(path: &str) -> bool {
     path.starts_with("/page")
         || path.starts_with("/static/panel")
@@ -156,7 +155,7 @@ pub async fn feature_gate(
 
 /// 路径 → 对应的功能开关。`None` 表示不受功能开关控制。
 ///
-/// 只匹配 `/api/panel` 下的相对路径；旧前缀已由改写层转换。
+/// 只匹配 `/api/panel` 下的相对路径。
 fn feature_of(path: &str, config: &crate::config::Config) -> Option<bool> {
     let relative = panel_relative(path)?;
     if relative.starts_with("/schedule") {
@@ -248,7 +247,7 @@ mod tests {
         assert!(!needs_admin("/api/panel/me"));
         assert!(!needs_admin("/api/panel/my/channels"));
         assert!(!needs_admin("/health"), "非面板路径不管");
-        assert!(!needs_admin("/sub/abc/playlist.m3u"));
+        assert!(!needs_admin("/api/sub/abc/playlist.m3u"));
         assert!(needs_admin("/api/panel/config"), "配置只给管理员");
         assert!(needs_admin("/api/panel/groups"), "分组只给管理员");
         assert!(needs_admin("/api/panel/users"), "用户管理只给管理员");
@@ -266,7 +265,7 @@ mod tests {
     #[test]
     fn page_and_auth_recovery_paths_are_ip_guard_exempt() {
         for path in [
-            "/page/panel",
+            "/page",
             "/static/panel/a.js",
             "/api/panel/status",
             "/api/unban/whoami",
@@ -282,8 +281,7 @@ mod tests {
     fn panel_relative_accepts_new_prefix() {
         assert_eq!(panel_relative("/api/panel/login"), Some("/login"));
         assert_eq!(panel_relative("/api/panel"), Some(""));
-        assert_eq!(panel_relative("/panel/api/login"), None, "旧前缀先被改写");
-        assert_eq!(panel_relative("/health"), None);
+        assert_eq!(panel_relative("/api/health"), None);
     }
 
     #[test]

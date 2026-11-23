@@ -46,7 +46,7 @@ pub async fn unban_page() -> Response {
     page("unban.html")
 }
 
-/// `/static/panel/*path`（旧 `/__assets/*path`）——Vite 构建产物。
+/// `/static/panel/*path`——Vite 构建产物。
 ///
 /// 文件名带内容哈希时可以长缓存。HTML 入口不带哈希，只允许协商缓存。
 pub async fn asset(Path(path): Path<String>) -> Response {

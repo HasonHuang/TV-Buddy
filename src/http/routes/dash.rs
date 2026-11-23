@@ -40,12 +40,12 @@ async fn inspect(state: &AppState, url: &str, gid: &str, cid: &str) -> Result<Va
     }))
 }
 
-/// `GET /panel/api/dash/status`——运行中的 DASH 会话。
+/// `GET /api/panel/dash/status`——运行中的 DASH 会话。
 pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(Value::Array(state.dash_hls.status()))
 }
 
-/// `GET /panel/api/dash/tracks/:gid/:cid`。
+/// `GET /api/panel/dash/tracks/:gid/:cid`。
 pub async fn tracks(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -56,7 +56,7 @@ pub async fn tracks(
     inspect(&state, &url, &gid, &cid).await.map(Json)
 }
 
-/// `POST /panel/api/dash/scan-url`——`{"url"}`；只解析，不改配置。
+/// `POST /api/panel/dash/scan-url`——`{"url"}`；只解析，不改配置。
 pub async fn scan_url(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -69,7 +69,7 @@ pub async fn scan_url(
     inspect(&state, url, "", "").await.map(Json)
 }
 
-/// `GET /panel/api/dash-timeshift/status`——回看能力与已录制片数。
+/// `GET /api/panel/dash-timeshift/status`——回看能力与已录制片数。
 pub async fn timeshift_status(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -133,7 +133,7 @@ pub async fn timeshift_status(
     }))
 }
 
-/// `GET /panel/api/health`——逐频道探测结果与本机摘要。
+/// `GET /api/panel/health`——逐频道探测结果与本机摘要。
 ///
 /// 目标形状是 `{enabled, entries{"<gid>/<cid>": {...}}}`（F-021 §7）。
 /// 末尾若干字段是本实现附加，供面板系统页使用。

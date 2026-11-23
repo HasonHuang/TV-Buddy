@@ -17,7 +17,7 @@ use crate::{
 /// 清空缓存时清理的目录（`dash/` 保留，S-CACHE-06）。
 const FLUSH_DIRS: [&str; 4] = ["m3u8", "seg_url", "seg_bytes", "sub_url"];
 
-/// `GET /panel/api/cache/stats`。
+/// `GET /api/panel/cache/stats`。
 ///
 /// 字段面按目标 v0.8.2 实测（F-021 §6）。附加字段 `entries`、`recommend`
 /// 供本实现的面板使用。
@@ -75,7 +75,7 @@ pub async fn cache_stats(
     }))
 }
 
-/// `POST /panel/api/cache/flush`。
+/// `POST /api/panel/cache/flush`。
 pub async fn cache_flush(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -109,7 +109,7 @@ pub async fn cache_flush(
     Ok(Json(json!({ "ok": true, "removed": removed })))
 }
 
-/// `GET /panel/api/stats`。
+/// `GET /api/panel/stats`。
 pub async fn stats(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
     let snapshot = state.stats.snapshot();
     let config = state.snapshot();
@@ -164,7 +164,7 @@ pub async fn stats(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) 
     }))
 }
 
-/// `GET /panel/api/metrics/history?range=5m`——趋势图历史。
+/// `GET /api/panel/metrics/history?range=5m`——趋势图历史。
 ///
 /// 窗口：`5m`、`10m`、`1h`、`24h`、`7d`。未知或缺失按 `5m` 处理。
 /// 聚合在阻塞线程池执行，避免 7 天范围的查询占住 tokio worker。
@@ -185,7 +185,7 @@ pub async fn metrics_history(
     Ok(Json(json!({ "range": range.key(), "points": points })))
 }
 
-/// `GET /panel/api/logs?limit=n`。
+/// `GET /api/panel/logs?limit=n`。
 pub async fn logs(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -256,8 +256,7 @@ fn count_out(state: Arc<AppState>, response: axum::response::Response) -> axum::
 
 /// 把播放路径还原为计数用的 `{gid}/{cid}/...` 形状。
 ///
-/// `/media` 与 `/api/play` 去掉前缀。`/api/play/token/...` 是令牌入口，
-/// 与旧 `/l/...` 一样不归组。其他路径只去掉前导 `/`。
+/// 只识别 `/media` 与 `/api/play`。`/api/play/token/...` 是令牌入口，不归组。
 fn stats_rest(path: &str) -> Option<&str> {
     if let Some(rest) = path.strip_prefix("/media/") {
         return Some(rest);
@@ -265,8 +264,7 @@ fn stats_rest(path: &str) -> Option<&str> {
     if let Some(rest) = path.strip_prefix("/api/play/") {
         return (!rest.starts_with("token/")).then_some(rest);
     }
-    let rest = path.trim_start_matches('/');
-    (!rest.is_empty()).then_some(rest)
+    None
 }
 
 /// 从路径取分组 id。面板、静态资源与公开文件不算。
@@ -324,7 +322,7 @@ mod tests {
         for path in [
             "/api/sub/t/playlist.m3u",
             "/static/panel/x.js",
-            "/page/panel",
+            "/page",
             "/api/panel/config",
             "/api/health",
             "/api/unban",
@@ -332,11 +330,5 @@ mod tests {
         ] {
             assert_eq!(group_of(path), None, "{path}");
         }
-    }
-
-    #[test]
-    fn stats_keep_legacy_paths() {
-        assert_eq!(group_of("/g1/c1/seg.png").as_deref(), Some("g1"));
-        assert_eq!(channel_of("/g1/c1/seg.png", "g1").as_deref(), Some("g1/c1"));
     }
 }

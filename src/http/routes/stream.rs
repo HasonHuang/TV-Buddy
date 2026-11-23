@@ -77,7 +77,7 @@ fn segment_cache_control(state: &AppState, first: bool) -> String {
     format!("{scope}, max-age={secs}")
 }
 
-/// `GET /{gid}/{cid}.m3u8` 与 `/{gid}/{cid}.mpd`。
+/// `GET /api/play/{gid}/{cid}.m3u8` 与 `/api/play/{gid}/{cid}.mpd`。
 pub async fn entry(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -98,7 +98,7 @@ pub async fn entry(
     play_entry(&state, &gid, &cid, &ext, &query, &headers, None, false).await
 }
 
-/// `GET /l/:token/:gid/:file`：订阅条目的路径令牌入口。
+/// `GET /api/play/token/:token/:gid/:file`：订阅条目的路径令牌入口。
 pub async fn token_entry(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -129,7 +129,7 @@ pub async fn token_entry(
     .await
 }
 
-/// `GET /l/:token/:gid/:cid/index.m3u8`：入口别名。
+/// `GET /api/play/token/:token/:gid/:cid/index.m3u8`：入口别名。
 pub async fn token_alias(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -160,7 +160,8 @@ pub async fn token_alias(
     .await
 }
 
-/// 入口逻辑的实体：`/{gid}/{cid}.m3u8` 与子路径别名 `/{gid}/{cid}/index.m3u8` 共用。
+/// 入口逻辑的实体：`/api/play/{gid}/{cid}.m3u8` 与子路径别名
+/// `/api/play/{gid}/{cid}/index.m3u8` 共用。
 ///
 /// 目标是「别名与入口同义」（2026-10-25 实测：`redirect` / `rewrite` 两组的两条路径
 /// 给出完全相同的 `302` 目标或清单正文），所以不能再按模式分裂实现。
@@ -1635,7 +1636,7 @@ fn resolve(config: &Config, gid: &str, cid: &str) -> Option<(Group, String)> {
 
 /// 拆入口文件名。
 ///
-/// 目标实测（2026-10-25，容器 `rea82v09`）：`/{gid}/<cid>` 后接的扩展名是
+/// 目标实测（2026-10-25，容器 `rea82v09`）：`/api/play/{gid}/<cid>` 后接的扩展名是
 /// **白名单** `.m3u8` / `.mpd` / `.txt`，另外**整段扩展名可以不写**；其余
 /// （`.ts`、`.mp4`、`.m3u`、`.`、大写 `.M3U8`、`.m3u8.txt`）一律 `302 not_found_url`。
 /// 三种后缀给出的清单正文完全相同——即扩展名只做形状门槛，不改变行为。

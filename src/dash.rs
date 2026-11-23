@@ -1,10 +1,10 @@
 //! DASH 清单（MPD）解析。
 //!
-//! - [`parse`] 只提取面板需要的轨道摘要（`/panel/api/dash/tracks`）。
+//! - [`parse`] 只提取面板需要的轨道摘要（`/api/panel/dash/tracks`）。
 //! - [`parse_presentation`] 解析完整演示：BaseURL、SegmentTemplate、
 //!   SegmentTimeline、SegmentList 与初始化段，供 DASH→HLS 转封装使用。
 //!
-//! 目标 `/panel/api/dash/tracks/:gid/:cid` 的响应形状未采证（F-011），格式自定。
+//! 目标 `/api/panel/dash/tracks/:gid/:cid` 的响应形状未采证（F-011），格式自定。
 //! 本模块不下载媒体，只解析 XML；媒体由 `dash_hls` 按需代理。
 
 use std::collections::HashSet;

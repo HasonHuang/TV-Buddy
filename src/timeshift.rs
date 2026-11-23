@@ -4,7 +4,7 @@
 //! - 点亮 `livestream` 后按 `timeshift_hours` 缓冲；
 //! - `?start=<unix>&end=<unix>` 或 `?playseek=<本地 yyyymmddHHMMSS-…>`；
 //! - 回看清单带 `#EXT-X-PLAYLIST-TYPE:VOD` 与 `#EXT-X-ENDLIST`；
-//! - 分片 `/{gid}/{cid}/timeshift/<16hex>.<ext>`，图片类型，`private, max-age=3600`；
+//! - 分片 `/media/{gid}/{cid}/timeshift/<16hex>.<ext>`，图片类型，`private, max-age=3600`；
 //! - 越界或未命中 → 落回实时清单。
 
 use std::{

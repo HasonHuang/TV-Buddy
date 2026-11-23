@@ -1,7 +1,7 @@
 //! 面板登录失败锁。
 //!
 //! 规则见 F-010（`docs/findings/dynamic/11-security-and-metrics.md` §4）：
-//! 窗口内失败数达到 `free + threshold` 时，后续 `/panel/api/login` 返回 `429`。
+//! 窗口内失败数达到 `free + threshold` 时，后续 `/api/panel/login` 返回 `429`。
 //! 锁不波及既有 Bearer 会话。首次锁定时长固定 300 秒。
 
 use std::{

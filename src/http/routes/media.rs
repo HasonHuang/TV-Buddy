@@ -30,23 +30,18 @@ use crate::{
 };
 
 /// 由请求路径判定素材种类（路由静态注册，避免与面板兜底路由冲突）。
-///
-/// 同时识别旧前缀 `/panel/api`、旧别名 `/subtitle` 与新前缀 `/api/panel`。
 fn kind_of(uri: &axum::http::Uri) -> Result<Kind, ApiError> {
     let path = uri.path();
-    if path.starts_with("/panel/api/assets/") || path.starts_with("/api/panel/assets/") {
+    if path.starts_with("/api/panel/assets/") {
         Ok(Kind::Video)
-    } else if path.starts_with("/panel/api/subtitle/")
-        || path.starts_with("/api/panel/subtitle/")
-        || path.starts_with("/subtitle/")
-    {
+    } else if path.starts_with("/api/panel/subtitle/") {
         Ok(Kind::Subtitle)
     } else {
         Err(ApiError::not_found("未知素材类型"))
     }
 }
 
-/// `GET /api/panel/{assets,subtitles}/list`。
+/// `GET /api/panel/{assets,subtitle}/list`。
 pub async fn list(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -693,7 +688,7 @@ pub async fn translate_raw(
     Ok(response)
 }
 
-/// `POST /subtitle/mtran/test`——字幕机翻自检（S-SUB-03）。
+/// `POST /api/panel/subtitle/mtran/test`——字幕机翻自检（S-SUB-03）。
 pub async fn mtran_test(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -748,7 +743,7 @@ pub async fn mtran_test(
     .into_response()
 }
 
-/// `POST /subtitle/translate/clear`——清空字幕翻译缓存。
+/// `POST /api/panel/subtitle/translate/clear`——清空字幕翻译缓存。
 pub async fn translate_clear(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -998,7 +993,7 @@ async fn remove_asset_url(state: &Arc<AppState>, url: &str) -> Result<Json<Value
     Ok(Json(json!({ "ok": true, "removed": 1 })))
 }
 
-/// `GET /static/assets/*path`（旧 `/assets/*path`）——公开读取本地 HLS 入口与切片。
+/// `GET /static/assets/*path`——公开读取本地 HLS 入口与切片。
 pub async fn served(State(state): State<Arc<AppState>>, Path(path): Path<String>) -> Response {
     let cache = state.snapshot().cache.disk_path.clone();
     let mut full = FsPath::new(&cache).join("assets");
