@@ -1691,6 +1691,9 @@ export function GroupsPage() {
                     <div className="ch-url">{channel.url}</div>
                     <div className="ch-url local">
                       {local}
+                      {effectiveMode === 'passthrough' && (
+                        <Badge tone="warn">直通</Badge>
+                      )}
                     </div>
                     <div className="ch-badges">
                       {channel.source_id ? (
@@ -1709,11 +1712,9 @@ export function GroupsPage() {
                       ) : (
                         <Badge tone="muted">本地</Badge>
                       )}
-                      {modeDiff && (
+                      {modeDiff && effectiveMode !== 'passthrough' && (
                         <HoverTip text={modeTip(effectiveMode)}>
-                          <Badge tone={effectiveMode === 'passthrough' ? 'warn' : 'muted'}>
-                            {effectiveMode === 'passthrough' ? '直通' : modeCode(effectiveMode)}
-                          </Badge>
+                          <Badge tone="muted">{modeCode(effectiveMode)}</Badge>
                         </HoverTip>
                       )}
                       {!channel.source_id && (
@@ -1846,7 +1847,7 @@ export function GroupsPage() {
                       role="group"
                       aria-label="更多频道操作"
                     >
-                      {group.mode === 'dash' && (
+                      {effectiveMode === 'dash' && (
                         <button
                           className="chip"
                           title="查看轨道"
