@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError } from './api';
-import { syncModeOptions } from './modes';
+import { modeText, syncModeOptions } from './modes';
 import {
   Badge,
+  Confirm,
   DateInput,
   Drawer,
   Field,
@@ -91,7 +92,36 @@ type Status = {
 };
 
 type GroupCount = { name: string; count: number };
-type ExistingGroup = { id: string; name: string; origin?: string };
+type ExistingGroup = {
+  id: string;
+  name: string;
+  origin?: string;
+  channels?: {
+    id: string;
+    mode?: string | null;
+    source_id?: string;
+    sync_follow?: boolean;
+    mode_source?: string;
+  }[];
+};
+
+function backfillCount(groups: ExistingGroup[], sourceId: string): number {
+  return groups
+    .flatMap((group) => group.channels ?? [])
+    .filter(
+      (channel) =>
+        channel.source_id === sourceId &&
+        !channel.mode &&
+        channel.sync_follow !== false &&
+        channel.mode_source !== 'manual',
+    ).length;
+}
+
+function backfillModeText(mode: string): string {
+  return mode === 'auto' || mode === ''
+    ? '自动选择（.mpd → dash，其他 → proxy）'
+    : modeText(mode);
+}
 
 type SyncPreview = {
   add: number;
@@ -470,6 +500,12 @@ export function PlaylistPage() {
   /** 正在切换启用状态的源 id。 */
   const [toggling, setToggling] = useState('');
   const { node, ok, err } = useToast();
+  const [backfill, setBackfill] = useState<{
+    id: string;
+    count: number;
+    mode: string;
+  } | null>(null);
+  const [backfillBusy, setBackfillBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -518,6 +554,25 @@ export function PlaylistPage() {
       // 分组列表只用于并入选择器；读取失败不影响编辑。
     }
   }, []);
+
+  const runBackfill = async () => {
+    if (!backfill) return;
+    setBackfillBusy(true);
+    try {
+      const result = await api<{ updated: number }>(
+        'POST',
+        `/subs/${backfill.id}/backfill-mode`,
+      );
+      ok(`已回填 ${result.updated} 个频道`);
+      setBackfill(null);
+      await load();
+      await loadGroups();
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -1506,11 +1561,11 @@ export function PlaylistPage() {
               </div>
               <div className="form-grid two wide-controls">
                 <Field
-                  label="新分组工作模式"
-                  tip="只影响之后新建的同步分组。已有分组在「分组管理」里修改「工作模式」。"
+                  label="新分组与频道默认"
+                  tip="用于之后新建的同步分组和新频道。已有频道不受影响。管理员改过的频道模式不会被覆盖。"
                 >
                   <Select
-                    ariaLabel="新分组工作模式"
+                    ariaLabel="新分组与频道默认"
                     value={drawer.draft.playback_mode}
                     options={[
                       { value: 'auto', label: '自动选择', desc: '按源的类型自动选。结果落在 PROXY 或 DASH。' },
@@ -1560,8 +1615,30 @@ export function PlaylistPage() {
                   <span className="hint">0 表示使用全局值</span>
                 </label>
               </div>
+              {drawer.draft.id &&
+                drawer.draft.mode === 'sync' &&
+                backfillCount(allGroups, drawer.draft.id) > 0 && (
+                  <div className="row between">
+                    <span className="hint">
+                      按源默认回填现有频道（{backfillCount(allGroups, drawer.draft.id)} 条）
+                    </span>
+                    <button
+                      className="ghost"
+                      type="button"
+                      onClick={() =>
+                        setBackfill({
+                          id: drawer.draft.id,
+                          count: backfillCount(allGroups, drawer.draft.id),
+                          mode: drawer.draft.playback_mode,
+                        })
+                      }
+                    >
+                      回填
+                    </button>
+                  </div>
+                )}
               <p className="muted">
-                已有分组的工作模式与内容格式在「分组管理」里修改；这里只设置之后新建分组的默认值。
+                已有分组的工作模式与内容格式在「分组管理」里修改；这里只设置之后新建分组与频道的默认值。
               </p>
             </>
           )}
@@ -1745,6 +1822,20 @@ export function PlaylistPage() {
           <p className="muted">保留为本地频道：频道和分组都保留，只是不再跟随源。</p>
           <p className="muted">一并删除：删除这个源创建的分组和频道。</p>
         </Modal>
+      )}
+
+      {backfill && (
+        <Confirm
+          title="按源默认回填工作模式"
+          text={`将把 ${backfill.count} 个未设置模式的同步频道改为「${backfillModeText(
+            backfill.mode,
+          )}」。管理员手动设置过的频道不变。`}
+          confirmText="回填"
+          tone="primary"
+          busy={backfillBusy}
+          onCancel={() => setBackfill(null)}
+          onConfirm={() => void runBackfill()}
+        />
       )}
 
       {node}
