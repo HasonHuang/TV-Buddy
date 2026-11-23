@@ -234,7 +234,7 @@ for needle in \
   '/static/assets/' \
   'cache.dash.watchdog_rebuild_stagger_ms' \
   'DraftCtx' \
-  '/api/panel/subs/groups' \
+  '/subs/groups' \
   'TRACE|DEBUG|INFO|WARN|ERROR'
 do
   case "$BUNDLE" in

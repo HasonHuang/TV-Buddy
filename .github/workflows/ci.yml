@@ -229,7 +229,7 @@ jobs:
           ok=0
           i=0
           while [ "$i" -lt 30 ]; do
-            if curl -fsS -o /dev/null "http://127.0.0.1:19876/health"; then ok=1; break; fi
+            if curl -fsS -o /dev/null "http://127.0.0.1:19876/api/health"; then ok=1; break; fi
             sleep 1
             i=$((i + 1))
           done
@@ -253,7 +253,7 @@ jobs:
             printf '%s\n' "  chmod +x tv-buddy"
             printf '%s\n' "  ./tv-buddy ./tv-buddy.db"
             printf '%s\n' ""
-            printf '%s\n' "面板：http://127.0.0.1:9900/panel"
+            printf '%s\n' "面板：http://127.0.0.1:9900/page"
             printf '%s\n' "初始口令：./cache/admin_initial_credentials.txt"
             printf '%s\n' ""
             printf '%s\n' "说明："

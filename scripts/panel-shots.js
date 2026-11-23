@@ -48,7 +48,7 @@ const SECTIONS = [
   });
   const report = {};
 
-  await page.goto(`${BASE}/panel`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/page`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(OUT, 'p00-login.png') });
   report.viewport = await page.evaluate(() => [innerWidth, innerHeight, devicePixelRatio]);

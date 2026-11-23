@@ -119,7 +119,7 @@ curl -sS --max-time 90 -X POST -H "Authorization: Bearer $SESSION" \
     "http://127.0.0.1:$PORT/api/panel/epg/refresh" >/dev/null || true
 
 echo "==> MTranServer 自检：$URL"
-curl -sS --max-time 90 -X POST "http://127.0.0.1:$PORT/subtitle/mtran/test" \
+curl -sS --max-time 90 -X POST "http://127.0.0.1:$PORT/api/panel/subtitle/mtran/test" \
     -H "Authorization: Bearer $SESSION" \
     -H 'Content-Type: application/json' --data '{"text":"Hello world"}' >"$WORK/test.json"
 python3 - "$WORK/test.json" <<'PY'
@@ -145,7 +145,7 @@ grep -q '你好' "$WORK/cache/epg/.translate/cache.json" || {
 }
 echo "EPG 已生成译文，缓存已写入"
 
-curl -fsS --max-time 90 -X POST "http://127.0.0.1:$PORT/epg/translate/run" \
+curl -fsS --max-time 90 -X POST "http://127.0.0.1:$PORT/api/panel/epg/translate/run" \
     -H "Authorization: Bearer $SESSION" >"$WORK/run.json"
 python3 - "$WORK/run.json" <<'PY'
 import json, sys
@@ -156,7 +156,7 @@ if not body.get("ok") or body.get("translated", 0) < 1:
 PY
 
 echo "==> EPG 翻译探测"
-curl -fsS --max-time 90 -X POST "http://127.0.0.1:$PORT/epg/translate/probe" \
+curl -fsS --max-time 90 -X POST "http://127.0.0.1:$PORT/api/panel/epg/translate/probe" \
     -H "Authorization: Bearer $SESSION" >"$WORK/probe.json"
 python3 - "$WORK/probe.json" <<'PY'
 import json, sys

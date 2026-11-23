@@ -105,11 +105,11 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$B/api/panel/config" \
   -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"groups":"bad"}')
 check "非法配置拒绝" "400" "$code"
 
-code=$(curl -s -o /dev/null -w '%{http_code}' "$B/panel")
+code=$(curl -s -o /dev/null -w '%{http_code}' "$B/page")
 check "面板页 200" "200" "$code"
 
 code=$(curl -s -o /dev/null -w '%{http_code}' "$B/definitely/missing")
-check "未知路径 302" "302" "$code"
+check "未知路径 404" "404" "$code"
 
 # 未知面板接口先被管理员门拦下：未登录 401。登录后的 404 由契约测试覆盖。
 code=$(curl -s -o /dev/null -w '%{http_code}' "$B/api/panel/nope")
