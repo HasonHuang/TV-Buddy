@@ -101,11 +101,11 @@ pub fn due_targets(
         if group.access == "archived" {
             continue;
         }
-        if group.mode == "passthrough" && !config.quality.probe_passthrough {
-            continue;
-        }
         for channel in &group.channels {
             if channel.url.trim().is_empty() || !scope_matches(scope, group, channel) {
+                continue;
+            }
+            if group.effective_mode(channel) == "passthrough" && !config.quality.probe_passthrough {
                 continue;
             }
             let source = source_of(config, channel);
@@ -632,11 +632,14 @@ fn guard_base_channels(config: &Config, scope: &RunScope) -> usize {
         .groups
         .iter()
         .filter(|group| group.access != "archived")
-        .filter(|group| group.mode != "passthrough" || config.quality.probe_passthrough)
         .flat_map(|group| {
             group
                 .channels
                 .iter()
+                .filter(move |channel| {
+                    group.effective_mode(channel) != "passthrough"
+                        || config.quality.probe_passthrough
+                })
                 .filter(move |channel| scope_matches(scope, group, channel))
                 .filter(|channel| !channel.source_id.is_empty() && channel.sync_follow)
                 .filter(|channel| {
@@ -828,6 +831,43 @@ mod tests {
             ..Group::default()
         });
         config
+    }
+
+    #[test]
+    fn guard_base_channels_uses_channel_effective_mode() {
+        let mut config = Config::default();
+        config.quality.enabled = true;
+        config.playlist.sources.push(PlaylistSource {
+            id: "s1".into(),
+            enabled: true,
+            mode: "sync".into(),
+            ..PlaylistSource::default()
+        });
+        config.groups.push(Group {
+            id: "mix".into(),
+            mode: "passthrough".into(),
+            channels: vec![
+                Channel {
+                    id: "inherit".into(),
+                    url: "http://up/a.m3u8".into(),
+                    source_id: "s1".into(),
+                    sync_follow: true,
+                    ..Channel::default()
+                },
+                Channel {
+                    id: "proxied".into(),
+                    url: "http://up/b.m3u8".into(),
+                    mode: Some("proxy".into()),
+                    source_id: "s1".into(),
+                    sync_follow: true,
+                    ..Channel::default()
+                },
+            ],
+            ..Group::default()
+        });
+        config.quality.probe_passthrough = false;
+
+        assert_eq!(guard_base_channels(&config, &RunScope::All), 1);
     }
 
     #[test]

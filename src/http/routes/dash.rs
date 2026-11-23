@@ -84,7 +84,7 @@ pub async fn timeshift_status(
                 .iter()
                 .filter(|channel| channel.livestream || channel.dash_timeshift)
                 .map(|channel| {
-                    let dash = group.mode == "dash" && channel.dash_timeshift;
+                    let dash = group.effective_mode(channel) == "dash" && channel.dash_timeshift;
                     let info = if dash {
                         state.dash_timeshift.info(&group.id, &channel.id)
                     } else {
@@ -105,7 +105,7 @@ pub async fn timeshift_status(
                         "channel_id": channel.id,
                         "hours": hours,
                         "segments": segments,
-                        "mode": group.mode,
+                        "mode": group.effective_mode(channel),
                     });
                     if let Some(info) = info {
                         value["tracks"] = json!(info.tracks);

@@ -4943,6 +4943,32 @@ async fn dash_timeshift_requires_channel_flag() {
 }
 
 #[tokio::test]
+async fn dash_timeshift_uses_channel_mode() {
+    let fixture = fixture_with_extra(
+        r#"{"groups":[{"id":"mix","name":"混合","mode":"proxy","access":"open","channels":[{"id":"d","name":"DASH","url":"{upstream}/dash/live.mpd","mode":"dash","dash_timeshift":true}]}]}"#
+    )
+    .await;
+    let session = login(&fixture).await;
+    let response = fixture
+        .client
+        .get(format!("{}/panel/api/dash-timeshift/status", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    let item = body["channels"]
+        .as_array()
+        .expect("频道数组")
+        .iter()
+        .find(|item| item["group_id"] == "mix" && item["channel_id"] == "d")
+        .expect("应有 DASH 频道");
+    assert_eq!(item["mode"], "dash");
+}
+
+#[tokio::test]
 async fn proxy_mode_rewrites_mpd_base_url_and_proxies_segments() {
     let fixture = fixture_with_extra(
         r#"{"groups":[{"id":"mpg","name":"代理 MPD","mode":"proxy","access":"open","mpd_keep_seconds":4,"channels":[{"id":"c1","name":"无 BaseURL","url":"{upstream}/dash/live.mpd"},{"id":"c2","name":"相对 BaseURL","url":"{upstream}/dash/base.mpd"}]}]}"#

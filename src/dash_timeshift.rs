@@ -628,10 +628,10 @@ fn key(gid: &str, cid: &str) -> String {
 fn settings(state: &AppState, gid: &str, cid: &str) -> Option<Settings> {
     let config = state.snapshot();
     let group = config.group(gid)?;
-    if group.mode != "dash" {
+    let channel = group.channels.iter().find(|channel| channel.id == cid)?;
+    if group.effective_mode(channel) != "dash" {
         return None;
     }
-    let channel = group.channels.iter().find(|channel| channel.id == cid)?;
     if !channel.dash_timeshift {
         return None;
     }
@@ -783,11 +783,11 @@ impl Manager {
         let entries: Vec<(String, String)> = config
             .groups
             .iter()
-            .filter(|group| group.mode == "dash")
             .flat_map(|group| {
                 group
                     .channels
                     .iter()
+                    .filter(|channel| group.effective_mode(channel) == "dash")
                     .filter(|channel| channel.dash_timeshift)
                     .map(|channel| (group.id.clone(), channel.id.clone()))
                     .collect::<Vec<_>>()

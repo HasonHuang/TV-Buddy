@@ -352,7 +352,7 @@ async fn record(state: Arc<AppState>, task: Task, end: i64, stop: Arc<AtomicBool
     let Some(channel) = group.channels.iter().find(|c| c.id == task.channel_id) else {
         return fail(&state, &task, "Channel not found");
     };
-    if group.mode == "dash" {
+    if group.effective_mode(channel) == "dash" {
         return record_dash(&state, &task, end, &stop, channel).await;
     }
     let mut url = channel.url.clone();
