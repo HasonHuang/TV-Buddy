@@ -483,6 +483,7 @@ async fn fixture_with_options(
         .route("/sync-changed.m3u8", get(sync_changed_playlist))
         .route("/slow-gate-source.m3u8", get(slow_gate_source))
         .route("/slow-probe.m3u8", get(slow_probe))
+        .route("/live2.m3u8", get(|| async { LIVE_BODY }))
         .route("/*path", get(upstream_file));
     if epg_enabled {
         let body = epg_document();
@@ -1505,6 +1506,52 @@ async fn passthrough_requires_token() {
         header(&response, "location"),
         format!("{}/live.m3u8", fixture.upstream)
     );
+}
+
+#[tokio::test]
+async fn mixed_group_routes_each_channel_by_its_mode() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let token = &fixture.token;
+    let body = serde_json::json!([{
+        "id": "mix",
+        "name": "混合组",
+        "mode": "redirect",
+        "access": "open",
+        "channels": [
+            { "id": "inherit", "name": "继承", "url": format!("{}/live.m3u8", fixture.upstream) },
+            { "id": "direct", "name": "直通", "url": format!("{}/live2.m3u8", fixture.upstream), "mode": "passthrough" },
+            { "id": "proxied", "name": "代理", "url": format!("{}/live.m3u8", fixture.upstream), "mode": "proxy" }
+        ]
+    }]);
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/groups/import", fixture.base))
+        .header("authorization", format!("Bearer {session}"))
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .send()
+        .await
+        .expect("导入分组");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let inherit = fetch(&fixture, &format!("/mix/inherit.m3u8?token={token}")).await;
+    assert_eq!(inherit.status(), StatusCode::FOUND);
+    assert_eq!(
+        header(&inherit, "location"),
+        format!("{}/live.m3u8", fixture.upstream)
+    );
+
+    let direct = fetch(&fixture, &format!("/mix/direct.m3u8?token={token}")).await;
+    assert_eq!(direct.status(), StatusCode::FOUND);
+    assert_eq!(
+        header(&direct, "location"),
+        format!("{}/live2.m3u8", fixture.upstream)
+    );
+
+    let proxied = fetch(&fixture, &format!("/mix/proxied.m3u8?token={token}")).await;
+    assert_eq!(proxied.status(), StatusCode::OK);
+    assert!(proxied.text().await.expect("读正文").contains("#EXTM3U"));
 }
 
 #[tokio::test]

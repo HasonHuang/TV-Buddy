@@ -226,13 +226,14 @@ async fn play_entry(
         }
     }
     // Passthrough 原样下发上游地址（S-MODE-11）。
-    if group.mode == "passthrough" {
+    let mode = group.effective_mode(channel);
+    if mode == "passthrough" {
         return redirect(&upstream);
     }
 
     // 切片路径签名前缀。关闭签名时为空串。
     let slice = crate::sign::prefix(&config, gid, cid);
-    match group.mode.as_str() {
+    match mode {
         // 302 直连上游；缓存解析出的地址（S-MODE-08/13）。
         "redirect" => redirect_entry(state, &config, group, cid, &upstream).await,
         // 清单绝对化，客户端直连上游切片（S-MODE-09/14）。
@@ -579,11 +580,9 @@ async fn serve_rest(
     // 签名开启后，本地切片一律要求带签名。入口别名 `index.m3u8` 除外：
     // 它自己会做令牌校验。
     let resolved = resolve(config, gid, cid);
+    let mode = config.effective_mode(gid, cid);
     if crate::sign::enabled(config) && !authorized && rest != "index.m3u8" {
-        let local = matches!(
-            resolved.as_ref().map(|(group, _)| group.mode.as_str()),
-            Some("proxy" | "remux" | "dash")
-        );
+        let local = matches!(mode, Some("proxy" | "remux" | "dash"));
         if local {
             return redirect_asset(config, &config.auth.token_failure_url);
         }
@@ -617,15 +616,13 @@ async fn serve_rest(
     if let Some(response) = state.remux.serve(gid, cid, rest) {
         return response;
     }
-    if let Some((group, _)) = resolved.as_ref() {
-        if group.mode == "dash" {
-            if let Some(response) = state
-                .dash_hls
-                .serve(state, gid, cid, rest, &self_base(config, headers))
-                .await
-            {
-                return response;
-            }
+    if mode == Some("dash") {
+        if let Some(response) = state
+            .dash_hls
+            .serve(state, gid, cid, rest, &self_base(config, headers))
+            .await
+        {
+            return response;
         }
     }
     if let Some(path) = rest.strip_prefix("mpd/") {
@@ -649,13 +646,7 @@ async fn serve_rest(
         // `passthrough`/`redirect` 下的任意子路径（含 `video/index.txt`、合法 remux 名、
         // 伪装切片形状）一律 `302 not_found_url`。只有 `proxy` 模式的切片分支才用
         // `error_url`，两者不能混。
-        _ if !matches!(
-            resolved.as_ref().map(|(group, _)| group.mode.as_str()),
-            Some("proxy")
-        ) =>
-        {
-            placeholder(config)
-        }
+        _ if mode != Some("proxy") => placeholder(config),
         _ => segment(state, gid, cid, rest).await,
     }
 }
@@ -893,7 +884,10 @@ async fn variant_playlist(
     let Some((group, channel_url)) = resolve(&config, gid, cid) else {
         return placeholder(&config);
     };
-    if group.access == "archived" || group.mode != "proxy" {
+    let Some(channel) = group.channels.iter().find(|channel| channel.id == cid) else {
+        return placeholder(&config);
+    };
+    if group.access == "archived" || group.effective_mode(channel) != "proxy" {
         return placeholder(&config);
     }
     let upstream = match upstream_playlist(state, &channel_url, gid, cid).await {
@@ -1380,12 +1374,12 @@ async fn mpd_segment(
     let Some(group) = config.group(gid) else {
         return (StatusCode::NOT_FOUND, "Channel not found").into_response();
     };
-    if group.mode != "proxy" {
-        return (StatusCode::NOT_FOUND, "Not found").into_response();
-    }
     let Some(channel) = group.channels.iter().find(|channel| channel.id == cid) else {
         return (StatusCode::NOT_FOUND, "Channel not found").into_response();
     };
+    if group.effective_mode(channel) != "proxy" {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
     let channel_url = match crate::resolver::resolve(state, gid, cid, channel).await {
         Ok(Some(url)) => url,
         Ok(None) => channel.url.clone(),
