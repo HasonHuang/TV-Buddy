@@ -24,11 +24,12 @@
 │  main ──► 加载配置 ──► 建缓存目录 ──► 起后台任务 ──► 起 HTTP 监听     │
 │                                                                      │
 │  HTTP（axum Router）                                                  │
-│   ├─ 公开面   /health /unban /logo /epg /unban/whoami /__assets       │
-│   ├─ 订阅面   /sub/<令牌>/{playlist.m3u,epg.xml[.gz]}                 │
-│   ├─ 播放面   /{gid}/{cid}.{ext}                                     │
-│   │            切片 …/<P>_<S>.<ext>、timeshift、dash-timeshift        │
-│   └─ 面板面   /panel（静态） + /panel/api/*（Bearer 或 X-Token）      │
+│   ├─ 公开面   /api/health /api/unban* /api/share/*                    │
+│   ├─ 订阅面   /api/sub/<令牌>/{playlist.m3u,epg.xml[.gz]}             │
+│   ├─ 播放面   /api/play/<gid>/<cid>...（清单）                        │
+│   │            /media/<gid>/<cid>/...（切片、时移、DASH）              │
+│   └─ 面板面   /page/panel（HTML）+ /api/panel/*（Bearer 或 X-Token）  │
+│               静态资源 /static/{panel,logo,assets}/*                  │
 │                                                                      │
 │  后台任务                                                             │
 │   ├─ 配置监视（notify，分段生效）                                     │
@@ -143,9 +144,12 @@
 ### 5.2 面板请求
 
 ```text
-/panel/api/*  → Bearer 或 X-Token → 处理 → JSON
-/panel、/logo、/epg、/unban → 内嵌静态资源（免登录）
+/api/panel/*  → Bearer 或 X-Token → 处理 → JSON
+/page/panel、/page/unban → 内嵌 HTML（免登录）
+/static/panel/*、/static/logo/*、/static/assets/* → 内嵌或本地静态资源（免登录）
 ```
+
+旧路径 `/panel`、`/unban`、`/panel/api/*`、`/logo/*` 由最外层改写中间件映射到新前缀。旧路径在本次主版本内继续可用。
 
 ## 6. 共享状态
 
@@ -208,14 +212,15 @@ struct AppState {
 ```text
 frontend/            # Vite + React + TS（独立目录）
   └─ pnpm build → dist/
-        └─ rust-embed（编译期）→ /panel、/logo、/epg、/unban、/__assets/*
+        └─ rust-embed（编译期）→ /page/panel、/page/unban、/static/panel/*
 ```
 
 | 项 | 设计 | 依据 |
 | --- | --- | --- |
-| 页面 | 4 页：管理面板、节目单、台标库、自助解封 | F-003 |
-| 路由 | 与目标一致（`/panel`、`/epg`、`/logo`、`/unban`） | S-EP-01/05/06/07 |
-| API | 只调 `/panel/api/*`；端点与字段不重命名 | S-EP-12、F-012 §3 |
+| 页面 | 2 页：管理面板、自助解封 | F-003 |
+| 路由 | `/page/panel`、`/page/unban`；旧 `/panel`、`/unban` 为别名 | S-EP-01、S-EP-07 |
+| API | 只调 `/api/panel/*`；端点与字段不重命名 | S-EP-12、F-012 §3 |
+| 静态资源 | `/static/panel/*`、`/static/logo/*`、`/static/assets/*` | S-EP-16 |
 | 基准 | 逐屏对照 [`reference/img/`](reference/) | E1b |
 
 ## 11. 错误与日志
