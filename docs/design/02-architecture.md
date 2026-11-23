@@ -115,8 +115,8 @@
 ### 5.1 播放请求
 
 ```text
-请求 /{gid}/{cid}.m3u8
-  → [1] 路由匹配
+请求 /api/play/{gid}/{cid}.m3u8
+  → [1] 路由匹配（旧 /{gid}/{cid}.m3u8 由改写层映射）
   → [2] 边缘校验（edge_mode != off）
   → [3] 查分组/频道；判定 access（public/archived）
   → [4] 播放 Token 校验（token_enabled）

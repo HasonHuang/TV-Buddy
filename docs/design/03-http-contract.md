@@ -510,7 +510,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | 安全管控 | `/api/panel/security/{token,token/rotate,ip/stats,ip/ban,ip/unban}` | ✅ |
 | 缓存状态 | `GET /api/panel/cache/stats`、`POST /api/panel/cache/flush`（二次确认） | ✅ |
 | 频道热度 | `GET /api/panel/stats`（总请求、切片、上游失败、分组排行） | ✅ |
-| 节目指南 | `GET /api/panel/epg/status`、`POST /api/panel/epg/refresh`；链接到 `/epg` 浏览页 | ✅ |
+| 节目指南 | `GET /api/panel/epg/status`、`POST /api/panel/epg/refresh`；面板分区 `#/epg`（公开 `/epg` 页已删除） | ✅ |
 | 运行日志 | `GET /api/panel/logs?limit=`（5 秒轮询） | ✅ |
 | 备份恢复 | `GET /api/panel/backup`、`POST /api/panel/restore`（浏览器内下载/上传） | ✅ |
 | 素材 | `/api/panel/{assets,subtitle}/*`、`/api/panel/assets/ffmpeg-status`、`/api/panel/tools/ffmpeg/{install,remove}` | ✅ |
