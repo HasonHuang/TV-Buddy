@@ -82,7 +82,7 @@ python3 -m http.server 19932 --directory "$F"
 
 ## 3. 配置
 
-面板 `PUT /api/panel/config`。关键值：
+面板 `PUT /panel/api/config`。关键值：
 
 | 字段 | 值 |
 | --- | --- |
@@ -118,7 +118,7 @@ python3 -m http.server 19932 --directory "$F"
 
 ### 4.1 步骤 4：开启 ffprobe
 
-运行 `POST /api/panel/quality/run`，范围 `group=qtest`，模式 `full`。
+运行 `POST /panel/api/quality/run`，范围 `group=qtest`，模式 `full`。
 
 | 频道 | 分辨率 | 速率 MiB/s | 原因 | `probe_error` |
 | --- | --- | --- | --- | --- |
@@ -167,7 +167,7 @@ fMP4 频道在步骤 4 中已运行。媒体清单含 `#EXT-X-MAP:URI="init.mp4"
 
 ### 4.4 步骤 7：面板安装
 
-执行 `POST /api/panel/tools/ffmpeg/install`。
+执行 `POST /panel/api/tools/ffmpeg/install`。
 
 实际：
 
@@ -176,7 +176,7 @@ fMP4 频道在步骤 4 中已运行。媒体清单含 `#EXT-X-MAP:URI="init.mp4"
 - `ffmpeg` 行：`source=managed`、`path=/data/tools/ffmpeg`、版本 `7.0.2-static`。
 - `ffprobe` 行：`source=managed`、`path=/data/tools/ffprobe`。
 - 容器内执行 `/data/tools/ffprobe -version`。输出 `ffprobe version 7.0.2-static`。
-- 补测删除。`POST /api/panel/tools/ffmpeg/remove` 返回 `removed=true`。两个文件都消失。状态行回退系统版本。
+- 补测删除。`POST /panel/api/tools/ffmpeg/remove` 返回 `removed=true`。两个文件都消失。状态行回退系统版本。
 
 结论：通过。
 
