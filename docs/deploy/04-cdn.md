@@ -146,11 +146,12 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 
 ```text
 /api/*
+/sub/*
 /page/*
 /logo/api/*
 ```
 
-`/l/*` 属于规则 A 的补充（§6.3）。它必须排在规则 B 之前。`/logo/api/*` 也在规则 A 补充中。
+`/sub/*` 是用户订阅与每用户 EPG 的正式前缀，必须不缓存。`/l/*` 属于规则 A 的补充（§6.3）。它必须排在规则 B 之前。`/logo/api/*` 也在规则 A 补充中。
 
 新增规则，缓存：
 
@@ -177,6 +178,7 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 
 ```text
 /api/*
+/sub/*
 /page/*
 /
 ```

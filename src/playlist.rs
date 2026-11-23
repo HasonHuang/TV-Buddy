@@ -3,8 +3,8 @@
 //! 契约见 [`docs/design/03-http-contract.md`](../docs/design/03-http-contract.md) §5。
 //! 证据：F-004、F-009、S-URL-02/04/07。
 //!
-//! 订阅有两种入口：用户订阅 `/api/sub/:token/playlist.m3u` 与分组订阅
-//! `/api/sub/:token/:gid/playlist.m3u`。令牌即身份，范围由用户决定。
+//! 订阅有两种入口：用户订阅 `/sub/:token/playlist.m3u` 与分组订阅
+//! `/sub/:token/:gid/playlist.m3u`。令牌即身份，范围由用户决定。
 //! 全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用。
 
 use std::collections::{BTreeMap, HashSet};
@@ -48,7 +48,7 @@ pub fn render_user(
     body
 }
 
-/// 渲染某个分组的订阅 `/api/sub/:token/:gid/playlist.m3u`。
+/// 渲染某个分组的订阅 `/sub/:token/:gid/playlist.m3u`。
 ///
 /// 规则与 [`render_user`] 相同：归档组、不可见频道与探测失败的频道都不进清单。
 /// 分组不存在、已归档或对该用户不可见时返回 `None`。
@@ -425,7 +425,7 @@ mod tests {
         let first = body.lines().next().unwrap();
         assert_eq!(
             first,
-            "#EXTM3U x-tvg-url=\"http://host/api/sub/tok/epg.xml.gz\""
+            "#EXTM3U x-tvg-url=\"http://host/sub/tok/epg.xml.gz\""
         );
     }
 

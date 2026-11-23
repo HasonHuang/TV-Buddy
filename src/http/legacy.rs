@@ -88,7 +88,8 @@ fn rewrite_prefix(method: &Method, path: &str) -> Option<String> {
     if let Some(rest) = segment_rest(path, "/subtitle") {
         return Some(join_prefix(paths::PANEL_API, &format!("/subtitle{rest}")));
     }
-    if let Some(rest) = segment_rest(path, "/sub") {
+    // v2026.60 曾用 `/api/sub`。现以 `/sub` 为准，旧前缀保留为别名。
+    if let Some(rest) = segment_rest(path, "/api/sub") {
         return Some(join_prefix(paths::SUB_API, rest));
     }
     if let Some(rest) = segment_rest(path, "/l") {
@@ -142,6 +143,8 @@ fn join_prefix(prefix: &str, rest: &str) -> String {
 /// 新前缀与首页不参与改写。
 fn is_reserved(path: &str) -> bool {
     path == "/"
+        || path == "/sub"
+        || path.starts_with("/sub/")
         || path.starts_with("/api/")
         || path.starts_with("/media/")
         || path.starts_with("/static/")
@@ -215,12 +218,12 @@ mod tests {
             Some("/api/panel/subtitle/list")
         );
         assert_eq!(
-            rewrite(&get, "/sub/t/playlist.m3u").as_deref(),
-            Some("/api/sub/t/playlist.m3u")
+            rewrite(&get, "/api/sub/t/playlist.m3u").as_deref(),
+            Some("/sub/t/playlist.m3u")
         );
         assert_eq!(
-            rewrite(&get, "/sub/t/g/playlist.m3u").as_deref(),
-            Some("/api/sub/t/g/playlist.m3u")
+            rewrite(&get, "/api/sub/t/g/playlist.m3u").as_deref(),
+            Some("/sub/t/g/playlist.m3u")
         );
         assert_eq!(
             rewrite(&get, "/l/t/g/c.m3u8").as_deref(),
@@ -319,6 +322,8 @@ mod tests {
         let get = Method::GET;
         for path in [
             "/api/share/pull",
+            "/sub/t/playlist.m3u",
+            "/sub/t/g/playlist.m3u",
             "/media/g/c/seg.png",
             "/static/logo/a.png",
             "/page/panel",

@@ -129,7 +129,7 @@ sudo ./install.sh --low-spec
   /*/*/*
 
 新增不缓存（放在规则 B 之前）
-  /api/*  /page/*  /logo/api/*  /__assets/*  /subtitle/*  /l/*
+  /api/*  /sub/*  /page/*  /logo/api/*  /__assets/*  /subtitle/*  /l/*
   /*/*/*/index.txt  /*/*/*/index.m3u8  /*/*/dash-timeshift/*/playlist*
 
 新增缓存（放在兜底之前）

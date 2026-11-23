@@ -33,14 +33,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/playlist.m3u", get(routes::sub::gone))
         .route("/:gid/playlist.m3u", get(routes::sub::gone))
         // 用户订阅入口。令牌见 `tv-buddy.db` 的 access_tokens 表。
-        .route("/api/sub/:token/playlist.m3u", get(routes::sub::playlist))
+        .route("/sub/:token/playlist.m3u", get(routes::sub::playlist))
         // 单个分组的订阅。分组范围仍受令牌所属用户的可见性限制。
         .route(
-            "/api/sub/:token/:gid/playlist.m3u",
+            "/sub/:token/:gid/playlist.m3u",
             get(routes::sub::group_playlist),
         )
-        .route("/api/sub/:token/epg.xml", get(routes::sub::epg))
-        .route("/api/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
+        .route("/sub/:token/epg.xml", get(routes::sub::epg))
+        .route("/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
         // 面板接口挂载在新前缀下。旧 `/panel/api` 由改写层提供。
         .nest(paths::PANEL_API, panel_api_routes())
         // 播放链路（M2）。清单只走 `/api/play`，媒体数据只走 `/media`。

@@ -67,7 +67,7 @@ TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、�
 - 规则条件支持全部满足、任一满足、全部不满足，可嵌套。
 - 采集：XML 源与脚本源。
 - 翻译：接 MTranServer，批量翻译标题与描述。
-- 输出：`/api/sub/<令牌>/epg.xml`，面板「节目指南」。
+- 输出：`/sub/<令牌>/epg.xml`，面板「节目指南」。
 - 订阅注入：开启后自动写入 `x-tvg-url`。
 
 ### 录制与回看
@@ -394,14 +394,14 @@ TV_BUDDY_INITIAL_PASSWORD='你的口令' sudo -E sh install.sh
 订阅地址只有一个入口，在面板「我的订阅」页复制：
 
 ```text
-http://<host>:9900/api/sub/<令牌>/playlist.m3u   # 该用户的订阅
-http://<host>:9900/api/sub/<令牌>/<分组>/playlist.m3u  # 该用户单个分组的订阅
-http://<host>:9900/api/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
+http://<host>:9900/sub/<令牌>/playlist.m3u   # 该用户的订阅
+http://<host>:9900/sub/<令牌>/<分组>/playlist.m3u  # 该用户单个分组的订阅
+http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 ```
 
 每个用户默认可见全部分组。需要收紧时，在「用户与设备」里开启「只开放指定分组」与「只开放指定频道」。令牌在同一个弹窗里管理。
-旧路径 `/sub/...`、`/panel/api/...` 与 `/health` 在本次主版本内仍可用。新部署请使用新地址。
-全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用，返回 `404`。分组订阅用 `/api/sub/<令牌>/<分组>/playlist.m3u`。
+旧路径 `/api/sub/...`、`/panel/api/...` 与 `/health` 在本次主版本内仍可用。新部署请使用新地址。
+全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用，返回 `404`。分组订阅用 `/sub/<令牌>/<分组>/playlist.m3u`。
 
 ---
 
@@ -613,9 +613,9 @@ ls scripts/smoke-*.sh
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/health` | 健康检查，返回 `ok` |
-| `GET` | `/api/sub/<令牌>/playlist.m3u` | 用户订阅，只含该用户可见频道 |
-| `GET` | `/api/sub/<令牌>/<分组>/playlist.m3u` | 该用户单个分组的订阅；不可见或归档分组返回 `404` |
-| `GET` | `/api/sub/<令牌>/epg.xml[.gz]` | 用户节目单 |
+| `GET` | `/sub/<令牌>/playlist.m3u` | 用户订阅，只含该用户可见频道 |
+| `GET` | `/sub/<令牌>/<分组>/playlist.m3u` | 该用户单个分组的订阅；不可见或归档分组返回 `404` |
+| `GET` | `/sub/<令牌>/epg.xml[.gz]` | 用户节目单 |
 | `GET` | `/api/play/{gid}/{cid}.m3u8`（或 `.mpd`） | 入口清单 |
 | `GET` | `/api/play/{gid}/{cid}/video/index.txt` | 媒体清单 |
 | `POST` | `/api/panel/login` | 面板登录 |
@@ -731,7 +731,7 @@ tests/             路由级集成测试（起真实服务 + 伪上游）
 - **Remux**：纯 Rust 切片。冷启动时在首批切片产出前返回 `503 remux warming up`，不是恒 503。
 - **DASH**：已把 MPD 转成 HLS。需要 `SegmentTimeline`，或 `SegmentTemplate@duration` 加总时长。CENC/ClearKey 不解密，按原字节代理。
 - **缓存**：只有磁盘后端，切片正文不进入进程内存。`cache.limit_mb` 是每 60 秒扫描后的回收目标，不是实时硬上限；两次扫描之间占用可能短时超过上限。
-- **EPG**：录制前后缓冲与部分私有端点未实现。公开 EPG 页与全局 `/epg.xml` 已删除，改用 `/api/sub/<令牌>/epg.xml` 或面板「节目指南」。
+- **EPG**：录制前后缓冲与部分私有端点未实现。公开 EPG 页与全局 `/epg.xml` 已删除，改用 `/sub/<令牌>/epg.xml` 或面板「节目指南」。
 - **订阅托管**：同步一次写整份配置。大清单会增加写入时间。单源上限 20000 条，空清单默认拦截。上游分组改名按旧组删除、新组创建处理。
 - **探测下线**：只在下一次探测后生效。默认周期 300 秒。只隐藏订阅清单，直接播放地址仍可用。
 - **录制**：DASH 频道要求直播 MPD 且系统有 ffmpeg。静态 MPD 报「录制区间内无可用切片」。

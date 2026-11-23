@@ -57,12 +57,12 @@ curl -fsSL https://raw.githubusercontent.com/HasonHuang/TV-Buddy/main/install.sh
 | 管理命令 | `/usr/local/bin/tv-buddy` |
 | 面板 | `http://<主机>:9900/page/panel` |
 | 健康检查 | `http://<主机>:9900/api/health` |
-| 用户订阅 | `http://<主机>:9900/api/sub/<令牌>/playlist.m3u` |
+| 用户订阅 | `http://<主机>:9900/sub/<令牌>/playlist.m3u` |
 | Docker 数据目录 | `/data` |
 
 数据库保存配置、用户与令牌。备份时必须包含数据库。
 
-旧地址 `/panel`、`/health` 与 `/sub/...` 在本次主版本内仍可用。新部署请使用上表地址。
+旧地址 `/panel`、`/health` 与 `/api/sub/...` 在本次主版本内仍可用。新部署请使用上表地址。
 
 ## 5. 占位符约定
 

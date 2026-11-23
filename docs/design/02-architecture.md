@@ -25,7 +25,7 @@
 │                                                                      │
 │  HTTP（axum Router）                                                  │
 │   ├─ 公开面   /api/health /api/unban* /api/share/*                    │
-│   ├─ 订阅面   /api/sub/<令牌>/{playlist.m3u,epg.xml[.gz]}             │
+│   ├─ 订阅面   /sub/<令牌>/{playlist.m3u,epg.xml[.gz]}                  │
 │   ├─ 播放面   /api/play/<gid>/<cid>...（清单）                        │
 │   │            /media/<gid>/<cid>/...（切片、时移、DASH）              │
 │   └─ 面板面   /page/panel（HTML）+ /api/panel/*（Bearer 或 X-Token）  │

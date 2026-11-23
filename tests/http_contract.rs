@@ -860,11 +860,11 @@ async fn health_and_user_playlist() {
 }
 
 #[tokio::test]
-async fn subscription_uses_new_paths() {
+async fn subscription_uses_canonical_path() {
     let fx = fixture().await;
     let response = fx
         .client
-        .get(format!("{}/api/sub/{}/playlist.m3u", fx.base, fx.token))
+        .get(format!("{}/sub/{}/playlist.m3u", fx.base, fx.token))
         .send()
         .await
         .expect("请求");
@@ -875,12 +875,12 @@ async fn subscription_uses_new_paths() {
 }
 
 #[tokio::test]
-async fn subscription_old_and_new_paths_agree() {
+async fn subscription_alias_matches_canonical() {
     let fixture = fixture_with(true).await;
     epg::refresh(&fixture.state).await.expect("采集应成功");
 
-    // 四类订阅端点：旧路径与新路径必须返回同一响应。
-    for (old, new) in [
+    // 四类订阅端点：v2026.60 别名与本前缀必须返回同一响应。
+    for (canonical, alias) in [
         (
             fixture.sub(&fixture.token, "playlist.m3u"),
             format!("/api/sub/{}/playlist.m3u", fixture.token),
@@ -898,17 +898,21 @@ async fn subscription_old_and_new_paths_agree() {
             format!("/api/sub/{}/epg.xml.gz", fixture.token),
         ),
     ] {
-        let old_response = fetch(&fixture, &old).await;
-        let new_response = fetch(&fixture, &new).await;
-        assert_eq!(old_response.status(), new_response.status(), "{new}");
+        let canonical_response = fetch(&fixture, &canonical).await;
+        let alias_response = fetch(&fixture, &alias).await;
         assert_eq!(
-            header(&old_response, "content-type"),
-            header(&new_response, "content-type"),
-            "{new}"
+            canonical_response.status(),
+            alias_response.status(),
+            "{alias}"
         );
-        let old_body = old_response.bytes().await.expect("旧正文");
-        let new_body = new_response.bytes().await.expect("新正文");
-        assert_eq!(old_body, new_body, "{new}");
+        assert_eq!(
+            header(&canonical_response, "content-type"),
+            header(&alias_response, "content-type"),
+            "{alias}"
+        );
+        let canonical_body = canonical_response.bytes().await.expect("本前缀正文");
+        let alias_body = alias_response.bytes().await.expect("别名正文");
+        assert_eq!(canonical_body, alias_body, "{alias}");
     }
 }
 
@@ -919,7 +923,7 @@ async fn global_playlist_is_gone() {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
         let body = response.text().await.expect("读正文");
-        assert!(body.contains("/api/sub/"), "应指路到用户订阅：{body}");
+        assert!(body.contains("/sub/"), "应指路到用户订阅：{body}");
     }
 }
 
@@ -1127,7 +1131,7 @@ async fn device_token_can_be_customized() {
     assert_eq!(body["token"]["token"], "living-room");
     assert_eq!(
         body["token"]["playlist_url"],
-        "/api/sub/living-room/playlist.m3u"
+        "/sub/living-room/playlist.m3u"
     );
     let expires = body["token"]["expires_at_ms"].as_i64().expect("应有有效期");
 
@@ -1670,10 +1674,10 @@ async fn legacy_paths_match_new_paths() {
         "HEAD /health"
     );
 
-    // 订阅与播放入口。
-    let sub_old = fixture.sub(&fixture.token, "playlist.m3u");
-    let sub_new = format!("/api/sub/{}/playlist.m3u", fixture.token);
-    assert_legacy_matches_new(&fixture, &sub_old, &sub_new, None).await;
+    // 订阅入口：v2026.60 别名与本前缀一致。
+    let sub_canonical = fixture.sub(&fixture.token, "playlist.m3u");
+    let sub_alias = format!("/api/sub/{}/playlist.m3u", fixture.token);
+    assert_legacy_matches_new(&fixture, &sub_alias, &sub_canonical, None).await;
 
     // `/l/<token>/...` 是订阅条目的旧路径令牌入口。
     let token_entry_old = format!("/l/{}/pm/c1.m3u8?token={}", fixture.token, fixture.token);
@@ -1927,7 +1931,7 @@ async fn epg_enabled_serves_xmltv_and_filters() {
     assert_eq!(response.status(), StatusCode::OK);
     let playlist = response.text().await.expect("读订阅");
     let expected = format!(
-        "#EXTM3U x-tvg-url=\"{}/api/sub/{}/epg.xml.gz\"",
+        "#EXTM3U x-tvg-url=\"{}/sub/{}/epg.xml.gz\"",
         fixture.base, fixture.token
     );
     assert_eq!(playlist.lines().next(), Some(expected.as_str()));

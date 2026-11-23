@@ -49,7 +49,7 @@ location ~ ^/(sub|proxy|play)$ {
 
 只运行 TV Buddy 时，删除 `upstream sontv` 与这个 `location`。否则精确访问 `/sub`、`/proxy`、`/play` 会返回 502。
 
-TV Buddy 的订阅路径是 `/api/sub/<令牌>/playlist.m3u`。它不匹配上面的精确 `/sub`，所以仍会转到 9900。旧的 `/sub/...` 在本次主版本内仍可用，也会转到 9900。
+TV Buddy 的订阅路径是 `/sub/<令牌>/playlist.m3u`。它不匹配上面的精确 `/sub`，所以仍会转到 9900。v2026.60 的 `/api/sub/...` 是别名，也会转到 9900。
 
 ### 2.2 模板中的监听地址
 
@@ -305,7 +305,7 @@ curl -I http://127.0.0.1/api/health
 curl -I http://127.0.0.1/page/panel
 
 # 订阅清单。确认地址是公网域名与 https
-curl -s 'https://tv.example.com/api/sub/<令牌>/playlist.m3u' | head
+curl -s 'https://tv.example.com/sub/<令牌>/playlist.m3u' | head
 
 # 切片 Range 透传
 curl -s -o /dev/null -w '%{http_code}\n' \
@@ -322,7 +322,7 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 | 订阅清单 | 地址是 `https://tv.example.com`，不是 `http://127.0.0.1:9900` |
 | 切片 Range | `206` |
 
-旧地址 `/health`、`/panel` 与 `/sub/...` 在本次主版本内仍可用。新部署请使用新地址。
+旧地址 `/health`、`/panel` 与 `/api/sub/...` 在本次主版本内仍可用。新部署请使用新地址。
 
 ## 10. 故障排查
 

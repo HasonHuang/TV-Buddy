@@ -71,7 +71,7 @@
 | --- | --- | --- | --- |
 | `m3u8-rs` | HLS 清单解析与重写 | P1 | `S-MODE-03` |
 | `quick-xml` | XMLTV 生成、MPD 解析 | P1 | `S-EP-05`、`S-GAP-01` |
-| `flate2`（gzip） | `/api/sub/<token>/epg.xml.gz`、备份包 | P1/P2 | `S-EP-05`、`S-BAK-01` |
+| `flate2`（gzip） | `/sub/<token>/epg.xml.gz`、备份包 | P1/P2 | `S-EP-05`、`S-BAK-01` |
 | `tar` | 备份与恢复 | P2 | `S-BAK-01` |
 | `aes-gcm` / `mp4` | ClearKey KID 检测（不解密） | P1 | `S-GAP-01` |
 | `image` | 台标转码与尺寸探测 | P2 | F-011 |

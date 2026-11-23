@@ -277,7 +277,16 @@ fn group_of(path: &str) -> Option<String> {
     }
     if matches!(
         first,
-        "panel" | "__assets" | "epg" | "logo" | "unban" | "api" | "health" | "static" | "page"
+        "panel"
+            | "__assets"
+            | "epg"
+            | "logo"
+            | "unban"
+            | "api"
+            | "health"
+            | "static"
+            | "page"
+            | "sub"
     ) {
         return None;
     }
@@ -322,6 +331,7 @@ mod tests {
     #[test]
     fn stats_skip_reserved_prefixes() {
         for path in [
+            "/sub/t/playlist.m3u",
             "/api/sub/t/playlist.m3u",
             "/static/panel/x.js",
             "/page/panel",

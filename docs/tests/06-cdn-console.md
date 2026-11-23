@@ -568,7 +568,7 @@ curl -sS -o /dev/null -D - "$CDN/page/panel" | sed -n '1,25p'
 订阅清单：
 
 ```bash
-curl -sS -o /dev/null -D - "$CDN/api/sub/<令牌>/playlist.m3u" | sed -n '1,25p'
+curl -sS -o /dev/null -D - "$CDN/sub/<令牌>/playlist.m3u" | sed -n '1,25p'
 ```
 
 预期：`200`。缓存状态 `BYPASS`。源站不给 `Cache-Control`，所以可能没有该头。
@@ -786,7 +786,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/config" \
 | 清单给 `http://` | 未下发 XFP；或 CDN 改写了 Host | `docs/design/06-low-spec-optimization.md:140` |
 | 源站命中返回 `private` | 只能「遵循源站头」的 CDN 不缓存。改用强制 TTL，或开 `[cdn].shared_cache_hits=true` | `src/http/routes/stream.rs:57-70` |
 | 上游失败被缓存成 200 空体 | 开 `[cdn].enabled=true`，设 `empty_status=502` | `src/http/routes/stream.rs:1579-1594` |
-| 订阅清单被缓存 | 源站已发 `Cache-Control: private, no-store`。检查不缓存规则是否仍 BYPASS `/api/sub/*`（旧 `/sub/*`） | `src/http/routes/sub.rs:60-66` |
+| 订阅清单被缓存 | 源站已发 `Cache-Control: private, no-store`。检查不缓存规则是否仍 BYPASS `/sub/*`（v2026.60 别名 `/api/sub/*`） | `src/http/routes/sub.rs:60-66` |
 | 切片 URL 每 5 分钟变一次 | 正常。时间窗签名会让路径变。缓存键必须包含 URI 路径 | `src/sign.rs` |
 | 切片返回 `302` | 签名过期或密钥被改。播放器重拉清单即恢复 | `src/http/routes/stream.rs` |
 | 两个用户拿到不同切片 URL | 时间窗不同或密钥不同。检查系统时钟与 `slice_sign_window_secs` | `src/sign.rs` |

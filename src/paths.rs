@@ -1,6 +1,6 @@
 //! 路径前缀与分类工具。
 //!
-//! 本模块统一生成新前缀 URL。新前缀为 `/api`、`/api/panel`、`/api/sub`、
+//! 本模块统一生成新前缀 URL。新前缀为 `/api`、`/api/panel`、`/sub`、
 //! `/api/play`、`/media`、`/static`、`/page`。本模块也识别清单路径，并归一化
 //! 已持久化的旧素材路径。
 
@@ -8,8 +8,8 @@
 pub const API: &str = "/api";
 /// 面板 API 前缀。
 pub const PANEL_API: &str = "/api/panel";
-/// 订阅 API 前缀。
-pub const SUB_API: &str = "/api/sub";
+/// 订阅前缀。它面向播放器，保持在 `/api` 之外，地址稳定。
+pub const SUB_API: &str = "/sub";
 /// 播放 API 前缀。
 pub const PLAY_API: &str = "/api/play";
 /// 媒体数据前缀。本前缀只提供切片与初始化段。
@@ -189,6 +189,13 @@ mod tests {
             "/static/logo/a.png"
         );
         assert_eq!(normalize_asset_url("https://up/a.png"), "https://up/a.png");
+    }
+
+    #[test]
+    fn subscription_urls_stay_outside_api() {
+        assert_eq!(sub("/t/playlist.m3u"), "/sub/t/playlist.m3u");
+        assert_eq!(sub("t/epg.xml"), "/sub/t/epg.xml");
+        assert_eq!(sub(""), "/sub");
     }
 
     #[test]
