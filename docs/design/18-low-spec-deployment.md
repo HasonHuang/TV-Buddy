@@ -117,21 +117,31 @@ sudo ./install.sh --low-spec
 
 另外确认：**不缓存 3xx**（`redirect` 模式会 302 到带时效的上游地址）、**不缓存非 200**。
 
-缓存规则用两条，顺序不能颠倒：
+缓存规则分四层，顺序不能颠倒：
 
 ```text
-规则 A：不缓存（放最前）
+规则 A：不缓存（放最前，迁移期保留）
   /panel*  /epg*  /subs/*  /sub/*  /api/*  /unban*  /share*  /health  /metrics
   /*/*.m3u8  /*/*.mpd
   /*/*/index.m3u8  /*/*/index.txt  /*/*/video/*  /*/*/mpd/*
 
-规则 B：缓存（放其后）
-  /*/*/* 中的其余路径（伪装切片、remux seg_*、timeshift/*、DASH 轨道切片）
+规则 B：缓存（迁移期保留）
+  /*/*/*
+
+新增不缓存（放在规则 B 之前）
+  /api/*  /page/*  /logo/api/*  /__assets/*  /subtitle/*  /l/*
+  /*/*/*/index.txt  /*/*/*/index.m3u8  /*/*/dash-timeshift/*/playlist*
+
+新增缓存（放在兜底之前）
+  /media/*  /static/panel/*  /static/logo/*  /static/assets/*
+
+兜底不缓存（放最后）
+  /*
 ```
 
-**不要按扩展名写规则。** 伪装扩展名在 jpg/png/gif/bmp/webp 之间轮换。控制台只支持扩展名时，改用路径前缀 `/{gid}/{cid}/`，逐分组配置。
+**不要按扩展名写规则。** 伪装扩展名在 jpg/png/gif/bmp/webp 之间轮换。控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。旧路径用 `/{gid}/{cid}/` 前缀，逐分组配置。
 
-操作步骤、路径补丁与验收命令见 [`06-low-spec-optimization.md`](06-low-spec-optimization.md) §2 与 [`docs/tests/06-cdn-console.md`](../tests/06-cdn-console.md)。
+完整规则、路径补丁与验收命令见 [`../deploy/04-cdn.md`](../deploy/04-cdn.md) §6 与 [`docs/tests/06-cdn-console.md`](../tests/06-cdn-console.md)。
 
 ## 7. 推荐值从哪来
 
@@ -153,7 +163,7 @@ TTL 与磁盘上限不能写死。片源窗口在 48–100 秒，单片 1.1–9 
 ```bash
 TOKEN='<面板会话令牌>'
 curl -X POST -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:9900/panel/api/cdn/estimate
+  http://127.0.0.1:9900/api/panel/cdn/estimate
 ```
 
 接口需要面板会话；未登录返回 `401`。
@@ -165,13 +175,13 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 ```bash
 # 0) 播放凭证。token_enabled=true 且分组不是 open 时必须带
 PLAY='<播放令牌>'
-MANIFEST="https://<域名>/<分组>/<变体>.m3u8?token=$PLAY"
+MANIFEST="https://<域名>/api/play/token/$PLAY/<分组>/<变体>.m3u8"
 
 # 1) 清单必须不缓存
 curl -s -o /dev/null -D - "$MANIFEST" | grep -iE 'x-cache|cache-control'
 
 # 2) 切片必须缓存。第二次应为 HIT 且带 Age
-SEG="https://<域名>/<分组>/<变体>/<从清单复制的切片路径>"
+SEG="https://<域名>/media/<分组>/<变体>/<从清单复制的切片路径>"
 for i in 1 2; do curl -s -o /dev/null -D - "$SEG" | grep -iE '^(x-cache|age|cache-control|content-length)'; done
 
 # 3) 字节未被改写：CDN 两次 + 源站一次
@@ -180,11 +190,11 @@ hash_stdin() {
 }
 CDN1=$(curl -s "$SEG" | hash_stdin | awk '{print $1}')
 CDN2=$(curl -s "$SEG" | hash_stdin | awk '{print $1}')
-ORIGIN=$(curl -s "http://127.0.0.1:9900/<分组>/<变体>/<切片路径>" | hash_stdin | awk '{print $1}')
+ORIGIN=$(curl -s "http://127.0.0.1:9900/media/<分组>/<变体>/<切片路径>" | hash_stdin | awk '{print $1}')
 printf 'cdn1=%s\ncdn2=%s\norigin=%s\n' "$CDN1" "$CDN2" "$ORIGIN"
 
 # 4) 面板与 API 不被缓存
-curl -s -o /dev/null -D - "https://<域名>/panel/api/status" | grep -iE 'x-cache|cache-control'
+curl -s -o /dev/null -D - "https://<域名>/api/panel/status" | grep -iE 'x-cache|cache-control'
 ```
 
 期望：清单与面板返回 `BYPASS`。切片第二次返回 `HIT` 并带 `Age`。三个哈希一致（CDN 两次 + 源站一次）。切片地址不带 token；只有清单入口需要 token。`sha256sum` 与 `shasum` 都没有时，先安装 `coreutils` 或 `perl`。
@@ -224,7 +234,7 @@ sudo tv-buddy restart
 - `per_channel_max = 0` 表示使用内置上限 4096。
 - 不要省略 `--db`。省略时二进制会写当前目录的 `./tv-buddy.db`。
 
-`config set` 直接写数据库，运行中的进程不会自动读取。执行 `sudo tv-buddy restart`，或在面板会话中调用 `POST /panel/api/reload`。面板里改配置则保存后立即生效。
+`config set` 直接写数据库，运行中的进程不会自动读取。执行 `sudo tv-buddy restart`，或在面板会话中调用 `POST /api/panel/reload`。面板里改配置则保存后立即生效。
 
 路径按默认安装目录。自定义 `PREFIX` 时替换 `BIN` 与 `DB`。
 

@@ -83,35 +83,50 @@ L2（内存滚动预热）取消。它只把 L1 的数据再存一份进内存�
 `/*/*.m3u8`、`/*/*.mpd`、`/*/*/index.m3u8`、`/*/*/index.txt`、
 `/*/*/video/*`、`/*/*/mpd/*`
 
-**规则 B：缓存**（放在后面）
+**规则 B：缓存**（放在规则 A 之后）
 
 `/*/*/*` 中的其余路径。包括伪装切片、remux 的 `seg_*`、`timeshift/*`、DASH 轨道切片。
 
+**新增规则：不缓存**
+
+`/api/*`、`/page/*`、`/logo/api/*`、`/__assets/*`、`/subtitle/*`、`/l/*`、
+与旧清单形状补丁（`/*/*/*/index.txt` 等）。这些规则必须排在规则 B 之前。
+
+**新增规则：缓存**
+
+`/media/*`、`/static/panel/*`、`/static/logo/*`、`/static/assets/*`。
+
+**兜底：不缓存** `/*`。兜底必须放在最后。
+
+迁移期同时保留 A、B 两层旧规则与新增规则。一个主版本后删除旧规则。完整顺序、路径补丁与验收命令见 [`../deploy/04-cdn.md`](../deploy/04-cdn.md) §6。
+
 **不要按扩展名写规则**。伪装扩展名在 jpg/png/gif/bmp/webp 之间轮换。关闭伪装时又是 ts。
-控制台只支持扩展名时，改用路径前缀 `/{gid}/{cid}/`，逐分组配置。
+控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。旧路径逐分组用 `/{gid}/{cid}/` 前缀。
 
 ### 2.3 操作步骤
 
 1. 打开统一面板，选中全部 4 个域名。
 2. 加入**规则 A**。
 3. 加入**规则 B**。强制 TTL，忽略源站头，忽略 Set-Cookie。
-4. 在回源配置中加请求头 `X-Forwarded-Proto: https`。
-5. 关闭图片处理、页面优化、智能压缩。
-6. 保存，然后**刷新全部缓存**（Purge All）。
-7. 按 §2.4 验证。四个域名各做一遍。
+4. 在规则 B 之前加入新增不缓存规则；在兜底之前加入 `/media/*` 与 `/static/*` 缓存规则。
+5. 加入兜底不缓存规则 `/*`，放在最后。
+6. 在回源配置中加请求头 `X-Forwarded-Proto: https`。
+7. 关闭图片处理、页面优化、智能压缩。
+8. 保存，然后**刷新全部缓存**（Purge All）。
+9. 按 §2.4 验证。四个域名各做一遍。
 
 ### 2.4 验收命令
 
 ```bash
 # 0) 播放凭证。token_enabled=true 且分组不是 open 时必须带
 PLAY='<播放令牌>'
-MANIFEST="https://<域名>/<分组>/<变体>.m3u8?token=$PLAY"
+MANIFEST="https://<域名>/api/play/token/$PLAY/<分组>/<变体>.m3u8"
 
 # 1) 清单必须不缓存
 curl -s -o /dev/null -D - "$MANIFEST" | grep -iE 'x-cache|cache-control'
 
 # 2) 切片必须缓存。连续两次，第二次应为 HIT 且出现 Age
-SEG="https://<域名>/<分组>/<变体>/<从清单复制的切片路径>"
+SEG="https://<域名>/media/<分组>/<变体>/<从清单复制的切片路径>"
 for i in 1 2; do curl -s -o /dev/null -D - "$SEG" | grep -iE '^(x-cache|age|cache-control|content-length)'; done
 
 # 3) 字节未被改写：CDN 两次 + 源站一次
@@ -120,11 +135,11 @@ hash_stdin() {
 }
 CDN1=$(curl -s "$SEG" | hash_stdin | awk '{print $1}')
 CDN2=$(curl -s "$SEG" | hash_stdin | awk '{print $1}')
-ORIGIN=$(curl -s "http://127.0.0.1:9900/<分组>/<变体>/<切片路径>" | hash_stdin | awk '{print $1}')
+ORIGIN=$(curl -s "http://127.0.0.1:9900/media/<分组>/<变体>/<切片路径>" | hash_stdin | awk '{print $1}')
 printf 'cdn1=%s\ncdn2=%s\norigin=%s\n' "$CDN1" "$CDN2" "$ORIGIN"
 
 # 4) 面板与 API 不被缓存
-curl -s -o /dev/null -D - "https://<域名>/panel/api/status" | grep -iE 'x-cache|cache-control'
+curl -s -o /dev/null -D - "https://<域名>/api/panel/status" | grep -iE 'x-cache|cache-control'
 ```
 
 期望结果：清单与面板返回 `BYPASS`。切片第二次返回 `HIT` 并带 `Age`。三个哈希一致（CDN 两次 + 源站一次）。切片地址不带 token；只有清单入口需要 token。
@@ -379,14 +394,14 @@ CDN 不下发 `X-Forwarded-Proto` 时补 `public_base`。
 
 | 配置 | 面板位置 | 接口 |
 | --- | --- | --- |
-| 推荐值展示（只读） | **缓存状态页** →「CDN 推荐值」卡片 | 扩展 `GET /panel/api/cache/stats` |
-| `[cdn]` 编辑 | **系统设置页** →「CDN 兜底」卡片 | `GET/PUT /panel/api/config` |
+| 推荐值展示（只读） | **缓存状态页** →「CDN 推荐值」卡片 | 扩展 `GET /api/panel/cache/stats` |
+| `[cdn]` 编辑 | **系统设置页** →「CDN 兜底」卡片 | `GET/PUT /api/panel/config` |
 | `[cache]` 上限与过期删除 | **系统设置页** →「缓存容量与回收」卡片 | 同上 |
 | `[cache.prefetch]` 编辑 | **系统设置页** →「预载配置」卡片 | 同上 |
 | 分组与频道 `prefetch` | 分组 / 频道编辑对话框 | `PUT /groups/{gid}`、`POST` 或 `PUT /channels[/{cid}]` |
-| 「立即估算」按钮 | 缓存状态页 →「CDN 推荐值」卡片右上角 | `POST /panel/api/cdn/estimate` |
+| 「立即估算」按钮 | 缓存状态页 →「CDN 推荐值」卡片右上角 | `POST /api/panel/cdn/estimate` |
 
-`PUT /panel/api/config` 整份替换。前端必须先 GET，再改，再 PUT。
+`PUT /api/panel/config` 整份替换。前端必须先 GET，再改，再 PUT。
 
 「立即估算」只运行一次。第二个并发请求返回 409，不排队等待。
 
@@ -400,7 +415,7 @@ CDN 不下发 `X-Forwarded-Proto` 时补 `public_base`。
 | `src/cache_estimate.rs`（新） | 被动统计（清单 T/N/W、切片体积滑动平均）、公式、`cache_estimate.json`、「立即估算」 |
 | `src/cache_gc.rs`（新） | `statvfs` 取空间、算上限、扫描与淘汰、紧急模式、推荐值输出 |
 | `src/http/routes/stream.rs` | CDN 模式的响应头与空体状态码；`self_base` 优先 `public_base`；预取改用 `prefetch_for`；切片体积采样 |
-| `src/http/routes/cdn.rs`（新） | `POST /panel/api/cdn/estimate` |
+| `src/http/routes/cdn.rs`（新） | `POST /api/panel/cdn/estimate` |
 | `src/proxy/segments.rs` | 磁盘索引落盘上限（超量丢最旧） |
 | `src/http/routes/admin.rs` | `cache/stats` 附带推荐值 |
 | `frontend/src/{lowcfg,cache,panel,groups}.tsx` | 推荐卡片、三张表单、分组与频道的四态选择 |
@@ -429,7 +444,7 @@ S4 与 S6 需要目标 VPS。本地只覆盖公式与淘汰逻辑：单测复现
 
 回滚：`cache.segments.per_channel_max` 改回 `0`，`cache.prefetch.concurrency` 改回 `4`；
 不再使用 CDN 兜底时再把 `[cdn].enabled` 改回 `false`。磁盘回收常开，没有开关。
-`config set` 直接写库；重启服务或调用 `POST /panel/api/reload` 后生效。
+`config set` 直接写库；重启服务或调用 `POST /api/panel/reload` 后生效。
 
 ---
 
