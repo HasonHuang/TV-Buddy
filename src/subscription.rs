@@ -502,7 +502,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
         let wanted = target_index.get(&planned.target).copied().unwrap_or(gidx);
         if wanted != gidx {
             move_keys.insert(planned_key);
-        } else if update_fields(channel, planned) {
+        } else if update_fields(source, channel, planned) {
             stats.updated += 1;
         }
     }
@@ -544,7 +544,7 @@ pub fn apply(config: &mut Config, source: &PlaylistSource, plan: &Plan) -> Apply
                 continue;
             };
             let planned = &plan.channels[pidx];
-            update_fields(&mut channel, planned);
+            update_fields(source, &mut channel, planned);
             let Some(&gidx) = target_index.get(&planned.target) else {
                 // 目标分组丢失：放回最后一个分组，避免丢数据。
                 if let Some(last) = groups.last_mut() {
@@ -1442,6 +1442,7 @@ pub fn detach_source(config: &mut Config, id: &str) -> usize {
                 channel.source_id.clear();
                 channel.source_key.clear();
                 channel.sync_follow = true;
+                channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
                 count += 1;
             }
         }
@@ -1470,6 +1471,7 @@ pub fn detach_channel(config: &mut Config, gid: &str, cid: &str) -> bool {
             channel.source_id.clear();
             channel.source_key.clear();
             channel.sync_follow = true;
+            channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
             found = true;
         }
     }
@@ -1513,6 +1515,7 @@ pub fn detach_group(config: &mut Config, gid: &str) -> bool {
         channel.source_id.clear();
         channel.source_key.clear();
         channel.sync_follow = true;
+        channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
     }
     true
 }
@@ -1722,6 +1725,25 @@ fn mode_for(source: &PlaylistSource, dash: bool) -> String {
         }
         other => other.to_string(),
     }
+}
+
+/// 频道模式的来源标记。记录创建时的源模式。
+fn source_mode_marker(source: &PlaylistSource) -> String {
+    match source.playback_mode.trim() {
+        "" | "auto" => "sync:auto".into(),
+        other => format!("sync:{other}"),
+    }
+}
+
+/// 源仍是 `auto` 时，按最新 URL 类型重算频道模式。
+fn refresh_source_mode(source: &PlaylistSource, channel: &mut Channel, planned: &PlannedChannel) {
+    if channel.mode_source() != "sync:auto" {
+        return;
+    }
+    if !matches!(source.playback_mode.trim(), "" | "auto") {
+        return;
+    }
+    channel.mode = Some(mode_for(source, planned.dash));
 }
 
 fn format_for(source: &PlaylistSource, dash: bool) -> String {
@@ -1974,12 +1996,14 @@ fn build_channel(source: &PlaylistSource, planned: &PlannedChannel, id: String) 
         id,
         name: planned.name.clone(),
         url: planned.url.clone(),
+        mode: Some(mode_for(source, planned.dash)),
         headers: planned.headers.clone(),
         source_id: source.id.clone(),
         source_key: planned.key.clone(),
         sync_follow: true,
         ..Channel::default()
     };
+    channel.set_mode_source(&source_mode_marker(source));
     write_upstream(&mut channel, planned);
     channel
 }
@@ -2016,12 +2040,13 @@ fn extra_str<'a>(channel: &'a Channel, key: &str) -> &'a str {
         .trim()
 }
 
-fn update_fields(channel: &mut Channel, planned: &PlannedChannel) -> bool {
-    if same_upstream(channel, planned) {
-        return false;
+fn update_fields(source: &PlaylistSource, channel: &mut Channel, planned: &PlannedChannel) -> bool {
+    let changed = !same_upstream(channel, planned);
+    if changed {
+        write_upstream(channel, planned);
     }
-    write_upstream(channel, planned);
-    true
+    refresh_source_mode(source, channel, planned);
+    changed
 }
 
 fn same_upstream(channel: &Channel, planned: &PlannedChannel) -> bool {
@@ -2092,6 +2117,123 @@ mod tests {
     fn run(config: &mut Config, source: &PlaylistSource, entries: &[Entry]) -> ApplyStats {
         let plan = plan(config, source, entries);
         apply(config, source, &plan)
+    }
+
+    #[test]
+    fn sync_creates_channel_with_source_mode() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.playback_mode = "redirect".into();
+        let entries = urls(&[("c1", "央视", "http://up/c1.m3u8")]);
+        run(&mut config, &source, &entries);
+
+        let channel = &config.groups[0].channels[0];
+        assert_eq!(channel.mode.as_deref(), Some("redirect"));
+        assert_eq!(channel.mode_source(), "sync:redirect");
+    }
+
+    #[test]
+    fn auto_source_stamps_each_channel_by_url() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.playback_mode = "auto".into();
+        let entries = urls(&[
+            ("hls", "混合", "http://up/live.m3u8"),
+            ("dash", "混合", "http://up/live.mpd"),
+        ]);
+        run(&mut config, &source, &entries);
+
+        let modes: Vec<_> = config.groups[0]
+            .channels
+            .iter()
+            .map(|channel| channel.mode.as_deref().unwrap_or(""))
+            .collect();
+        assert!(modes.contains(&"proxy"), "{modes:?}");
+        assert!(modes.contains(&"dash"), "{modes:?}");
+        assert!(config.groups[0]
+            .channels
+            .iter()
+            .all(|channel| channel.mode_source() == "sync:auto"));
+    }
+
+    #[test]
+    fn auto_mode_reevaluates_when_source_stays_auto() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.playback_mode = "auto".into();
+        run(
+            &mut config,
+            &source,
+            &urls(&[("c1", "央视", "http://up/c1.m3u8")]),
+        );
+        assert_eq!(config.groups[0].channels[0].mode.as_deref(), Some("proxy"));
+
+        run(
+            &mut config,
+            &source,
+            &urls(&[("c1", "央视", "http://up/c1.mpd")]),
+        );
+        assert_eq!(config.groups[0].channels[0].mode.as_deref(), Some("dash"));
+    }
+
+    #[test]
+    fn source_mode_change_does_not_rewrite_existing_auto_channel() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.playback_mode = "auto".into();
+        run(
+            &mut config,
+            &source,
+            &urls(&[("c1", "央视", "http://up/c1.m3u8")]),
+        );
+        assert_eq!(config.groups[0].channels[0].mode.as_deref(), Some("proxy"));
+
+        source.playback_mode = "redirect".into();
+        run(
+            &mut config,
+            &source,
+            &urls(&[("c1", "央视", "http://up/c1.m3u8")]),
+        );
+        assert_eq!(config.groups[0].channels[0].mode.as_deref(), Some("proxy"));
+    }
+
+    #[test]
+    fn sync_does_not_overwrite_manual_mode() {
+        let mut config = config_with_source();
+        let source = source();
+        run(
+            &mut config,
+            &source,
+            &urls(&[("c1", "央视", "http://up/c1.m3u8")]),
+        );
+        config.groups[0].channels[0].mode = Some("rewrite".into());
+        config.groups[0].channels[0].set_mode_source("manual");
+
+        run(
+            &mut config,
+            &source,
+            &urls(&[("c1", "央视", "http://up/c1.mpd")]),
+        );
+        assert_eq!(
+            config.groups[0].channels[0].mode.as_deref(),
+            Some("rewrite")
+        );
+    }
+
+    #[test]
+    fn detach_channel_marks_mode_manual() {
+        let mut config = config_with_source();
+        let source = source();
+        run(
+            &mut config,
+            &source,
+            &urls(&[("c1", "央视", "http://up/c1.m3u8")]),
+        );
+        let gid = config.groups[0].id.clone();
+        assert!(detach_channel(&mut config, &gid, "c1"));
+        let channel = &config.groups[0].channels[0];
+        assert_eq!(channel.mode_source(), "manual");
+        assert!(channel.mode.is_some());
     }
 
     #[test]
