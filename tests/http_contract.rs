@@ -1555,6 +1555,86 @@ async fn mixed_group_routes_each_channel_by_its_mode() {
 }
 
 #[tokio::test]
+async fn backfill_mode_endpoint_stamps_unset_sync_channels() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    let source = serde_json::json!({
+        "id": "s1",
+        "name": "源",
+        "url": "http://up/a.m3u",
+        "mode": "sync",
+        "playback_mode": "redirect"
+    });
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/playlist/sources", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(source.to_string())
+        .send()
+        .await
+        .expect("创建源");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let groups = serde_json::json!([{
+        "id": "g",
+        "name": "组",
+        "mode": "rewrite",
+        "access": "public",
+        "channels": [{
+            "id": "c1",
+            "name": "频道",
+            "url": "http://up/c1.m3u8",
+            "source_id": "s1",
+            "sync_follow": true
+        }]
+    }]);
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/groups/import", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(groups.to_string())
+        .send()
+        .await
+        .expect("导入分组");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = fixture
+        .client
+        .post(format!("{}/panel/api/subs/s1/backfill-mode", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("回填");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(body["updated"], 1);
+    assert_eq!(body["modes"]["redirect"], 1);
+
+    let groups = fixture
+        .client
+        .get(format!("{}/panel/api/groups/export", fixture.base))
+        .header("authorization", &auth)
+        .send()
+        .await
+        .expect("导出");
+    let body: serde_json::Value =
+        serde_json::from_str(&groups.text().await.expect("读正文")).expect("解析 JSON");
+    let group = body
+        .as_array()
+        .expect("分组数组")
+        .iter()
+        .find(|group| group["id"] == "g")
+        .expect("应有导入组");
+    assert_eq!(group["channels"][0]["mode"], "redirect");
+    assert_eq!(group["channels"][0]["mode_source"], "sync:redirect");
+}
+
+#[tokio::test]
 async fn unknown_panel_api_is_404() {
     let fixture = fixture().await;
     let session = login(&fixture).await;

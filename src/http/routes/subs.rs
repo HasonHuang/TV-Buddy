@@ -501,6 +501,42 @@ pub async fn panel_content(
     })))
 }
 
+/// `POST /subs/:id/backfill-mode`——按源默认回填未设置模式的同步频道。
+pub async fn panel_backfill_mode(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let source = state
+        .snapshot()
+        .playlist
+        .sources
+        .iter()
+        .find(|source| source.id == id)
+        .cloned()
+        .ok_or_else(|| ApiError::not_found("Source not found"))?;
+    if source.mode != "sync" {
+        return Err(ApiError::bad_request("只有托管源可以回填频道模式"));
+    }
+
+    let mut updated = 0;
+    let mut modes = std::collections::BTreeMap::new();
+    state
+        .mutate(|config| {
+            let result = subscription::backfill_modes(config, &id);
+            updated = result.0;
+            modes = result.1;
+            Ok(())
+        })
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+
+    Ok(Json(json!({
+        "ok": true,
+        "updated": updated,
+        "modes": modes,
+    })))
+}
+
 /// 抽样条数上限。
 const SAMPLE_LIMIT: usize = 5;
 

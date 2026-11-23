@@ -148,6 +148,10 @@ fn panel_api_routes() -> Router<Arc<AppState>> {
         .route("/subs/sync", post(routes::subs::panel_sync))
         .route("/subs/:id/content", delete(routes::subs::panel_content))
         .route(
+            "/subs/:id/backfill-mode",
+            post(routes::subs::panel_backfill_mode),
+        )
+        .route(
             "/schedule",
             get(routes::schedule::list).post(routes::schedule::create),
         )

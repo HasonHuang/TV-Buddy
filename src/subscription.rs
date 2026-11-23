@@ -1746,6 +1746,41 @@ fn refresh_source_mode(source: &PlaylistSource, channel: &mut Channel, planned: 
     channel.mode = Some(mode_for(source, planned.dash));
 }
 
+/// 按源默认回填未设置模式的同步频道。
+pub fn backfill_modes(
+    config: &mut Config,
+    source_id: &str,
+) -> (usize, std::collections::BTreeMap<String, usize>) {
+    let Some(source) = config
+        .playlist
+        .sources
+        .iter()
+        .find(|source| source.id == source_id && source.mode == "sync")
+    else {
+        return (0, std::collections::BTreeMap::new());
+    };
+    let marker = source_mode_marker(source);
+    let mut updated = 0;
+    let mut modes = std::collections::BTreeMap::new();
+    for group in &mut config.groups {
+        for channel in &mut group.channels {
+            if channel.source_id != source_id
+                || channel.mode.is_some()
+                || !channel.sync_follow
+                || channel.mode_source() == crate::config::model::MODE_SOURCE_MANUAL
+            {
+                continue;
+            }
+            let mode = mode_for(source, crate::config::model::is_dash_url(&channel.url));
+            channel.mode = Some(mode.clone());
+            channel.set_mode_source(&marker);
+            *modes.entry(mode).or_insert(0) += 1;
+            updated += 1;
+        }
+    }
+    (updated, modes)
+}
+
 fn format_for(source: &PlaylistSource, dash: bool) -> String {
     match source.format.trim() {
         "" | "auto" => {
@@ -2234,6 +2269,92 @@ mod tests {
         let channel = &config.groups[0].channels[0];
         assert_eq!(channel.mode_source(), "manual");
         assert!(channel.mode.is_some());
+    }
+
+    #[test]
+    fn backfill_stamps_only_pre_feature_channels() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.playback_mode = "redirect".into();
+        config.playlist.sources = vec![source.clone()];
+        config.groups.push(Group {
+            id: "g".into(),
+            mode: "rewrite".into(),
+            channels: vec![
+                Channel {
+                    id: "unset".into(),
+                    url: "http://up/a.m3u8".into(),
+                    source_id: "s1".into(),
+                    sync_follow: true,
+                    ..Channel::default()
+                },
+                Channel {
+                    id: "manual-inherit".into(),
+                    url: "http://up/b.m3u8".into(),
+                    source_id: "s1".into(),
+                    sync_follow: true,
+                    ..Channel::default()
+                },
+                Channel {
+                    id: "override".into(),
+                    url: "http://up/c.m3u8".into(),
+                    mode: Some("proxy".into()),
+                    source_id: "s1".into(),
+                    sync_follow: true,
+                    ..Channel::default()
+                },
+            ],
+            ..Group::default()
+        });
+        config.groups[0].channels[1].set_mode_source("manual");
+
+        let (updated, modes) = backfill_modes(&mut config, "s1");
+
+        assert_eq!(updated, 1);
+        assert_eq!(modes.get("redirect"), Some(&1));
+        assert_eq!(
+            config.groups[0].channels[0].mode.as_deref(),
+            Some("redirect")
+        );
+        assert!(config.groups[0].channels[1].mode.is_none());
+        assert_eq!(config.groups[0].channels[2].mode.as_deref(), Some("proxy"));
+    }
+
+    #[test]
+    fn backfill_uses_auto_resolution_and_is_idempotent() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.playback_mode = "auto".into();
+        config.playlist.sources = vec![source];
+        config.groups.push(Group {
+            id: "g".into(),
+            mode: "rewrite".into(),
+            channels: vec![
+                Channel {
+                    id: "hls".into(),
+                    url: "http://up/a.m3u8".into(),
+                    source_id: "s1".into(),
+                    sync_follow: true,
+                    ..Channel::default()
+                },
+                Channel {
+                    id: "dash".into(),
+                    url: "http://up/a.mpd".into(),
+                    source_id: "s1".into(),
+                    sync_follow: true,
+                    ..Channel::default()
+                },
+            ],
+            ..Group::default()
+        });
+
+        let (updated, modes) = backfill_modes(&mut config, "s1");
+        assert_eq!(updated, 2);
+        assert_eq!(modes.get("proxy"), Some(&1));
+        assert_eq!(modes.get("dash"), Some(&1));
+
+        let (again, _) = backfill_modes(&mut config, "s1");
+        assert_eq!(again, 0);
     }
 
     #[test]
