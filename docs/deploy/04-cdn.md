@@ -112,47 +112,16 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 
 规则顺序固定。命中即止。
 
-### 6.1 迁移期规则
+### 6.1 规则
 
-迁移期保留现有规则 A 与 B。不要删除。新规则叠加在 A、B 之后。
-
-规则 A，不缓存：
-
-```text
-/panel*
-/epg*
-/subs/*
-/sub/*
-/api/*
-/unban*
-/share*
-/health
-/metrics
-/*/*.m3u8
-/*/*.mpd
-/*/*/index.m3u8
-/*/*/index.txt
-/*/*/video/*
-/*/*/mpd/*
-```
-
-规则 B，缓存：
-
-```text
-/*/*/*
-```
-
-新增规则，不缓存：
+不缓存，放在最前：
 
 ```text
 /api/*
 /page/*
-/logo/api/*
 ```
 
-`/l/*` 属于规则 A 的补充（§6.3）。它必须排在规则 B 之前。`/logo/api/*` 也在规则 A 补充中。
-
-新增规则，缓存：
+缓存，放在其后：
 
 ```text
 /media/*
@@ -161,78 +130,32 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 /static/assets/*
 ```
 
-兜底规则，不缓存：
+兜底，不缓存，放在最后：
 
 ```text
 /*
 ```
 
-兜底规则必须放在最后。否则媒体路径不会被缓存。
+说明：
 
-### 6.2 迁移后规则
+- `/api/*` 覆盖面板 API、订阅、清单、解封接口、健康检查与分享接口。订阅与清单都不缓存。
+- `/media/*` 只包含切片、初始化段、时移切片、DASH 切片与 MPD 代理数据。
+- `/static/*` 包含台标、面板构建产物与本地素材。`/static/assets/*` 里的 HLS 清单也按静态资源缓存。
+- `/page/*` 返回 HTML。CDN 不缓存。
+- 首页 `/` 由兜底规则 `/*` 覆盖，不缓存。不要把 `/` 写成前缀规则；部分控制台会把它当成全部路径。
+- 兜底 `/*` 阻止未登记路径被缓存。
 
-一个主版本后删除旧规则 A 与 B，只保留这组规则。
+不要颠倒顺序。缓存规则放在不缓存规则之前时，`/api/*` 与 `/page/*` 会被缓存。
 
-不缓存：
+### 6.2 不要按扩展名写规则
 
-```text
-/api/*
-/page/*
-/
-```
+切片伪装扩展名在 `jpg`、`png`、`gif`、`bmp`、`webp` 之间轮换。关闭伪装时又是 `ts`。按扩展名写规则会漏掉部分切片。
 
-缓存：
+控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。
 
-```text
-/media/*
-/static/panel/*
-/static/logo/*
-/static/assets/*
-```
+不同控制台的通配符语义不同。仓库不定义 `*` 是否跨多段。若控制台按单段匹配，改用「路径前缀」规则，不要用通配符规则。
 
-### 6.3 本实现的路径补丁（迁移期）
-
-本实现的旧路径深度与通用设计不同。先加规则 A 的补充，再加规则 B 的补充。迁移后这些补丁随旧路径一起删除。
-
-规则 A 补充，不缓存：
-
-| 路径形状 | 规则 |
-| --- | --- |
-| `/api/share/*` | `/api/share/*` |
-| `/l/*` | `/l/*` |
-| `/logo/api/*` | `/logo/api/*` |
-| `/__assets/*` | `/__assets/*` |
-| `/subtitle/*` | `/subtitle/*` |
-| `/{gid}/{cid}/{track}/index.txt` | `/*/*/*/index.txt` |
-| `/{gid}/{cid}/{track}/index.m3u8` | `/*/*/*/index.m3u8` |
-| `/{gid}/{cid}/dash-timeshift/{track}/playlist` | `/*/*/dash-timeshift/*/playlist` |
-| `/{gid}/{cid}/dash-timeshift/{track}/playlist.txt` | `/*/*/dash-timeshift/*/playlist.txt` |
-| `/{gid}/{cid}/dash-timeshift/{track}/playlist.m3u8` | `/*/*/dash-timeshift/*/playlist.m3u8` |
-
-规则 B 补充，缓存：
-
-| 路径形状 | 规则 |
-| --- | --- |
-| `/{gid}/{cid}/timeshift/<16位十六进制>.<ext>` | `/*/*/timeshift/*` |
-| `/{gid}/{cid}/{track}/<文件名>` | `/*/*/*/*` |
-| `/{gid}/{cid}/dash-timeshift/{track}/<文件名>` | `/*/*/dash-timeshift/*/*` |
-| `/{gid}/{cid}/l/<exp>/<sig>/<文件名>` | `/*/*/l/*/*/*` |
-| `/assets/*` | `/assets/*` |
-| `/logo/*` | `/logo/*` |
-
-`/*/*/l/*/*/*` 匹配旧的签名切片。控制台不支持多段通配符时，不要加这条规则。这些路径会落到兜底不缓存规则。功能正常，但不缓存。
-
-`/*/*/*/*` 会匹配四段路径。规则 A、规则 A 补充与新增不缓存规则（`/api/*`、`/page/*` 等）先行命中。顺序不能反。
-
-### 6.4 不要按扩展名写规则
-
-切片伪装扩展名在 `jpg`、`png`、`gif`、`bmp`、`webp` 之间轮换。关闭伪装时又是 `ts`。
-
-控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。旧路径用 `/{gid}/{cid}/` 前缀。逐分组配置。
-
-不同控制台的通配符语义不同。仓库不定义 `*` 是否跨多段。若控制台不支持多段通配符，按 `/{gid}/{cid}/` 前缀配置。
-
-### 6.5 保存与刷新
+### 6.3 保存与刷新
 
 1. 保存控制台规则。
 2. 执行「刷新全部缓存」。控制台可能写作 Purge All。
@@ -276,7 +199,7 @@ CDN='https://<CDN域名>'
 MANIFEST="$CDN/api/play/<gid>/<cid>.m3u8?token=<令牌>"
 ```
 
-`token` 只在入口清单需要。切片 URL 不带 token。旧路径 `/<gid>/<cid>.m3u8` 仍可用，但 CDN 规则应优先覆盖新路径。
+`token` 只在入口清单需要。切片 URL 不带 token。清单路径是 `/api/play/...`，由 `/api/*` 不缓存规则覆盖。切片路径以 `/media/` 开头，由 `/media/*` 缓存规则覆盖。
 
 ### 8.2 清单必须不缓存
 
@@ -369,10 +292,10 @@ done
 | 切片一直 `BYPASS` | 规则未生效、未刷新缓存、Cookie 未关 | 检查 §4.1 第 1、3 项。执行 Purge All |
 | `MISS` 不转 `HIT` | 缓存键包含 Cookie 或请求头，或 TTL 太短 | 缓存键去掉 Cookie。使用推荐 TTL |
 | `HIT` 但画面损坏或卡住 | 图片优化或压缩改写了字节 | 关闭图片优化、WebP、压缩。比对哈希 |
-| 清单被缓存 | 规则顺序颠倒 | 规则 A 放在最前 |
+| 清单被缓存 | 规则顺序颠倒 | 把 `/api/*` 不缓存规则放在最前 |
 | 切换频道返回 404 | 302 被缓存 | 关闭 3xx 缓存 |
 | 清单仍给 `http://` | 缺少 `X-Forwarded-Proto` | 回源加 `X-Forwarded-Proto: https`，或设置 `public_base` |
-| 切片 404 | 切片路径被缓存成了旧清单地址 | Purge。确认规则 A 不缓存清单 |
+| 切片 404 | 切片路径被缓存成了清单地址 | Purge。确认 `/api/*` 不缓存、`/media/*` 缓存 |
 | 回源 502 | CDN 回源地址或端口错误 | 检查源站域名、端口、防火墙 |
 | 面板被缓存 | 不缓存规则缺少 `/page/*` 或 `/api/*` | 补不缓存规则 |
 | 新切片一直 `BYPASS` | 缺少 `/media/*` 缓存规则 | 补缓存规则。确认兜底规则在最后 |

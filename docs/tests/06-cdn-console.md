@@ -74,7 +74,7 @@ VPS 上必须有：
 | CDN 供应商名称、控制台 URL、菜单层级、按钮文案 | 仓库无控制面 | 按实际控制台执行，记录实际名称 |
 | 控制台字段名 | 仓库无控制面 | 用设计字段名找同义项 |
 | 缓存状态头名与 `HIT`/`MISS`/`BYPASS` 取值 | 本服务不发送该头（`src/http/routes/stream.rs:1388-1393`） | 按供应商文档判定，记录实际头名与值 |
-| 通配符 `*` 是否跨多段 | 仓库无定义 | 按第 3.8 节补规则 |
+| 通配符 `*` 是否跨多段 | 仓库无定义 | 按第 3.7 节用路径前缀规则 |
 | 缓存键是否含查询串、Cookie、UA、请求头 | 仓库无控制面 | 第 3.7 节取消 Cookie；其余按失败表排查 |
 | 控制台 TTL 单位 | 仓库只产出秒（`src/cache_estimate.rs:30-42`） | 见第 3.6 节的换算 |
 | 「忽略 Set-Cookie」「缓存带 Cookie 的响应」是否存在 | 取决于 CDN | 三选一，记录实际选项 |
@@ -281,73 +281,13 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq -r
 
 顺序固定。命中即止。
 
-#### 3.7.1 迁移期规则
-
-迁移期保留现有规则 A 与 B。不要删除。新规则叠加在 A、B 之后。一个主版本后删除 A、B 与 §3.8 的补丁。
-
-规则 A，不缓存：
-
-```text
-/panel*
-/epg*
-/subs/*
-/api/*
-/unban*
-/share*
-/health
-/metrics
-/sub/*
-/*/*.m3u8
-/*/*.mpd
-/*/*/index.m3u8
-/*/*/index.txt
-/*/*/video/*
-/*/*/mpd/*
-```
-
-规则 B，缓存：
-
-```text
-/*/*/*
-```
-
-新增规则，不缓存：
-
-```text
-/api/*
-/page/*
-/logo/api/*
-```
-
-`/l/*` 属于 §3.8 的规则 A 补充。它必须排在规则 B 之前。`/logo/api/*` 也在规则 A 补充中。
-
-新增规则，缓存：
-
-```text
-/media/*
-/static/panel/*
-/static/logo/*
-/static/assets/*
-```
-
-兜底规则，不缓存：
-
-```text
-/*
-```
-
-兜底规则必须放在最后。否则媒体路径不会被缓存。
-
-依据：`docs/design/06-low-spec-optimization.md:77-87`。
-
-#### 3.7.2 迁移后规则
+#### 3.7.1 规则
 
 不缓存：
 
 ```text
 /api/*
 /page/*
-/
 ```
 
 缓存：
@@ -359,51 +299,29 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq -r
 /static/assets/*
 ```
 
-不要按扩展名写规则。伪装扩展名在 `jpg`、`png`、`gif`、`bmp`、`webp` 之间轮换（`src/config/model.rs:526-549`、`src/proxy/media.rs:159-162`）。控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`，逐分组配置（`docs/design/06-low-spec-optimization.md:89-90`）。
+兜底不缓存：
 
-规则 A 中的 `/metrics` 与 `/share*` 在本实现没有对应路由。保留这两条不影响结果。本实现只有 `/api/share/pull`（`src/http.rs:31`）。
+```text
+/*
+```
 
-### 3.8 本实现的路径补丁（迁移期）
+兜底规则必须放在最后。否则媒体路径不会被缓存。
 
-本实现的旧路径与设计稿有三处深度差异。迁移期先加 BYPASS，再加 CACHE。迁移后这些补丁随旧路径一起删除。控制台不支持多段通配符时，按 `/{gid}/{cid}/` 前缀逐分组配置。
+`/api/*` 覆盖面板 API、订阅、清单、解封接口、健康检查与分享接口。`/media/*` 只包含切片、初始化段、时移切片、DASH 切片与 MPD 代理数据。`/static/*` 包含台标、面板构建产物与本地素材。首页 `/` 由兜底规则覆盖，不要写成前缀规则。
 
-规则 A 补充，不缓存：
+不要颠倒顺序。缓存规则放在不缓存规则之前时，`/api/*` 与 `/page/*` 会被缓存。
 
-| 路径形状 | 源码 | 规则 |
-| --- | --- | --- |
-| `/api/share/pull` | `src/http.rs:31` | `/api/share/*` |
-| `/l/*` | `src/http/legacy.rs:94` | `/l/*` |
-| `/logo/api/*` | `src/http/legacy.rs:97` | `/logo/api/*` |
-| `/__assets/*` | `src/http/legacy.rs:100` | `/__assets/*` |
-| `/subtitle/*` | `src/http/legacy.rs:88` | `/subtitle/*` |
-| `/{gid}/{cid}/{track}/index.txt` | `src/dash_hls.rs:998-1000` | `/*/*/*/index.txt` |
-| `/{gid}/{cid}/{track}/index.m3u8` | `src/dash_hls.rs:998-1000` | `/*/*/*/index.m3u8` |
-| `/{gid}/{cid}/dash-timeshift/{track}/playlist` | `src/dash_timeshift.rs:7` | `/*/*/dash-timeshift/*/playlist` |
-| `/{gid}/{cid}/dash-timeshift/{track}/playlist.txt` | `src/dash_timeshift.rs:7` | `/*/*/dash-timeshift/*/playlist.txt` |
-| `/{gid}/{cid}/dash-timeshift/{track}/playlist.m3u8` | `src/dash_timeshift.rs:7` | `/*/*/dash-timeshift/*/playlist.m3u8` |
+依据：`docs/design/06-low-spec-optimization.md` §2.2。
 
-规则 B 补充，缓存：
+不要按扩展名写规则。伪装扩展名在 `jpg`、`png`、`gif`、`bmp`、`webp` 之间轮换（`src/config/model.rs:526-549`、`src/proxy/media.rs:159-162`）。控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。
 
-| 路径形状 | 源码 | 规则 |
-| --- | --- | --- |
-| `/{gid}/{cid}/timeshift/<16位十六进制>.<ext>` | `src/timeshift.rs:7` | `/*/*/timeshift/*` |
-| `/{gid}/{cid}/{track}/<文件名>` | `src/dash_hls.rs:860-871` | `/*/*/*/*` |
-| `/{gid}/{cid}/dash-timeshift/{track}/<文件名>` | `src/dash_timeshift.rs:7` | `/*/*/dash-timeshift/*/*` |
-| `/{gid}/{cid}/l/<exp>/<sig>/<文件名>` | `src/http/legacy.rs:161-175` | `/*/*/l/*/*/*` |
-| `/assets/*` | `src/http/legacy.rs:103` | `/assets/*` |
-| `/logo/*` | `src/http/legacy.rs:97` | `/logo/*` |
-
-`/*/*/l/*/*/*` 匹配旧的签名切片。控制台不支持多段通配符时，不要加这条规则。这些路径会落到兜底不缓存规则。功能正常，但不缓存。
-
-`/*/*/*/*` 会匹配四段路径。规则 A、规则 A 补充与新增不缓存规则（`/api/*`、`/page/*` 等）先行命中。顺序不能反。
+不同控制台的通配符语义不同。若控制台按单段匹配，改用「路径前缀」规则，不要用通配符规则。
 
 ### 3.9 保存并刷新
 
 1. 保存控制台规则。
 2. 执行「刷新全部缓存」。控制台可能写作 Purge All。
-3. 四个域名各做一遍。支持「应用到全部域名」时，第 3.6 至 3.8 节只做一次。
-
-依据：`docs/design/06-low-spec-optimization.md:94-100`。
+3. 四个域名各做一遍。支持「应用到全部域名」时，第 3.6 至 3.7 节只做一次。
 
 ### 3.10 准备验证变量
 
@@ -661,13 +579,9 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/logout" | jq
 
 ## 规则
 
-- 规则 A 条数：
-- 规则 B 条数：
-- 新增 BYPASS 条数：
-- 新增 CACHE 条数：
+- 不缓存规则条数：
+- 缓存规则条数：
 - 兜底规则：
-- 补充 BYPASS 条数：
-- 补充 CACHE 条数：
 - 保存时间（UTC）：
 - Purge All 时间（UTC）：
 

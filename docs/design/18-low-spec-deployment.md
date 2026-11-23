@@ -117,31 +117,28 @@ sudo ./install.sh --low-spec
 
 另外确认：**不缓存 3xx**（`redirect` 模式会 302 到带时效的上游地址）、**不缓存非 200**。
 
-缓存规则分四层，顺序不能颠倒：
+缓存规则分三层，顺序不能颠倒：
 
 ```text
-规则 A：不缓存（放最前，迁移期保留）
-  /panel*  /epg*  /subs/*  /sub/*  /api/*  /unban*  /share*  /health  /metrics
-  /*/*.m3u8  /*/*.mpd
-  /*/*/index.m3u8  /*/*/index.txt  /*/*/video/*  /*/*/mpd/*
+不缓存（放最前）
+  /api/*
+  /page/*
 
-规则 B：缓存（迁移期保留）
-  /*/*/*
-
-新增不缓存（放在规则 B 之前）
-  /api/*  /page/*  /logo/api/*  /__assets/*  /subtitle/*  /l/*
-  /*/*/*/index.txt  /*/*/*/index.m3u8  /*/*/dash-timeshift/*/playlist*
-
-新增缓存（放在兜底之前）
-  /media/*  /static/panel/*  /static/logo/*  /static/assets/*
+缓存（放在其后）
+  /media/*
+  /static/panel/*
+  /static/logo/*
+  /static/assets/*
 
 兜底不缓存（放最后）
   /*
 ```
 
-**不要按扩展名写规则。** 伪装扩展名在 jpg/png/gif/bmp/webp 之间轮换。控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。旧路径用 `/{gid}/{cid}/` 前缀，逐分组配置。
+`/api/*` 覆盖面板 API、订阅、清单、解封接口、健康检查与分享接口。`/media/*` 只包含切片、初始化段、时移切片、DASH 切片与 MPD 代理数据。首页 `/` 由兜底规则覆盖。
 
-完整规则、路径补丁与验收命令见 [`../deploy/04-cdn.md`](../deploy/04-cdn.md) §6 与 [`docs/tests/06-cdn-console.md`](../tests/06-cdn-console.md)。
+**不要按扩展名写规则。** 伪装扩展名在 jpg/png/gif/bmp/webp 之间轮换。控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。
+
+完整规则与验收命令见 [`../deploy/04-cdn.md`](../deploy/04-cdn.md) §6 与 [`docs/tests/06-cdn-console.md`](../tests/06-cdn-console.md)。
 
 ## 7. 推荐值从哪来
 
@@ -208,7 +205,7 @@ curl -s -o /dev/null -D - "https://<域名>/api/panel/status" | grep -iE 'x-cach
 | 切片仍 `BYPASS` | 规则未生效、未刷新缓存、Cookie 未关 | 查设置项 1 与 3 |
 | `MISS` 不转 `HIT` | 缓存键含 Cookie 或请求头，或 TTL 太短 | 缓存键去掉 Cookie，TTL 用推荐值 |
 | `HIT` 但花屏或卡住 | 图片优化改写了字节 | 关闭图片处理，比对哈希 |
-| 清单被缓存 | 规则顺序颠倒 | 把规则 A 调到最前 |
+| 清单被缓存 | 规则顺序颠倒 | 把 `/api/*` 不缓存规则调到最前 |
 | 换台 404 | 302 被缓存 | 关闭 3xx 缓存 |
 | 清单仍给 `http://` | 未下发 XFP | 加回源请求头，或配 `[cdn].public_base` |
 
