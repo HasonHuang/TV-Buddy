@@ -92,7 +92,7 @@ fn push_group(
         {
             continue;
         }
-        push_entry(body, group, channel, base, Some(token));
+        push_entry(body, group, channel, base, token);
     }
 }
 
@@ -247,13 +247,7 @@ pub fn entry_url(group: &Group, channel: &Channel, base: &str, token: &str) -> S
     )
 }
 
-fn push_entry(
-    body: &mut String,
-    group: &Group,
-    channel: &Channel,
-    base: &str,
-    token: Option<&str>,
-) {
+fn push_entry(body: &mut String, group: &Group, channel: &Channel, base: &str, token: &str) {
     let tvg_id = string_field(channel, "tvg_id").unwrap_or_else(|| channel.id.clone());
     let tvg_name = string_field(channel, "tvg_name").unwrap_or_else(|| channel.name.clone());
     let logo = string_field(channel, "logo")
@@ -271,18 +265,7 @@ fn push_entry(
         tvg_id, tvg_name, logo, group_title, channel.name
     ));
 
-    match token {
-        Some(value) => body.push_str(&entry_url(group, channel, base, value)),
-        // 无令牌调用只用于内部渲染，按「不带参数」处理。
-        None if group.effective_mode(channel) == "passthrough" => body.push_str(&channel.url),
-        None => body.push_str(&format!(
-            "{}/{}/{}.{}",
-            base.trim_end_matches('/'),
-            group.id,
-            channel.id,
-            if group.format == "mpd" { "mpd" } else { "m3u8" }
-        )),
-    }
+    body.push_str(&entry_url(group, channel, base, token));
     body.push('\n');
 }
 
