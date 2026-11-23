@@ -166,7 +166,7 @@ function entryExt(group: Group): string {
 }
 
 function entryUrl(group: Group, channel: Channel): string {
-  return `${location.origin}/${group.id}/${channel.id}.${entryExt(group)}`;
+  return `${location.origin}/api/play/${group.id}/${channel.id}.${entryExt(group)}`;
 }
 
 /**
@@ -176,7 +176,7 @@ function entryUrl(group: Group, channel: Channel): string {
  */
 function playUrl(group: Group, channel: Channel, token: string): string {
   if (token === '') return entryUrl(group, channel);
-  return `${location.origin}/l/${token}/${group.id}/${channel.id}.${entryExt(group)}`;
+  return `${location.origin}/api/play/token/${encodeURIComponent(token)}/${group.id}/${channel.id}.${entryExt(group)}`;
 }
 
 /** 读频道配置里的字符串字段；空串按未设置处理。 */
@@ -892,7 +892,7 @@ export function GroupsPage() {
       err('播放凭证未就绪，请刷新页面后再试');
       return;
     }
-    const link = `${location.origin}/sub/${encodeURIComponent(playToken)}/${encodeURIComponent(group.id)}/playlist.m3u`;
+    const link = `${location.origin}/api/sub/${encodeURIComponent(playToken)}/${encodeURIComponent(group.id)}/playlist.m3u`;
     await copy(link, `分组「${group.name || group.id}」的 M3U 链接`);
   };
 

@@ -239,6 +239,14 @@ pub async fn put_config(
     let expected = body.get("revision").and_then(Value::as_u64);
     let config: config::Config = serde_json::from_value(body)
         .map_err(|err| ApiError::bad_request(format!("配置格式错误: {err}")))?;
+    // 先在接口层校验，把客户端输入错误映射为 400。
+    // 保存阶段再校验一次，覆盖并发与持久化约束。
+    let mut checked = config.clone();
+    checked.normalize();
+    crate::sign::ensure_secret(&mut checked);
+    if let Err(err) = config::validate(&checked) {
+        return Err(ApiError::bad_request(format!("配置不合法: {err}")));
+    }
 
     let revision = match state.save_config(config, expected) {
         Ok(revision) => revision,

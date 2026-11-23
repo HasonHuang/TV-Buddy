@@ -629,7 +629,7 @@ export function UsersPage() {
         >
           <p className="muted">
             每个设备有一个独立播放凭证。播放地址形如{' '}
-            <code className="mono">/sub/&lt;凭证&gt;/playlist.m3u</code>。
+            <code className="mono">/api/sub/&lt;凭证&gt;/playlist.m3u</code>。
           </p>
           <div className="device-add">
             <div className="fields">

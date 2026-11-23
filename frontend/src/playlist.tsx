@@ -1629,7 +1629,10 @@ export function PlaylistPage() {
                         setBackfill({
                           id: drawer.draft.id,
                           count: backfillCount(allGroups, drawer.draft.id),
-                          mode: drawer.draft.playback_mode,
+                          // 后端按已保存的源配置回填；草稿里未保存的改动不算。
+                          mode:
+                            sources.find((item) => item.id === drawer.draft.id)
+                              ?.playback_mode ?? drawer.draft.playback_mode,
                         })
                       }
                     >

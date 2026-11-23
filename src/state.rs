@@ -566,6 +566,9 @@ impl AppState {
             None => (*self.snapshot()).clone(),
         };
         let (results, delete_keys) = change(&mut config)?;
+        // 落库前先修复，内存快照才与数据库一致。同步把未设模式的频道
+        // 移进 passthrough 分组时，安全修复必须同时生效于当前快照。
+        config.normalize();
         let revision = self.config_store.save_tx(&tx, &config)?;
         for key in &delete_keys {
             self.quality_store.delete_tx(&tx, key)?;
@@ -666,6 +669,40 @@ mod tests {
         )
         .expect("state");
         (std::sync::Arc::new(state), dir)
+    }
+
+    /// 内存快照必须与落库结果一致：不安全组合在替换前也已修复。
+    #[test]
+    fn mutate_admission_replaces_normalized_config() {
+        let (state, dir) = test_state();
+        state
+            .mutate_admission_full(&[], |config| {
+                config
+                    .playlist
+                    .sources
+                    .push(crate::config::model::PlaylistSource {
+                        id: "s1".into(),
+                        playback_mode: "auto".into(),
+                        ..crate::config::model::PlaylistSource::default()
+                    });
+                config.groups.push(Group {
+                    id: "g".into(),
+                    mode: "passthrough".into(),
+                    channels: vec![Channel {
+                        id: "c".into(),
+                        url: "http://up/c.m3u8".into(),
+                        source_id: "s1".into(),
+                        ..Channel::default()
+                    }],
+                    ..Group::default()
+                });
+                Ok((Vec::new(), Vec::new()))
+            })
+            .unwrap();
+        let snapshot = state.snapshot();
+        let group = snapshot.group("g").expect("分组");
+        assert_eq!(group.channels[0].mode.as_deref(), Some("redirect"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -183,7 +183,7 @@ export function SystemPage({ embedded = false }: { embedded?: boolean }) {
             <dd>{health.sessions}</dd>
             <dt>公开健康检查</dt>
             <dd>
-              <code>{location.origin}/health</code>
+              <code>{location.origin}/api/health</code>
             </dd>
             <dt>回看缓冲</dt>
             <dd>

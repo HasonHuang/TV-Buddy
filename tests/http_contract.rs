@@ -1770,6 +1770,42 @@ async fn invalid_and_sync_passthrough_modes_are_rejected() {
 }
 
 #[tokio::test]
+async fn put_config_rejects_invalid_mode_with_400() {
+    let fixture = fixture_with_extra(
+        r#"{"groups":[{"id":"g","name":"G","mode":"proxy","access":"public","channels":[
+            {"id":"c","name":"C","url":"http://up/c.m3u8"}
+        ]}]}"#,
+    )
+    .await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let mut config: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/api/panel/config", fixture.base))
+            .header("authorization", &auth)
+            .send()
+            .await
+            .expect("取配置")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    config["groups"][0]["channels"][0]["mode"] = json!("magic");
+    let response = fixture
+        .client
+        .put(format!("{}/api/panel/config", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(config.to_string())
+        .send()
+        .await
+        .expect("保存配置");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn status_counts_channels_by_effective_mode() {
     let fixture = fixture_with_extra(
         r#"{"groups":[{"id":"mix","name":"混合","mode":"rewrite","access":"public","channels":[
