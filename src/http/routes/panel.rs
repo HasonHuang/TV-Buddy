@@ -141,6 +141,16 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
             .or_insert_with(|| json!(0));
         *count = json!(count.as_u64().unwrap_or(0) + 1);
     }
+    let mut channel_modes: serde_json::Map<String, Value> = serde_json::Map::new();
+    for group in &cfg.groups {
+        for channel in &group.channels {
+            let mode = group.effective_mode(channel);
+            let count = channel_modes
+                .entry(mode.to_string())
+                .or_insert_with(|| json!(0));
+            *count = json!(count.as_u64().unwrap_or(0) + 1);
+        }
+    }
     let entry_exts: serde_json::Map<String, Value> = cfg
         .groups
         .iter()
@@ -173,6 +183,7 @@ pub async fn status(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>)
         "host_net_rx_bytes": net_rx_bytes,
         "host_net_tx_bytes": net_tx_bytes,
         "group_modes": group_modes,
+        "channel_modes": channel_modes,
         "low_resource_mode": cfg.server.low_resource_mode,
         // 目标没有对应配置键，固定 10。
         "poll_interval_secs": 10,

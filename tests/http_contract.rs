@@ -1763,6 +1763,33 @@ async fn invalid_and_sync_passthrough_modes_are_rejected() {
 }
 
 #[tokio::test]
+async fn status_counts_channels_by_effective_mode() {
+    let fixture = fixture_with_extra(
+        r#"{"groups":[{"id":"mix","name":"混合","mode":"rewrite","access":"public","channels":[
+            {"id":"a","name":"A","url":"http://up/a.m3u8"},
+            {"id":"b","name":"B","url":"http://up/b.m3u8","mode":"redirect"}
+        ]}]}"#,
+    )
+    .await;
+    let session = login(&fixture).await;
+    let status: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/status", fixture.base))
+            .header("authorization", format!("Bearer {session}"))
+            .send()
+            .await
+            .expect("状态")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert_eq!(status["channel_modes"]["redirect"], 1);
+    assert!(status["channel_modes"]["rewrite"].as_u64().unwrap_or(0) >= 1);
+}
+
+#[tokio::test]
 async fn unknown_panel_api_is_404() {
     let fixture = fixture().await;
     let session = login(&fixture).await;
