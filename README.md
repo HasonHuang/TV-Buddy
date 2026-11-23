@@ -46,7 +46,7 @@ TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、�
 
 | 能力 | 说明 |
 | --- | --- |
-| 六种分组模式 | `proxy`、`redirect`、`rewrite`、`passthrough`、`remux`、`dash` |
+| 六种工作模式 | `proxy`、`redirect`、`rewrite`、`passthrough`、`remux`、`dash`。分组设默认值，频道可单独覆盖 |
 | 协议 | HLS（`.m3u8`）、DASH（`.mpd`）、MPEG-TS |
 | 切片缓存 | 磁盘与内存索引可限，按频道设上限 |
 | 切片伪装 | 切片路径改名，不暴露上游地址 |

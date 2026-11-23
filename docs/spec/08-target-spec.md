@@ -58,6 +58,7 @@
 | --- | --- | --- | --- |
 | S-MODE-01 | 面板提供**六种**模式：`proxy`/`remux`/`dash`/`redirect`/`rewrite`/`passthrough`（公开 README 只写四种） | D-README | ✅【观测】面板 `<select id="mg-mode">` 六项 |
 | S-MODE-02 | 模式属于**分组**；同组频道共用 | D-README | ✅【观测】 |
+| S-MODE-02 扩展 | 本实现在分组默认值之上增加**频道级覆盖**；缺省仍继承分组 | 本实现 | ✅ 已实现 |
 | S-MODE-03 | Proxy：反代 + 切片缓存；内容格式 HLS / MPD；`MPD 裁剪保留秒数` 仅在格式=MPD 时出现 | D-mode-proxy | ✅【观测】反代+伪装切片已验；MPD 的绝对/相对/缺失 `<BaseURL>` 全部改写为本地 `/{gid}/{cid}/mpd/{token}/{base64}/`（F-022） |
 | S-MODE-04 | Proxy + 内容格式=MPD 时，频道多出 **ClearKey 密钥** 字段（`kid_hex:key_hex`，每行一对）；行为为"反代穿透本服务" | D-mode-proxy || ✅【观测】频道 `license_key` 字段；`#KODIPROP` 仅 passthrough（F-016） |
 | S-MODE-05 | Remux：连续流（FLV / 裸 TS / MMT-TLV）→ HLS；**不解码**，CPU 低；`源容器类型`= 自动识别 / TS / FLV / MMT-TLV；**无**内容格式字段 | D-mode-remux | 🔶【观测】容器自动识别（`【remux】自动识别容器: Ts`） |
@@ -96,7 +97,7 @@
 | --- | --- | --- | --- |
 | S-MODEL-01 | **分组级**字段：分组 ID、显示名称、工作模式、EPG 地址、访问范围、内容格式、网络配置（分组默认，频道可覆盖） | D-fields/D-panel || ✅【观测】`GET /panel/api/config` 全量字段（S-CFG-04） |
 | S-MODEL-02 | **频道级**字段：频道 ID、名称、上游 URL、Logo URL、tvg-id、tvg-name、上游解析（静态/脚本 PY）、源站回看、网络配置 | D-fields/D-panel || ✅【观测】同上（含 `resolver_script`/`catchup`/`proxy`） |
-| S-MODEL-03 | 工作模式/访问范围/网络配置**属于分组**；频道级网络配置覆盖分组，自定义请求头**合并**、同名以频道级为准 | D-iptv/D-fields || ✅【观测】模式属分组（S-MODE-02）；频道级 `proxy`/头覆盖字段存在 |
+| S-MODEL-03 | 工作模式/访问范围/网络配置**属于分组**；频道级网络配置覆盖分组，自定义请求头**合并**、同名以频道级为准 | D-iptv/D-fields || ✅【观测】模式属分组（S-MODE-02）；频道级 `proxy`/头覆盖字段存在。本实现另加频道级工作模式覆盖 |
 | S-MODEL-04 | `tvg-id` 缺省则用频道 ID；`tvg-name` 缺省则用频道名称（EPG 匹配） | D-fields || ✅【观测】EPG 匹配 `out_id=tvg_id||id`（F-016） |
 | S-MODEL-05 | 上游 URL 支持**脚本解析（PY）**，每次播放前算地址，需 `python3`；有解析缓存时长（须小于签名有效期） | D-fields || ✅【观测】`python3 <cache>/resolvers/<脚本>`，TTL/SWR（F-014） |
 

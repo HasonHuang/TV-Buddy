@@ -104,6 +104,22 @@
 | `Channel` | `source_id`、`source_key` | 空时省略 |
 | `Channel` | `sync_follow`（默认 true） | true 时省略，只写 false |
 | `Channel` | `offline_on_fail`（三态） | 未设置时省略，表示继承分组 |
+| `Channel` | `mode` | 未设置时省略，表示继承分组的工作模式 |
+| `Channel` | `mode_source` | 内部标记，`sync:auto` / `sync:<模式>` / `manual` |
+
+### 1.3.1 频道级工作模式
+
+`Group.mode` 是分组默认值。`Channel.mode` 缺省时继承分组；设置后以频道为准。
+所有播放、订阅、探测、录制、时移、统计路径按有效模式判断：
+
+```text
+有效模式 = channel.mode ?? group.mode
+```
+
+同步源创建频道时把源的工作模式写成频道显式值，并写 `mode_source`。
+`sync:auto` 表示创建时源为 `auto`；只有源仍为 `auto` 时，URL 类型变化才重算。
+管理员在频道上设置或清空模式时写 `manual`。回填只处理没有 `manual` 标记的频道。
+同步频道的有效模式不能是 `passthrough`。
 
 「探测失败下线」只在 `[health].enabled = true` 时生效。
 有效值按频道级 > 分组级解析（`Config::offline_on_fail_for`）。

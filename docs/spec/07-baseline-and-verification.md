@@ -83,7 +83,7 @@ HasonHuang/sontv/docs/iptv-proxy/
 | S-DIS-16 | **切片不受 token 保护** | 无 token 取切片 → 200 | ✅ |
 | S-URL-06 | 播放 token 参数名为 `token`，面板 Bearer 不适用 | `?t=` → 302；Bearer → 302 | ✅ |
 | S-MODE-01 | 六种模式 | 面板 `<select id="mg-mode">` 六个 `<option>` | ✅ |
-| S-MODE-02 | 模式属于分组 | `PUT /panel/api/groups/{id}` `{"mode":…}` 改变全组行为 | ✅ |
+| S-MODE-02 | 模式属于分组 | `PUT /panel/api/groups/{id}` `{"mode":…}` 改变全组行为 | ✅（本实现另支持频道级覆盖，缺省仍继承分组） |
 | S-MODE-08 | Redirect=302 直连；缓存上游地址 300s | 302 `location=上游`；`cache/m3u8/redirect_url_…` TTL=300 | ✅ |
 | S-MODE-09 | Rewrite=取一次清单、相对改绝对 | 200 `text/plain`，切片=上游绝对 URL，客户端直连 | ✅ |
 | S-MODE-11 | Passthrough 原样导出上游 URL | 302 `location=上游` | ✅ |

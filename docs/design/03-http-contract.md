@@ -311,7 +311,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | --- | --- | --- | --- |
 | POST | `/api/panel/login` | `{"username","password"}` | `{"token":"<uuid>"}`；错 → `401`；失败过多 → `429`（`locked_for_secs`） |
 | POST | `/api/panel/logout` | — | `{"ok":true}` |
-| GET | `/api/panel/status` | — | 目标字段：`uptime_secs, active_sessions, online_viewers, group_count, channel_count, version, mem_rss_mb, cpu_seconds, disk_cache_mb, recording_mb, low_resource_mode, poll_interval_secs, traffic_in_bytes, traffic_out_bytes, whole_file_{committed,budget,peak,hits,fallbacks}, entry_exts{gid → ext}, cpu_cores`。附加字段：`name, bind, log_level, timezone_offset_hours, cache_disk_path, host_cpu_percent, mem_total_mb, load_avg, disk_total_mb, disk_free_mb, host_net_rx_bytes, host_net_tx_bytes, group_modes`。`traffic_in_bytes` 恒 0（S-BUG-01）。附加的主机指标只读 `/proc` 与 `statvfs`，读不到时输出 0。缓存只有磁盘后端，响应不含后端字段 |
+| GET | `/api/panel/status` | — | 目标字段：`uptime_secs, active_sessions, online_viewers, group_count, channel_count, version, mem_rss_mb, cpu_seconds, disk_cache_mb, recording_mb, low_resource_mode, poll_interval_secs, traffic_in_bytes, traffic_out_bytes, whole_file_{committed,budget,peak,hits,fallbacks}, entry_exts{gid → ext}, cpu_cores`。附加字段：`name, bind, log_level, timezone_offset_hours, cache_disk_path, host_cpu_percent, mem_total_mb, load_avg, disk_total_mb, disk_free_mb, host_net_rx_bytes, host_net_tx_bytes, group_modes, channel_modes`。`channel_modes` 按频道有效模式计数。`traffic_in_bytes` 恒 0（S-BUG-01）。附加的主机指标只读 `/proc` 与 `statvfs`，读不到时输出 0。缓存只有磁盘后端，响应不含后端字段 |
 | GET | `/api/panel/config` | — | 全量配置 JSON |
 | PUT | `/api/panel/config` | 全量配置 | `{"ok":true,"revision":<n>}`；非法 → `400`；缺 `revision` 或版本不符 → `409 stale_revision` |
 | POST | `/api/panel/reload` | — | `{"ok":true}`；读取或保存失败 → `500`（保留当前快照） |
@@ -328,6 +328,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | POST | `/api/panel/groups/{gid}/channels` | `{"id","name","url", …}` | `{"ok":true}` | F-004 |
 | PUT | `/api/panel/groups/{gid}/channels/{cid}` | 局部字段 | `{"ok":true}` | F-004 |
 | DELETE | `/api/panel/groups/{gid}/channels/{cid}` | — | `{"ok":true}`；缺 → `404` `Channel not found` | F-013 §5 |
+| POST | `/api/panel/subs/{id}/backfill-mode` | — | `{"ok":true,"updated":n,"modes":{"<模式>":n}}`；只回填未设置模式且 `mode_source != "manual"` 的同步频道 | 本实现扩展 |
 | GET | `/api/panel/groups/export` | — | 顶层**数组**（完整分组对象） | F-013 §1 |
 | POST | `/api/panel/groups/import` | — | 体为分组数组；id 已存在则跳过；`{"ok":true,"imported":n,"skipped":m}` | F-013 |
 | POST | `/api/panel/groups/import/force` | — | 同上，但同 id 覆盖 | F-013 |
@@ -337,6 +338,8 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | POST | `/api/panel/logo/delete` | — | 体 `{"file"}`；成功 `{"ok":true,"removed":1}`；缺文件 → `404` | F-012 |
 | POST | `/api/panel/logo/rename` | — | 体 `{"file","name"}`；保留扩展名；`{"ok":true,"logo":{…}}`；缺文件 → `404`，目标已存在 → `400` | F-012（形状自定） |
 | POST | `/api/panel/logo/restore` | — | 体 `{"file"}`；用 `<cache>/logos/.orig/` 备份覆盖当前文件；`{"ok":true}`；无备份 → `400` | F-012 |
+
+频道字段 `mode` 可设为六种模式或 `null`。`null` 表示继承分组。同步频道的有效模式不能是 `passthrough`；分组 `mode = "passthrough"` 时，组内不能有未设置模式的同步频道，否则接口返回 `400`。
 | POST | `/api/panel/logo/animate` | — | 体 `{"file","effect","quality":"<1..100>"}`；`effect` ∈ `diagonal/vertical/bounce/spot/glow/breathe`；返回 `{"ok":true,"frames":10,"width","height","total_ms":2220,"bytes_before","bytes_after","dirty_ratio"}`；输出动画 WebP（扩展名不变）；PNG/WebP 纯 Rust 解码，其他格式回退 `ffmpeg`；已动画源图 → `400` | F-012 |
 | GET | `/api/panel/logo/match-report` | — | `{"channels","missing","broken","unused","missing_channels":[…],"broken_logos":[…],"unused_logos":[…]}` | F-012（形状自定） |
 | POST | `/api/panel/logo/apply` | — | 体 `{"gid","cid","file"}`；把 `/static/logo/<file>` 写入频道 `logo`；`404` 用于缺文件或未知分组/频道 | F-012（形状自定） |

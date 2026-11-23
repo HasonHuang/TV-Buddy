@@ -69,7 +69,9 @@
 | `merge_into` | BTreeMap\<string,string\> | 空 | 上游分组名 → 已有分组 id。显式并入 |
 | `merge_new` | BTreeMap\<string,string\> | 空 | 上游分组名 → 新组名。显式合并到新组；同名共用一组 |
 
-`playback_mode` 与 `format` 只用于**新建**同步分组；已有分组的工作模式与内容格式在「分组管理」里修改。
+`playback_mode` 与 `format` 用于**新建**同步分组与**新建**同步频道；已有分组与频道保持原值。新建同步频道把源模式写成频道的显式模式，之后管理员可单条覆盖，同步不再改写。
+
+已有同步频道可用 `POST /api/panel/subs/{id}/backfill-mode` 按源默认回填。回填只处理未设置模式、仍在跟随来源、且 `mode_source != "manual"` 的频道。`playback_mode = auto` 时按频道 URL 解析：`.mpd` → `dash`，其他 → `proxy`。
 
 校验：
 
