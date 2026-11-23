@@ -70,7 +70,7 @@ iptv-api 在生成结果清单时做校验。本项目的输出是代理入口�
 - 不新增配置段。扩展 `[health]`。
 - 增加 `probe_mode`（连通 / 清单 / 测速）与阈值字段。
 - 扩展现有 `Health::Entry`，增加速率与分辨率。
-- 现有健康循环直接承担测速。扩展 `/panel/api/health` 与分组页徽章。
+- 现有健康循环直接承担测速。扩展 `/api/panel/health` 与分组页徽章。
 - 结果只放内存。
 
 优点：
@@ -499,7 +499,7 @@ effective.enabled =
 | `[health]` 周期、超时、并发 | 保留。`quality.enabled=true` 时，质量调度器接管探测，不再重复跑健康循环。 |
 | `Health.Entry` | 保留原字段。质量调度器同时写入可达性结果。 |
 | `offline_on_fail` | 保留。仍只看可达性，且仍受 `[health].enabled` 控制。 |
-| `/panel/api/health` | 保留原字段。新增 `reason`、`speed_mib`、`resolution`、`fps`、`codecs`。 |
+| `/api/panel/health` | 保留原字段。新增 `reason`、`speed_mib`、`resolution`、`fps`、`codecs`。 |
 | 分组页状态点 | 保留。新增质量徽章。 |
 
 质量调度器写入 `Health` 的规则：
@@ -967,22 +967,22 @@ fn hidden(config: &Config, quality: Option<&QualityState>, group: &Group, channe
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/panel/api/quality/status` | 全局开关、运行状态、计数、预算使用。 |
-| `GET` | `/panel/api/quality/results` | 结果列表。支持 `gid`、`cid`、`source_id`、`state`、`limit`、`offset`。 |
-| `GET` | `/panel/api/quality/history` | 单频道历史。参数 `gid`、`cid`、`limit`。 |
-| `POST` | `/panel/api/quality/run` | 发起校验。返回 `202`。 |
-| `GET` | `/panel/api/quality/runs/:run_id` | 进度与结果计数。 |
-| `POST` | `/panel/api/quality/cancel` | 取消当前任务。 |
-| `POST` | `/panel/api/quality/preview` | 按当前结果计算将隐藏的频道。不写状态。 |
-| `POST` | `/panel/api/quality/pin` | 固定显示或隐藏。`{"gid","cid","state":"keep"|"hide"|"auto"}`。 |
-| `POST` | `/panel/api/quality/cleanup` | 预览或执行清理。`{"apply":false}`。 |
+| `GET` | `/api/panel/quality/status` | 全局开关、运行状态、计数、预算使用。 |
+| `GET` | `/api/panel/quality/results` | 结果列表。支持 `gid`、`cid`、`source_id`、`state`、`limit`、`offset`。 |
+| `GET` | `/api/panel/quality/history` | 单频道历史。参数 `gid`、`cid`、`limit`。 |
+| `POST` | `/api/panel/quality/run` | 发起校验。返回 `202`。 |
+| `GET` | `/api/panel/quality/runs/:run_id` | 进度与结果计数。 |
+| `POST` | `/api/panel/quality/cancel` | 取消当前任务。 |
+| `POST` | `/api/panel/quality/preview` | 按当前结果计算将隐藏的频道。不写状态。 |
+| `POST` | `/api/panel/quality/pin` | 固定显示或隐藏。`{"gid","cid","state":"keep"|"hide"|"auto"}`。 |
+| `POST` | `/api/panel/quality/cleanup` | 预览或执行清理。`{"apply":false}`。 |
 
 规则保存：
 
-- 全局规则：`PUT /panel/api/config` 或专用设置端点。沿用现有配置保存与 `revision` 校验。
-- 源规则：`PUT /panel/api/playlist/sources/:id`。
-- 分组规则：`PUT /panel/api/groups/:gid`。
-- 频道规则：`PUT /panel/api/groups/:gid/channels/:cid`。
+- 全局规则：`PUT /api/panel/config` 或专用设置端点。沿用现有配置保存与 `revision` 校验。
+- 源规则：`PUT /api/panel/playlist/sources/:id`。
+- 分组规则：`PUT /api/panel/groups/:gid`。
+- 频道规则：`PUT /api/panel/groups/:gid/channels/:cid`。
 
 ### 8.1 状态响应
 
@@ -1361,7 +1361,7 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 
 #### 10.4.6 可观测
 
-`/panel/api/quality/status` 增加：
+`/api/panel/quality/status` 增加：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -1464,7 +1464,7 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 | `quality.enabled` | 默认 `false`。 |
 | `[health]` | 保持不变。质量关闭时按原逻辑运行。 |
 | `offline_on_fail` | 保持不变。与质量规则叠加。 |
-| `/panel/api/health` | 原字段不变。新增字段为附加项。 |
+| `/api/panel/health` | 原字段不变。新增字段为附加项。 |
 | 订阅清单 | 质量关闭时字节级不变。 |
 | 备份 | 配置进备份。结果表不进备份，恢复后重新探测。 |
 | 删除频道 | 配置变更后清理对应结果。避免孤儿记录。 |
@@ -1511,7 +1511,7 @@ limit_by_count  = max_channels_per_run（0 表示不限）
 | `src/source_cache.rs` | 持久化新状态字段。 |
 | `src/state.rs` | `quality` 状态、运行锁、句柄。 |
 | `src/main.rs` | 启动质量调度器。 |
-| `src/http.rs` | 新增 `/panel/api/quality/*` 路由。 |
+| `src/http.rs` | 新增 `/api/panel/quality/*` 路由。 |
 | `src/http/routes/quality.rs` | 状态、结果、历史、运行、取消、预览、固定、清理。 |
 | `src/http/routes/groups.rs` | 分组与频道规则保存后清理旧结果。 |
 | `src/http/routes/playlist.rs` | 源规则保存后重新计算源状态。 |

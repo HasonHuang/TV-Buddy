@@ -272,11 +272,11 @@
 
 ## 8 HTTP 接口
 
-所有接口需要管理员会话。公开路径与 `/panel/api` 别名受同一保护。
+所有接口需要管理员会话。公开路径与旧 `/panel/api` 别名（现为 `/api/panel`）受同一保护。
 
 ### 8.1 状态
 
-`GET /panel/api/subs/status`：
+`GET /api/panel/subs/status`：
 
 ```json
 {
@@ -317,7 +317,7 @@
 
 ### 8.2 触发同步
 
-`POST /panel/api/subs/sync`：
+`POST /api/panel/subs/sync`：
 
 ```json
 { "id": "src-a", "force": false }
@@ -336,7 +336,7 @@
 
 ### 8.3 预检
 
-`POST /panel/api/subs/preview`：
+`POST /api/panel/subs/preview`：
 
 - 保留原有 `kept`、`sample`、`trace`。
 - 源是托管模式时，增加 `sync`：
@@ -367,7 +367,7 @@
 
 ### 8.4 清理内容
 
-`DELETE /panel/api/subs/:id/content?to_manual=1`：
+`DELETE /api/panel/subs/:id/content?to_manual=1`：
 
 - 默认 `to_manual=1`：保留内容，清空来源字段，转为手工。
 - `to_manual=0`：删除本源频道，并清理空同步分组。
@@ -377,10 +377,10 @@
 
 | 接口 | 说明 |
 | --- | --- |
-| `PUT /panel/api/playlist/settings` | 只保存全局字段，保留源列表 |
-| `POST /panel/api/playlist/sources` | 新建一个源。空 id 生成 UUID |
-| `PUT /panel/api/playlist/sources/:id` | 保存一个源。`?keep_content=0` 删除已有内容 |
-| `DELETE /panel/api/playlist/sources/:id` | 默认保留内容为手工。`?keep_content=0` 一并删除 |
+| `PUT /api/panel/playlist/settings` | 只保存全局字段，保留源列表 |
+| `POST /api/panel/playlist/sources` | 新建一个源。空 id 生成 UUID |
+| `PUT /api/panel/playlist/sources/:id` | 保存一个源。`?keep_content=0` 删除已有内容 |
+| `DELETE /api/panel/playlist/sources/:id` | 默认保留内容为手工。`?keep_content=0` 一并删除 |
 
 - 源启用时 URL 必须是 `http(s)`。
 - 已有物化内容且请求未显式选择时，修改模式或删除源返回 `409`，`code=content_exists`，附 `channels` 计数。
@@ -393,13 +393,13 @@
 
 | 接口 | 说明 |
 | --- | --- |
-| `PUT /panel/api/groups/:gid/channels/:cid` | 上游字段变化且未显式传 `sync_follow` 时，自动置 `false` |
-| `DELETE /panel/api/groups/:gid/channels/:cid` | 同步频道删除时写入源 `exclude`。`tvg-id` 同源唯一用 `id:`；不唯一但名称唯一用 `idname:`；都相同才用 `url:` |
-| `DELETE /panel/api/groups/:gid` | 同步分组删除时写入组内每个频道键。不写 `group:` |
-| `POST /panel/api/groups/:gid/detach` | 分组转为手工。只断开本源频道，其他源频道保持跟随 |
-| `POST /panel/api/groups/:gid/channels/:cid/detach` | 频道转为手工 |
-| `POST /panel/api/groups/import[/force]` | 默认跳过 `source_id` 非空的分组 |
-| `POST /panel/api/groups/import/m3u` | 同上。`replace` 遇同步分组时要求 `include_synced=true` |
+| `PUT /api/panel/groups/:gid/channels/:cid` | 上游字段变化且未显式传 `sync_follow` 时，自动置 `false` |
+| `DELETE /api/panel/groups/:gid/channels/:cid` | 同步频道删除时写入源 `exclude`。`tvg-id` 同源唯一用 `id:`；不唯一但名称唯一用 `idname:`；都相同才用 `url:` |
+| `DELETE /api/panel/groups/:gid` | 同步分组删除时写入组内每个频道键。不写 `group:` |
+| `POST /api/panel/groups/:gid/detach` | 分组转为手工。只断开本源频道，其他源频道保持跟随 |
+| `POST /api/panel/groups/:gid/channels/:cid/detach` | 频道转为手工 |
+| `POST /api/panel/groups/import[/force]` | 默认跳过 `source_id` 非空的分组 |
+| `POST /api/panel/groups/import/m3u` | 同上。`replace` 遇同步分组时要求 `include_synced=true` |
 
 防回流只用于用户主动删除。上游自己删除的频道不加 `exclude`。上游恢复时重新新增。
 
@@ -528,7 +528,7 @@
 1. 起可变 M3U 源。登录管理员。
 2. 建托管源、预检、保存、同步。
 3. 检查分组、频道、状态、幂等。
-4. 检查订阅清单含同步频道，地址带 `/l/<token>/`。
+4. 检查订阅清单含同步频道，地址带 `/api/play/token/<token>/`。
 5. 用户授权过滤。
 6. 上游新增、删除、改 URL。
 7. 手工改名并固定。同步后保留。

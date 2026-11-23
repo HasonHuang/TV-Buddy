@@ -107,9 +107,9 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 
 | 路径 | 用途 |
 | --- | --- |
-| `/sub/:token/playlist.m3u` | 用户订阅清单 |
-| `/sub/:token/epg.xml` | 独立 EPG |
-| `/sub/:token/epg.xml.gz` | 同上，压缩 |
+| `/api/sub/:token/playlist.m3u` | 用户订阅清单 |
+| `/api/sub/:token/epg.xml` | 独立 EPG |
+| `/api/sub/:token/epg.xml.gz` | 同上，压缩 |
 
 ### 3.4 当前登录者
 
@@ -161,7 +161,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 - 建成后凭证不可修改。要换凭证，先撤销旧设备，再添加新设备。
 - `web_ui_links` 行标为「面板」。
 
-订阅地址即 `/sub/<token>/playlist.m3u`。
+订阅地址即 `/api/sub/<token>/playlist.m3u`。
 
 ## 5. 权限语义
 
@@ -184,8 +184,8 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 口令散列 | argon2id | SHA-256 十六进制 |
 | 会话 | 内存 + 会话表 | 内存 `SessionStore` |
 | 设备令牌 | 12 位短串，带用途与有效期 | 只有全局 `[auth].token` |
-| 订阅入口 | `/sub/:token/playlist.m3u` | 同左，按用户可见范围过滤 |
-| 每用户 EPG | `/sub/:token/epg.xml(.gz)` | 同左 |
+| 订阅入口 | `/api/sub/:token/playlist.m3u` | 同左，按用户可见范围过滤 |
+| 每用户 EPG | `/api/sub/:token/epg.xml(.gz)` | 同左 |
 | 面板分权 | 管理员 / 普通用户两级 | 同左：普通用户只见「我的订阅」 |
 | 可见范围 | 分组 + 频道两级 | 同左 |
 | 存储 | SQLite | 单库 `tv-buddy.db` |
@@ -247,7 +247,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 口令 | 用 `argon2` 校验。迁移时把现有 `[panel].password_sha256` 转成一个 admin 用户，口令不变 |
 | 会话 | 登录成功签发会话。会话绑定 `user_id` |
 | 令牌 | 12 位短串。播放与订阅按 401 语义分流 |
-| 订阅入口 | 新增 `/sub/:token/playlist.m3u` 与 `.xml` / `.xml.gz` |
+| 订阅入口 | 新增 `/api/sub/:token/playlist.m3u` 与 `.xml` / `.xml.gz` |
 | 过滤 | 分组级 + 频道级两级。作用范围：清单、EPG、播放链接 |
 | 面板 | 新增第 14 个分区「用户与设备」。表格列与弹窗字段按 §4 |
 
@@ -266,40 +266,40 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 数据层 | `src/users/{model,password,store}.rs` | SQLite，表结构与 §2 一致 |
 | 口令 | argon2id。不支持旧散列格式 | 完成 |
 | 首次安装 | 无用户时建 `admin`，随机 16 位口令写入 `<安装目录>/cache/admin_initial_credentials.txt`（0600）。路径跟随数据库文件，与 `cache.disk_path` 无关 | 完成 |
-| 登录 | `POST /panel/api/login` 查 `users` 表，会话绑定用户 | 完成 |
-| 用户 API | `/panel/api/users` 全套，含 `channel-options`、`password` | 完成 |
-| 令牌 API | `/panel/api/users/:id/tokens` 全套 | 完成 |
-| 当前用户 | `GET /panel/api/me` | 完成 |
-| 订阅入口 | `/sub/:token/playlist.m3u`，按可见范围过滤 | 完成 |
+| 登录 | `POST /api/panel/login` 查 `users` 表，会话绑定用户 | 完成 |
+| 用户 API | `/api/panel/users` 全套，含 `channel-options`、`password` | 完成 |
+| 令牌 API | `/api/panel/users/:id/tokens` 全套 | 完成 |
+| 当前用户 | `GET /api/panel/me` | 完成 |
+| 订阅入口 | `/api/sub/:token/playlist.m3u`，按可见范围过滤 | 完成 |
 | 播放鉴权 | `?token=` 改为查 `access_tokens`，并校验用户可见该频道 | 完成 |
 | 废弃全局令牌 | 删除 `/security/token` 与 `rotate`、`PlayTokenStore`、分享里的令牌同步。共享载荷与 link-info 的 token 字段恒为空 | 完成 |
 | 面板分区 | 第 14 个分区「用户与设备」。列表 + 新建/编辑弹窗 + 设备令牌弹窗 | 完成 |
 | 禁止全局订阅 | `/playlist.m3u` 与 `/{gid}/playlist.m3u` 返回 `404` 文本 | 完成（`v2026.7`） |
-| 每用户 EPG | `/sub/:token/epg.xml(.gz)`；订阅头改指自己；`epg::load_generated_cached` 缓存解析结果 | 完成（`v2026.7`） |
+| 每用户 EPG | `/api/sub/:token/epg.xml(.gz)`；订阅头改指自己；`epg::load_generated_cached` 缓存解析结果 | 完成（`v2026.7`） |
 | 面板分权 | `guard::admin_gate`；`PanelUser` 每次请求重读角色 | 完成（`v2026.7`） |
 | 「我的订阅」页 | 普通用户登录后的唯一分区；订阅地址、EPG 地址、可见频道 | 完成（`v2026.7`） |
 | 令牌维护 | 启动清理过期令牌；每 60 秒把 `last_seen_at_ms` 落盘 | 完成（`v2026.7`） |
 | 自定义凭证 | 新建设备时可自定义凭证；建成后不可修改 | 完成（`v2026.30`，`v2026.37` 起不可修改） |
-| 订阅路径令牌 | 条目改为 `/l/<token>/<gid>/<cid>.<ext>`；查询参数 `?token=` 也接受 | 完成（`v2026.8`） |
+| 订阅路径令牌 | 条目改为 `/api/play/token/<token>/<gid>/<cid>.<ext>`；查询参数 `?token=` 也接受 | 完成（`v2026.8`） |
 | 切片路径签名 | 时间窗共享签名；面板可改密钥；CDN 可共享缓存 | 完成（`v2026.8`） |
 
 ### 9.2 待办
 
 | # | 项 | 说明 |
 | --- | --- | --- |
-| 1 | ~~EPG 用户隔离~~ | 完成（`v2026.7`）：`/sub/:token/epg.xml(.gz)` 已实现，订阅头改指自己 |
-| 2 | 面板分权 | 完成（`v2026.7`）：`guard::admin_gate` 拦非管理员的 `/panel/api/*`；普通用户只见「我的订阅」 |
+| 1 | ~~EPG 用户隔离~~ | 完成（`v2026.7`）：`/api/sub/:token/epg.xml(.gz)` 已实现，订阅头改指自己 |
+| 2 | 面板分权 | 完成（`v2026.7`）：`guard::admin_gate` 拦非管理员的 `/api/panel/*`；普通用户只见「我的订阅」 |
 | 3 | 管理 CLI | 完成：改为调用 `tv-buddy passwd` 写入 `users` 表，不再读 `panel username` / `password_sha256` |
 | 5 | Docker 集成冒烟 | `smoke-dash-timeshift-docker.sh` 在容器内起服务后清单请求无响应。待查 |
 | 6 | ~~切片级鉴权~~ | 完成（`v2026.8`）：切片路径带时间窗签名。令牌撤销仍只挡入口，签名按窗口过期 |
 
 ### 9.3 行为变化
 
-**订阅只有一个入口**：`/sub/:token/playlist.m3u`。
+**订阅只有一个入口**：`/api/sub/:token/playlist.m3u`。
 全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 返回 `404` 文本，指路用户订阅。
 
-**EPG 跟随令牌**：`/sub/:token/epg.xml(.gz)` 只含该用户可见频道的节目。
-公开 `/epg.xml[.gz]` 已删除。面板「节目指南」走 `/panel/api/epg/*`。
+**EPG 跟随令牌**：`/api/sub/:token/epg.xml(.gz)` 只含该用户可见频道的节目。
+公开 `/epg.xml[.gz]` 已删除。面板「节目指南」走 `/api/panel/epg/*`。
 
 **订阅来源展示**：分组授权列表显示 `origin` 与 `source_id`。
 只授予指定分组的用户，不自动获得同步新增的分组。
@@ -310,16 +310,16 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 开启后才按勾选的分组限制。开关语义与「只开放指定频道」一致。
 
 **面板按角色分权**：普通用户只看到「我的订阅」页（订阅地址、EPG 地址、授权频道）。
-其余 `/panel/api/*` 返回 `403`。角色每次请求从库重读，降级立即生效。
+其余 `/api/panel/*` 返回 `403`。角色每次请求从库重读，降级立即生效。
 
 **归档组停播**：`access = "archived"` 的分组不出现在任何订阅与每用户 EPG 里。
 
 ### 9.4 切片路径签名（v2026.8）
 
-**订阅条目改用路径令牌**：`/l/<token>/<gid>/<cid>.<ext>`。
+**订阅条目改用路径令牌**：`/api/play/token/<token>/<gid>/<cid>.<ext>`。
 查询参数 `?token=` 入口也可用。
 
-**切片地址带时间窗签名**：`/<gid>/<cid>/l/<exp>/<sig>/<name>`。
+**切片地址带时间窗签名**：`/media/<gid>/<cid>/l/<exp>/<sig>/<name>`。
 
 | 项 | 规则 |
 | --- | --- |
@@ -332,7 +332,7 @@ CREATE INDEX users_order_idx ON users (sort_order, id);
 | 密钥 | `auth.slice_sign_secret`，十六进制；留空时保存配置自动生成 32 字节 |
 
 **CDN 规则**：缓存 Key 必须包含 URI 路径。切片 TTL 不大于时间窗。
-`/sub/*` 响应带 `Cache-Control: private, no-store`，CDN 不缓存。
+`/api/sub/*` 响应带 `Cache-Control: private, no-store`，CDN 不缓存。
 
 **已知限制**：签名不绑定用户。拿到 URL 的人在一个窗口内都能播。
 按用户撤销要等窗口过期。

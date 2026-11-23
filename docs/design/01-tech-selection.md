@@ -71,7 +71,7 @@
 | --- | --- | --- | --- |
 | `m3u8-rs` | HLS 清单解析与重写 | P1 | `S-MODE-03` |
 | `quick-xml` | XMLTV 生成、MPD 解析 | P1 | `S-EP-05`、`S-GAP-01` |
-| `flate2`（gzip） | `/epg.xml.gz`、备份包 | P1/P2 | `S-EP-05`、`S-BAK-01` |
+| `flate2`（gzip） | `/api/sub/<token>/epg.xml.gz`、备份包 | P1/P2 | `S-EP-05`、`S-BAK-01` |
 | `tar` | 备份与恢复 | P2 | `S-BAK-01` |
 | `aes-gcm` / `mp4` | ClearKey KID 检测（不解密） | P1 | `S-GAP-01` |
 | `image` | 台标转码与尺寸探测 | P2 | F-011 |
@@ -82,15 +82,15 @@
 | --- | --- | --- |
 | 构建 | Vite 6 + TypeScript 5 | 产物 `dist/` 由 `rust-embed` 嵌入 |
 | 框架 | React 19 | 组件化复刻四个页面 |
-| 路由 | `react-router` | 与目标路径一致（`/panel`、`/panel/epg`、`/panel/logo`、`/unban`） |
-| 数据层 | `@tanstack/react-query` | 统一 `/panel/api/*` 的请求、轮询与失效 |
+| 路由 | 哈希分区（无路由器） | 面板用 `#/<分区>` 切换，页面入口 `/page/panel` |
+| 数据层 | `@tanstack/react-query` | 统一 `/api/panel/*` 的请求、轮询与失效 |
 | 样式 | 自写 CSS（CSS Modules + 设计变量） | 从目标面板提取**视觉参数**（配色、间距、字号），不复制其 CSS 文件 |
 | 组件库 | 不加重型 UI 库；按需加 `@radix-ui/*` 无样式原语 | 控制体积，保持外观可控 |
 | Node 工具链 | pnpm 8 / Node 24（本机已具备） | 仅构建期依赖，运行期无 Node |
 
 **复刻范围**（F-003）：管理面板、节目单、台标库、自助解封。
 
-**契约要求**：前端只调用 `/panel/api/*` 中已登记的端点（`spec/08` §2，F-012 §3）。端点名、请求体、响应字段**不得重命名**。
+**契约要求**：前端只调用 `/api/panel/*` 中已登记的端点（`spec/08` §2，F-012 §3）。端点名、请求体、响应字段**不得重命名**。
 
 ## 5. 兼容契约（必须逐条对齐）
 
@@ -159,7 +159,7 @@
 | 前端构建 | `pnpm install && pnpm build` → `dist/` 嵌入 |
 | 发布物 | `tv-buddy` 二进制（arm64/amd64）+ 安装脚本 |
 | 服务单元 | systemd（Alpine 用 OpenRC），`/opt/tv-buddy` 布局 | 
-| 版本上报 | `/panel/api/status.version` 输出**本次构建版本**：取最近的 `v*` 标签（`build.rs`），无标签时取 `Cargo.toml`；字段名不变 |
+| 版本上报 | `/api/panel/status.version` 输出**本次构建版本**：取最近的 `v*` 标签（`build.rs`），无标签时取 `Cargo.toml`；字段名不变 |
 
 ## 9. 阶段范围
 
@@ -192,7 +192,7 @@
 | 切片伪装 | `<S>` 与目标逐字节一致；扩展名→`Content-Type` | `S-DIS-01/02` |
 | 缓存窗口 | 首写 `public, max-age=<TTL>`；命中 `private, max-age=<TTL>` | `S-CACHE-01` |
 | Token 鉴权 | `?token=<48hex>`；失效 302 `token_failure_url` | `S-AUTH-01` |
-| 面板登录 | `POST /panel/api/login` 返回 UUID token；`Bearer`/`X-Token` 均可用 | `S-AUTH-02` |
+| 面板登录 | `POST /api/panel/login` 返回 UUID token；`Bearer`/`X-Token` 均可用 | `S-AUTH-02` |
 
 > 偏差：目标实测切片 `max-age=300`。本实现由 `cache.ttl.segment_secs` 决定：
 > 手动值优先；否则用实测值；无实测用 600 秒。CDN 开/关都生效。

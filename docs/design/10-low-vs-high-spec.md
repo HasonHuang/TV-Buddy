@@ -27,7 +27,7 @@
 
 低配示例 `config-low-spec.json` 还显式写出多个默认值。作用只是文档，不是调优。
 
-`[server].low_resource_mode` 低配示例没有设置。它只出现在 `/panel/api/status` 的回显里，
+`[server].low_resource_mode` 低配示例没有设置。它只出现在 `/api/panel/status` 的回显里，
 不改变任何行为（复刻目标行为）。不要把它当调优开关。
 
 ## 2. 按资源类型看参数

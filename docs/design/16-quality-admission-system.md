@@ -414,19 +414,19 @@ sync_lock → admission_lock → config.write_lock → SharedConn
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/panel/api/quality/status` | 开关、周期、下次运行、运行状态、统计、源错误、安全阀。 |
-| GET | `/panel/api/quality/results` | 结果分页与筛选。 |
-| GET | `/panel/api/quality/sources` | 同步源门控统计。 |
-| GET | `/panel/api/quality/effective` | 有效规则与来源层级。参数 `source_id`、`gid`、`cid`。 |
-| POST | `/panel/api/quality/run` | 发起校验。 |
-| GET | `/panel/api/quality/runs/:run_id` | 任务进度。 |
-| POST | `/panel/api/quality/cancel` | 取消当前任务。 |
-| POST | `/panel/api/quality/preview` | 按最近结果预览将移出频道。不写状态。 |
-| POST | `/panel/api/quality/schedule/preview` | 校验 cron，返回未来 3 次运行时间。 |
-| POST | `/panel/api/playlist/sources/:id/disable` | 停用源，body `{keep_channels}`。 |
-| POST | `/panel/api/playlist/sources/:id/enable` | 启用源，可触发同步。 |
-| DELETE | `/panel/api/playlist/sources/:id` | 现有删除，`keep_content=0|1`。 |
-| GET | `/panel/api/subs/status` | 扩展门控阶段与统计。 |
+| GET | `/api/panel/quality/status` | 开关、周期、下次运行、运行状态、统计、源错误、安全阀。 |
+| GET | `/api/panel/quality/results` | 结果分页与筛选。 |
+| GET | `/api/panel/quality/sources` | 同步源门控统计。 |
+| GET | `/api/panel/quality/effective` | 有效规则与来源层级。参数 `source_id`、`gid`、`cid`。 |
+| POST | `/api/panel/quality/run` | 发起校验。 |
+| GET | `/api/panel/quality/runs/:run_id` | 任务进度。 |
+| POST | `/api/panel/quality/cancel` | 取消当前任务。 |
+| POST | `/api/panel/quality/preview` | 按最近结果预览将移出频道。不写状态。 |
+| POST | `/api/panel/quality/schedule/preview` | 校验 cron，返回未来 3 次运行时间。 |
+| POST | `/api/panel/playlist/sources/:id/disable` | 停用源，body `{keep_channels}`。 |
+| POST | `/api/panel/playlist/sources/:id/enable` | 启用源，可触发同步。 |
+| DELETE | `/api/panel/playlist/sources/:id` | 现有删除，`keep_content=0|1`。 |
+| GET | `/api/panel/subs/status` | 扩展门控阶段与统计。 |
 
 ### 8.1 状态响应
 
@@ -507,7 +507,7 @@ sync_lock → admission_lock → config.write_lock → SharedConn
 
 ### 8.4 源停用
 
-`POST /playlist/sources/:id/disable`
+`POST /api/panel/playlist/sources/:id/disable`
 
 ```json
 { "keep_channels": true }
@@ -523,7 +523,7 @@ sync_lock → admission_lock → config.write_lock → SharedConn
 - `SectionId` 增加 `quality`；导航增加「质量校验」。
 - 新增 `frontend/src/quality-page.tsx`，保留现有徽章组件。
 - `api.ts` 增加状态、结果、源、有效规则、运行、取消、停用/启用类型与函数。
-- 规则保存使用 `GET /config` + `PUT /config`，带 `revision`。
+- 规则保存使用 `GET /api/panel/config` + `PUT /api/panel/config`，带 `revision`。
 - 源停用/删除使用新接口。
 - 运行中每 2 秒轮询状态；结果页每 2 秒刷新。
 - 分组页徽章跳转 `#/quality/results?gid=...&cid=...`。

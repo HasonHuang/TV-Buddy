@@ -93,16 +93,16 @@
 
 | 场景 | 面板位置 | 接口 |
 | --- | --- | --- |
-| 节目单配置 | 节目指南 → 节目单翻译 | `GET/PUT /panel/api/config` |
-| 立即翻译 | 节目指南 → 节目单翻译 | `POST /panel/api/epg/translate/run` |
-| 探测服务 | 节目指南 → 节目单翻译 | `POST /panel/api/epg/translate/probe` |
-| 清缓存 | 节目指南 → 节目单翻译 | `POST /panel/api/epg/translate/clear` |
-| 字幕配置 | 系统设置 → 监控与字幕 → 字幕设置 | `GET/PUT /panel/api/config` |
-| 翻译字幕 | 视频素材 → 字幕文件 | `POST /panel/api/subtitle/translate` |
-| 下载译文 | 视频素材 → 字幕文件 | `GET /panel/api/subtitle/translate/raw/<名称>` |
-| 清理译文缓存 | 系统设置 → 监控与字幕 → 字幕设置 | `POST /panel/api/subtitle/translate/clear` |
-| 节目单机翻自检 | 节目指南 → 节目单翻译 | `POST /panel/api/epg/translate/mtran/test` |
-| 字幕机翻自检 | 系统设置 → 监控与字幕 → 字幕设置 | `POST /panel/api/subtitle/mtran/test` |
+| 节目单配置 | 节目指南 → 节目单翻译 | `GET/PUT /api/panel/config` |
+| 立即翻译 | 节目指南 → 节目单翻译 | `POST /api/panel/epg/translate/run` |
+| 探测服务 | 节目指南 → 节目单翻译 | `POST /api/panel/epg/translate/probe` |
+| 清缓存 | 节目指南 → 节目单翻译 | `POST /api/panel/epg/translate/clear` |
+| 字幕配置 | 系统设置 → 监控与字幕 → 字幕设置 | `GET/PUT /api/panel/config` |
+| 翻译字幕 | 视频素材 → 字幕文件 | `POST /api/panel/subtitle/translate` |
+| 下载译文 | 视频素材 → 字幕文件 | `GET /api/panel/subtitle/translate/raw/<名称>` |
+| 清理译文缓存 | 系统设置 → 监控与字幕 → 字幕设置 | `POST /api/panel/subtitle/translate/clear` |
+| 节目单机翻自检 | 节目指南 → 节目单翻译 | `POST /api/panel/epg/translate/mtran/test` |
+| 字幕机翻自检 | 系统设置 → 监控与字幕 → 字幕设置 | `POST /api/panel/subtitle/mtran/test` |
 
 `run`、`probe` 与字幕翻译需要面板会话。未启用或未配地址时返回 `400`。
 

@@ -134,7 +134,7 @@ EPG 源的 `script` 字段建议写完整文件名，例如 `foo.py`。
 - `epg/scripts/*.py`
 - `resolvers/*.py`
 
-备份范围用 `GET /panel/api/backup?include=all|epg-scripts|resolver`。
+备份范围用 `GET /api/panel/backup?include=all|epg-scripts|resolver`。
 恢复脚本时不会执行脚本。恢复后按恢复的配置运行。
 
 ---
@@ -531,16 +531,16 @@ docker compose exec tv-buddy ls -l /data/cache/epg/scripts/
 ```bash
 # 登录后取得 token
 # 口令见面板账号或首次安装文件 admin_initial_credentials.txt
-T=$(curl -s -X POST http://127.0.0.1:9900/panel/api/login \
+T=$(curl -s -X POST http://127.0.0.1:9900/api/panel/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"<你的口令>"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
 
-curl -s -H "Authorization: Bearer $T" http://127.0.0.1:9900/panel/api/resolver/scripts
-curl -s -H "Authorization: Bearer $T" http://127.0.0.1:9900/panel/api/epg/scripts
+curl -s -H "Authorization: Bearer $T" http://127.0.0.1:9900/api/panel/resolver/scripts
+curl -s -H "Authorization: Bearer $T" http://127.0.0.1:9900/api/panel/epg/scripts
 ```
 
-`/panel/api/epg/scripts` 同时返回 Python 版本。值为 `null` 表示服务端没有 `python3`。
+`/api/panel/epg/scripts` 同时返回 Python 版本。值为 `null` 表示服务端没有 `python3`。
 
 ---
 
@@ -570,9 +570,9 @@ curl -s -H "Authorization: Bearer $T" http://127.0.0.1:9900/panel/api/epg/script
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/panel/api/resolver/scripts` | 列表 |
-| POST | `/panel/api/resolver/script` | 保存或覆盖 |
-| POST | `/panel/api/resolver/remove` | 删除 |
+| GET | `/api/panel/resolver/scripts` | 列表 |
+| POST | `/api/panel/resolver/script` | 保存或覆盖 |
+| POST | `/api/panel/resolver/remove` | 删除 |
 
 列表响应：
 
@@ -595,9 +595,9 @@ curl -s -H "Authorization: Bearer $T" http://127.0.0.1:9900/panel/api/epg/script
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/panel/api/epg/scripts` | 列表与 Python 版本 |
-| POST | `/panel/api/epg/script` | 保存或覆盖 |
-| POST | `/panel/api/epg/script-delete` | 删除 |
+| GET | `/api/panel/epg/scripts` | 列表与 Python 版本 |
+| POST | `/api/panel/epg/script` | 保存或覆盖 |
+| POST | `/api/panel/epg/script-delete` | 删除 |
 
 列表响应：
 
