@@ -107,7 +107,7 @@
 
 「探测失败下线」只在 `[health].enabled = true` 时生效。
 有效值按频道级 > 分组级解析（`Config::offline_on_fail_for`）。
-频道最近一次探测失败（`/panel/api/health` 的 `entries["<gid>/<cid>"].ok = false`）时，
+频道最近一次探测失败（`/api/panel/health` 的 `entries["<gid>/<cid>"].ok = false`）时，
 它不进订阅清单与「我的订阅」页。探测成功后立即恢复。
 没有探测记录（新频道、刚启动）按在线处理。
 该开关只影响清单，不拦截播放。
@@ -119,7 +119,7 @@
   - 源 `mode`、`schedule`、`playback_mode`、`format` 为空时补默认值。
 - `Config.revision` 是并发令牌。
   - 唯一自增点：`ConfigStore::save`。
-  - `PUT /panel/api/config` 必须从请求体读 `revision`。
+  - `PUT /api/panel/config` 必须从请求体读 `revision`。
   - 缺失 `revision` 或与库内值不同时返回 `409`，`code=stale_revision`，并附当前 `revision`。
   - 校验与写入在同一个 `IMMEDIATE` 事务内完成，跨进程写者不能插在两者之间。
 - 专用端点走 `state.mutate`，只改自己的字段，不要求 `revision`。
@@ -152,7 +152,7 @@ EPG 到期判断用**最近触发时间**，不用“下次触发时间”。
 实现：没有文件可监视，也没有热重载线程。三条路径：
 
 - 面板保存：写库后立即替换快照。
-- `POST /panel/api/reload`：从库重读，替换快照。
+- `POST /api/panel/reload`：从库重读，替换快照。
 - 管理 CLI 改库：需要重启服务，或调用上面这个接口。
 
 > 竞态：面板保存、分组编辑与 CLI 改库都以**数据库为唯一事实源**。
@@ -196,7 +196,7 @@ EPG 到期判断用**最近触发时间**，不用“下次触发时间”。
 | DASH 缓存（P4 已实现） | `dash/<gid>/<cid>/<track>/{index.txt,init.<ext>,<序号>_<hash>.<ext>}`；媒体清单按时重取，init/切片命中复用 | `src/dash_hls.rs` |
 | DASH 时间窗 | `[groups].mpd_keep_seconds > 0` 时媒体清单只保留末尾累计时长；`0` 保留全部。`proxy` 模式 MPD 同样裁剪时间线并推进编号 | `src/dash_hls.rs`、`src/http/routes/stream.rs` |
 | DASH URL 池 | 多个 `<BaseURL>` 时取前 N 条作候选，N = min(地址数, `url_pool_size`, 6)。视频固定 `pool[0]`；音频/字幕在 `pool[1..N]` 轮询。池启用时逐址快速回退，视频记住最近成功地址 300 秒。`url_pool_size<=1` 或单地址时行为完全不变。目标 `pool>=2` 的取用方式不可观测（F-015），本语义为自定 | `src/dash_hls.rs` |
-| proxy MPD 反代 | `<BaseURL>`（绝对/相对/缺失）统一改为 `/{gid}/{cid}/mpd/{token}/{Base64URL(base)}/`；切片请求解码还原上游地址并校验令牌 | `src/http/routes/stream.rs` |
+| proxy MPD 反代 | `<BaseURL>`（绝对/相对/缺失）统一改为 `/media/{gid}/{cid}/mpd/{token}/{Base64URL(base)}/`；切片请求解码还原上游地址并校验令牌 | `src/http/routes/stream.rs` |
 | 清单复用（M2 已实现） | 进程内 TTL 5 秒（`TtlCache`） | `src/proxy/mod.rs` |
 | 订阅源缓存（U-07 已实现） | `sub_url/<sha256("sub:{id}:{url}")>.json`：`{key,body,stored_at}`；`subs/status.json` 保存 `channels/last_ok/last_try/error`；重启后按源级 TTL 命中 | `src/source_cache.rs`、F-020 |
 | flush | 清 `m3u8`/`seg_url`/`seg_bytes`/`sub_url`，**保留 `dash/`**；同时清进程内切片索引、清单缓存与订阅源缓存 | S-CACHE-06 |
@@ -251,7 +251,7 @@ EPG 到期判断用**最近触发时间**，不用“下次触发时间”。
 | 交叉编译 | Docker `rust:1-alpine`：镜像宿主三元组本身就是 `*-linux-musl`，直接 `cargo build --release` 得静态二进制 | `scripts/build-release.sh` |
 | 依赖来源 | 宿主 `~/.cargo/registry` 与 `~/.cargo/git` 挂进容器，`--offline` 构建 | 容器无外网 |
 | 目标目录 | `CARGO_TARGET_DIR=target/pack-<arch>`，不污染本机构建 | — |
-| 产物校验 | `scripts/verify-release.sh`：`ldd` 无动态依赖、能启动、`/health` 返回 `ok` | `scripts/verify-release.sh` |
+| 产物校验 | `scripts/verify-release.sh`：`ldd` 无动态依赖、能启动、`/api/health` 返回 `ok` | `scripts/verify-release.sh` |
 | 服务 | systemd 单元；Alpine 用 OpenRC | S-ENV-04 |
 
 发布包内容（`dist/tv-buddy-<version>-linux-<arch>.tar.gz`）：
@@ -371,8 +371,8 @@ tv-buddy-<version>-linux-<arch>/
 | 路径 | 内容 |
 | --- | --- |
 | `<cache>/cache_estimate.json` | 被动实测统计（带 `v` 版本号；不匹配即丢弃）。由 GC tick 节流落盘（≥300s） |
-| `GET /panel/api/cache/stats` | 新增只读 `recommend` 块：`ttl_source`、`cap_source`、`limited_by`、`channels`、`working_channels`、`segment_body_bytes`、`segment_index_bytes`、`segment_index_limit_bytes`、`segment_cache_bytes`、`gc_last_run_secs_ago` 等；来源值 `measured`/`manual`/`fallback` 与 `auto`/`manual` |
-| `POST /panel/api/cdn/estimate` | 一次性估算：前 3 个非归档分组各第 1 个频道，抓清单与首个切片长度；全失败仍返回 `200`（`ttl_source` 回落 `fallback`），并发请求返回 `409` |
+| `GET /api/panel/cache/stats` | 新增只读 `recommend` 块：`ttl_source`、`cap_source`、`limited_by`、`channels`、`working_channels`、`segment_body_bytes`、`segment_index_bytes`、`segment_index_limit_bytes`、`segment_cache_bytes`、`gc_last_run_secs_ago` 等；来源值 `measured`/`manual`/`fallback` 与 `auto`/`manual` |
+| `POST /api/panel/cdn/estimate` | 一次性估算：前 3 个非归档分组各第 1 个频道，抓清单与首个切片长度；全失败仍返回 `200`（`ttl_source` 回落 `fallback`），并发请求返回 `409` |
 
 ### 11.5 旧键处理
 
