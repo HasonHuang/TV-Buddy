@@ -56,6 +56,27 @@ pub fn validate(config: &Config) -> anyhow::Result<()> {
             if !chans.insert(&channel.id) {
                 bail!("频道 id 重复: {}/{}", group.id, channel.id);
             }
+            if let Some(mode) = channel.mode.as_deref() {
+                if !crate::config::model::valid_mode(mode) {
+                    bail!("频道 {}/{} 的 mode 不支持 {mode}", group.id, channel.id);
+                }
+                if mode == "passthrough" && !channel.source_id.is_empty() {
+                    bail!("同步频道 {}/{} 不能使用 passthrough", group.id, channel.id);
+                }
+            }
+            if !channel.source_id.is_empty()
+                && channel.mode.is_none()
+                && group.mode == "passthrough"
+            {
+                bail!(
+                    "分组 {} 使用 passthrough，但同步频道 {} 未设置工作模式",
+                    group.id,
+                    channel.id
+                );
+            }
+        }
+        if !crate::config::model::valid_mode(&group.mode) {
+            bail!("分组 {} 的 mode 不支持 {}", group.id, group.mode);
         }
         if group.origin != "manual" && group.origin != "sync" {
             bail!("分组 {} 的 origin 必须是 manual 或 sync", group.id);
@@ -395,6 +416,47 @@ mod tests {
             mode: mode.into(),
             ..PlaylistSource::default()
         }
+    }
+
+    fn group_with_channel(group_mode: &str, channel_mode: Option<&str>, source_id: &str) -> Config {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g".into(),
+            mode: group_mode.into(),
+            channels: vec![Channel {
+                id: "c".into(),
+                mode: channel_mode.map(str::to_string),
+                source_id: source_id.into(),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+        config
+    }
+
+    #[test]
+    fn validate_rejects_unknown_group_and_channel_modes() {
+        let mut config = group_with_channel("proxy", Some("magic"), "");
+        let error = validate(&config).expect_err("非法频道模式应拒绝");
+        assert!(error.to_string().contains("magic"), "{error}");
+
+        config = group_with_channel("magic", None, "");
+        let error = validate(&config).expect_err("非法分组模式应拒绝");
+        assert!(error.to_string().contains("magic"), "{error}");
+    }
+
+    #[test]
+    fn validate_rejects_sync_channel_passthrough() {
+        let config = group_with_channel("proxy", Some("passthrough"), "s1");
+        let error = validate(&config).expect_err("同步频道直通应拒绝");
+        assert!(error.to_string().contains("passthrough"), "{error}");
+    }
+
+    #[test]
+    fn validate_rejects_passthrough_group_with_unset_sync_channel() {
+        let config = group_with_channel("passthrough", None, "s1");
+        let error = validate(&config).expect_err("同步频道继承直通应拒绝");
+        assert!(error.to_string().contains("passthrough"), "{error}");
     }
 
     #[test]

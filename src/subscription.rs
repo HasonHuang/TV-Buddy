@@ -302,7 +302,7 @@ pub fn plan(config: &Config, source: &PlaylistSource, entries: &[Entry]) -> Plan
             }),
         }
 
-        let dash = is_mpd(&url);
+        let dash = crate::config::model::is_dash_url(&url);
         channels.push(PlannedChannel {
             id_base: channel_id_base(item.entry, &base_key),
             key,
@@ -1933,11 +1933,6 @@ fn entry_headers(entry: &Entry) -> Vec<Value> {
         push(name, value);
     }
     headers
-}
-
-fn is_mpd(url: &str) -> bool {
-    let path = url.split(['?', '#']).next().unwrap_or(url);
-    path.to_ascii_lowercase().ends_with(".mpd")
 }
 
 fn short_hash(value: &str) -> String {

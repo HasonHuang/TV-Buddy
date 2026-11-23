@@ -14,6 +14,32 @@ use serde_json::{Map, Value};
 /// 与存储格式一致，直接用 JSON 值承载。保存时原样写回，不丢第三方配置。
 pub type Extra = Map<String, Value>;
 
+/// 支持的频道与分组工作模式。
+pub const MODE_VALUES: [&str; 6] = [
+    "proxy",
+    "remux",
+    "dash",
+    "redirect",
+    "rewrite",
+    "passthrough",
+];
+
+/// 频道模式来源标记的 `extra` 键。
+pub const MODE_SOURCE_KEY: &str = "mode_source";
+/// 管理员显式设置或清空过模式。
+pub const MODE_SOURCE_MANUAL: &str = "manual";
+
+/// 是否为支持的工作模式。
+pub fn valid_mode(mode: &str) -> bool {
+    MODE_VALUES.contains(&mode)
+}
+
+/// URL 是否为 DASH 清单。忽略查询串与片段，扩展名不区分大小写。
+pub fn is_dash_url(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    path.to_ascii_lowercase().ends_with(".mpd")
+}
+
 /// 顶层配置。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -53,6 +79,13 @@ impl Config {
     /// 按 id 找可变分组。
     pub fn group_mut(&mut self, gid: &str) -> Option<&mut Group> {
         self.groups.iter_mut().find(|group| group.id == gid)
+    }
+
+    /// 按分组与频道 id 取有效工作模式。
+    pub fn effective_mode(&self, gid: &str, cid: &str) -> Option<&str> {
+        let group = self.group(gid)?;
+        let channel = group.channels.iter().find(|channel| channel.id == cid)?;
+        Some(group.effective_mode(channel))
     }
 
     /// 补齐默认值。
@@ -1170,6 +1203,9 @@ pub struct Channel {
     pub id: String,
     pub name: String,
     pub url: String,
+    /// 频道级工作模式；缺省表示继承分组。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     pub headers: Vec<Value>,
     /// 频道级上游代理；覆盖分组级。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1215,6 +1251,7 @@ impl Default for Channel {
             id: String::new(),
             name: String::new(),
             url: String::new(),
+            mode: None,
             headers: Vec::new(),
             proxy: None,
             prefetch: None,
@@ -1238,6 +1275,36 @@ impl Default for Channel {
             sync_follow: true,
             extra: Extra::new(),
         }
+    }
+}
+
+impl Group {
+    /// 频道有效工作模式：频道显式值优先，否则用分组默认值。
+    pub fn effective_mode<'a>(&'a self, channel: &'a Channel) -> &'a str {
+        channel.mode.as_deref().unwrap_or(self.mode.as_str())
+    }
+}
+
+impl Channel {
+    /// 当前模式来自哪里。空串表示没有标记。
+    pub fn mode_source(&self) -> &str {
+        self.extra
+            .get(MODE_SOURCE_KEY)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+    }
+
+    /// 写入模式来源标记。
+    pub fn set_mode_source(&mut self, value: &str) {
+        self.extra.insert(
+            MODE_SOURCE_KEY.to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+
+    /// 删除模式来源标记。
+    pub fn clear_mode_source(&mut self) {
+        self.extra.remove(MODE_SOURCE_KEY);
     }
 }
 
@@ -1512,6 +1579,50 @@ impl Default for ShareCfg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_mode_inherits_group_and_overrides_it() {
+        let mut group = Group {
+            id: "g".into(),
+            mode: "rewrite".into(),
+            ..Group::default()
+        };
+        group.channels.push(Channel {
+            id: "inherit".into(),
+            ..Channel::default()
+        });
+        group.channels.push(Channel {
+            id: "override".into(),
+            mode: Some("redirect".into()),
+            ..Channel::default()
+        });
+        assert_eq!(group.effective_mode(&group.channels[0]), "rewrite");
+        assert_eq!(group.effective_mode(&group.channels[1]), "redirect");
+    }
+
+    #[test]
+    fn channel_mode_is_omitted_when_none() {
+        let channel = Channel::default();
+        let value = serde_json::to_value(&channel).expect("序列化");
+        assert!(value.get("mode").is_none());
+    }
+
+    #[test]
+    fn is_dash_url_ignores_query_case_and_fragment() {
+        assert!(is_dash_url("http://up/a.MPD?token=1"));
+        assert!(is_dash_url("http://up/a.mpd#frag"));
+        assert!(!is_dash_url("http://up/a.m3u8?x=.mpd"));
+    }
+
+    #[test]
+    fn mode_source_helpers_round_trip() {
+        let mut channel = Channel::default();
+        assert_eq!(channel.mode_source(), "");
+        channel.set_mode_source("sync:auto");
+        assert_eq!(channel.mode_source(), "sync:auto");
+        channel.clear_mode_source();
+        assert_eq!(channel.mode_source(), "");
+    }
 
     #[test]
     fn token_check_is_on_by_default() {
