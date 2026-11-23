@@ -194,9 +194,23 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
 
   const auth = config.auth ?? {};
   const configGroups = Array.isArray((config as { groups?: unknown }).groups)
-    ? ((config as { groups: { id: string; name?: string; mode?: string }[] }).groups ?? [])
+    ? ((config as {
+        groups: {
+          id: string;
+          name?: string;
+          mode?: string;
+          channels?: { id: string; name?: string; mode?: string }[];
+        }[];
+      }).groups ?? [])
     : [];
-  const passthroughGroups = configGroups.filter((group) => group.mode === 'passthrough');
+  const passthroughChannels = configGroups.flatMap((group) =>
+    (group.channels ?? [])
+      .filter((channel) => (channel.mode ?? group.mode) === 'passthrough')
+      .map((channel) => ({
+        group: group.name || group.id,
+        channel: channel.name || channel.id,
+      })),
+  );
   const setKey = (key: string, value: unknown) =>
     setConfig({ ...config, auth: { ...auth, [key]: value } });
 
@@ -332,15 +346,15 @@ function AuthConfigCard({ onSaved }: { onSaved: () => void }) {
       ) : (
         <p className="msg ok">播放凭证已开启。所有分组都要求有效凭证。</p>
       )}
-      {passthroughGroups.length > 0 && (
+      {passthroughChannels.length > 0 && (
         <div className="msg warn">
-          有 {passthroughGroups.length} 个本地分组使用「原样直通」（
-          {passthroughGroups
+          有 {passthroughChannels.length} 个频道使用「原样直通」（
+          {passthroughChannels
             .slice(0, 3)
-            .map((group) => group.name || group.id)
+            .map((item) => `${item.group} / ${item.channel}`)
             .join('、')}
-          {passthroughGroups.length > 3 ? '…' : ''}
-          ）。这些分组绕过本机和凭证检查。建议改为「改写地址」。
+          {passthroughChannels.length > 3 ? '…' : ''}
+          ）。这些频道绕过本机和凭证检查。建议改为「改写地址」或「302 跳转」。
         </div>
       )}
 

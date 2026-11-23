@@ -708,7 +708,10 @@ export function Overview({
         typeof value === 'number' ? value.toFixed(2) : '0.00',
       )
     : ['0.00', '0.00', '0.00'];
-  const groupModes = (status?.group_modes ?? {}) as Record<string, number>;
+  const channelModes = (status?.channel_modes ?? status?.group_modes ?? {}) as Record<
+    string,
+    number
+  >;
   const version = status?.version ? `v${status.version}` : '—';
   const bind = text(status, 'bind');
   const cachePath = text(status, 'cache_disk_path');
@@ -1157,7 +1160,7 @@ export function Overview({
             <CardHead
               icon="groups"
               title="分组分布"
-              note="按工作模式统计分组数"
+              note="频道按有效工作模式统计（含频道覆盖）"
             />
             <div className="ov-dist-list">
               <div className="ov-dist-row">
@@ -1168,7 +1171,7 @@ export function Overview({
                 <span>频道</span>
                 <b>{channelCount}</b>
               </div>
-              {Object.entries(groupModes).map(([mode, count]) => (
+              {Object.entries(channelModes).map(([mode, count]) => (
                 <div className="ov-dist-row" key={mode}>
                   <span>
                     <i className={`ov-dot ${mode}`} />
