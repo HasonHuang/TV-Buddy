@@ -38,6 +38,43 @@ where
     serde_json::from_value(value).map_err(|err| ApiError::bad_request(format!("字段不合法: {err}")))
 }
 
+fn validate_channel_mode(group: &Group, channel: &Channel) -> Result<(), ApiError> {
+    if let Some(mode) = channel.mode.as_deref() {
+        if !crate::config::model::valid_mode(mode) {
+            return Err(ApiError::bad_request(format!("不支持的频道模式: {mode}")));
+        }
+        if mode == "passthrough" && !channel.source_id.is_empty() {
+            return Err(ApiError::bad_request("同步频道不能使用 passthrough"));
+        }
+    }
+    if !channel.source_id.is_empty() && channel.mode.is_none() && group.mode == "passthrough" {
+        return Err(ApiError::bad_request(
+            "分组使用 passthrough 时，同步频道必须设置显式模式",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_group_mode(group: &Group) -> Result<(), ApiError> {
+    if !crate::config::model::valid_mode(&group.mode) {
+        return Err(ApiError::bad_request(format!(
+            "不支持的分组模式: {}",
+            group.mode
+        )));
+    }
+    if group.mode == "passthrough"
+        && group
+            .channels
+            .iter()
+            .any(|channel| !channel.source_id.is_empty() && channel.mode.is_none())
+    {
+        return Err(ApiError::bad_request(
+            "组内有未设置模式的同步频道，不能使用 passthrough",
+        ));
+    }
+    Ok(())
+}
+
 fn body_id(body: &Value) -> Result<String, ApiError> {
     let id = body
         .get("id")
@@ -62,6 +99,7 @@ pub async fn create_group(
         return Err(ApiError::conflict("Group id already exists"));
     }
     let group: Group = merge_into(&Group::default(), &body)?;
+    validate_group_mode(&group)?;
 
     state
         .mutate(|config| {
@@ -85,6 +123,7 @@ pub async fn update_group(
         .group(&gid)
         .ok_or_else(|| ApiError::not_found("Group not found"))?;
     let updated: Group = merge_into(group, &body)?;
+    validate_group_mode(&updated)?;
     let offline_changed = group.offline_on_fail != updated.offline_on_fail;
 
     state
@@ -181,7 +220,13 @@ pub async fn create_channel(
     if group.channels.iter().any(|channel| channel.id == id) {
         return Err(ApiError::conflict("Channel id already exists"));
     }
-    let channel: Channel = merge_into(&Channel::default(), &body)?;
+    let mut channel: Channel = merge_into(&Channel::default(), &body)?;
+    validate_channel_mode(group, &channel)?;
+    if body.get("mode").is_some() {
+        channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
+    } else {
+        channel.clear_mode_source();
+    }
 
     state
         .mutate(|config| {
@@ -206,15 +251,24 @@ pub async fn update_channel(
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
     let current = state.snapshot();
-    let channel = current
+    let group = current
         .group(&gid)
-        .and_then(|group| group.channels.iter().find(|channel| channel.id == cid))
+        .ok_or_else(|| ApiError::not_found("Group not found"))?;
+    let channel = group
+        .channels
+        .iter()
+        .find(|channel| channel.id == cid)
         .ok_or_else(|| ApiError::not_found("Channel not found"))?;
     let mut updated: Channel = merge_into(channel, &body)?;
+    validate_channel_mode(group, &updated)?;
+    if body.get("mode").is_some() {
+        updated.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
+    }
     let upstream_changed = subscription::upstream_differs(channel, &updated);
     // 改上游字段后固定。请求体显式带 `sync_follow` 时以请求为准。
     if !channel.source_id.is_empty() && body.get("sync_follow").is_none() && upstream_changed {
         updated.sync_follow = false;
+        updated.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
     }
     let offline_changed = channel.offline_on_fail != updated.offline_on_fail;
     // 解析脚本或上游地址变化后，旧探测结果不再代表这个频道。
@@ -332,6 +386,10 @@ fn import(
             .map_err(|err| ApiError::bad_request(format!("分组字段不合法: {err}")))?;
         if group.id.trim().is_empty() || group.name.trim().is_empty() {
             return Err(ApiError::bad_request("分组 id 与名称不能为空"));
+        }
+        validate_group_mode(&group)?;
+        for channel in &group.channels {
+            validate_channel_mode(&group, channel)?;
         }
         groups.push(group);
     }

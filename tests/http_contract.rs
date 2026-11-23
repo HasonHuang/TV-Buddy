@@ -1635,6 +1635,134 @@ async fn backfill_mode_endpoint_stamps_unset_sync_channels() {
 }
 
 #[tokio::test]
+async fn channel_mode_override_and_clear() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    let put = |body: serde_json::Value| {
+        fixture
+            .client
+            .put(format!("{}/panel/api/groups/pg/channels/c1", fixture.base))
+            .header("authorization", &auth)
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+    };
+
+    let response = put(json!({ "mode": "redirect" })).await.expect("设置模式");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let groups: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/groups/export", fixture.base))
+            .header("authorization", &auth)
+            .send()
+            .await
+            .expect("导出")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let pg = groups
+        .as_array()
+        .expect("分组数组")
+        .iter()
+        .find(|group| group["id"] == "pg")
+        .expect("应有 pg");
+    assert_eq!(pg["channels"][0]["mode"], "redirect");
+    assert_eq!(pg["channels"][0]["mode_source"], "manual");
+
+    let response = put(json!({ "mode": null })).await.expect("清空模式");
+    assert_eq!(response.status(), StatusCode::OK);
+    let groups: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/panel/api/groups/export", fixture.base))
+            .header("authorization", &auth)
+            .send()
+            .await
+            .expect("导出")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let pg = groups
+        .as_array()
+        .expect("分组数组")
+        .iter()
+        .find(|group| group["id"] == "pg")
+        .expect("应有 pg");
+    assert!(pg["channels"][0].get("mode").is_none());
+    assert_eq!(pg["channels"][0]["mode_source"], "manual");
+}
+
+#[tokio::test]
+async fn invalid_and_sync_passthrough_modes_are_rejected() {
+    let fixture = fixture_with_extra(
+        r#"{
+            "playlist": {"sources": [{"id":"s1","name":"源","url":"http://up/a.m3u","mode":"sync","playback_mode":"redirect"}]},
+            "groups": [{"id":"sg","name":"同步组","mode":"proxy","access":"public","channels":[
+                {"id":"c1","name":"同步频道","url":"http://up/c1.m3u8","source_id":"s1","sync_follow":true}
+            ]}]
+        }"#,
+    )
+    .await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let put = |path: &str, body: serde_json::Value| {
+        fixture
+            .client
+            .put(format!("{}{path}", fixture.base))
+            .header("authorization", &auth)
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+    };
+
+    let response = put(
+        "/panel/api/groups/sg/channels/c1",
+        json!({ "mode": "magic" }),
+    )
+    .await
+    .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = put(
+        "/panel/api/groups/sg/channels/c1",
+        json!({ "mode": "passthrough" }),
+    )
+    .await
+    .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = put("/panel/api/groups/sg", json!({ "mode": "passthrough" }))
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = put(
+        "/panel/api/groups/sg/channels/c1",
+        json!({ "mode": "redirect" }),
+    )
+    .await
+    .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = put("/panel/api/groups/sg", json!({ "mode": "passthrough" }))
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = put("/panel/api/groups/sg/channels/c1", json!({ "mode": null }))
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn unknown_panel_api_is_404() {
     let fixture = fixture().await;
     let session = login(&fixture).await;
