@@ -86,7 +86,7 @@ echo "exit=$?"
 安装完成：/opt/tv-buddy
 数据：/opt/tv-buddy/tv-buddy.db
 初始口令：/opt/tv-buddy/cache/admin_initial_credentials.txt
-面板：http://<主机>:9900/panel（账号 admin；初始口令见下）
+面板：http://<主机>:9900/page（账号 admin；初始口令见下）
 状态：服务已启动
 exit=0
 ```
@@ -168,9 +168,9 @@ rc-update show default | grep tv-buddy
 ### 8. 核对健康检查
 
 ```bash
-curl -sS -o /tmp/tv-health.txt -w '%{http_code}\n' http://127.0.0.1:9900/health
+curl -sS -o /tmp/tv-health.txt -w '%{http_code}\n' http://127.0.0.1:9900/api/health
 cat /tmp/tv-health.txt; echo
-curl -sS -D - -o /dev/null http://127.0.0.1:9900/health | tr -d '\r' | head -n 5
+curl -sS -D - -o /dev/null http://127.0.0.1:9900/api/health | tr -d '\r' | head -n 5
 ```
 
 预期：
@@ -184,21 +184,22 @@ content-type: text/plain; charset=utf-8
 
 正文 `ok` 没有换行，`echo` 用于换行显示（`src/http.rs:25`、`src/http/routes/public.rs:29-35`）。
 
-说明：默认绑定位是 `[::]`。Linux 默认接受 IPv4 映射地址，`127.0.0.1` 可用。若 `127.0.0.1` 连接失败而 `curl 'http://[::1]:9900/health'` 成功，检查 `sysctl net.ipv6.bindv6only`。
+说明：默认绑定位是 `[::]`。Linux 默认接受 IPv4 映射地址，`127.0.0.1` 可用。若 `127.0.0.1` 连接失败而 `curl 'http://[::1]:9900/api/health'` 成功，检查 `sysctl net.ipv6.bindv6only`。
 
 ### 9. 核对面板页面
 
 ```bash
-curl -sS -o /tmp/tv-panel.html -w '%{http_code}\n' http://127.0.0.1:9900/panel
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:9900/
+curl -sS -o /tmp/tv-panel.html -w '%{http_code}\n' http://127.0.0.1:9900/page
 wc -c /tmp/tv-panel.html
 ```
 
-预期：状态码 `200`，字节数大于 0（`src/http.rs:50-51`）。
+预期：根路径返回 `302`，`redirect_url` 为 `/page`。`/page` 返回 `200`，字节数大于 0（`src/http.rs:50-51`）。未登录时，页面显示登录表单。没有独立登录页。
 
 ### 10. 核对默认账号登录
 
 ```bash
-curl -sS -X POST http://127.0.0.1:9900/panel/api/login \
+curl -sS -X POST http://127.0.0.1:9900/api/panel/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}'
 ```
@@ -210,7 +211,7 @@ curl -sS -X POST http://127.0.0.1:9900/panel/api/login \
 ### 11. 核对错误口令被拒绝
 
 ```bash
-curl -sS -o /tmp/tv-login-bad.json -w '%{http_code}\n' -X POST http://127.0.0.1:9900/panel/api/login \
+curl -sS -o /tmp/tv-login-bad.json -w '%{http_code}\n' -X POST http://127.0.0.1:9900/api/panel/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"not-the-password"}'
 cat /tmp/tv-login-bad.json; echo
@@ -232,7 +233,7 @@ grep -a -n 'tv-buddy 启动' /opt/tv-buddy/tv-buddy.log | tail -n 1
 
 预期：
 
-- `tv-buddy url` 输出三行：`面板地址：http://<host>:9900/panel`、`账号：admin`、`初始口令：/opt/tv-buddy/cache/admin_initial_credentials.txt`。绑定位为 `[::]` 时自动探测本机 IP。
+- `tv-buddy url` 输出三行：`面板地址：http://<host>:9900/page`、`账号：admin`、`初始口令：/opt/tv-buddy/cache/admin_initial_credentials.txt`。绑定位为 `[::]` 时自动探测本机 IP。
 - `tv-buddy status` 退出码 `0`（`packaging/tv-buddy.sh:649-663`）。
 - 日志中出现启动记录 `tv-buddy 启动`（`src/main.rs:90-97`）。
 
@@ -257,7 +258,7 @@ grep -a -c 'tv-buddy 启动' /opt/tv-buddy/tv-buddy.log
 ```bash
 tv-buddy restart; echo "restart=$?"
 sleep 2
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9900/health
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9900/api/health
 ```
 
 预期：`restart=0`，随后状态码 `200`。
@@ -278,14 +279,14 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9900/health
 | 8 | 配置端口 | `bind = "[::]:9900"` | 其他值 |
 | 9 | 服务状态 | 第 7 步所选分支的退出码为 `0` | 非 0 |
 | 10 | 开机自启 | systemd 下 `is-enabled` 输出 `enabled`；OpenRC 下 `rc-update` 列出 `tv-buddy` | 未启用 |
-| 11 | 健康检查 | `/health` 返回 `200`，正文 `ok`，`content-type` 为 `text/plain; charset=utf-8` | 非 200 或正文不符 |
-| 12 | 面板页面 | `/panel` 返回 `200`，字节数大于 0 | 非 200 或空正文 |
+| 11 | 健康检查 | `/api/health` 返回 `200`，正文 `ok`，`content-type` 为 `text/plain; charset=utf-8` | 非 200 或正文不符 |
+| 12 | 面板页面 | `/` 返回 `302` 且跳转 `/page`；`/page` 返回 `200`，字节数大于 0 | 非 302、跳转目标不符、非 200 或空正文 |
 | 13 | 默认账号 | 登录返回 `200` 且正文含 `token` | 401 或 429 |
 | 14 | 错误口令 | 返回 `401`，正文为 `{"error":"用户名或密码错误"}` | 返回 200 或其他正文 |
 | 15 | CLI 地址 | `tv-buddy url` 输出三行，端口为 9900，末行是凭据文件绝对路径 | 行数不符、端口不符，或末行不是绝对路径 |
 | 16 | CLI 状态 | `tv-buddy status` 退出码为 `0` | 非 0 |
 | 17 | 日志文件 | `/opt/tv-buddy/tv-buddy.log` 存在，且含 `tv-buddy 启动` | 文件缺失或不含该行 |
-| 18 | 重启 | `restart=0`，重启后 `/health` 返回 `200` | 非 0 或健康检查失败 |
+| 18 | 重启 | `restart=0`，重启后 `/api/health` 返回 `200` | 非 0 或健康检查失败 |
 
 通过条件：第 1 至 18 项全部通过。第 10 项仅对 systemd 与 OpenRC 有效。PID 文件模式跳过第 10 项。
 
@@ -323,11 +324,11 @@ is-active 或 status 退出码：
 开机自启输出：
 
 ### HTTP
-/health 状态码：
-/health 正文：
-/health content-type：
-/panel 状态码：
-/panel 字节数：
+/api/health 状态码：
+/api/health 正文：
+/api/health content-type：
+/page 状态码：
+/page 字节数：
 /login 正确口令：是否含 token（不贴 token）：
 /login 错误口令状态码与正文：
 
@@ -337,7 +338,7 @@ tv-buddy status 退出码：
 tv-buddy log 5 输出：
 日志中的启动记录（grep -a 'tv-buddy 启动'）：
 restart 退出码：
-restart 后 /health 状态码：
+restart 后 /api/health 状态码：
 ```
 
 ## 6. 失败时怎么报
@@ -383,8 +384,8 @@ cat /opt/tv-buddy/tv-buddy.pid 2>/dev/null || echo "无 PID 文件"
 | 安装打印 `警告：rc-service tv-buddy restart 失败` | OpenRC 状态 | `/tmp/tv-rc.txt`、`/tmp/tv-messages.txt` |
 | 安装打印 `警告：服务启动失败，见 /opt/tv-buddy/tv-buddy.log` | 日志末尾 | `/tmp/tv-buddy.log` |
 | 服务反复重启 | `journalctl` 里是否有 `打开数据库失败` | `/tmp/tv-journal.txt`、`/tmp/tv-buddy.db` |
-| `/health` 连接失败 | 进程是否存活、端口是否被占 | `/tmp/tv-listen.txt`、`/tmp/tv-journal.txt` |
-| `/health` 返回 200 但登录 401 | 账号是否为 `admin`；口令是否取自凭据文件 | `/tmp/tv-buddy.db`、`/opt/tv-buddy/cache/admin_initial_credentials.txt` |
+| `/api/health` 连接失败 | 进程是否存活、端口是否被占 | `/tmp/tv-listen.txt`、`/tmp/tv-journal.txt` |
+| `/api/health` 返回 200 但登录 401 | 账号是否为 `admin`；口令是否取自凭据文件 | `/tmp/tv-buddy.db`、`/opt/tv-buddy/cache/admin_initial_credentials.txt` |
 | 凭据文件不存在 | 是否 `curl` 报错前就启动过服务（文件只在首次启动、库内无用户时生成）。库内已有用户时不再重建 | `ls -l /opt/tv-buddy/cache/`、`/opt/tv-buddy/tv-buddy.log` 中含 `admin_initial_credentials` 的行。日志里 `path=` 是实际写入位置 |
 | 登录返回 429 | 失败次数是否超限 | `/tmp/tv-journal.txt` |
 
@@ -396,9 +397,9 @@ cat /opt/tv-buddy/tv-buddy.pid 2>/dev/null || echo "无 PID 文件"
 - 配置存于 SQLite（`tv-buddy.db`）。库打不开或 JSON 解析失败时直接报错。
 - 校验会拦：`server.bind` 为空、分组 id 为空或重复、频道 id 重复（`src/config.rs`）。
 - 缺少 sha256 工具时，安装脚本打印 `未找到 sha256 工具，跳过校验` 并继续（`install.sh:168-169`）。这不是安装失败，但要记录。
-- systemd 下 `Restart=on-failure` 与 `RestartSec=3` 会让坏配置进入每 3 秒重启的循环（`packaging/tv-buddy.service:11-12`）。`is-active` 在该期间可能短暂为 active。以 `journalctl` 中的 `打开数据库失败` 或 `配置记录解析失败` 与 `/health` 结果为准。
+- systemd 下 `Restart=on-failure` 与 `RestartSec=3` 会让坏配置进入每 3 秒重启的循环（`packaging/tv-buddy.service:11-12`）。`is-active` 在该期间可能短暂为 active。以 `journalctl` 中的 `打开数据库失败` 或 `配置记录解析失败` 与 `/api/health` 结果为准。
 - OpenRC 下 `tv-buddy log` 先读 `/opt/tv-buddy/tv-buddy.log`。只有该文件缺失时才回退到 `/var/log/tv-buddy.log`（`packaging/tv-buddy.sh:670-681`）。程序实际写 `/opt/tv-buddy/tv-buddy.log`（`src/logging.rs:166-173`）。正常安装下回退分支不执行。收集时两份日志都取。
-- PID 文件模式下，`start` 只等进程存活，最多 10 秒（`packaging/tv-buddy.sh:185-190`）。`start` 成功不等于 HTTP 已就绪。以 `/health` 结果为准。
+- PID 文件模式下，`start` 只等进程存活，最多 10 秒（`packaging/tv-buddy.sh:185-190`）。`start` 成功不等于 HTTP 已就绪。以 `/api/health` 结果为准。
 - 上报时附上 `/tmp/install-debug.log`。该文件由下面命令生成：
 
 ```bash

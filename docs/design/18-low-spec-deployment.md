@@ -117,24 +117,23 @@ sudo ./install.sh --low-spec
 
 另外确认：**不缓存 3xx**（`redirect` 模式会 302 到带时效的上游地址）、**不缓存非 200**。
 
-缓存规则分三层，顺序不能颠倒：
+缓存规则分两层，顺序不能颠倒：
 
 ```text
 不缓存（放最前）
   /api/*
-  /page/*
+  /page*
 
 缓存（放在其后）
   /media/*
   /static/panel/*
   /static/logo/*
   /static/assets/*
-
-兜底不缓存（放最后）
-  /*
 ```
 
-`/api/*` 覆盖面板 API、订阅、清单、解封接口、健康检查与分享接口。`/media/*` 只包含切片、初始化段、时移切片、DASH 切片与 MPD 代理数据。首页 `/` 由兜底规则覆盖。
+不要加兜底 `/*` 规则。
+
+`/api/*` 覆盖面板 API、订阅、清单、解封接口、健康检查与分享接口。`/media/*` 只包含切片、初始化段、时移切片、DASH 切片与 MPD 代理数据。`/page*` 覆盖 `/page` 与 `/page/unban`，含裸 `/page`。不要写成 `/page/*`。根路径 `/` 默认 `302` 到 `/page`。不缓存 3xx 与非 200，所以 `/` 与未知路径不入缓存。
 
 **不要按扩展名写规则。** 伪装扩展名在 jpg/png/gif/bmp/webp 之间轮换。控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。
 
@@ -192,9 +191,10 @@ printf 'cdn1=%s\ncdn2=%s\norigin=%s\n' "$CDN1" "$CDN2" "$ORIGIN"
 
 # 4) 面板与 API 不被缓存
 curl -s -o /dev/null -D - "https://<域名>/api/panel/status" | grep -iE 'x-cache|cache-control'
+curl -s -o /dev/null -D - "https://<域名>/page" | grep -iE 'x-cache|cache-control'
 ```
 
-期望：清单与面板返回 `BYPASS`。切片第二次返回 `HIT` 并带 `Age`。三个哈希一致（CDN 两次 + 源站一次）。切片地址不带 token；只有清单入口需要 token。`sha256sum` 与 `shasum` 都没有时，先安装 `coreutils` 或 `perl`。
+期望：清单、面板页与 API 返回 `BYPASS`。`/page` 请求验证 `/page*` 覆盖裸 `/page`。切片第二次返回 `HIT` 并带 `Age`。三个哈希一致（CDN 两次 + 源站一次）。切片地址不带 token；只有清单入口需要 token。`sha256sum` 与 `shasum` 都没有时，先安装 `coreutils` 或 `perl`。
 
 完整验收与记录模板见 [`docs/tests/06-cdn-console.md`](../tests/06-cdn-console.md)。磁盘回收与 24 小时运行验收见 [`docs/tests/05-low-spec-acceptance.md`](../tests/05-low-spec-acceptance.md)。
 

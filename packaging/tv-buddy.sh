@@ -301,7 +301,7 @@ show_url() {
     case "$host" in
         *:*) host="[$host]" ;;
     esac
-    printf '面板地址：http://%s:%s/page/panel\n' "$host" "$port"
+    printf '面板地址：http://%s:%s/page\n' "$host" "$port"
     printf '账号：%s\n' "$DEFAULT_USER"
     printf '初始口令：%s\n' "$CREDENTIALS_FILE"
 }

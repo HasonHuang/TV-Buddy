@@ -92,8 +92,6 @@ docker compose ps
 docker compose exec tv-buddy wget -qO- http://127.0.0.1:9900/api/health
 ```
 
-旧地址 `/health` 在本次主版本内仍可用。新脚本请使用 `/api/health`。
-
 ## 4. 修改端口与监听地址
 
 ### 4.1 命令行

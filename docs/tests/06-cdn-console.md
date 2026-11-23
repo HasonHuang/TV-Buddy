@@ -287,7 +287,7 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq -r
 
 ```text
 /api/*
-/page/*
+/page*
 ```
 
 缓存：
@@ -299,17 +299,15 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/cache/stats" | jq -r
 /static/assets/*
 ```
 
-兜底不缓存：
+不要加兜底 `/*` 规则。
 
-```text
-/*
-```
+`/api/*` 覆盖面板 API、订阅、清单、解封接口、健康检查与分享接口。`/media/*` 只包含切片、初始化段、时移切片、DASH 切片与 MPD 代理数据。`/static/*` 包含台标、面板构建产物与本地素材。
 
-兜底规则必须放在最后。否则媒体路径不会被缓存。
+`/page*` 覆盖 `/page` 与 `/page/unban`，含裸 `/page`。不要写成 `/page/*`。部分控制台不会用 `/page/*` 匹配裸 `/page`。
 
-`/api/*` 覆盖面板 API、订阅、清单、解封接口、健康检查与分享接口。`/media/*` 只包含切片、初始化段、时移切片、DASH 切片与 MPD 代理数据。`/static/*` 包含台标、面板构建产物与本地素材。首页 `/` 由兜底规则覆盖，不要写成前缀规则。
+根路径 `/` 默认 `302` 到 `/page`。不缓存 3xx 与非 200，所以 `/` 与未知路径不入缓存。不要把 `/` 写成前缀规则。
 
-不要颠倒顺序。缓存规则放在不缓存规则之前时，`/api/*` 与 `/page/*` 会被缓存。
+不要颠倒顺序。缓存规则放在不缓存规则之前时，`/api/*` 与 `/page*` 会被缓存。
 
 依据：`docs/design/06-low-spec-optimization.md` §2.2。
 
@@ -478,10 +476,10 @@ curl -sS -o /dev/null -D - -H "Authorization: Bearer $ADMIN" "$CDN/api/panel/sta
 面板页面：
 
 ```bash
-curl -sS -o /dev/null -D - "$CDN/page/panel" | sed -n '1,25p'
+curl -sS -o /dev/null -D - "$CDN/page" | sed -n '1,25p'
 ```
 
-预期：`200`。缓存状态 `BYPASS`。
+预期：`200`。缓存状态 `BYPASS`。本请求验证 `/page*` 覆盖裸 `/page`。
 
 订阅清单：
 
@@ -581,7 +579,7 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/logout" | jq
 
 - 不缓存规则条数：
 - 缓存规则条数：
-- 兜底规则：
+- 兜底规则：无（不得设置 `/*`）
 - 保存时间（UTC）：
 - Purge All 时间（UTC）：
 
@@ -700,12 +698,12 @@ curl -sS -H "Authorization: Bearer $ADMIN" "$BASE/api/panel/config" \
 | 清单给 `http://` | 未下发 XFP；或 CDN 改写了 Host | `docs/design/06-low-spec-optimization.md:140` |
 | 源站命中返回 `private` | 只能「遵循源站头」的 CDN 不缓存。改用强制 TTL，或开 `[cdn].shared_cache_hits=true` | `src/http/routes/stream.rs:57-70` |
 | 上游失败被缓存成 200 空体 | 开 `[cdn].enabled=true`，设 `empty_status=502` | `src/http/routes/stream.rs:1579-1594` |
-| 订阅清单被缓存 | 源站已发 `Cache-Control: private, no-store`。检查不缓存规则是否仍 BYPASS `/api/sub/*`（旧 `/sub/*`） | `src/http/routes/sub.rs:60-66` |
+| 订阅清单被缓存 | 源站已发 `Cache-Control: private, no-store`。检查不缓存规则是否仍 BYPASS `/api/sub/*` | `src/http/routes/sub.rs:60-66` |
 | 切片 URL 每 5 分钟变一次 | 正常。时间窗签名会让路径变。缓存键必须包含 URI 路径 | `src/sign.rs` |
 | 切片返回 `302` | 签名过期或密钥被改。播放器重拉清单即恢复 | `src/http/routes/stream.rs` |
 | 两个用户拿到不同切片 URL | 时间窗不同或密钥不同。检查系统时钟与 `slice_sign_window_secs` | `src/sign.rs` |
 | 面板 JS/CSS 不缓存 | `/static/panel/*` 不在缓存规则。补 CACHE | `src/http/static_assets.rs:49-55` |
-| 面板页面被缓存 | `/page/*` 不在不缓存规则。补 BYPASS | `src/http/static_assets.rs:31-39` |
+| 面板页面被缓存 | `/page*` 不在不缓存规则。补 BYPASS | `src/http/static_assets.rs:31-39` |
 | `/api/panel/*` 被缓存 | `/api/*` 不在不缓存规则。补 BYPASS | `src/http.rs:45` |
 | DASH 轨道清单被缓存 | 四段路径不在 `/*/*/index.txt`。补 BYPASS | `src/dash_hls.rs:998-1000` |
 | 时移切片不缓存 | `/media/{gid}/{cid}/timeshift/*` 不在缓存规则。补 CACHE | `src/timeshift.rs:7` |

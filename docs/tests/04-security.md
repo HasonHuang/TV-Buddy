@@ -50,11 +50,11 @@ systemctl is-active tv-buddy
 确认版本。程序不认 `--version`，改用面板接口：
 
 ```bash
-T=$(curl -sS -X POST http://127.0.0.1:9900/panel/api/login \
+T=$(curl -sS -X POST http://127.0.0.1:9900/api/panel/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-curl -sS -H "Authorization: Bearer $T" http://127.0.0.1:9900/panel/api/status \
+curl -sS -H "Authorization: Bearer $T" http://127.0.0.1:9900/api/panel/status \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["version"])'
 ```
 
@@ -68,7 +68,7 @@ curl -sS -H "Authorization: Bearer $T" http://127.0.0.1:9900/panel/api/status \
 
 ```bash
 BASE=http://127.0.0.1:9900
-LOGIN=$(curl -s -X POST "$BASE/panel/api/login" \
+LOGIN=$(curl -s -X POST "$BASE/api/panel/login" \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}')
 TOKEN=$(printf '%s' "$LOGIN" | jq -r .token)
@@ -83,7 +83,7 @@ printf '%s\n' "$LOGIN"
 备份当前 `[auth]`：
 
 ```bash
-curl -s -H "$AUTH" "$BASE/panel/api/config" | jq '.auth' > /tmp/tv-buddy-auth-backup.json
+curl -s -H "$AUTH" "$BASE/api/panel/config" | jq '.auth' > /tmp/tv-buddy-auth-backup.json
 cat /tmp/tv-buddy-auth-backup.json
 ```
 
@@ -93,10 +93,10 @@ cat /tmp/tv-buddy-auth-backup.json
 
 ```bash
 set_auth() {
-  curl -s -H "$AUTH" "$BASE/panel/api/config" \
+  curl -s -H "$AUTH" "$BASE/api/panel/config" \
     | jq --argjson patch "$1" '.auth |= (. + $patch)' \
     | curl -s -X PUT -H "$AUTH" -H 'Content-Type: application/json' \
-        --data-binary @- "$BASE/panel/api/config"
+        --data-binary @- "$BASE/api/panel/config"
 }
 ```
 
@@ -104,16 +104,16 @@ set_auth() {
 
 说明：
 
-- `PUT /panel/api/config` 写盘并立即生效（`src/http/routes/panel.rs:186`）。不需要重启，也不需要等热重载。
+- `PUT /api/panel/config` 写盘并立即生效（`src/http/routes/panel.rs:186`）。不需要重启，也不需要等热重载。
 - 改配置不清空内存里的封禁、会话、限流、登录失败计数。`replace` 只重置 watchdog、切片、订阅、缓存（`src/state.rs:210`）。
 - 因此用例之间用不同 IP，避免互相污染。
 
 取分组与频道 id：
 
 ```bash
-GID=$(curl -s -H "$AUTH" "$BASE/panel/api/config" | jq -r '.groups[0].id')
-CID=$(curl -s -H "$AUTH" "$BASE/panel/api/config" | jq -r '.groups[0].channels[0].id')
-CID2=$(curl -s -H "$AUTH" "$BASE/panel/api/config" | jq -r '.groups[0].channels[1].id')
+GID=$(curl -s -H "$AUTH" "$BASE/api/panel/config" | jq -r '.groups[0].id')
+CID=$(curl -s -H "$AUTH" "$BASE/api/panel/config" | jq -r '.groups[0].channels[0].id')
+CID2=$(curl -s -H "$AUTH" "$BASE/api/panel/config" | jq -r '.groups[0].channels[1].id')
 printf 'GID=%s CID=%s CID2=%s\n' "$GID" "$CID" "$CID2"
 ```
 
@@ -134,7 +134,7 @@ set_auth '{"ip_guard_enabled":false,"token_enabled":false,"whitelist":[]}'
 for i in $(seq 1 15); do
   curl -s -o /dev/null -w '%{http_code}\n' \
     -H 'X-Forwarded-For: 198.51.100.10' \
-    "$BASE/$GID/$CIDX.m3u8"
+    "$BASE/api/play/$GID/$CIDX.m3u8"
 done | sort | uniq -c
 ```
 
@@ -155,7 +155,7 @@ for i in $(seq 1 12); do
   printf '%02d ' "$i"
   curl -s -o /dev/null -D - \
     -H 'X-Forwarded-For: 203.0.113.10' \
-    "$BASE/$GID/$CIDX.m3u8" \
+    "$BASE/api/play/$GID/$CIDX.m3u8" \
     | awk 'NR==1{printf "%s ",$2} tolower($1)=="retry-after:"{printf "Retry-After=%s",$2} END{print ""}'
   sleep 3
 done
@@ -189,7 +189,7 @@ done
 第 11 次的正文：
 
 ```bash
-curl -s -H 'X-Forwarded-For: 203.0.113.10' "$BASE/$GID/$CIDX.m3u8"
+curl -s -H 'X-Forwarded-For: 203.0.113.10' "$BASE/api/play/$GID/$CIDX.m3u8"
 echo
 ```
 
@@ -198,7 +198,7 @@ echo
 查看统计：
 
 ```bash
-curl -s -H "$AUTH" "$BASE/panel/api/security/ip/stats" \
+curl -s -H "$AUTH" "$BASE/api/panel/security/ip/stats" \
   | jq '.entries[] | select(.ip=="203.0.113.10")'
 ```
 
@@ -209,7 +209,7 @@ curl -s -H "$AUTH" "$BASE/panel/api/security/ip/stats" \
 ```bash
 curl -s -X POST -H "$AUTH" -H 'Content-Type: application/json' \
   -d '{"ip":"203.0.113.10"}' \
-  "$BASE/panel/api/security/ip/unban"
+  "$BASE/api/panel/security/ip/unban"
 ```
 
 预期：`{"ok":true,"removed":1,"requested":1}`（`src/http/routes/security.rs:206`）。
@@ -222,7 +222,7 @@ for i in 1 2 3; do
   printf '%02d ' "$i"
   curl -s -o /dev/null -D - \
     -H 'X-Forwarded-For: 203.0.113.11' \
-    "$BASE/$GID/$CIDX.m3u8" \
+    "$BASE/api/play/$GID/$CIDX.m3u8" \
     | awk 'NR==1{printf "%s ",$2} tolower($1)=="retry-after:"{printf "Retry-After=%s",$2} END{print ""}'
 done
 ```
@@ -247,7 +247,7 @@ set_auth '{"ip_guard_enabled":true,"whitelist":[],"max_sessions_per_ip":1,"sessi
 play() {
   curl -s -o /dev/null -D - \
     -H 'X-Forwarded-For: 203.0.113.20' \
-    "$BASE/$GID/$1.m3u8" \
+    "$BASE/api/play/$GID/$1.m3u8" \
     | awk 'NR==1{printf "status=%s ",$2} tolower($1)=="location:"{printf "location=%s",$2} END{print ""}'
 }
 printf 'A1 '; play "$CID"
@@ -284,7 +284,7 @@ set_auth '{"max_sessions_per_ip":0}'
 play0() {
   curl -s -o /dev/null -D - \
     -H 'X-Forwarded-For: 203.0.113.21' \
-    "$BASE/$GID/$1.m3u8" \
+    "$BASE/api/play/$GID/$1.m3u8" \
     | awk 'NR==1{printf "status=%s ",$2} tolower($1)=="location:"{printf "location=%s",$2} END{print ""}'
 }
 printf 'A1 '; play0 "$CID"
@@ -307,7 +307,7 @@ set_auth '{"ip_guard_enabled":true,"whitelist":["203.0.113.30"],"l1_limit":30,"l
 for i in $(seq 1 12); do
   curl -s -o /dev/null -w '%{http_code}\n' \
     -H 'X-Forwarded-For: 203.0.113.30' \
-    "$BASE/$GID/$CIDX.m3u8"
+    "$BASE/api/play/$GID/$CIDX.m3u8"
 done | sort | uniq -c
 ```
 
@@ -320,7 +320,7 @@ set_auth '{"whitelist":["203.0.113.0/24"]}'
 for i in $(seq 1 10); do
   curl -s -o /dev/null -w '%{http_code}\n' \
     -H 'X-Forwarded-For: 203.0.113.31' \
-    "$BASE/$GID/$CIDX.m3u8"
+    "$BASE/api/play/$GID/$CIDX.m3u8"
 done | sort | uniq -c
 ```
 
@@ -333,7 +333,7 @@ set_auth '{"whitelist":["*"]}'
 for i in $(seq 1 10); do
   curl -s -o /dev/null -w '%{http_code}\n' \
     -H 'X-Forwarded-For: 198.51.100.1' \
-    "$BASE/$GID/$CIDX.m3u8"
+    "$BASE/api/play/$GID/$CIDX.m3u8"
 done | sort | uniq -c
 ```
 
@@ -346,7 +346,7 @@ set_auth '{"whitelist":["2001:db8::1"]}'
 for i in $(seq 1 10); do
   curl -s -o /dev/null -w '%{http_code}\n' \
     -H 'X-Forwarded-For: 2001:db8::1' \
-    "$BASE/$GID/$CIDX.m3u8"
+    "$BASE/api/play/$GID/$CIDX.m3u8"
 done | sort | uniq -c
 ```
 
@@ -359,7 +359,7 @@ set_auth '{"whitelist":["2001:db8::/32"]}'
 for i in $(seq 1 10); do
   curl -s -o /dev/null -w '%{http_code}\n' \
     -H 'X-Forwarded-For: 2001:db8::2' \
-    "$BASE/$GID/$CIDX.m3u8"
+    "$BASE/api/play/$GID/$CIDX.m3u8"
 done | sort | uniq -c
 ```
 
@@ -374,7 +374,7 @@ set_auth '{"whitelist":["203.0.113.0/33"]}'
 for i in $(seq 1 10); do
   curl -s -o /dev/null -w '%{http_code}\n' \
     -H 'X-Forwarded-For: 203.0.113.32' \
-    "$BASE/$GID/$CIDX.m3u8"
+    "$BASE/api/play/$GID/$CIDX.m3u8"
 done | sort | uniq -c
 ```
 
@@ -387,12 +387,12 @@ done | sort | uniq -c
 ```bash
 set_auth '{"ip_guard_enabled":true,"whitelist":["203.0.113.33"],"auth_fail_free_per_window":0,"auth_fail_ban_threshold":3,"auth_fail_lock_secs":300}'
 for i in 1 2 3; do
-  curl -s -o /dev/null -X POST "$BASE/panel/api/login" \
+  curl -s -o /dev/null -X POST "$BASE/api/panel/login" \
     -H 'Content-Type: application/json' \
     -H 'X-Forwarded-For: 203.0.113.33' \
     -d '{"username":"admin","password":"wrong"}'
 done
-curl -s -w '\n%{http_code}\n' -X POST "$BASE/panel/api/login" \
+curl -s -w '\n%{http_code}\n' -X POST "$BASE/api/panel/login" \
   -H 'Content-Type: application/json' \
   -H 'X-Forwarded-For: 203.0.113.33' \
   -d '{"username":"admin","password":"wrong"}'
@@ -414,13 +414,13 @@ set_auth '{"ip_guard_enabled":true,"whitelist":[],"auth_fail_window_secs":60,"au
 
 ```bash
 try_login() {
-  curl -s -o /dev/null -w '%{http_code}\n' -X POST "$BASE/panel/api/login" \
+  curl -s -o /dev/null -w '%{http_code}\n' -X POST "$BASE/api/panel/login" \
     -H 'Content-Type: application/json' \
     -H "X-Forwarded-For: $1" \
     -d '{"username":"admin","password":"wrong"}'
 }
 locked() {
-  curl -s -X POST "$BASE/panel/api/login" \
+  curl -s -X POST "$BASE/api/panel/login" \
     -H 'Content-Type: application/json' \
     -H "X-Forwarded-For: $1" \
     -d '{"username":"admin","password":"wrong"}'
@@ -469,7 +469,7 @@ locked 203.0.113.77
 检查响应头：
 
 ```bash
-curl -s -D - -o /dev/null -X POST "$BASE/panel/api/login" \
+curl -s -D - -o /dev/null -X POST "$BASE/api/panel/login" \
   -H 'Content-Type: application/json' \
   -H 'X-Forwarded-For: 203.0.113.77' \
   -d '{"username":"admin","password":"wrong"}' \
@@ -481,7 +481,7 @@ curl -s -D - -o /dev/null -X POST "$BASE/panel/api/login" \
 锁定期间既有会话仍可用：
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' -H "$AUTH" "$BASE/panel/api/status"
+curl -s -o /dev/null -w '%{http_code}\n' -H "$AUTH" "$BASE/api/panel/status"
 ```
 
 预期：`200`。
@@ -523,15 +523,15 @@ locked 203.0.113.79
 set_auth '{"ip_guard_enabled":false,"whitelist":[]}'
 curl -s -X POST -H "$AUTH" -H 'Content-Type: application/json' \
   -d '{"ip":"203.0.113.50","secs":60}' \
-  "$BASE/panel/api/security/ip/ban" \
+  "$BASE/api/panel/security/ip/ban" \
   | jq '{ok, secs, max_seconds, default_seconds}'
 ```
 
 预期：`{"ok":true,"secs":60,"max_seconds":2592000,"default_seconds":3600}`。
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-For: 203.0.113.50' "$BASE/$GID/$CID.m3u8"
-curl -s -H 'X-Forwarded-For: 203.0.113.50' "$BASE/$GID/$CID.m3u8"
+curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-For: 203.0.113.50' "$BASE/api/play/$GID/$CID.m3u8"
+curl -s -H 'X-Forwarded-For: 203.0.113.50' "$BASE/api/play/$GID/$CID.m3u8"
 echo
 ```
 
@@ -544,7 +544,7 @@ echo
 ```bash
 set_auth '{"ip_guard_enabled":true}'
 set_auth '{"ip_guard_enabled":false}'
-curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-For: 203.0.113.50' "$BASE/$GID/$CID.m3u8"
+curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-For: 203.0.113.50' "$BASE/api/play/$GID/$CID.m3u8"
 ```
 
 预期：`403`。
@@ -557,10 +557,10 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-For: 203.0.113.50' "$BA
 set_auth '{"ip_guard_enabled":true,"whitelist":["203.0.113.52"]}'
 curl -s -X POST -H "$AUTH" -H 'Content-Type: application/json' \
   -d '{"ip":"203.0.113.52","secs":60}' \
-  "$BASE/panel/api/security/ip/ban" >/dev/null
-curl -s -H "$AUTH" "$BASE/panel/api/security/ip/stats" \
+  "$BASE/api/panel/security/ip/ban" >/dev/null
+curl -s -H "$AUTH" "$BASE/api/panel/security/ip/stats" \
   | jq '.entries[] | select(.ip=="203.0.113.52") | {banned, remaining_secs}'
-curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-For: 203.0.113.52' "$BASE/$GID/$CID.m3u8"
+curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-For: 203.0.113.52' "$BASE/api/play/$GID/$CID.m3u8"
 ```
 
 预期：
@@ -576,7 +576,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-For: 203.0.113.52' "$BA
 for ip in 203.0.113.50 203.0.113.52; do
   curl -s -X POST -H "$AUTH" -H 'Content-Type: application/json' \
     -d "{\"ip\":\"$ip\"}" \
-    "$BASE/panel/api/security/ip/unban"
+    "$BASE/api/panel/security/ip/unban"
   echo
 done
 ```
@@ -589,9 +589,9 @@ done
 
 ```bash
 set_auth '{"ip_guard_enabled":false}'
-curl -s -H 'X-Forwarded-For: 203.0.113.60' "$BASE/unban/whoami"
+curl -s -H 'X-Forwarded-For: 203.0.113.60' "$BASE/api/unban/whoami"
 echo
-curl -s -X POST -H 'X-Forwarded-For: 203.0.113.60' "$BASE/unban"
+curl -s -X POST -H 'X-Forwarded-For: 203.0.113.60' "$BASE/api/unban"
 echo
 ```
 
@@ -606,7 +606,7 @@ echo
 
 ```bash
 set_auth '{"ip_guard_enabled":true,"whitelist":[]}'
-curl -s -H 'X-Forwarded-For: 203.0.113.60' "$BASE/unban/whoami"
+curl -s -H 'X-Forwarded-For: 203.0.113.60' "$BASE/api/unban/whoami"
 echo
 ```
 
@@ -618,9 +618,9 @@ echo
 for n in 1 2 3 4; do
   curl -s -X POST -H "$AUTH" -H 'Content-Type: application/json' \
     -d '{"ip":"203.0.113.60","secs":60}' \
-    "$BASE/panel/api/security/ip/ban" >/dev/null
+    "$BASE/api/panel/security/ip/ban" >/dev/null
   printf 'round %s: ' "$n"
-  curl -s -X POST -H 'X-Forwarded-For: 203.0.113.60' "$BASE/unban"
+  curl -s -X POST -H 'X-Forwarded-For: 203.0.113.60' "$BASE/api/unban"
   echo
 done
 ```
@@ -637,7 +637,7 @@ done
 依据：配额每 IP 3 次 / 30 天（`src/auth/unban.rs:13`、`src/auth/unban.rs:15`）。
 
 ```bash
-curl -s -H 'X-Forwarded-For: 203.0.113.60' "$BASE/unban/whoami"
+curl -s -H 'X-Forwarded-For: 203.0.113.60' "$BASE/api/unban/whoami"
 echo
 ```
 
@@ -648,13 +648,13 @@ echo
 ```bash
 curl -s -X POST -H "$AUTH" -H 'Content-Type: application/json' \
   -d '{"ip":"203.0.113.60"}' \
-  "$BASE/panel/api/security/ip/unban"
+  "$BASE/api/panel/security/ip/unban"
 echo
 ```
 
 预期：`{"ok":true,"removed":1,"requested":1}`。面板解封不消耗自助配额。
 
-`/unban` 与 `/unban/whoami` 不受封禁中间件拦截（`src/http/guard.rs:23`）。
+`/page/unban` 与 `/api/unban/whoami` 不受封禁中间件拦截（`src/http/guard.rs:23`）。
 
 #### 步骤 10：播放 Token
 
@@ -662,7 +662,7 @@ echo
 
 ```bash
 set_auth '{"ip_guard_enabled":false,"token_enabled":false}'
-curl -s -H "$AUTH" "$BASE/panel/api/link-info" | jq '{token, token_enabled}'
+curl -s -H "$AUTH" "$BASE/api/panel/link-info" | jq '{token, token_enabled}'
 ```
 
 预期：`{"token":"","token_enabled":false}`（`src/http/routes/security.rs:30`）。
@@ -671,8 +671,8 @@ curl -s -H "$AUTH" "$BASE/panel/api/link-info" | jq '{token, token_enabled}'
 
 ```bash
 set_auth '{"ip_guard_enabled":false,"token_enabled":true,"token_ttl_hours":24}'
-curl -s -H "$AUTH" "$BASE/panel/api/link-info" | jq '{token, token_enabled}'
-PT=$(curl -s -H "$AUTH" "$BASE/panel/api/link-info" | jq -r .token)
+curl -s -H "$AUTH" "$BASE/api/panel/link-info" | jq '{token, token_enabled}'
+PT=$(curl -s -H "$AUTH" "$BASE/api/panel/link-info" | jq -r .token)
 printf 'len=%s\n' "${#PT}"
 printf '%s\n' "$PT" | grep -Eq '^[0-9a-f]{48}$' && echo shape-ok || echo shape-bad
 ```
@@ -685,7 +685,7 @@ printf '%s\n' "$PT" | grep -Eq '^[0-9a-f]{48}$' && echo shape-ok || echo shape-b
 
 ```bash
 curl -s -o /dev/null -D - -H 'X-Forwarded-For: 203.0.113.40' \
-  "$BASE/$GID/$CID.m3u8" \
+  "$BASE/api/play/$GID/$CID.m3u8" \
   | awk 'NR==1{print "status",$2} tolower($1)=="location:"{print "location",$2}'
 ```
 
@@ -700,7 +700,7 @@ curl -s -o /dev/null -D - -H 'X-Forwarded-For: 203.0.113.40' \
 
 ```bash
 curl -s -o /dev/null -D - -H 'X-Forwarded-For: 203.0.113.40' \
-  "$BASE/$GID/$CID.m3u8?token=$PT" \
+  "$BASE/api/play/token/$PT/$GID/$CID.m3u8" \
   | awk 'NR==1{print "status",$2} tolower($1)=="location:"{print "location",$2}'
 ```
 
@@ -710,7 +710,7 @@ curl -s -o /dev/null -D - -H 'X-Forwarded-For: 203.0.113.40' \
 
 ```bash
 OLD=$PT
-ROT=$(curl -s -X POST -H "$AUTH" "$BASE/panel/api/security/token/rotate")
+ROT=$(curl -s -X POST -H "$AUTH" "$BASE/api/panel/security/token/rotate")
 printf '%s\n' "$ROT" | jq '{ok, expires_in_hours}'
 NEW=$(printf '%s' "$ROT" | jq -r .new_token)
 printf 'OLD=%s NEW=%s len_old=%s len_new=%s\n' "$OLD" "$NEW" "${#OLD}" "${#NEW}"
@@ -723,7 +723,7 @@ test "$OLD" != "$NEW" && echo differ-ok
 for t in "$OLD" "$NEW"; do
   printf '%s ' "${t:0:8}"
   curl -s -o /dev/null -D - -H 'X-Forwarded-For: 203.0.113.41' \
-    "$BASE/$GID/$CID.m3u8?token=$t" \
+    "$BASE/api/play/token/$t/$GID/$CID.m3u8" \
     | awk 'NR==1{printf "status=%s ",$2} tolower($1)=="location:"{printf "location=%s",$2} END{print ""}'
 done
 ```
@@ -731,7 +731,7 @@ done
 预期：两次的 `location` 都不是 `Failure.mp4`。
 
 ```bash
-curl -s -H "$AUTH" "$BASE/panel/api/security/token" | jq '{enabled, status}'
+curl -s -H "$AUTH" "$BASE/api/panel/security/token" | jq '{enabled, status}'
 ```
 
 预期：
@@ -752,7 +752,7 @@ curl -s -H "$AUTH" "$BASE/panel/api/security/token" | jq '{enabled, status}'
 ```bash
 sudo tv-buddy restart
 sleep 3
-LOGIN=$(curl -s -X POST "$BASE/panel/api/login" \
+LOGIN=$(curl -s -X POST "$BASE/api/panel/login" \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}')
 TOKEN=$(printf '%s' "$LOGIN" | jq -r .token)
@@ -760,7 +760,7 @@ AUTH="Authorization: Bearer $TOKEN"
 for t in "$OLD" "$NEW"; do
   printf '%s ' "${t:0:8}"
   curl -s -o /dev/null -D - -H 'X-Forwarded-For: 203.0.113.41' \
-    "$BASE/$GID/$CID.m3u8?token=$t" \
+    "$BASE/api/play/token/$t/$GID/$CID.m3u8" \
     | awk 'NR==1{printf "status=%s ",$2} tolower($1)=="location:"{printf "location=%s",$2} END{print ""}'
 done
 ```
@@ -780,10 +780,10 @@ done
 ```bash
 set_auth '{"ip_guard_enabled":false,"token_enabled":false,"random_id_enabled":true}'
 curl -s -X POST -H "$AUTH" -H 'Content-Type: application/json' \
-  "$BASE/panel/api/groups/import/m3u" \
+  "$BASE/api/panel/groups/import/m3u" \
   -d '{"text":"#EXTM3U\n#EXTINF:-1 tvg-id=\"cctv1\" group-title=\"rid-test\",CCTV1\nhttp://127.0.0.1:9/x.m3u8\n","mode":"append","group_mode":"redirect"}'
 echo
-curl -s -H "$AUTH" "$BASE/panel/api/config" \
+curl -s -H "$AUTH" "$BASE/api/panel/config" \
   | jq -r '.groups[] | select(.name=="rid-test") | .channels[].id'
 ```
 
@@ -799,10 +799,10 @@ curl -s -H "$AUTH" "$BASE/panel/api/config" \
 ```bash
 set_auth '{"random_id_enabled":false}'
 curl -s -X POST -H "$AUTH" -H 'Content-Type: application/json' \
-  "$BASE/panel/api/groups/import/m3u" \
+  "$BASE/api/panel/groups/import/m3u" \
   -d '{"text":"#EXTM3U\n#EXTINF:-1 tvg-id=\"cctv2\" group-title=\"rid-test2\",CCTV2\nhttp://127.0.0.1:9/y.m3u8\n","mode":"append","group_mode":"redirect"}'
 echo
-curl -s -H "$AUTH" "$BASE/panel/api/config" \
+curl -s -H "$AUTH" "$BASE/api/panel/config" \
   | jq -r '.groups[] | select(.name=="rid-test2") | .channels[].id'
 ```
 
@@ -811,9 +811,9 @@ curl -s -H "$AUTH" "$BASE/panel/api/config" \
 ##### 11.3 清理
 
 ```bash
-curl -s -X DELETE -H "$AUTH" "$BASE/panel/api/groups/rid-test"
+curl -s -X DELETE -H "$AUTH" "$BASE/api/panel/groups/rid-test"
 echo
-curl -s -X DELETE -H "$AUTH" "$BASE/panel/api/groups/rid-test2"
+curl -s -X DELETE -H "$AUTH" "$BASE/api/panel/groups/rid-test2"
 echo
 ```
 
@@ -822,10 +822,10 @@ echo
 #### 步骤 12：恢复配置
 
 ```bash
-curl -s -H "$AUTH" "$BASE/panel/api/config" \
+curl -s -H "$AUTH" "$BASE/api/panel/config" \
   | jq --slurpfile a /tmp/tv-buddy-auth-backup.json '.auth = $a[0]' \
   | curl -s -X PUT -H "$AUTH" -H 'Content-Type: application/json' \
-      --data-binary @- "$BASE/panel/api/config"
+      --data-binary @- "$BASE/api/panel/config"
 echo
 sudo tv-buddy restart
 sleep 3
@@ -860,7 +860,7 @@ systemctl is-active tv-buddy
 | SEC-18 | 第 2 次锁时长 | `locked_for_secs` 为 4 | 其他值 |
 | SEC-19 | 第 3 次锁时长 | `locked_for_secs` 为 6 | 其他值 |
 | SEC-20 | 登录锁无 `Retry-After` | `grep -c` 输出 `0` | 输出大于 0 |
-| SEC-21 | 锁不影响既有会话 | `GET /panel/api/status` 为 `200` | 返回 `401` |
+| SEC-21 | 锁不影响既有会话 | `GET /api/panel/status` 为 `200` | 返回 `401` |
 | SEC-22 | 默认阈值 | 第 22 次 `429`，`locked_for_secs` 为 300 | 其他结果 |
 | SEC-23 | 关闭时锁不升级 | 两次都是 2 秒 | 第二次为 4 秒 |
 | SEC-24 | 手动封禁 | `403`，正文 `banned` | 其他状态码 |
@@ -957,21 +957,21 @@ systemctl is-active tv-buddy
 2. 导出当前 `[auth]`：
 
 ```bash
-curl -s -H "$AUTH" "$BASE/panel/api/config" | jq '.auth' > /tmp/tv-buddy-auth-fail.json
+curl -s -H "$AUTH" "$BASE/api/panel/config" | jq '.auth' > /tmp/tv-buddy-auth-fail.json
 cat /tmp/tv-buddy-auth-fail.json
 ```
 
 3. 导出 IP 统计：
 
 ```bash
-curl -s -H "$AUTH" "$BASE/panel/api/security/ip/stats" | jq . > /tmp/tv-buddy-ip-stats.json
+curl -s -H "$AUTH" "$BASE/api/panel/security/ip/stats" | jq . > /tmp/tv-buddy-ip-stats.json
 cat /tmp/tv-buddy-ip-stats.json
 ```
 
 4. 导出服务状态：
 
 ```bash
-curl -s -H "$AUTH" "$BASE/panel/api/status" | jq . > /tmp/tv-buddy-status.json
+curl -s -H "$AUTH" "$BASE/api/panel/status" | jq . > /tmp/tv-buddy-status.json
 cat /tmp/tv-buddy-status.json
 ```
 

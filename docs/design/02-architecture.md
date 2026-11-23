@@ -28,7 +28,7 @@
 │   ├─ 订阅面   /api/sub/<令牌>/{playlist.m3u,epg.xml[.gz]}             │
 │   ├─ 播放面   /api/play/<gid>/<cid>...（清单）                        │
 │   │            /media/<gid>/<cid>/...（切片、时移、DASH）              │
-│   └─ 面板面   /page/panel（HTML）+ /api/panel/*（Bearer 或 X-Token）  │
+│   └─ 面板面   /page（HTML）+ /api/panel/*（Bearer 或 X-Token）        │
 │               静态资源 /static/{panel,logo,assets}/*                  │
 │                                                                      │
 │  后台任务                                                             │
@@ -145,11 +145,12 @@
 
 ```text
 /api/panel/*  → Bearer 或 X-Token → 处理 → JSON
-/page/panel、/page/unban → 内嵌 HTML（免登录）
+/page、/page/unban → 内嵌 HTML（免登录）
 /static/panel/*、/static/logo/*、/static/assets/* → 内嵌或本地静态资源（免登录）
+/ → 302 → /page（默认 server.home_url）
 ```
 
-旧路径 `/panel`、`/unban`、`/panel/api/*`、`/logo/*` 由最外层改写中间件映射到新前缀。旧路径在本次主版本内继续可用。
+`GET /page` 返回面板 HTML。未登录时，前端显示登录表单。没有独立登录页。
 
 ## 6. 共享状态
 
@@ -212,13 +213,13 @@ struct AppState {
 ```text
 frontend/            # Vite + React + TS（独立目录）
   └─ pnpm build → dist/
-        └─ rust-embed（编译期）→ /page/panel、/page/unban、/static/panel/*
+        └─ rust-embed（编译期）→ /page、/page/unban、/static/panel/*
 ```
 
 | 项 | 设计 | 依据 |
 | --- | --- | --- |
 | 页面 | 2 页：管理面板、自助解封 | F-003 |
-| 路由 | `/page/panel`、`/page/unban`；旧 `/panel`、`/unban` 为别名 | S-EP-01、S-EP-07 |
+| 路由 | `/page`、`/page/unban`；`/` 默认 `302` 到 `/page` | S-EP-01、S-EP-07 |
 | API | 只调 `/api/panel/*`；端点与字段不重命名 | S-EP-12、F-012 §3 |
 | 静态资源 | `/static/panel/*`、`/static/logo/*`、`/static/assets/*` | S-EP-16 |
 | 基准 | 逐屏对照 [`reference/img/`](reference/) | E1b |

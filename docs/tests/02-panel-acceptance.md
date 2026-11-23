@@ -6,7 +6,7 @@
 
 范围外：
 
-- 目标 `/panel` 的像素级比对。本项目不做像素比对。
+- 目标面板页的像素级比对。本项目不做像素比对。
 - 浏览器兼容性。只测 Chrome。
 
 > 本实现的界面文案全部自研。目标截图只用来对照布局层级，不用来对照文字（`docs/design/reference/README.md` §7）。
@@ -37,7 +37,7 @@ TV_BUDDY_INITIAL_PASSWORD=admin sudo -E /opt/tv-buddy/tv-buddy "$DB" \
   >/tmp/tv-buddy-panel-test/run.log 2>&1 &
 echo $! | sudo tee /tmp/tv-buddy-panel-test/pid
 sleep 1
-curl -fsS http://127.0.0.1:19898/health; echo
+curl -fsS http://127.0.0.1:19898/api/health; echo
 ```
 
 预期：`ok`。
@@ -62,7 +62,7 @@ cd /tmp/tv-buddy-origin && python3 -m http.server 9999 >/tmp/tv-buddy-origin/htt
 
 ```bash
 B=http://127.0.0.1:19898
-T=$(curl -sS -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+T=$(curl -sS -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
      -d '{"username":"admin","password":"admin"}' \
    | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
 echo "$T" | head -c 8; echo
@@ -75,7 +75,7 @@ cat >/tmp/tv-buddy-panel-test/seed.json <<'EOF'
 [
   {"id":"qa1","name":"验收代理组","mode":"proxy","access":"public","format":"hls","channels":[
     {"id":"c1","name":"CCTV-1","url":"http://127.0.0.1:9999/live.m3u8",
-     "tvg_id":"cctv1","tvg_name":"CCTV-1","logo":"/logo/CCTV1.png",
+     "tvg_id":"cctv1","tvg_name":"CCTV-1","logo":"/static/logo/CCTV1.png",
      "prefetch":{"enabled":true,"prefetch_limit":3,"concurrency":2}},
     {"id":"c2","name":"央视二套","url":"http://127.0.0.1:9999/live.m3u8",
      "livestream":true,"timeshift_hours":4},
@@ -90,7 +90,7 @@ cat >/tmp/tv-buddy-panel-test/seed.json <<'EOF'
   {"id":"qa4","name":"验收空组","mode":"proxy","access":"public","format":"hls","channels":[]}
 ]
 EOF
-curl -sS -X POST "$B/panel/api/groups/import" \
+curl -sS -X POST "$B/api/panel/groups/import" \
   -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
   --data-binary @/tmp/tv-buddy-panel-test/seed.json; echo
 ```
@@ -103,7 +103,7 @@ curl -sS -X POST "$B/panel/api/groups/import" \
 
 ```bash
 sleep 12
-curl -sS -H "Authorization: Bearer $T" "$B/panel/api/health" > /tmp/tv-buddy-panel-test/health.json
+curl -sS -H "Authorization: Bearer $T" "$B/api/panel/health" > /tmp/tv-buddy-panel-test/health.json
 python3 -c '
 import json
 d = json.load(open("/tmp/tv-buddy-panel-test/health.json"))["entries"]
@@ -119,7 +119,7 @@ for k in ("qa1/c1","qa1/c3","qa2/d1"):
 ### 2.5 打开面板
 
 ```bash
-echo "浏览器打开：http://127.0.0.1:19898/panel"
+echo "浏览器打开：http://127.0.0.1:19898/page"
 # 在远端 VPS 上测试时，先建隧道：
 # ssh -N -L 19898:127.0.0.1:19898 <user>@<vps>
 ```
@@ -400,7 +400,7 @@ JSON.stringify({
 人工确认：
 
 - `频道 ID` 禁用，值为 `c1`。
-- `频道 Logo URL` 值为 `/logo/CCTV1.png`。
+- `频道 Logo URL` 值为 `/static/logo/CCTV1.png`。
 - `tvg-id` 值为 `cctv1`，提示「留空则同频道 ID。」
 - `上游类型` 选中 `静态 URL`。
 - `工作模式` 选中「跟随分组（当前：…）」。
@@ -525,7 +525,7 @@ livestream.png assets.png  logs.png
 ## 环境
 - 日期：
 - 发布 tag：
-- `version` 字段（`/panel/api/status`）：
+- `version` 字段（`/api/panel/status`）：
 - 二进制 SHA-256：
 - 浏览器与版本：
 - 视口：innerWidth / innerHeight / devicePixelRatio
@@ -613,13 +613,13 @@ sudo tv-buddy log 300 > /tmp/tv-panel-log.txt 2>&1
 
 # 面板数据
 B=http://127.0.0.1:19898
-T=$(curl -sS -X POST "$B/panel/api/login" -H 'Content-Type: application/json' \
+T=$(curl -sS -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
      -d '{"username":"admin","password":"admin"}' \
    | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-curl -sS -H "Authorization: Bearer $T" "$B/panel/api/status" > /tmp/tv-panel-status.json
-curl -sS -H "Authorization: Bearer $T" "$B/panel/api/config" > /tmp/tv-panel-config.json
-curl -sS -H "Authorization: Bearer $T" "$B/panel/api/health" > /tmp/tv-panel-health.json
-curl -sS -H "Authorization: Bearer $T" "$B/panel/api/groups/export" > /tmp/tv-panel-groups.json
+curl -sS -H "Authorization: Bearer $T" "$B/api/panel/status" > /tmp/tv-panel-status.json
+curl -sS -H "Authorization: Bearer $T" "$B/api/panel/config" > /tmp/tv-panel-config.json
+curl -sS -H "Authorization: Bearer $T" "$B/api/panel/health" > /tmp/tv-panel-health.json
+curl -sS -H "Authorization: Bearer $T" "$B/api/panel/groups/export" > /tmp/tv-panel-groups.json
 ```
 
 贴配置前删掉敏感值：`panel.password_sha256`、`share.key`、`subtitle.translate.token`、`epg.translate.mtran_token`、各级 `proxy.password`。
@@ -628,7 +628,7 @@ curl -sS -H "Authorization: Bearer $T" "$B/panel/api/groups/export" > /tmp/tv-pa
 
 ```bash
 for g in qa1 qa2 qa3 qa4; do
-  curl -sS -X DELETE -H "Authorization: Bearer $T" "$B/panel/api/groups/$g"; echo
+  curl -sS -X DELETE -H "Authorization: Bearer $T" "$B/api/panel/groups/$g"; echo
 done
 kill "$(cat /tmp/tv-buddy-panel-test/pid)"
 rm -rf /tmp/tv-buddy-panel-test /tmp/tv-buddy-origin

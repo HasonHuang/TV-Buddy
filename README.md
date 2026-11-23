@@ -363,8 +363,10 @@ sudo tv-buddy start   # 启动服务（安装后默认已启动）
 打开面板：
 
 ```text
-http://<host>:9900/page/panel
+http://<host>:9900/page
 ```
+
+`http://<host>:9900/` 默认跳转到 `/page`。`GET /page` 返回面板 HTML。未登录时，页面显示登录表单。没有独立登录页。
 
 首次启动生成账号 `admin`，口令随机，写在：
 
@@ -400,7 +402,6 @@ http://<host>:9900/api/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 ```
 
 每个用户默认可见全部分组。需要收紧时，在「用户与设备」里开启「只开放指定分组」与「只开放指定频道」。令牌在同一个弹窗里管理。
-旧路径 `/sub/...`、`/panel/api/...` 与 `/health` 在本次主版本内仍可用。新部署请使用新地址。
 全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用，返回 `404`。分组订阅用 `/api/sub/<令牌>/<分组>/playlist.m3u`。
 
 ---

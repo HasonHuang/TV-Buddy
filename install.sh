@@ -665,7 +665,7 @@ fi
 
 echo "安装完成：$PREFIX"
 echo "数据：$PREFIX/tv-buddy.db"
-echo "面板：http://<主机>:9900/page/panel（账号 admin；初始口令见下）"
+echo "面板：http://<主机>:9900/page（账号 admin；初始口令见下）"
 echo "初始口令：$PREFIX/cache/admin_initial_credentials.txt（首次启动后生成，权限 600）"
 if [ "$STARTED" = 1 ]; then
     echo "状态：服务已启动"
@@ -681,7 +681,7 @@ if [ "$DO_NGINX" = 1 ]; then
     if [ "$NGINX_CONF_OK" != 1 ]; then
         echo "NGINX：未配置。见上方警告"
     elif [ "$NGINX_STARTED" = 1 ]; then
-        echo "NGINX：反向代理已配置并启动，入口 http://<主机>/page/panel"
+        echo "NGINX：反向代理已配置并启动，入口 http://<主机>/page"
     elif [ "$DO_START" = 0 ]; then
         echo "NGINX：反向代理已配置，未启动（--no-start）"
     else

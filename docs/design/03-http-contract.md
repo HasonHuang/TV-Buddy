@@ -77,47 +77,17 @@
 | GET | `/api/unban/whoami` | 登录会话 | 开启 IP 管控：`{"banned","enabled":true,"ip","max_per_month":3,"remaining","used"}`；关闭：`{"enabled":false,"ip"}`；未登录 `401`；XFF 取末项，其次 `X-Real-IP`，最后 TCP 对端 | ✅ v2026.16 | S-EP-15 |
 | GET | `/whoami` | 无 | `404`（目标未注册） | ✅ P3 | S-EP-15 |
 | GET | `/api/health` | 无 | `200` `ok`（`text/plain`） | ✅ M0 | S-EP-10 |
-| GET | `/page/panel`、`/page/panel/` | 无 | `200` `text/html` | ✅ M0 | S-EP-01 |
+| GET | `/` | 无 | `302` → `[server].home_url`（默认 `/page`） | ✅ M0 | S-EP-01 |
+| GET | `/page`、`/page/` | 无 | `200` `text/html`；未登录时前端显示登录表单 | ✅ M0 | S-EP-01 |
 | GET | `/static/panel/*path` | 无 | `200` 静态资源 / `404` | ✅ M0 | S-EP-16 |
 | GET | `/static/assets/*path` | 无 | `200` 本地 HLS 清单或切片 / `404` | ✅ P2 | S-EP-16 |
 | GET | `/api/share/pull?key=` | 分享密钥 | `200` JSON；见 §6.10 | ✅ P1 | F-013 |
 
-### 3.1 旧路径别名
+### 3.1 页面入口
 
-旧路径在本次主版本内继续可用。改写层先于路由匹配运行。它不用重定向。旧路径与新路径使用同一套处理器，响应一致。下一主版本删除。
+`GET /page` 返回面板 HTML。未登录时，前端显示登录表单。没有独立登录页。
 
-| 旧路径 | 改写目标 |
-| --- | --- |
-| `GET /health` | `/api/health` |
-| `/panel/api/*` | `/api/panel/*` |
-| `/subs/*` | `/api/panel/subs/*` |
-| `/epg/translate/*` | `/api/panel/epg/translate/*` |
-| `/subtitle/*` | `/api/panel/subtitle/*` |
-| `/sub/*` | `/api/sub/*` |
-| `/l/*` | `/api/play/token/*` |
-| `/logo/*` | `/static/logo/*` |
-| `/__assets/*` | `/static/panel/*` |
-| `/assets/*` | `/static/assets/*` |
-| `GET /unban/whoami` | `/api/unban/whoami` |
-| `POST /unban` | `/api/unban` |
-| `GET /unban` | `/page/unban` |
-| `GET /panel`、`GET /panel/` | `/page/panel`、`/page/panel/` |
-
-播放形状按顺序判断：
-
-| 旧路径形状 | 改写目标 |
-| --- | --- |
-| `/<gid>/<file>` | `/api/play/<gid>/<file>` |
-| `/<gid>/<cid>/l/<exp>/<sig>/<rest>`，清单形状 | `/api/play/<gid>/<cid>/l/<exp>/<sig>/<rest>` |
-| `/<gid>/<cid>/l/<exp>/<sig>/<rest>`，其余形状 | `/media/<gid>/<cid>/l/<exp>/<sig>/<rest>` |
-| `/<gid>/<cid>/<rest>`，清单形状 | `/api/play/<gid>/<cid>/<rest>` |
-| `/<gid>/<cid>/<rest>`，其余形状 | `/media/<gid>/<cid>/<rest>` |
-
-清单形状：`index.m3u8`、`<track>/index.txt`、`<track>/index.m3u8`、`dash-timeshift/<track>/playlist[.txt|.m3u8]`。其余形状按媒体数据处理。
-
-两段 `/<gid>/<file>` 一律改写，不限于入口文件名。旧 `/<gid>/<cid>.mp4` 返回占位 `302`，改写后保持该响应。这是兼容性放宽。处理器的扩展名白名单不变。
-
-`/playlist.m3u` 与 `/<gid>/playlist.m3u` 是固定 `404` 指路。它们不改写。`/api/`、`/media/`、`/static/`、`/page/` 与 `/` 不参与改写。
+`GET /` 返回 `302`。`Location` 取 `[server].home_url`。默认值为 `/page`。
 
 ## 4. 播放契约（proxy）
 
@@ -381,7 +351,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | 导入 | `POST /api/panel/groups/import/m3u` | ✅ P1（见 §6.2） |
 | 导入 | `/groups/{import,import/force}`（JSON 分组数组） | ✅ P1（`/groups/import/m3u` 相邻） |
 | 订阅聚合 | `POST /api/panel/subs/{groups,preview}` | P2 |
-| 翻译 | `/api/panel/epg/translate/{run,status,clear,clear-engine,probe,models,mtran/test}`（兼容无前缀别名）、`/api/panel/subtitle/{translate/clear,mtran/test}` | ✅ P2 |
+| 翻译 | `/api/panel/epg/translate/{run,status,clear,clear-engine,probe,models,mtran/test}`、`/api/panel/subtitle/{translate/clear,mtran/test}` | ✅ P2 |
 | 分享 | `GET /api/share/pull?key=`（仅 GET/HEAD） | P2 |
 | 解析脚本 | `/api/panel/resolver/{scripts,script-delete}` | P2 |
 
@@ -466,7 +436,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 > 额外频道不进入公开频道表；只有已匹配本地频道可出现，且允许 `programme_count=0`。
 >
 | 翻译 | 读 `[epg.translate]`：`enabled`、`url`（或 `engine="mtran"` 时的 `mtran_url`）、`token`/`mtran_token`、`source`/`mtran_source`、`target`/`targets`、`translation_first`、`mtran_batch`。采集后把节目文本批量发到 MTranServer v5 `/translate/batch`（`{from,to,texts}` → `{results}`）；`/translate/batch` 不可用时回退单条 `/translate`。译文按目标语言追加为 `lang="<target>"` 的文本节点；`translation_first = true` 时排在原文前。结果缓存在 `<cache>/epg/.translate/cache.json`，命中不发请求 |
-| 翻译接口 | `GET /api/panel/epg/translate/{status,models}` 报告引擎与目标语言；`POST /api/panel/epg/translate/{run,probe,mtran/test,clear,clear-engine}`。旧 `/epg/translate/*` 在迁移期内可用。`run/probe` 需面板会话；未启用或未配地址 → `400`。`clear*` 清空缓存 |
+| 翻译接口 | `GET /api/panel/epg/translate/{status,models}` 报告引擎与目标语言；`POST /api/panel/epg/translate/{run,probe,mtran/test,clear,clear-engine}`。`run/probe` 需面板会话；未启用或未配地址 → `400`。`clear*` 清空缓存 |
 
 ### 6.6 备份与恢复（P1 已实现）
 
@@ -499,7 +469,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 项 | 规则 |
 | --- | --- |
-| 记账 | `/page/*`、`/static/panel/*`、`/api/panel/*`、`/api/unban/*` 与旧 `/panel*`、`/unban*` 不记账。其余路径按 `X-Forwarded-For` 末项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略 |
+| 记账 | `/page`、`/page/*`、`/static/panel/*`、`/api/panel/*`、`/api/unban/*` 不记账。其余路径按 `X-Forwarded-For` 末项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略 |
 | 拦截 | 封禁期内 → `403` 纯文本 `banned`；上述豁免路径不拦截（避免管理员或用户自锁） |
 | 容量 | 最多保留 10 000 个地址，超出后忽略新地址 |
 | 未实现 | 按 IP 的会话上限与自动限流 |
@@ -722,7 +692,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 - `trace` 的 `after_group` 只计分组阶段；`after_global_exclude`、`after_include`、`after_exclude` 均在分组与全局排除之后，按各自阶段累计。
 - 过滤词：频道名包含；`group:<文本>` 同时匹配原分组、映射分组与 `merge_new` 新组名；`id:<tvg-id>` 精确匹配；`url:<完整地址>` 精确匹配且区分大小写。
 - 过滤词含 `*` 或 `?` 时，裸词、`group:`、`id:` 改为整串通配符匹配。`*` 匹配任意长度，`?` 匹配一个字符。`idname:` 与 `url:` 仍精确匹配。
-- 所有处理器需要管理员会话。公开路径与 `/api/panel` 别名受同一保护。
+- 所有处理器需要管理员会话。
 - 抓取超时 25 秒，正文上限 16 MiB。托管源预检使用草稿源的请求头与代理。
 - `sample` 最多 5 条。
 - `ttl_secs=0` 按 3600 秒；状态 `channels` 为去重后并入条数。

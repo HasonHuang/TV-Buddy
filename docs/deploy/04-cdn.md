@@ -118,7 +118,7 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 
 ```text
 /api/*
-/page/*
+/page*
 ```
 
 缓存，放在其后：
@@ -130,22 +130,18 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 /static/assets/*
 ```
 
-兜底，不缓存，放在最后：
-
-```text
-/*
-```
+不要加兜底 `/*` 规则。
 
 说明：
 
 - `/api/*` 覆盖面板 API、订阅、清单、解封接口、健康检查与分享接口。订阅与清单都不缓存。
 - `/media/*` 只包含切片、初始化段、时移切片、DASH 切片与 MPD 代理数据。
 - `/static/*` 包含台标、面板构建产物与本地素材。`/static/assets/*` 里的 HLS 清单也按静态资源缓存。
-- `/page/*` 返回 HTML。CDN 不缓存。
-- 首页 `/` 由兜底规则 `/*` 覆盖，不缓存。不要把 `/` 写成前缀规则；部分控制台会把它当成全部路径。
-- 兜底 `/*` 阻止未登记路径被缓存。
+- `/page*` 覆盖 `/page` 与 `/page/unban`。它返回 HTML。CDN 不缓存。不要写成 `/page/*`。部分控制台不会用 `/page/*` 匹配裸 `/page`。
+- 根路径 `/` 默认 `302` 到 `/page`。§4.2 要求不缓存 3xx，所以 `/` 不入缓存。不要把 `/` 写成前缀规则；部分控制台会把它当成全部路径。
+- 不设兜底 `/*` 规则。源站对未知路径返回 `404`。§4.2 要求不缓存非 200。
 
-不要颠倒顺序。缓存规则放在不缓存规则之前时，`/api/*` 与 `/page/*` 会被缓存。
+不要颠倒顺序。缓存规则放在不缓存规则之前时，`/api/*` 与 `/page*` 会被缓存。
 
 ### 6.2 不要按扩展名写规则
 
@@ -257,11 +253,11 @@ printf 'cdn1=%s\ncdn2=%s\norigin=%s\n' "$CDN1" "$CDN2" "$ORIGIN"
 ```bash
 curl -sS -o /dev/null -D - "$CDN/api/panel/status" \
   | grep -iE 'x-cache|cache-control'
-curl -sS -o /dev/null -D - "$CDN/page/panel" \
+curl -sS -o /dev/null -D - "$CDN/page" \
   | grep -iE 'x-cache|cache-control'
 ```
 
-期望：两个请求都是 `BYPASS`。
+期望：两个请求都是 `BYPASS`。第二个请求验证 `/page*` 规则覆盖裸 `/page`。
 
 ### 8.6 清单必须下发 https
 
@@ -297,8 +293,8 @@ done
 | 清单仍给 `http://` | 缺少 `X-Forwarded-Proto` | 回源加 `X-Forwarded-Proto: https`，或设置 `public_base` |
 | 切片 404 | 切片路径被缓存成了清单地址 | Purge。确认 `/api/*` 不缓存、`/media/*` 缓存 |
 | 回源 502 | CDN 回源地址或端口错误 | 检查源站域名、端口、防火墙 |
-| 面板被缓存 | 不缓存规则缺少 `/page/*` 或 `/api/*` | 补不缓存规则 |
-| 新切片一直 `BYPASS` | 缺少 `/media/*` 缓存规则 | 补缓存规则。确认兜底规则在最后 |
+| 面板被缓存 | 不缓存规则缺少 `/page*` 或 `/api/*` | 补不缓存规则 |
+| 新切片一直 `BYPASS` | 缺少 `/media/*` 缓存规则 | 补缓存规则 |
 | 缓存命中率低 | 每个 POP 各自 Miss，或伪装路径未命中 | 检查规则覆盖。多 POP 场景属正常 |
 
 ## 10. 多 CDN
