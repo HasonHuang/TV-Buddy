@@ -110,7 +110,7 @@ pub(crate) fn manual_hidden(
     if !config.quality.enabled {
         return false;
     }
-    if group.mode == "passthrough" && !config.quality.probe_passthrough {
+    if group.effective_mode(channel) == "passthrough" && !config.quality.probe_passthrough {
         return false;
     }
     if !channel.source_id.is_empty() {
@@ -236,7 +236,7 @@ fn header(config: &Config, base: &str, epg_path: &str) -> String {
 /// `passthrough` 直接给上游原始地址，且不套 Token（S-URL-02、S-MODE-11）。
 /// 其余组用路径令牌：`/api/play/token/<token>/<gid>/<cid>.<ext>`。
 pub fn entry_url(group: &Group, channel: &Channel, base: &str, token: &str) -> String {
-    if group.mode == "passthrough" {
+    if group.effective_mode(channel) == "passthrough" {
         return channel.url.clone();
     }
     let ext = if group.format == "mpd" { "mpd" } else { "m3u8" };
@@ -274,7 +274,7 @@ fn push_entry(
     match token {
         Some(value) => body.push_str(&entry_url(group, channel, base, value)),
         // 无令牌调用只用于内部渲染，按「不带参数」处理。
-        None if group.mode == "passthrough" => body.push_str(&channel.url),
+        None if group.effective_mode(channel) == "passthrough" => body.push_str(&channel.url),
         None => body.push_str(&format!(
             "{}/{}/{}.{}",
             base.trim_end_matches('/'),
@@ -389,6 +389,32 @@ mod tests {
         let config = config_with(vec![group("g3", "public", "proxy")]);
         let body = render_user(&config, &admin(), "http://host", "tok", None, None);
         assert!(body.contains("http://host/api/play/token/tok/g3/c1.m3u8\n"));
+    }
+
+    #[test]
+    fn mixed_group_uses_channel_mode_for_entry_url() {
+        let mut group = group("g1", "public", "rewrite");
+        group.channels = vec![
+            Channel {
+                id: "inherit".into(),
+                name: "跟随".into(),
+                url: "http://upstream/inherit.m3u8".into(),
+                ..Channel::default()
+            },
+            Channel {
+                id: "direct".into(),
+                name: "直通".into(),
+                url: "http://upstream/direct.m3u8".into(),
+                mode: Some("passthrough".into()),
+                ..Channel::default()
+            },
+        ];
+        let config = config_with(vec![group]);
+        let body = render_user(&config, &admin(), "http://host", "tok", None, None);
+
+        assert!(body.contains("http://host/api/play/token/tok/g1/inherit.m3u8"));
+        assert!(body.contains("http://upstream/direct.m3u8"));
+        assert!(!body.contains("/g1/direct.m3u8"));
     }
 
     #[test]
