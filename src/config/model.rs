@@ -142,6 +142,45 @@ impl Config {
         for source in &mut self.playlist.sources {
             source.normalize();
         }
+        let source_modes: std::collections::HashMap<String, String> = self
+            .playlist
+            .sources
+            .iter()
+            .map(|source| (source.id.clone(), source.playback_mode.clone()))
+            .collect();
+        for group in &mut self.groups {
+            if group.mode != "passthrough" {
+                continue;
+            }
+            let gid = group.id.clone();
+            for channel in &mut group.channels {
+                if channel.source_id.is_empty() || channel.mode.is_some() {
+                    continue;
+                }
+                let source_mode = source_modes.get(&channel.source_id).map(String::as_str);
+                let explicit = source_mode.filter(|mode| {
+                    matches!(*mode, "proxy" | "remux" | "dash" | "redirect" | "rewrite")
+                });
+                let mode = explicit.unwrap_or("redirect");
+                channel.mode = Some(mode.to_string());
+                let marker = match source_mode {
+                    Some("") | Some("auto") => "sync:auto".to_string(),
+                    Some(value)
+                        if matches!(value, "proxy" | "remux" | "dash" | "redirect" | "rewrite") =>
+                    {
+                        format!("sync:{value}")
+                    }
+                    _ => MODE_SOURCE_MANUAL.to_string(),
+                };
+                channel.set_mode_source(&marker);
+                tracing::warn!(
+                    group = %gid,
+                    channel = %channel.id,
+                    mode,
+                    "分组为直通，同步频道缺少工作模式；已写入安全模式"
+                );
+            }
+        }
     }
 
     /// `[assets].map`：原始 URL → 本地 HLS 入口。
@@ -1622,6 +1661,64 @@ mod tests {
         assert_eq!(channel.mode_source(), "sync:auto");
         channel.clear_mode_source();
         assert_eq!(channel.mode_source(), "");
+    }
+
+    #[test]
+    fn normalize_repairs_sync_channel_in_passthrough_group() {
+        let mut config = Config::default();
+        config.playlist.sources.push(PlaylistSource {
+            id: "s1".into(),
+            mode: "sync".into(),
+            playback_mode: "redirect".into(),
+            ..PlaylistSource::default()
+        });
+        config.groups.push(Group {
+            id: "g".into(),
+            mode: "passthrough".into(),
+            channels: vec![Channel {
+                id: "c1".into(),
+                url: "http://up/c1.m3u8".into(),
+                source_id: "s1".into(),
+                sync_follow: true,
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+
+        config.normalize();
+
+        let channel = &config.groups[0].channels[0];
+        assert_eq!(channel.mode.as_deref(), Some("redirect"));
+        assert_eq!(channel.mode_source(), "sync:redirect");
+    }
+
+    #[test]
+    fn normalize_uses_redirect_when_source_is_auto() {
+        let mut config = Config::default();
+        config.playlist.sources.push(PlaylistSource {
+            id: "s1".into(),
+            mode: "sync".into(),
+            playback_mode: "auto".into(),
+            ..PlaylistSource::default()
+        });
+        config.groups.push(Group {
+            id: "g".into(),
+            mode: "passthrough".into(),
+            channels: vec![Channel {
+                id: "c1".into(),
+                url: "http://up/c1.mpd".into(),
+                source_id: "s1".into(),
+                sync_follow: true,
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+
+        config.normalize();
+        assert_eq!(
+            config.groups[0].channels[0].mode.as_deref(),
+            Some("redirect")
+        );
     }
 
     #[test]
