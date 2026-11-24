@@ -42,15 +42,22 @@ impl ConfigStore {
     }
 
     /// 在调用方的事务里写配置。语义与 [`ConfigStore::save`] 相同。
-    pub fn save_tx(&self, tx: &Transaction<'_>, config: &Config) -> Result<u64> {
-        save_conn(tx, config)
+    ///
+    /// 返回新版本与**实际落库**的配置（已补齐默认值、已补密钥）。
+    /// 调用方用它替换内存快照，避免再次克隆与归一化。
+    pub fn save_tx(&self, tx: &Transaction<'_>, config: &Config) -> Result<(u64, Config)> {
+        save_conn_full(tx, config)
     }
 
     /// 按 `revision` 条件保存。
     ///
     /// 在 `IMMEDIATE` 事务里读版本并写入，跨进程写者不会插在检查与写入之间。
     /// `expected` 为空或与库内值不同时返回 [`crate::config::StaleRevision`]。
-    pub fn save_if_revision(&self, config: &Config, expected: Option<u64>) -> Result<u64> {
+    pub fn save_if_revision(
+        &self,
+        config: &Config,
+        expected: Option<u64>,
+    ) -> Result<(u64, Config)> {
         let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = load_conn(&tx)?.map(|from_db| from_db.revision).unwrap_or(0);
@@ -60,9 +67,15 @@ impl ConfigStore {
         if expected != current {
             return Err(anyhow::Error::new(crate::config::StaleRevision(current)));
         }
-        let revision = save_conn(&tx, config)?;
+        let saved = save_conn_full(&tx, config)?;
         tx.commit()?;
-        Ok(revision)
+        Ok(saved)
+    }
+
+    /// 写配置并返回实际落库的配置。用于整份替换后同步内存快照。
+    pub fn save_full(&self, config: &Config) -> Result<(u64, Config)> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        save_conn_full(&conn, config)
     }
 
     /// 恢复默认配置。用户不受影响。
@@ -90,6 +103,11 @@ fn load_conn(conn: &Connection) -> Result<Option<Config>> {
 }
 
 fn save_conn(conn: &Connection, config: &Config) -> Result<u64> {
+    save_conn_full(conn, config).map(|(revision, _)| revision)
+}
+
+/// 落库并返回实际保存的配置。归一化、补密钥与校验只做一次。
+fn save_conn_full(conn: &Connection, config: &Config) -> Result<(u64, Config)> {
     let mut config = config.clone();
     config.normalize();
     crate::sign::ensure_secret(&mut config);
@@ -111,7 +129,7 @@ fn save_conn(conn: &Connection, config: &Config) -> Result<u64> {
            updated_at_ms = excluded.updated_at_ms",
         params![CONFIG_KEY, text, now_ms()],
     )?;
-    Ok(config.revision)
+    Ok((config.revision, config))
 }
 
 #[cfg(test)]
@@ -237,7 +255,10 @@ mod tests {
 
         assert!(store.save_if_revision(&config, None).is_err());
         assert_eq!(
-            store.save_if_revision(&config, Some(1)).expect("当前版本"),
+            store
+                .save_if_revision(&config, Some(1))
+                .expect("当前版本")
+                .0,
             2
         );
         let _ = std::fs::remove_dir_all(dir);

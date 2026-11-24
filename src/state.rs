@@ -471,26 +471,20 @@ impl AppState {
     ///
     /// `expected` 非零且与库中版本不同时返回 [`crate::config::StaleRevision`]。
     /// 每次成功写入都自增版本，并返回新值。
-    pub fn save_config(&self, mut config: Config, expected: Option<u64>) -> anyhow::Result<u64> {
+    pub fn save_config(&self, config: Config, expected: Option<u64>) -> anyhow::Result<u64> {
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
-        config.normalize();
-        crate::sign::ensure_secret(&mut config);
-        let revision = self.config_store.save_if_revision(&config, expected)?;
-        config.revision = revision;
-        self.replace(config);
+        let (revision, saved) = self.config_store.save_if_revision(&config, expected)?;
+        self.replace(saved);
         Ok(revision)
     }
 
     /// 整份替换配置，跳过 `revision` 校验。用于备份恢复等显式覆盖操作。
     ///
     /// 与 [`AppState::save_config`] 共用写锁。写入后返回新版本并替换快照。
-    pub fn replace_config(&self, mut config: Config) -> anyhow::Result<u64> {
+    pub fn replace_config(&self, config: Config) -> anyhow::Result<u64> {
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
-        config.normalize();
-        crate::sign::ensure_secret(&mut config);
-        let revision = self.config_store.save(&config)?;
-        config.revision = revision;
-        self.replace(config);
+        let (revision, saved) = self.config_store.save_full(&config)?;
+        self.replace(saved);
         Ok(revision)
     }
 
@@ -509,11 +503,8 @@ impl AppState {
             None => (*self.snapshot()).clone(),
         };
         change(&mut config)?;
-        config.normalize();
-        crate::sign::ensure_secret(&mut config);
-        let revision = self.config_store.save(&config)?;
-        config.revision = revision;
-        self.replace(config);
+        let (_, saved) = self.config_store.save_full(&config)?;
+        self.replace(saved);
         Ok(())
     }
 
@@ -566,10 +557,8 @@ impl AppState {
             None => (*self.snapshot()).clone(),
         };
         let (results, delete_keys) = change(&mut config)?;
-        // 落库前先修复，内存快照才与数据库一致。同步把未设模式的频道
-        // 移进 passthrough 分组时，安全修复必须同时生效于当前快照。
-        config.normalize();
-        let revision = self.config_store.save_tx(&tx, &config)?;
+        // 落库只归一化一次。用实际保存的配置替换快照，避免内存与数据库不一致。
+        let (_, saved) = self.config_store.save_tx(&tx, &config)?;
         for key in &delete_keys {
             self.quality_store.delete_tx(&tx, key)?;
         }
@@ -578,8 +567,7 @@ impl AppState {
             self.quality_store.meta_set_tx(&tx, key, value)?;
         }
         tx.commit()?;
-        config.revision = revision;
-        self.replace(config);
+        self.replace(saved);
         Ok(results)
     }
 

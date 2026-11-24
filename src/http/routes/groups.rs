@@ -75,6 +75,44 @@ fn validate_group_mode(group: &Group) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// 校验分组请求体内嵌的所有频道。
+fn validate_group_channels(group: &Group) -> Result<(), ApiError> {
+    let mut seen = std::collections::HashSet::new();
+    for channel in &group.channels {
+        if channel.id.trim().is_empty() {
+            return Err(ApiError::bad_request("频道 id 不能为空"));
+        }
+        if !seen.insert(&channel.id) {
+            return Err(ApiError::bad_request(format!(
+                "频道 id 重复: {}",
+                channel.id
+            )));
+        }
+        validate_channel_mode(group, channel)?;
+    }
+    Ok(())
+}
+
+/// 分组接口整组保存频道时，把真正改过的模式与固定频道标成手工。
+fn mark_group_channels_manual(old: &Group, updated: &mut Group) {
+    for channel in &mut updated.channels {
+        match old.channels.iter().find(|old| old.id == channel.id) {
+            Some(old_channel) => {
+                if old_channel.mode != channel.mode
+                    || old_channel.url != channel.url
+                    || (old_channel.sync_follow && !channel.sync_follow)
+                {
+                    channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
+                }
+            }
+            None if channel.mode.is_some() && channel.mode_source().is_empty() => {
+                channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
+            }
+            None => {}
+        }
+    }
+}
+
 fn body_id(body: &Value) -> Result<String, ApiError> {
     let id = body
         .get("id")
@@ -98,8 +136,14 @@ pub async fn create_group(
     if state.snapshot().group(&id).is_some() {
         return Err(ApiError::conflict("Group id already exists"));
     }
-    let group: Group = merge_into(&Group::default(), &body)?;
+    let mut group: Group = merge_into(&Group::default(), &body)?;
     validate_group_mode(&group)?;
+    validate_group_channels(&group)?;
+    for channel in &mut group.channels {
+        if channel.mode.is_some() && channel.mode_source().is_empty() {
+            channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
+        }
+    }
 
     state
         .mutate(|config| {
@@ -122,9 +166,14 @@ pub async fn update_group(
     let group = current
         .group(&gid)
         .ok_or_else(|| ApiError::not_found("Group not found"))?;
-    let updated: Group = merge_into(group, &body)?;
+    let mut updated: Group = merge_into(group, &body)?;
     validate_group_mode(&updated)?;
+    validate_group_channels(&updated)?;
+    mark_group_channels_manual(group, &mut updated);
     let offline_changed = group.offline_on_fail != updated.offline_on_fail;
+    let group_playback_changed = group.mode != updated.mode || group.format != updated.format;
+    let old_channels = group.channels.clone();
+    let new_channels = updated.channels.clone();
 
     state
         .mutate(|config| {
@@ -136,8 +185,26 @@ pub async fn update_group(
             Ok(())
         })
         .map_err(|err| ApiError::internal(err.to_string()))?;
-    if offline_changed {
+    if offline_changed || group_playback_changed {
         state.health.forget_group(&gid);
+        state.quality.forget_group(&gid);
+    }
+    // 整组替换可能删除或改写频道。旧探测结果不再代表新配置。
+    for old_channel in &old_channels {
+        let changed = new_channels
+            .iter()
+            .find(|channel| channel.id == old_channel.id)
+            .is_none_or(|channel| {
+                old_channel.url != channel.url
+                    || old_channel.mode != channel.mode
+                    || crate::resolver::Setting::from_channel(old_channel)
+                        != crate::resolver::Setting::from_channel(channel)
+            });
+        if changed {
+            state.health.forget(&gid, &old_channel.id);
+            state.quality.forget(&gid, &old_channel.id);
+            forget_quality_results(&state, &gid, old_channel);
+        }
     }
     Ok(Json(json!({ "ok": true })))
 }
@@ -387,24 +454,45 @@ fn import(
         if group.id.trim().is_empty() || group.name.trim().is_empty() {
             return Err(ApiError::bad_request("分组 id 与名称不能为空"));
         }
-        validate_group_mode(&group)?;
-        for channel in &group.channels {
-            validate_channel_mode(&group, channel)?;
-        }
         groups.push(group);
     }
 
-    let mut imported = 0usize;
+    // 先判断哪些分组会被跳过，再校验。被跳过的旧同步分组不应让整批导入失败。
+    let snapshot = state.snapshot();
+    let mut to_import: Vec<Group> = Vec::with_capacity(groups.len());
     let mut skipped = 0usize;
+    for mut group in groups {
+        let existing = snapshot.group(&group.id);
+        let skipped_synced = !include_synced && !group.source_id.is_empty();
+        let skipped_duplicate = match existing {
+            Some(_) if !force => true,
+            Some(current) if !include_synced && !current.source_id.is_empty() => true,
+            _ => false,
+        };
+        if skipped_synced || skipped_duplicate {
+            skipped += 1;
+            continue;
+        }
+        validate_group_mode(&group)?;
+        validate_group_channels(&group)?;
+        match existing {
+            Some(current) => mark_group_channels_manual(current, &mut group),
+            None => {
+                for channel in &mut group.channels {
+                    if channel.mode.is_some() && channel.mode_source().is_empty() {
+                        channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
+                    }
+                }
+            }
+        }
+        to_import.push(group);
+    }
+
+    let mut imported = 0usize;
     state
         .mutate_admission_full(&[], |config| {
             let mut delete_keys = Vec::new();
-            for group in &groups {
-                // 同步分组默认跳过。`include_synced=true` 才允许覆盖。
-                if !include_synced && !group.source_id.is_empty() {
-                    skipped += 1;
-                    continue;
-                }
+            for group in &to_import {
                 match config
                     .groups
                     .iter()
@@ -431,7 +519,7 @@ fn import(
         .map_err(|err| ApiError::internal(format!("{err:#}")))?;
 
     // 覆盖导入可能换掉频道地址。丢掉旧探测结果，按在线处理到下一轮探测。
-    for group in &groups {
+    for group in &to_import {
         state.health.forget_group(&group.id);
         state.quality.forget_group(&group.id);
     }
@@ -578,6 +666,10 @@ pub async fn import_m3u(
             url: entry.url.clone(),
             ..Channel::default()
         };
+        // `auto` 按每个频道的 URL 定模式。混合分组不能让 HLS 频道继承 DASH。
+        if group_mode == "auto" {
+            channel.mode = Some(if is_dash { "dash" } else { "rewrite" }.to_string());
+        }
         if let Some(value) = &entry.tvg_id {
             channel
                 .extra
@@ -628,8 +720,15 @@ pub async fn import_m3u(
     state
         .mutate(|config| {
             for draft in drafts {
+                let has_hls = draft
+                    .channels
+                    .iter()
+                    .any(|channel| channel.mode.as_deref() != Some("dash"));
                 let (group_mode, format) = if group_mode == "auto" {
-                    if draft.has_dash {
+                    if draft.has_dash && has_hls {
+                        // 混合分组用 HLS 清单承载 DASH 频道，避免 HLS 频道拿到 `.mpd` 入口。
+                        ("rewrite", "hls")
+                    } else if draft.has_dash {
                         ("dash", "mpd")
                     } else {
                         ("rewrite", "hls")

@@ -119,7 +119,10 @@ fn config_command(raw: &[String]) -> Result<()> {
             }
             let text =
                 std::fs::read_to_string(source).with_context(|| format!("无法读取 {source}"))?;
-            let config: Config = serde_json::from_str(&text).context("配置格式错误")?;
+            let mut config: Config = serde_json::from_str(&text).context("配置格式错误")?;
+            let old = store.load()?.unwrap_or_default();
+            crate::config::model::Config::mark_manual_mode_changes(&old, &mut config);
+            crate::config::validate(&config).context("配置不合法")?;
             store.save(&config)?;
             println!("已导入配置：{} 个分组", config.groups.len());
             print_reload_hint();
@@ -140,9 +143,12 @@ fn config_command(raw: &[String]) -> Result<()> {
             let (Some(path), Some(text)) = (args.positional.get(1), args.positional.get(2)) else {
                 bail!("用法：tv-buddy config set <a.b.c> <值>");
             };
-            let mut value = serde_json::to_value(store.load()?.unwrap_or_default())?;
+            let old = store.load()?.unwrap_or_default();
+            let mut value = serde_json::to_value(&old)?;
             set_path(&mut value, path, parse_value(text))?;
-            let config: Config = serde_json::from_value(value).context("配置格式错误")?;
+            let mut config: Config = serde_json::from_value(value).context("配置格式错误")?;
+            crate::config::model::Config::mark_manual_mode_changes(&old, &mut config);
+            crate::config::validate(&config).context("配置不合法")?;
             store.save(&config)?;
             println!("{path} = {text}");
             print_reload_hint();

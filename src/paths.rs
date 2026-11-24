@@ -4,8 +4,6 @@
 //! `/api/play`、`/media`、`/static`、`/page`。本模块也识别清单路径，并归一化
 //! 已持久化的旧素材路径。
 
-/// API 根前缀。
-pub const API: &str = "/api";
 /// 面板 API 前缀。
 pub const PANEL_API: &str = "/api/panel";
 /// 订阅 API 前缀。
@@ -16,8 +14,6 @@ pub const PLAY_API: &str = "/api/play";
 pub const MEDIA: &str = "/media";
 /// 静态资源前缀。
 pub const STATIC: &str = "/static";
-/// 页面前缀。
-pub const PAGE: &str = "/page";
 
 /// 在 `prefix` 后拼接 `path`。
 ///
@@ -53,11 +49,6 @@ pub fn media(path: &str) -> String {
 /// 生成静态资源路径。
 pub fn static_path(path: &str) -> String {
     join(STATIC, path)
-}
-
-/// 生成页面路径。
-pub fn page(path: &str) -> String {
-    join(PAGE, path)
 }
 
 /// 拼接完整 URL。

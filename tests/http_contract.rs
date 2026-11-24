@@ -2869,6 +2869,286 @@ async fn group_import_adds_skips_and_overwrites() {
 }
 
 #[tokio::test]
+async fn group_import_skips_synced_before_validation() {
+    let fixture = fixture().await;
+    let token = login(&fixture).await;
+    let body = serde_json::json!([{
+        "id": "old-sync",
+        "name": "旧同步组",
+        "mode": "proxy",
+        "access": "public",
+        "source_id": "s1",
+        "channels": [{
+            "id": "c1",
+            "name": "同步频道",
+            "url": "http://up/c1.m3u8",
+            "source_id": "s1",
+            "sync_follow": true,
+            "mode": "passthrough"
+        }]
+    }]);
+    let post = |path: &str| {
+        fixture
+            .client
+            .post(format!("{}{path}", fixture.base))
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {token}"))
+            .body(body.to_string())
+            .send()
+    };
+
+    // 默认跳过同步分组，不校验其频道。整批导入成功。
+    let response = post("/api/panel/groups/import").await.expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+    let result: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    assert_eq!(result["imported"], 0);
+    assert_eq!(result["skipped"], 1);
+
+    // 显式包含同步分组时才校验，并返回 400。
+    let response = post("/api/panel/groups/import?include_synced=1")
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn group_interface_validates_embedded_channels() {
+    let fixture = fixture().await;
+    let token = login(&fixture).await;
+    let auth = format!("Bearer {token}");
+    let response = fixture
+        .client
+        .post(format!("{}/api/panel/groups", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "id": "bad-embed",
+                "name": "坏频道",
+                "mode": "proxy",
+                "access": "public",
+                "channels": [{ "id": "c1", "name": "C", "url": "http://up/c.m3u8", "mode": "magic" }]
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = fixture
+        .client
+        .put(format!("{}/api/panel/groups/pg", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "channels": [{ "id": "c1", "name": "C", "url": "http://up/c.m3u8", "mode": "magic" }]
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn put_config_rejects_unsafe_repair_with_400() {
+    let fixture = fixture_with_extra(
+        r#"{
+            "playlist": {"sources": [{"id":"s1","name":"源","url":"http://up/a.m3u","mode":"sync","playback_mode":"redirect"}]},
+            "groups": [{"id":"sg","name":"同步组","mode":"proxy","access":"public","channels":[
+                {"id":"c1","name":"同步频道","url":"http://up/c1.m3u8","source_id":"s1","sync_follow":true}
+            ]}]
+        }"#,
+    )
+    .await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let mut config: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/api/panel/config", fixture.base))
+            .header("authorization", &auth)
+            .send()
+            .await
+            .expect("取配置")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let groups = config["groups"].as_array_mut().expect("分组数组");
+    let group = groups
+        .iter_mut()
+        .find(|group| group["id"] == "sg")
+        .expect("应有 sg");
+    group["mode"] = json!("passthrough");
+
+    let response = fixture
+        .client
+        .put(format!("{}/api/panel/config", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(config.to_string())
+        .send()
+        .await
+        .expect("保存配置");
+    assert_eq!(
+        response.status(),
+        StatusCode::BAD_REQUEST,
+        "不安全组合不能被 normalize 静默修复"
+    );
+}
+
+#[tokio::test]
+async fn put_config_marks_changed_mode_manual() {
+    let fixture = fixture_with_extra(
+        r#"{
+            "playlist": {"sources": [{"id":"s1","name":"源","url":"http://up/a.m3u","mode":"sync","playback_mode":"proxy"}]},
+            "groups": [{"id":"sg","name":"同步组","mode":"proxy","access":"public","channels":[
+                {"id":"c1","name":"同步频道","url":"http://up/c1.m3u8","source_id":"s1","sync_follow":true,"mode":"proxy","mode_source":"sync:proxy"}
+            ]}]
+        }"#,
+    )
+    .await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let mut config: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/api/panel/config", fixture.base))
+            .header("authorization", &auth)
+            .send()
+            .await
+            .expect("取配置")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let groups = config["groups"].as_array_mut().expect("分组数组");
+    let group = groups
+        .iter_mut()
+        .find(|group| group["id"] == "sg")
+        .expect("应有 sg");
+    group["channels"][0]["mode"] = json!("redirect");
+
+    let response = fixture
+        .client
+        .put(format!("{}/api/panel/config", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(config.to_string())
+        .send()
+        .await
+        .expect("保存配置");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let saved: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/api/panel/config", fixture.base))
+            .header("authorization", &auth)
+            .send()
+            .await
+            .expect("取配置")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let saved_group = saved["groups"]
+        .as_array()
+        .expect("分组")
+        .iter()
+        .find(|group| group["id"] == "sg")
+        .expect("应有 sg");
+    assert_eq!(saved_group["channels"][0]["mode"], "redirect");
+    assert_eq!(saved_group["channels"][0]["mode_source"], "manual");
+}
+
+#[tokio::test]
+async fn m3u_auto_sets_channel_modes_for_mixed_group() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let text = "#EXTM3U\n\
+        #EXTINF:-1 group-title=\"混合\",HLS\n\
+        http://up/a.m3u8\n\
+        #EXTINF:-1 group-title=\"混合\",DASH\n\
+        http://up/b.mpd\n";
+    let response = fixture
+        .client
+        .post(format!("{}/api/panel/groups/import/m3u", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "text": text,
+                "mode": "append",
+                "group_mode": "auto"
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let config: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/api/panel/config", fixture.base))
+            .header("authorization", &auth)
+            .send()
+            .await
+            .expect("取配置")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let group = config["groups"]
+        .as_array()
+        .expect("分组")
+        .iter()
+        .find(|group| group["name"] == "混合")
+        .expect("混合分组");
+    assert_eq!(group["mode"], "rewrite");
+    assert_eq!(group["format"], "hls");
+    let modes: Vec<&str> = group["channels"]
+        .as_array()
+        .expect("频道")
+        .iter()
+        .map(|channel| channel["mode"].as_str().expect("频道模式"))
+        .collect();
+    assert_eq!(modes, vec!["rewrite", "dash"]);
+}
+
+#[tokio::test]
+async fn archived_dash_group_rejects_subpaths() {
+    let fixture = fixture_with_extra(
+        r#"{"groups":[{"id":"ad","name":"归档 DASH","mode":"dash","access":"archived","format":"mpd","channels":[
+            {"id":"c1","name":"C","url":"http://up/live.mpd"}
+        ]}]}"#,
+    )
+    .await;
+    // 归档组在入口前就返回占位，不会触达上游。
+    for path in ["/api/play/ad/c1/video/index.txt", "/media/ad/c1/0.png"] {
+        let response = fetch(&fixture, path).await;
+        assert_eq!(response.status(), StatusCode::FOUND, "{path}");
+        assert_eq!(
+            header(&response, "location"),
+            "http://placeholder.test/404.mp4",
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn m3u_import_creates_groups_and_channels() {
     let fixture = fixture().await;
     let token = login(&fixture).await;

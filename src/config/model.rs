@@ -149,12 +149,15 @@ impl Config {
             .map(|source| (source.id.clone(), source.playback_mode.clone()))
             .collect();
         for group in &mut self.groups {
-            if group.mode != "passthrough" {
-                continue;
-            }
+            let group_passthrough = group.mode == "passthrough";
             let gid = group.id.clone();
             for channel in &mut group.channels {
-                if channel.source_id.is_empty() || channel.mode.is_some() {
+                if channel.source_id.is_empty() {
+                    continue;
+                }
+                let explicit_passthrough = channel.mode.as_deref() == Some("passthrough");
+                let inherits_passthrough = group_passthrough && channel.mode.is_none();
+                if !explicit_passthrough && !inherits_passthrough {
                     continue;
                 }
                 let source_mode = source_modes.get(&channel.source_id).map(String::as_str);
@@ -177,8 +180,38 @@ impl Config {
                     group = %gid,
                     channel = %channel.id,
                     mode,
-                    "分组为直通，同步频道缺少工作模式；已写入安全模式"
+                    reason = if explicit_passthrough {
+                        "同步频道不能使用直通"
+                    } else {
+                        "分组为直通，同步频道缺少工作模式"
+                    },
+                    "已写入安全模式"
                 );
+            }
+        }
+    }
+
+    /// 管理员全量保存配置时，把真正改过的频道模式标成手工。
+    ///
+    /// 只比较已有频道。新增频道若自带来源标记则保留；没有标记时，
+    /// 显式模式视为管理员输入。同步写入不经过本函数。
+    pub fn mark_manual_mode_changes(old: &Config, new: &mut Config) {
+        for group in &mut new.groups {
+            let old_group = old.group(&group.id);
+            for channel in &mut group.channels {
+                let old_channel = old_group
+                    .and_then(|group| group.channels.iter().find(|old| old.id == channel.id));
+                match old_channel {
+                    Some(old) => {
+                        if old.mode != channel.mode || old.url != channel.url {
+                            channel.set_mode_source(MODE_SOURCE_MANUAL);
+                        }
+                    }
+                    None if channel.mode.is_some() && channel.mode_source().is_empty() => {
+                        channel.set_mode_source(MODE_SOURCE_MANUAL);
+                    }
+                    None => {}
+                }
             }
         }
     }
@@ -1719,6 +1752,68 @@ mod tests {
             config.groups[0].channels[0].mode.as_deref(),
             Some("redirect")
         );
+    }
+
+    #[test]
+    fn normalize_repairs_explicit_passthrough_on_sync_channel() {
+        let mut config = Config::default();
+        config.playlist.sources.push(PlaylistSource {
+            id: "s1".into(),
+            mode: "sync".into(),
+            playback_mode: "proxy".into(),
+            ..PlaylistSource::default()
+        });
+        config.groups.push(Group {
+            id: "g".into(),
+            mode: "rewrite".into(),
+            channels: vec![Channel {
+                id: "c1".into(),
+                url: "http://up/c1.m3u8".into(),
+                source_id: "s1".into(),
+                mode: Some("passthrough".into()),
+                sync_follow: true,
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+
+        config.normalize();
+
+        let channel = &config.groups[0].channels[0];
+        assert_eq!(channel.mode.as_deref(), Some("proxy"));
+        assert_eq!(channel.mode_source(), "sync:proxy");
+    }
+
+    #[test]
+    fn manual_changes_stamp_only_changed_channels() {
+        let mut old = Config::default();
+        old.groups.push(Group {
+            id: "g".into(),
+            channels: vec![
+                Channel {
+                    id: "same".into(),
+                    url: "http://up/same.m3u8".into(),
+                    mode: Some("proxy".into()),
+                    ..Channel::default()
+                },
+                Channel {
+                    id: "changed".into(),
+                    url: "http://up/changed.m3u8".into(),
+                    mode: Some("proxy".into()),
+                    ..Channel::default()
+                },
+            ],
+            ..Group::default()
+        });
+        old.groups[0].channels[0].set_mode_source("sync:proxy");
+        old.groups[0].channels[1].set_mode_source("sync:proxy");
+
+        let mut new = old.clone();
+        new.groups[0].channels[1].mode = Some("redirect".into());
+        Config::mark_manual_mode_changes(&old, &mut new);
+
+        assert_eq!(new.groups[0].channels[0].mode_source(), "sync:proxy");
+        assert_eq!(new.groups[0].channels[1].mode_source(), MODE_SOURCE_MANUAL);
     }
 
     #[test]

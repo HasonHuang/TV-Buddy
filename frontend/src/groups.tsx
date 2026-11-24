@@ -693,7 +693,7 @@ export function GroupsPage() {
       proxy: proxyPayload(form.proxy),
       prefetch: prefetchPayload(prefetch),
     };
-    if (isNew || form.mode !== form.originalMode) {
+    if (form.mode !== form.originalMode) {
       payload.mode = form.mode === '' ? null : form.mode;
     }
     // 只在用户显式切换时发送；否则由服务端按来源字段变化自动固定。
@@ -2002,9 +2002,13 @@ export function GroupsPage() {
           {(() => {
             const current = groups.find((group) => group.id === groupForm.form.id);
             const explicit = (current?.channels ?? []).filter((channel) => channel.mode).length;
-            const unsafe = (current?.channels ?? []).filter(
+            const unsafeChannels = (current?.channels ?? []).filter(
               (channel) => channel.source_id && !channel.mode,
+            );
+            const unsafeManual = unsafeChannels.filter(
+              (channel) => channel.mode_source === 'manual',
             ).length;
+            const unsafeBackfill = unsafeChannels.length - unsafeManual;
             return (
               <>
                 {explicit > 0 && (
@@ -2012,9 +2016,12 @@ export function GroupsPage() {
                     {explicit} 个频道使用单独设置的模式，不受分组修改影响。
                   </p>
                 )}
-                {groupForm.form.mode === 'passthrough' && unsafe > 0 && (
+                {groupForm.form.mode === 'passthrough' && unsafeChannels.length > 0 && (
                   <p className="msg warn">
-                    组内有 {unsafe} 个同步频道未设置工作模式，直通会绕过凭证。请先为它们设置模式或按源默认回填。
+                    组内有 {unsafeChannels.length} 个同步频道未设置工作模式，直通会绕过凭证。
+                    {unsafeBackfill > 0 && ` 其中 ${unsafeBackfill} 个可按源默认回填。`}
+                    {unsafeManual > 0 &&
+                      ` 另有 ${unsafeManual} 个已选择跟随分组，请为它们设置非直通的显式模式。`}
                   </p>
                 )}
               </>

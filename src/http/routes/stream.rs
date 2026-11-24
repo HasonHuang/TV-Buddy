@@ -580,8 +580,16 @@ async fn serve_rest(
     }
     // 签名开启后，本地切片一律要求带签名。入口别名 `index.m3u8` 除外：
     // 它自己会做令牌校验。
-    let resolved = resolve(config, gid, cid);
-    let mode = config.effective_mode(gid, cid);
+    let group = config.group(gid);
+    let channel = group.and_then(|group| group.channels.iter().find(|channel| channel.id == cid));
+    let mode = match (group, channel) {
+        (Some(group), Some(channel)) => Some(group.effective_mode(channel)),
+        _ => None,
+    };
+    // 归档组整组停播，包括清单、切片、时移与 DASH 子路径。
+    if group.is_some_and(|group| group.access == "archived") {
+        return placeholder(config);
+    }
     if crate::sign::enabled(config) && !authorized && rest != "index.m3u8" {
         let local = matches!(mode, Some("proxy" | "remux" | "dash"));
         if local {
@@ -589,7 +597,7 @@ async fn serve_rest(
         }
     }
     // 只统计配置里存在的频道：未知路径不能撑大活动表。
-    if resolved.is_some() {
+    if channel.is_some() {
         state.segments.note_channel(gid, cid);
     }
     if let Some(name) = rest.strip_prefix("timeshift/") {

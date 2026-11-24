@@ -237,14 +237,12 @@ pub async fn put_config(
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
     let expected = body.get("revision").and_then(Value::as_u64);
-    let config: config::Config = serde_json::from_value(body)
+    let mut config: config::Config = serde_json::from_value(body)
         .map_err(|err| ApiError::bad_request(format!("配置格式错误: {err}")))?;
-    // 先在接口层校验，把客户端输入错误映射为 400。
-    // 保存阶段再校验一次，覆盖并发与持久化约束。
-    let mut checked = config.clone();
-    checked.normalize();
-    crate::sign::ensure_secret(&mut checked);
-    if let Err(err) = config::validate(&checked) {
+    // 全量保存是管理员操作：模式或上游地址真正变化的频道转入手工来源。
+    crate::config::model::Config::mark_manual_mode_changes(&state.snapshot(), &mut config);
+    // 先校验原始输入。`normalize` 是安全网，不能把本应拒绝的组合静默修复。
+    if let Err(err) = config::validate(&config) {
         return Err(ApiError::bad_request(format!("配置不合法: {err}")));
     }
 
