@@ -1,16 +1,16 @@
-# 频道级工作模式 Implementation Plan
+# 频道级工作模式实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **给自动执行代理：** 必须使用子技能 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项执行本计划。步骤使用 `- [ ]` 复选框跟踪。
 
-**Goal:** 每个频道可以覆盖工作模式，未设置时继承分组；同步源把工作模式写入新建频道，并提供存量回填。
+**目标：** 每个频道可以覆盖工作模式，未设置时继承分组；同步源把工作模式写入新建频道，并提供存量回填。
 
-**Architecture:** `Channel.mode: Option<String>` 是唯一的覆盖层，`Group.mode` 是默认值。播放、订阅、探测、录制、时移统一通过 `Group::effective_mode` 取值。同步创建频道时把源模式落成显式值，并用 `mode_source` 标记来源。同步频道不能通过显式或继承得到 `passthrough`。
+**架构：** `Channel.mode: Option<String>` 是唯一的覆盖层，`Group.mode` 是默认值。播放、订阅、探测、录制、时移统一通过 `Group::effective_mode` 取值。同步创建频道时把源模式落成显式值，并用 `mode_source` 标记来源。同步频道不能通过显式或继承得到 `passthrough`。
 
-**Tech Stack:** Rust（axum、serde、SQLite 配置存储）、React 18 + Vite、自绘 UI 组件。
+**技术栈：** Rust（axum、serde、SQLite 配置存储）、React 18 + Vite、自绘 UI 组件。
 
-**Spec:** `docs/superpowers/specs/2026-11-22-channel-level-mode-design.md`
+**规格：** `docs/superpowers/specs/2026-11-22-channel-level-mode-design.md`
 
-## Global Constraints
+## 全局约束
 
 - 模式值只有六种：`proxy`、`remux`、`dash`、`redirect`、`rewrite`、`passthrough`。
 - 频道缺省模式表示继承分组。不要写 `"inherit"` 字符串。
@@ -21,17 +21,17 @@
 - 注释与文档使用中文。文案短句、主动语态。
 - 提交信息沿用仓库的 Conventional Commits 风格。
 
-## Review Focus
+## 审查重点
 
-- 混合分组订阅：直通频道输出原始 URL，其他频道输出本地入口。见 Task 2、Task 3。
-- 同步频道在直通分组里：显式设置和继承都必须被拒绝，不能绕过凭证。见 Task 1、Task 6、Task 8。
-- 回填：管理员显式选过「跟随分组」的频道不能被再次覆盖。见 Task 5、Task 7。
-- 源 `auto`：只有创建时是 `auto`、且当前源仍是 `auto` 的频道才按 URL 重算。见 Task 5。
-- 改分组模式：只影响没有显式模式的频道；显式值不变。见 Task 3、Task 5、Task 11。
+- 混合分组订阅：直通频道输出原始 URL，其他频道输出本地入口。见 任务 2、任务 3。
+- 同步频道在直通分组里：显式设置和继承都必须被拒绝，不能绕过凭证。见 任务 1、任务 6、任务 8。
+- 回填：管理员显式选过「跟随分组」的频道不能被再次覆盖。见 任务 5、任务 7。
+- 源 `auto`：只有创建时是 `auto`、且当前源仍是 `auto` 的频道才按 URL 重算。见 任务 5。
+- 改分组模式：只影响没有显式模式的频道；显式值不变。见 任务 3、任务 5、任务 11。
 
 ---
 
-## File Structure
+## 文件结构
 
 | 文件 | 职责 |
 | --- | --- |
@@ -58,15 +58,15 @@
 
 ---
 
-### Task 1: 配置模型、有效模式与校验
+### 任务 1: 配置模型、有效模式与校验
 
-**Files:**
+**文件：**
 - Modify: `src/config/model.rs`
 - Modify: `src/config.rs`
 - Test: 两个文件内的 `#[cfg(test)]` 模块
 
-**Interfaces:**
-- Produces:
+**接口：**
+- 产出：
   - `pub const MODE_VALUES: [&str; 6]`
   - `pub fn valid_mode(mode: &str) -> bool`
   - `pub fn is_dash_url(url: &str) -> bool`
@@ -78,7 +78,7 @@
   - `Group::effective_mode<'a>(&'a self, channel: &'a Channel) -> &'a str`
   - `Config::effective_mode(&self, gid: &str, cid: &str) -> Option<&str>`
 
-- [ ] **Step 1: 写模型失败测试**
+- [ ] **步骤 1: 写模型失败测试**
 
 在 `src/config/model.rs` 测试模块加入这些用例：
 
@@ -87,12 +87,12 @@
 - `is_dash_url_ignores_query_case_and_fragment`：`a.MPD?token=1` 与 `a.mpd#frag` 为真；`a.m3u8?x=.mpd` 为假。
 - `mode_source_helpers_round_trip`：空 → `set("sync:auto")` → 读回 → `clear` → 空。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **步骤 2: 运行测试确认失败**
 
 Run: `cargo test config::model::tests::channel_mode -- --nocapture`
 Expected: 编译失败，提示 `mode` 字段或 helper 不存在。
 
-- [ ] **Step 3: 实现模型与 helper**
+- [ ] **步骤 3: 实现模型与 helper**
 
 在 `src/config/model.rs` 加入常量与函数：
 
@@ -147,12 +147,12 @@ impl Config {
 
 `Config::effective_mode` 找分组与频道，返回 `Some(group.effective_mode(channel))`。同步模块的 `is_mpd` 改为调用 `is_dash_url` 并删除重复实现。
 
-- [ ] **Step 4: 运行模型测试确认通过**
+- [ ] **步骤 4: 运行模型测试确认通过**
 
 Run: `cargo test config::model::tests -- --nocapture`
 Expected: PASS。
 
-- [ ] **Step 5: 写校验失败测试**
+- [ ] **步骤 5: 写校验失败测试**
 
 在 `src/config.rs` 测试模块加入用例：
 
@@ -162,12 +162,12 @@ Expected: PASS。
 
 测试夹具：`Config::default()`，推入一个 `Group`，组内一个 `Channel`。
 
-- [ ] **Step 6: 运行校验测试确认失败**
+- [ ] **步骤 6: 运行校验测试确认失败**
 
 Run: `cargo test config::tests -- --nocapture`
 Expected: FAIL，非法值未被拒绝。
 
-- [ ] **Step 7: 实现校验**
+- [ ] **步骤 7: 实现校验**
 
 在 `src/config.rs::validate` 的分组循环中：
 
@@ -197,12 +197,12 @@ for channel in &group.channels {
 }
 ```
 
-- [ ] **Step 8: 运行测试确认通过**
+- [ ] **步骤 8: 运行测试确认通过**
 
 Run: `cargo test config:: -- --nocapture`
 Expected: PASS。
 
-- [ ] **Step 9: 提交**
+- [ ] **步骤 9: 提交**
 
 ```bash
 git add src/config/model.rs src/config.rs
@@ -211,16 +211,16 @@ git commit -m "feat(config): add channel-level work mode"
 
 ---
 
-### Task 2: 订阅地址按频道模式生成
+### 任务 2: 订阅地址按频道模式生成
 
-**Files:**
+**文件：**
 - Modify: `src/playlist.rs`
 - Test: `src/playlist.rs` 测试模块
 
-**Interfaces:**
-- Consumes: `Group::effective_mode`（Task 1）。
+**接口：**
+- 使用： `Group::effective_mode`（任务 1）。
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **步骤 1: 写失败测试**
 
 测试 `mixed_group_uses_channel_mode_for_entry_url`：
 
@@ -231,12 +231,12 @@ git commit -m "feat(config): add channel-level work mode"
   - 包含 `http://upstream/direct.m3u8`
   - 不包含 `/g1/direct.m3u8`
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **步骤 2: 运行测试确认失败**
 
 Run: `cargo test playlist::tests::mixed_group -- --nocapture`
 Expected: FAIL，直通频道仍输出本地入口。
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3: 实现**
 
 在 `src/playlist.rs` 把三处判断改为 `group.effective_mode(channel)`：
 
@@ -244,12 +244,12 @@ Expected: FAIL，直通频道仍输出本地入口。
 - `push_entry` 无令牌分支的 `None if group.mode == "passthrough"`。
 - `manual_hidden` 的 `if group.mode == "passthrough" && !config.quality.probe_passthrough`。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **步骤 4: 运行测试确认通过**
 
 Run: `cargo test playlist::tests -- --nocapture`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [ ] **步骤 5: 提交**
 
 ```bash
 git add src/playlist.rs
@@ -258,16 +258,16 @@ git commit -m "feat(playlist): use channel-level mode for subscription URLs"
 
 ---
 
-### Task 3: 播放入口按频道模式分发
+### 任务 3: 播放入口按频道模式分发
 
-**Files:**
+**文件：**
 - Modify: `src/http/routes/stream.rs`
 - Modify: `tests/http_contract.rs`（在上游 router 加 `/live2.m3u8`）
 
-**Interfaces:**
-- Consumes: `Group::effective_mode`、`Config::effective_mode`（Task 1）。
+**接口：**
+- 使用： `Group::effective_mode`、`Config::effective_mode`（任务 1）。
 
-- [ ] **Step 1: 写契约失败测试**
+- [ ] **步骤 1: 写契约失败测试**
 
 测试 `mixed_group_routes_each_channel_by_its_mode`：
 
@@ -284,12 +284,12 @@ git commit -m "feat(playlist): use channel-level mode for subscription URLs"
 
 在 `fixture_with_options` 的上游 router 加 `.route("/live2.m3u8", get(|| async { LIVE_BODY }))`。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **步骤 2: 运行测试确认失败**
 
 Run: `cargo test --test http_contract mixed_group_routes_each_channel_by_its_mode -- --nocapture`
 Expected: FAIL，`direct` 返回本地入口或 `proxied` 返回 302。
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3: 实现**
 
 在 `src/http/routes/stream.rs`：
 
@@ -301,12 +301,12 @@ Expected: FAIL，`direct` 返回本地入口或 `proxied` 返回 302。
 - `variant_playlist`：找到频道后判断 `group.effective_mode(channel) != "proxy"`。
 - `mpd_segment`：已有 `channel`，把 `group.mode != "proxy"` 改为 `group.effective_mode(channel) != "proxy"`。
 
-- [ ] **Step 4: 运行契约测试确认通过**
+- [ ] **步骤 4: 运行契约测试确认通过**
 
 Run: `cargo test --test http_contract mixed_group_routes_each_channel_by_its_mode -- --nocapture`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [ ] **步骤 5: 提交**
 
 ```bash
 git add src/http/routes/stream.rs tests/http_contract.rs
@@ -315,19 +315,19 @@ git commit -m "feat(stream): route playback by channel mode"
 
 ---
 
-### Task 4: 质量、录制、时移按频道模式判断
+### 任务 4: 质量、录制、时移按频道模式判断
 
-**Files:**
+**文件：**
 - Modify: `src/quality/engine.rs`
 - Modify: `src/schedule.rs`
 - Modify: `src/dash_timeshift.rs`
 - Modify: `src/http/routes/dash.rs`
 - Modify: `tests/http_contract.rs`
 
-**Interfaces:**
-- Consumes: `Group::effective_mode`（Task 1）。
+**接口：**
+- 使用： `Group::effective_mode`（任务 1）。
 
-- [ ] **Step 1: 写质量失败测试**
+- [ ] **步骤 1: 写质量失败测试**
 
 测试 `guard_base_channels_uses_channel_effective_mode`：
 
@@ -336,12 +336,12 @@ git commit -m "feat(stream): route playback by channel mode"
 - 源 `s1` 存在且启用，`config.quality.enabled = true`，`probe_passthrough = false`。
 - 断言 `guard_base_channels(&config, &RunScope::All) == 1`。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **步骤 2: 运行测试确认失败**
 
 Run: `cargo test quality::engine::tests::guard_base_channels_uses_channel_effective_mode -- --nocapture`
 Expected: FAIL，计数为 2 或 0。
 
-- [ ] **Step 3: 实现质量判断**
+- [ ] **步骤 3: 实现质量判断**
 
 - `due_targets`：删除分组级 `if group.mode == "passthrough" ... continue;`。在频道循环内、URL 判空之后加入：
 
@@ -359,14 +359,14 @@ if group.effective_mode(channel) == "passthrough" && !config.quality.probe_passt
 })
 ```
 
-- [ ] **Step 4: 实现录制与时移判断**
+- [ ] **步骤 4: 实现录制与时移判断**
 
 - `src/schedule.rs::record`：`if group.effective_mode(channel) == "dash"`。
 - `src/dash_timeshift.rs::settings`：先找频道，再判断 `group.effective_mode(channel) != "dash"`；然后判断 `channel.dash_timeshift`。
 - `src/dash_timeshift.rs::warm`：逐频道过滤 `group.effective_mode(channel) == "dash"` 且 `channel.dash_timeshift`。
 - `src/http/routes/dash.rs::timeshift_status`：`let dash = group.effective_mode(channel) == "dash" && channel.dash_timeshift;`，JSON 的 `"mode"` 改为 `group.effective_mode(channel)`。
 
-- [ ] **Step 5: 写 DASH 时移契约测试**
+- [ ] **步骤 5: 写 DASH 时移契约测试**
 
 测试 `dash_timeshift_uses_channel_mode`：
 
@@ -375,13 +375,13 @@ if group.effective_mode(channel) == "passthrough" && !config.quality.probe_passt
 - `login` 取 token，带 `authorization: Bearer <token>` 请求 `GET /panel/api/dash-timeshift/status`。
 - 断言 `channels[0].mode == "dash"`。
 
-- [ ] **Step 6: 运行测试确认通过**
+- [ ] **步骤 6: 运行测试确认通过**
 
 Run: `cargo test quality::engine::tests::guard_base_channels_uses_channel_effective_mode -- --nocapture`
 Run: `cargo test --test http_contract dash_timeshift_uses_channel_mode -- --nocapture`
 Expected: PASS。
 
-- [ ] **Step 7: 提交**
+- [ ] **步骤 7: 提交**
 
 ```bash
 git add src/quality/engine.rs src/schedule.rs src/dash_timeshift.rs src/http/routes/dash.rs tests/http_contract.rs
@@ -390,20 +390,20 @@ git commit -m "feat(quality): gate probing and recording by channel mode"
 
 ---
 
-### Task 5: 同步默认落盘、auto 重算与 detach 标记
+### 任务 5: 同步默认落盘、auto 重算与 detach 标记
 
-**Files:**
+**文件：**
 - Modify: `src/subscription.rs`
 - Test: `src/subscription.rs` 测试模块
 
-**Interfaces:**
-- Consumes: `Channel.mode`、`mode_source` helper、`is_dash_url`（Task 1）。
-- Produces:
+**接口：**
+- 使用： `Channel.mode`、`mode_source` helper、`is_dash_url`（任务 1）。
+- 产出：
   - `fn source_mode_marker(source: &PlaylistSource) -> String`
   - `fn refresh_source_mode(source: &PlaylistSource, channel: &mut Channel, planned: &PlannedChannel)`
   - `fn update_fields(source: &PlaylistSource, channel: &mut Channel, planned: &PlannedChannel) -> bool`
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **步骤 1: 写失败测试**
 
 在 `src/subscription.rs` 测试模块加入这些用例（复用现有 `config_with_source`、`source`、`urls`、`run` helper）：
 
@@ -414,12 +414,12 @@ git commit -m "feat(quality): gate probing and recording by channel mode"
 - `sync_does_not_overwrite_manual_mode`：首次同步后把频道设为 `rewrite`、`mode_source = "manual"`；再次同步；仍为 `rewrite`。
 - `detach_channel_marks_mode_manual`：首次同步后 `detach_channel`；`mode_source == "manual"`，`mode` 仍为 `Some`。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **步骤 2: 运行测试确认失败**
 
 Run: `cargo test subscription::tests::sync_creates_channel_with_source_mode -- --nocapture`
 Expected: FAIL，`mode` 为空。
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3: 实现**
 
 在 `src/subscription.rs` 增加：
 
@@ -471,14 +471,14 @@ fn update_fields(
 
 - `detach_channel`、`detach_group`、`detach_source` 在清空 `source_id` 后调用 `channel.set_mode_source(MODE_SOURCE_MANUAL)`。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **步骤 4: 运行测试确认通过**
 
 Run: `cargo test subscription::tests::sync_creates_channel_with_source_mode subscription::tests::auto_source -- --nocapture`
 Run: `cargo test subscription::tests::source_mode -- --nocapture`
 Run: `cargo test subscription::tests::detach -- --nocapture`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [ ] **步骤 5: 提交**
 
 ```bash
 git add src/subscription.rs
@@ -487,17 +487,17 @@ git commit -m "feat(sync): stamp source mode onto new channels"
 
 ---
 
-### Task 6: 加载时修复直通分组里的同步频道
+### 任务 6: 加载时修复直通分组里的同步频道
 
-**Files:**
+**文件：**
 - Modify: `src/config/model.rs`
 - Test: `src/config/model.rs` 测试模块
 
-**Interfaces:**
-- Consumes: `MODE_SOURCE_MANUAL`、`valid_mode`（Task 1）。
-- Produces: `Config::normalize` 的新行为。
+**接口：**
+- 使用： `MODE_SOURCE_MANUAL`、`valid_mode`（任务 1）。
+- 产出： `Config::normalize` 的新行为。
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **步骤 1: 写失败测试**
 
 在 `src/config/model.rs` 测试模块加入：
 
@@ -509,12 +509,12 @@ git commit -m "feat(sync): stamp source mode onto new channels"
   - 同上，但源 `playback_mode = "auto"`，频道 URL 以 `.mpd` 结尾。
   - 修复后仍为 `redirect`，不是 `dash`。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **步骤 2: 运行测试确认失败**
 
 Run: `cargo test config::model::tests::normalize_repairs -- --nocapture`
 Expected: FAIL，模式仍为空。
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3: 实现**
 
 在 `Config::normalize` 的源归一化之后加入：
 
@@ -558,12 +558,12 @@ for group in &mut self.groups {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **步骤 4: 运行测试确认通过**
 
 Run: `cargo test config::model::tests::normalize -- --nocapture`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [ ] **步骤 5: 提交**
 
 ```bash
 git add src/config/model.rs
@@ -572,22 +572,22 @@ git commit -m "fix(config): repair sync channels under passthrough groups"
 
 ---
 
-### Task 7: 回填函数与接口
+### 任务 7: 回填函数与接口
 
-**Files:**
+**文件：**
 - Modify: `src/subscription.rs`
 - Modify: `src/http/routes/subs.rs`
 - Modify: `src/http.rs`
 - Modify: `tests/http_contract.rs`
 
-**Interfaces:**
-- Consumes: `source_mode_marker`（Task 5）、`Channel::mode_source`（Task 1）。
-- Produces:
+**接口：**
+- 使用： `source_mode_marker`（任务 5）、`Channel::mode_source`（任务 1）。
+- 产出：
   - `pub fn backfill_modes(config: &mut Config, source_id: &str) -> (usize, BTreeMap<String, usize>)`
   - `pub async fn panel_backfill_mode(...) -> Result<Json<Value>, ApiError>`
   - 路由 `/subs/:id/backfill-mode`（挂在 `panel_api_routes`）。
 
-- [ ] **Step 1: 写回填函数失败测试**
+- [ ] **步骤 1: 写回填函数失败测试**
 
 在 `src/subscription.rs` 测试模块加入：
 
@@ -604,12 +604,12 @@ git commit -m "fix(config): repair sync channels under passthrough groups"
   - 第一次回填 → `updated == 2`，`modes` 含 `proxy` 与 `dash`。
   - 第二次回填 → `updated == 0`。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **步骤 2: 运行测试确认失败**
 
 Run: `cargo test subscription::tests::backfill -- --nocapture`
 Expected: 编译失败，`backfill_modes` 不存在。
 
-- [ ] **Step 3: 实现回填函数**
+- [ ] **步骤 3: 实现回填函数**
 
 在 `src/subscription.rs` 增加：
 
@@ -649,7 +649,7 @@ pub fn backfill_modes(
 }
 ```
 
-- [ ] **Step 4: 写接口失败测试**
+- [ ] **步骤 4: 写接口失败测试**
 
 测试 `backfill_mode_endpoint_stamps_unset_sync_channels`：
 
@@ -661,7 +661,7 @@ pub fn backfill_modes(
 
 如果创建源接口要求更多字段，按 `Source` 类型补空值。
 
-- [ ] **Step 5: 实现接口**
+- [ ] **步骤 5: 实现接口**
 
 在 `src/http/routes/subs.rs` 增加：
 
@@ -708,13 +708,13 @@ pub async fn panel_backfill_mode(
 )
 ```
 
-- [ ] **Step 6: 运行测试确认通过**
+- [ ] **步骤 6: 运行测试确认通过**
 
 Run: `cargo test subscription::tests::backfill -- --nocapture`
 Run: `cargo test --test http_contract backfill_mode_endpoint -- --nocapture`
 Expected: PASS。
 
-- [ ] **Step 7: 提交**
+- [ ] **步骤 7: 提交**
 
 ```bash
 git add src/subscription.rs src/http/routes/subs.rs src/http.rs tests/http_contract.rs
@@ -723,17 +723,17 @@ git commit -m "feat(sync): add channel mode backfill"
 
 ---
 
-### Task 8: 频道与分组接口的模式校验和来源标记
+### 任务 8: 频道与分组接口的模式校验和来源标记
 
-**Files:**
+**文件：**
 - Modify: `src/http/routes/groups.rs`
 - Modify: `tests/http_contract.rs`
 
-**Interfaces:**
-- Consumes: `valid_mode`、`MODE_SOURCE_MANUAL`、`Channel::set_mode_source`（Task 1）。
-- Produces: 无新公开接口。
+**接口：**
+- 使用： `valid_mode`、`MODE_SOURCE_MANUAL`、`Channel::set_mode_source`（任务 1）。
+- 产出： 无新公开接口。
 
-- [ ] **Step 1: 写契约失败测试**
+- [ ] **步骤 1: 写契约失败测试**
 
 测试 `channel_mode_override_and_clear`：
 
@@ -752,12 +752,12 @@ git commit -m "feat(sync): add channel mode backfill"
 5. 先把 `c1` 设为 `redirect`（`200`），再把分组设为 `passthrough`（`200`）。
 6. 在 `passthrough` 分组里把 `c1` 设为 `null` → `400`。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **步骤 2: 运行测试确认失败**
 
 Run: `cargo test --test http_contract channel_mode_override_and_clear -- --nocapture`
 Expected: FAIL，`mode_source` 不存在或模式未被接收。
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3: 实现**
 
 在 `src/http/routes/groups.rs` 增加两个 helper：
 
@@ -785,13 +785,13 @@ fn validate_group_mode(group: &Group) -> Result<(), ApiError>;
 - `create_group` 与 `update_group`：`merge_into` 后调用 `validate_group_mode`。
 - `import`：对每个导入分组调用 `validate_group_mode`，非法值返回 `400`。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **步骤 4: 运行测试确认通过**
 
 Run: `cargo test --test http_contract channel_mode_override_and_clear -- --nocapture`
 Run: `cargo test --test http_contract invalid_and_sync_passthrough_modes_are_rejected -- --nocapture`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [ ] **步骤 5: 提交**
 
 ```bash
 git add src/http/routes/groups.rs tests/http_contract.rs
@@ -800,17 +800,17 @@ git commit -m "feat(api): validate channel modes and track mode source"
 
 ---
 
-### Task 9: 状态接口返回有效模式分布
+### 任务 9: 状态接口返回有效模式分布
 
-**Files:**
+**文件：**
 - Modify: `src/http/routes/panel.rs`
 - Modify: `tests/http_contract.rs`
 
-**Interfaces:**
-- Consumes: `Group::effective_mode`（Task 1）。
-- Produces: `GET /panel/api/status` 的 `channel_modes` 字段。
+**接口：**
+- 使用： `Group::effective_mode`（任务 1）。
+- 产出： `GET /panel/api/status` 的 `channel_modes` 字段。
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **步骤 1: 写失败测试**
 
 测试 `status_counts_channels_by_effective_mode`：
 
@@ -821,12 +821,12 @@ git commit -m "feat(api): validate channel modes and track mode source"
   - `channel_modes["redirect"] == 1`
   - `channel_modes["rewrite"] >= 1`
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **步骤 2: 运行测试确认失败**
 
 Run: `cargo test --test http_contract status_counts_channels_by_effective_mode -- --nocapture`
 Expected: FAIL，`channel_modes` 不存在。
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3: 实现**
 
 在 `src/http/routes/panel.rs::status` 中按有效模式统计频道：
 
@@ -843,12 +843,12 @@ for group in &cfg.groups {
 
 在响应 JSON 中加入 `"channel_modes": channel_modes`。保留 `group_modes`。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **步骤 4: 运行测试确认通过**
 
 Run: `cargo test --test http_contract status_counts_channels_by_effective_mode -- --nocapture`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [ ] **步骤 5: 提交**
 
 ```bash
 git add src/http/routes/panel.rs tests/http_contract.rs
@@ -857,17 +857,17 @@ git commit -m "feat(panel): report channel mode distribution"
 
 ---
 
-### Task 10: 前端模式选项与频道表单状态
+### 任务 10: 前端模式选项与频道表单状态
 
-**Files:**
+**文件：**
 - Modify: `frontend/src/modes.ts`
 - Modify: `frontend/src/groups.tsx`
 
-**Interfaces:**
-- Produces: `channelModeOptions(groupMode: string, sync: boolean, allowInherit?: boolean): ModeOption[]`
-- Produces: `ChannelForm` 新字段 `mode: string`、`originalMode: string`、`modeFromSource: boolean`。
+**接口：**
+- 产出： `channelModeOptions(groupMode: string, sync: boolean, allowInherit?: boolean): ModeOption[]`
+- 产出： `ChannelForm` 新字段 `mode: string`、`originalMode: string`、`modeFromSource: boolean`。
 
-- [ ] **Step 1: 增加模式选项**
+- [ ] **步骤 1: 增加模式选项**
 
 在 `frontend/src/modes.ts` 增加：
 
@@ -885,7 +885,7 @@ export function channelModeOptions(
 }
 ```
 
-- [ ] **Step 2: 扩展前端类型**
+- [ ] **步骤 2: 扩展前端类型**
 
 在 `frontend/src/groups.tsx`：
 
@@ -915,7 +915,7 @@ modeFromSource: text(channel, 'mode_source').startsWith('sync:'),
 
 新建分支加入 `mode: ''`、`originalMode: ''`、`modeFromSource: false`。
 
-- [ ] **Step 3: 保存时只在变更后发送 mode**
+- [ ] **步骤 3: 保存时只在变更后发送 mode**
 
 在 `saveChannel` 的 payload 构造之后：
 
@@ -925,12 +925,12 @@ if (channelForm.isNew || form.mode !== form.originalMode) {
 }
 ```
 
-- [ ] **Step 4: 构建确认通过**
+- [ ] **步骤 4: 构建确认通过**
 
 Run: `cd frontend && npm run build`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [ ] **步骤 5: 提交**
 
 ```bash
 git add frontend/src/modes.ts frontend/src/groups.tsx
@@ -939,15 +939,15 @@ git commit -m "feat(panel): add channel mode form state"
 
 ---
 
-### Task 11: 频道弹窗、列表徽标与分组提示
+### 任务 11: 频道弹窗、列表徽标与分组提示
 
-**Files:**
+**文件：**
 - Modify: `frontend/src/groups.tsx`
 
-**Interfaces:**
-- Consumes: `channelModeOptions`（Task 10）、`modeCode`、`modeTip`。
+**接口：**
+- 使用： `channelModeOptions`（任务 10）、`modeCode`、`modeTip`。
 
-- [ ] **Step 1: 增加导入并放频道模式字段**
+- [ ] **步骤 1: 增加导入并放频道模式字段**
 
 在 modes 导入里加入 `channelModeOptions`：
 
@@ -990,7 +990,7 @@ import { channelModeOptions, modeCode, modeOptions, modeTip } from './modes';
 </Field>
 ```
 
-- [ ] **Step 2: 列表按有效模式显示**
+- [ ] **步骤 2: 列表按有效模式显示**
 
 在频道行渲染中：
 
@@ -1021,7 +1021,7 @@ const allTracks =
 
 删除原来的 `{group.mode === 'passthrough' && <Badge tone="muted">直通</Badge>}`。
 
-- [ ] **Step 3: 分组弹窗提示**
+- [ ] **步骤 3: 分组弹窗提示**
 
 在分组弹窗的工作模式 `Field` 下方加入：
 
@@ -1047,12 +1047,12 @@ const allTracks =
 })()}
 ```
 
-- [ ] **Step 4: 构建确认通过**
+- [ ] **步骤 4: 构建确认通过**
 
 Run: `cd frontend && npm run build`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [ ] **步骤 5: 提交**
 
 ```bash
 git add frontend/src/groups.tsx
@@ -1061,15 +1061,15 @@ git commit -m "feat(panel): show channel mode overrides"
 
 ---
 
-### Task 12: 订阅源抽屉回填入口
+### 任务 12: 订阅源抽屉回填入口
 
-**Files:**
+**文件：**
 - Modify: `frontend/src/playlist.tsx`
 
-**Interfaces:**
-- Consumes: `POST /subs/:id/backfill-mode`（Task 7）、`Confirm`、`useToast`。
+**接口：**
+- 使用： `POST /subs/:id/backfill-mode`（任务 7）、`Confirm`、`useToast`。
 
-- [ ] **Step 1: 扩展分组类型与计数**
+- [ ] **步骤 1: 扩展分组类型与计数**
 
 在 `frontend/src/playlist.tsx`：
 
@@ -1106,7 +1106,7 @@ function backfillModeText(mode: string): string {
 }
 ```
 
-- [ ] **Step 2: 增加状态与执行函数**
+- [ ] **步骤 2: 增加状态与执行函数**
 
 在组件内：
 
@@ -1133,7 +1133,7 @@ const runBackfill = async () => {
 };
 ```
 
-- [ ] **Step 3: 修改文案并加入按钮**
+- [ ] **步骤 3: 修改文案并加入按钮**
 
 把「新分组工作模式」改为「新分组与频道默认」，提示改为：
 
@@ -1168,7 +1168,7 @@ const runBackfill = async () => {
   )}
 ```
 
-- [ ] **Step 4: 增加确认框**
+- [ ] **步骤 4: 增加确认框**
 
 在页面底部与其他 `Confirm` 并列：
 
@@ -1190,12 +1190,12 @@ const runBackfill = async () => {
 
 引入 `modeText`、`Confirm`。`allGroups` 已由 `loadGroups` 从 `/config` 读取。
 
-- [ ] **Step 5: 构建确认通过**
+- [ ] **步骤 5: 构建确认通过**
 
 Run: `cd frontend && npm run build`
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [ ] **步骤 6: 提交**
 
 ```bash
 git add frontend/src/playlist.tsx
@@ -1204,16 +1204,16 @@ git commit -m "feat(panel): add source mode backfill action"
 
 ---
 
-### Task 13: 安全卡与概览分布
+### 任务 13: 安全卡与概览分布
 
-**Files:**
+**文件：**
 - Modify: `frontend/src/ops.tsx`
 - Modify: `frontend/src/overview.tsx`
 
-**Interfaces:**
-- Consumes: `GET /panel/api/status` 的 `channel_modes`（Task 9）。
+**接口：**
+- 使用： `GET /panel/api/status` 的 `channel_modes`（任务 9）。
 
-- [ ] **Step 1: 安全卡按频道统计**
+- [ ] **步骤 1: 安全卡按频道统计**
 
 在 `frontend/src/ops.tsx` 把 `configGroups` 类型扩展为包含 `channels`，并计算：
 
@@ -1244,7 +1244,7 @@ const passthroughChannels = configGroups.flatMap((group) =>
 )}
 ```
 
-- [ ] **Step 2: 概览使用 channel_modes**
+- [ ] **步骤 2: 概览使用 channel_modes**
 
 在 `frontend/src/overview.tsx`：
 
@@ -1257,12 +1257,12 @@ const channelModes = (status?.channel_modes ?? status?.group_modes ?? {}) as Rec
 
 把渲染里的 `groupModes` 改为 `channelModes`，说明文字改为「频道按有效工作模式统计（含频道覆盖）」。
 
-- [ ] **Step 3: 构建确认通过**
+- [ ] **步骤 3: 构建确认通过**
 
 Run: `cd frontend && npm run build`
 Expected: PASS。
 
-- [ ] **Step 4: 提交**
+- [ ] **步骤 4: 提交**
 
 ```bash
 git add frontend/src/ops.tsx frontend/src/overview.tsx
@@ -1271,9 +1271,9 @@ git commit -m "feat(panel): count passthrough channels and effective modes"
 
 ---
 
-### Task 14: 文档、验收与整体验证
+### 任务 14: 文档、验收与整体验证
 
-**Files:**
+**文件：**
 - Modify: `README.md`
 - Modify: `docs/design/03-http-contract.md`
 - Modify: `docs/design/04-config-and-storage.md`
@@ -1284,7 +1284,7 @@ git commit -m "feat(panel): count passthrough channels and effective modes"
 - Modify: `docs/tests/02-panel-acceptance.md`
 - Modify: `PROGRESS.md`
 
-- [ ] **Step 1: 更新文档**
+- [ ] **步骤 1: 更新文档**
 
 按设计文档 §16 的清单逐项更新。至少写明：
 
@@ -1294,7 +1294,7 @@ git commit -m "feat(panel): count passthrough channels and effective modes"
 - 与 `S-MODE-02` / `S-MODEL-03` 的差异。
 - 频道弹窗、列表徽标、订阅源回填、安全卡、概览的新文案。
 
-- [ ] **Step 2: 运行格式化与静态检查**
+- [ ] **步骤 2: 运行格式化与静态检查**
 
 ```bash
 cargo fmt --check
@@ -1303,7 +1303,7 @@ cargo clippy --all-targets -- -D warnings
 
 Expected: 无输出或 `Finished`。
 
-- [ ] **Step 3: 运行后端测试**
+- [ ] **步骤 3: 运行后端测试**
 
 ```bash
 cargo test --all-targets
@@ -1311,7 +1311,7 @@ cargo test --all-targets
 
 Expected: PASS。
 
-- [ ] **Step 4: 构建前端**
+- [ ] **步骤 4: 构建前端**
 
 ```bash
 cd frontend && npm run build
@@ -1319,7 +1319,7 @@ cd frontend && npm run build
 
 Expected: PASS。
 
-- [ ] **Step 5: 手工验收**
+- [ ] **步骤 5: 手工验收**
 
 按 `docs/tests/02-panel-acceptance.md` 的新增条目检查：
 
@@ -1332,7 +1332,7 @@ Expected: PASS。
 - 概览按有效模式显示频道分布。
 - 键盘 Tab 能到达新模式字段与回填按钮；Select 有可见标签；徽标同时有文字，不只靠颜色。
 
-- [ ] **Step 6: 提交**
+- [ ] **步骤 6: 提交**
 
 ```bash
 git add README.md docs PROGRESS.md
@@ -1341,32 +1341,32 @@ git commit -m "docs: document channel-level work modes"
 
 ---
 
-## Self-Review
+## 自审
 
-**Spec coverage:**
+**规格覆盖：**
 
-- 频道字段、继承、序列化：Task 1。
-- 源默认落盘、auto 重算、来源标记、detach：Task 5。
-- 存量回填：Task 7。
-- 播放与订阅：Task 2、Task 3。
-- 质量、录制、时移：Task 4。
-- 直通安全边界：Task 1、Task 6、Task 8。
-- 状态统计：Task 9。
-- 前端交互：Task 10、Task 11、Task 12、Task 13。
-- 兼容性与基线差异：Task 14。
+- 频道字段、继承、序列化：任务 1。
+- 源默认落盘、auto 重算、来源标记、detach：任务 5。
+- 存量回填：任务 7。
+- 播放与订阅：任务 2、任务 3。
+- 质量、录制、时移：任务 4。
+- 直通安全边界：任务 1、任务 6、任务 8。
+- 状态统计：任务 9。
+- 前端交互：任务 10、任务 11、任务 12、任务 13。
+- 兼容性与基线差异：任务 14。
 - 已知限制：设计文档 §14.1，不在本次实现。
 
-**Type consistency:**
+**类型一致性：**
 
-- `Channel.mode: Option<String>` 在 Task 1 定义，后续任务统一使用。
+- `Channel.mode: Option<String>` 在 任务 1 定义，后续任务统一使用。
 - `mode_source` 通过 `Channel::mode_source` / `set_mode_source` 访问，不重复字符串键。
-- `backfill_modes` 的返回类型在 Task 7 定义，接口直接序列化。
-- 前端 `channelModeOptions` 在 Task 10 定义，Task 11 使用。
+- `backfill_modes` 的返回类型在 任务 7 定义，接口直接序列化。
+- 前端 `channelModeOptions` 在 任务 10 定义，任务 11 使用。
 
-**Review Focus 测试覆盖:**
+**审查重点测试覆盖：**
 
-- 混合分组订阅：Task 2、Task 3。
-- 同步频道直通：Task 1、Task 6、Task 8。
-- 回填不覆盖手动选择：Task 5、Task 7。
-- auto 重算边界：Task 5。
-- 分组模式变更：Task 3、Task 5、Task 11。
+- 混合分组订阅：任务 2、任务 3。
+- 同步频道直通：任务 1、任务 6、任务 8。
+- 回填不覆盖手动选择：任务 5、任务 7。
+- auto 重算边界：任务 5。
+- 分组模式变更：任务 3、任务 5、任务 11。
