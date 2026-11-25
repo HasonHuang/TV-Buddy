@@ -192,6 +192,16 @@ impl Manager {
         session
     }
 
+    /// 该请求是否由 remux 本地会话处理。用于签名门禁，不读取切片。
+    pub fn handles(&self, gid: &str, cid: &str, name: &str) -> bool {
+        Session::owns(name)
+            && self
+                .sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&format!("{gid}/{cid}"))
+    }
+
     /// 交给请求路径：返回 `Some` 表示已处理；`None` 表示不归 remux 管。
     ///
     /// 会话未就绪或切片缺失都返回 `None`，由上层统一给 `302 not_found_url`：

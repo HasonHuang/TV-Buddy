@@ -1735,12 +1735,20 @@ fn source_mode_marker(source: &PlaylistSource) -> String {
     }
 }
 
-/// 源仍是 `auto` 时，按最新 URL 类型重算频道模式。
-fn refresh_source_mode(source: &PlaylistSource, channel: &mut Channel, planned: &PlannedChannel) {
+/// 源仍是 `auto` 时，只在 URL 类型变化后重算频道模式。
+fn refresh_source_mode(
+    source: &PlaylistSource,
+    channel: &mut Channel,
+    planned: &PlannedChannel,
+    old_dash: bool,
+) {
     if channel.mode_source() != "sync:auto" {
         return;
     }
     if !matches!(source.playback_mode.trim(), "" | "auto") {
+        return;
+    }
+    if old_dash == planned.dash {
         return;
     }
     channel.mode = Some(mode_for(source, planned.dash));
@@ -2076,11 +2084,12 @@ fn extra_str<'a>(channel: &'a Channel, key: &str) -> &'a str {
 }
 
 fn update_fields(source: &PlaylistSource, channel: &mut Channel, planned: &PlannedChannel) -> bool {
+    let old_dash = crate::config::model::is_dash_url(&channel.url);
     let changed = !same_upstream(channel, planned);
     if changed {
         write_upstream(channel, planned);
     }
-    refresh_source_mode(source, channel, planned);
+    refresh_source_mode(source, channel, planned, old_dash);
     changed
 }
 
@@ -2165,6 +2174,30 @@ mod tests {
         let channel = &config.groups[0].channels[0];
         assert_eq!(channel.mode.as_deref(), Some("redirect"));
         assert_eq!(channel.mode_source(), "sync:redirect");
+    }
+
+    #[test]
+    fn auto_mode_recomputes_only_on_url_type_change() {
+        let mut config = config_with_source();
+        let mut source = source();
+        source.playback_mode = "auto".into();
+        let hls = urls(&[("hls", "混合", "http://up/live.m3u8")]);
+        run(&mut config, &source, &hls);
+        assert_eq!(config.groups[0].channels[0].mode.as_deref(), Some("proxy"));
+
+        // 安全修复写入的 redirect 不应在 URL 未变时被改成 proxy。
+        config.groups[0].channels[0].mode = Some("redirect".into());
+        run(&mut config, &source, &hls);
+        assert_eq!(
+            config.groups[0].channels[0].mode.as_deref(),
+            Some("redirect")
+        );
+
+        // URL 类型变化后按新类型重算。
+        let dash = urls(&[("hls", "混合", "http://up/live.mpd")]);
+        run(&mut config, &source, &dash);
+        assert_eq!(config.groups[0].channels[0].mode.as_deref(), Some("dash"));
+        assert_eq!(config.groups[0].channels[0].mode_source(), "sync:auto");
     }
 
     #[test]

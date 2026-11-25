@@ -135,6 +135,30 @@ impl Config {
         );
         strip_legacy(&mut self.cdn.extra, &["auto_tune", "segment_max_age_secs"]);
         for group in &mut self.groups {
+            if !valid_mode(&group.mode) {
+                tracing::warn!(
+                    group = %group.id,
+                    mode = %group.mode,
+                    "分组工作模式不支持；按 proxy 修复"
+                );
+                group.mode = "proxy".to_string();
+            }
+            for channel in &mut group.channels {
+                if channel
+                    .mode
+                    .as_deref()
+                    .is_some_and(|mode| !valid_mode(mode))
+                {
+                    tracing::warn!(
+                        group = %group.id,
+                        channel = %channel.id,
+                        mode = %channel.mode.as_deref().unwrap_or(""),
+                        "频道工作模式不支持；改为继承分组"
+                    );
+                    channel.mode = None;
+                    channel.clear_mode_source();
+                }
+            }
             if group.origin.trim().is_empty() {
                 group.origin = "manual".to_string();
             }
@@ -1782,6 +1806,30 @@ mod tests {
         let channel = &config.groups[0].channels[0];
         assert_eq!(channel.mode.as_deref(), Some("proxy"));
         assert_eq!(channel.mode_source(), "sync:proxy");
+    }
+
+    #[test]
+    fn normalize_repairs_unknown_group_and_channel_modes() {
+        let mut config = Config::default();
+        config.groups.push(Group {
+            id: "g".into(),
+            mode: "magic".into(),
+            channels: vec![Channel {
+                id: "c1".into(),
+                url: "http://up/c1.m3u8".into(),
+                mode: Some("magic".into()),
+                ..Channel::default()
+            }],
+            ..Group::default()
+        });
+
+        config.normalize();
+
+        let group = &config.groups[0];
+        assert_eq!(group.mode, "proxy");
+        assert_eq!(group.channels[0].mode, None);
+        assert_eq!(group.channels[0].mode_source(), "");
+        crate::config::validate(&config).expect("修复后应可保存");
     }
 
     #[test]

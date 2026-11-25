@@ -591,8 +591,13 @@ async fn serve_rest(
         return placeholder(config);
     }
     if crate::sign::enabled(config) && !authorized && rest != "index.m3u8" {
-        let local = matches!(mode, Some("proxy" | "remux" | "dash"));
-        if local {
+        // 本地处理器不看模式：频道级覆盖成 redirect/rewrite/passthrough 后，
+        // 已存在的回看或 remux 会话仍能返回本地字节。门禁必须按处理器判断。
+        let local_mode = matches!(mode, Some("proxy" | "remux" | "dash"));
+        let local_buffer = (rest.starts_with("timeshift/")
+            && state.timeshift.has_session(gid, cid))
+            || state.remux.handles(gid, cid, rest);
+        if local_mode || local_buffer {
             return redirect_asset(config, &config.auth.token_failure_url);
         }
     }

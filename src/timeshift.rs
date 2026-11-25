@@ -213,6 +213,14 @@ impl Manager {
         Some(session)
     }
 
+    /// 是否存在该频道的回看会话。用于签名门禁，不触发创建。
+    pub fn has_session(&self, gid: &str, cid: &str) -> bool {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(&format!("{gid}/{cid}"))
+    }
+
     /// 已缓冲切片数；会话不存在时为 0。
     pub fn count(&self, gid: &str, cid: &str) -> usize {
         self.sessions

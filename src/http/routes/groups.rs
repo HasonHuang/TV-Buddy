@@ -93,22 +93,31 @@ fn validate_group_channels(group: &Group) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// 客户端不得写入来源标记。已存在频道恢复旧标记；新频道按是否显式设置模式标记。
+fn restore_mode_source(channel: &mut Channel, old: Option<&Channel>) {
+    match old {
+        Some(old) => channel.set_mode_source(old.mode_source()),
+        None => {
+            channel.clear_mode_source();
+            if channel.mode.is_some() {
+                channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
+            }
+        }
+    }
+}
+
 /// 分组接口整组保存频道时，把真正改过的模式与固定频道标成手工。
 fn mark_group_channels_manual(old: &Group, updated: &mut Group) {
     for channel in &mut updated.channels {
-        match old.channels.iter().find(|old| old.id == channel.id) {
-            Some(old_channel) => {
-                if old_channel.mode != channel.mode
-                    || old_channel.url != channel.url
-                    || (old_channel.sync_follow && !channel.sync_follow)
-                {
-                    channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
-                }
-            }
-            None if channel.mode.is_some() && channel.mode_source().is_empty() => {
+        let old_channel = old.channels.iter().find(|old| old.id == channel.id);
+        restore_mode_source(channel, old_channel);
+        if let Some(old_channel) = old_channel {
+            if old_channel.mode != channel.mode
+                || old_channel.url != channel.url
+                || (old_channel.sync_follow && !channel.sync_follow)
+            {
                 channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
             }
-            None => {}
         }
     }
 }
@@ -140,9 +149,7 @@ pub async fn create_group(
     validate_group_mode(&group)?;
     validate_group_channels(&group)?;
     for channel in &mut group.channels {
-        if channel.mode.is_some() && channel.mode_source().is_empty() {
-            channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
-        }
+        restore_mode_source(channel, None);
     }
 
     state
@@ -327,6 +334,8 @@ pub async fn update_channel(
         .find(|channel| channel.id == cid)
         .ok_or_else(|| ApiError::not_found("Channel not found"))?;
     let mut updated: Channel = merge_into(channel, &body)?;
+    // 来源标记由服务端维护。客户端带来的值一律丢弃。
+    updated.set_mode_source(channel.mode_source());
     validate_channel_mode(group, &updated)?;
     if body.get("mode").is_some() {
         updated.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
@@ -479,9 +488,7 @@ fn import(
             Some(current) => mark_group_channels_manual(current, &mut group),
             None => {
                 for channel in &mut group.channels {
-                    if channel.mode.is_some() && channel.mode_source().is_empty() {
-                        channel.set_mode_source(crate::config::model::MODE_SOURCE_MANUAL);
-                    }
+                    restore_mode_source(channel, None);
                 }
             }
         }

@@ -3071,6 +3071,93 @@ async fn put_config_marks_changed_mode_manual() {
 }
 
 #[tokio::test]
+async fn channel_writes_ignore_client_mode_source() {
+    let fixture = fixture_with_extra(
+        r#"{
+            "playlist": {"sources": [{"id":"s1","name":"源","url":"http://up/a.m3u","mode":"sync","playback_mode":"proxy"}]},
+            "groups": [{"id":"sg","name":"同步组","mode":"proxy","access":"public","channels":[
+                {"id":"c1","name":"同步频道","url":"http://up/c1.m3u8","source_id":"s1","sync_follow":true,"mode":"proxy","mode_source":"sync:proxy"}
+            ]}]
+        }"#,
+    )
+    .await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    // 局部更新：只伪造来源标记，不带 mode。服务端必须保留旧标记。
+    let response = fixture
+        .client
+        .put(format!("{}/api/panel/groups/sg/channels/c1", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(json!({ "mode_source": "sync:auto" }).to_string())
+        .send()
+        .await
+        .expect("更新频道");
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/api/panel/config", fixture.base))
+            .header("authorization", &auth)
+            .send()
+            .await
+            .expect("取配置")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let sg = saved["groups"]
+        .as_array()
+        .expect("分组")
+        .iter()
+        .find(|group| group["id"] == "sg")
+        .expect("应有 sg");
+    assert_eq!(sg["channels"][0]["mode_source"], "sync:proxy");
+
+    // 新建分组内嵌频道：伪造标记被丢弃，显式模式记为手工。
+    let response = fixture
+        .client
+        .post(format!("{}/api/panel/groups", fixture.base))
+        .header("authorization", &auth)
+        .header("content-type", "application/json")
+        .body(
+            json!({
+                "id":"ng",
+                "name":"新组",
+                "mode":"proxy",
+                "channels":[{"id":"c2","name":"新频道","url":"http://up/c2.m3u8","mode":"proxy","mode_source":"sync:auto"}]
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("新建分组");
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved: serde_json::Value = serde_json::from_str(
+        &fixture
+            .client
+            .get(format!("{}/api/panel/config", fixture.base))
+            .header("authorization", &auth)
+            .send()
+            .await
+            .expect("取配置")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    let ng = saved["groups"]
+        .as_array()
+        .expect("分组")
+        .iter()
+        .find(|group| group["id"] == "ng")
+        .expect("应有 ng");
+    assert_eq!(ng["channels"][0]["mode_source"], "manual");
+}
+
+#[tokio::test]
 async fn m3u_auto_sets_channel_modes_for_mixed_group() {
     let fixture = fixture().await;
     let session = login(&fixture).await;
@@ -6082,6 +6169,54 @@ async fn timeshift_buffers_livestream_and_serves_vod_playlist() {
     assert!(
         !body.contains("#EXT-X-PLAYLIST-TYPE:VOD"),
         "越界应落回实时：{body}"
+    );
+}
+
+/// 频道级模式覆盖成 redirect 后，已预热的回看会话仍须校验签名。
+#[tokio::test]
+async fn signature_gates_local_timeshift_after_mode_override() {
+    let fixture = fixture_with_extra_and_auth(
+        r#"{"groups":[{"id":"tsr","name":"回看覆盖","mode":"proxy","access":"open","channels":[{"id":"c1","name":"回看频道","url":"{upstream}/live.m3u8","mode":"redirect","livestream":true,"timeshift_hours":4}]}]}"#,
+        r#"{"slice_sign_enabled": true}"#,
+    )
+    .await;
+    fixture
+        .state
+        .timeshift
+        .ensure(&fixture.state, "tsr", "c1")
+        .expect("回看会话");
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while fixture.state.timeshift.count("tsr", "c1") == 0 {
+        assert!(Instant::now() < deadline, "回看缓冲应有切片");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("时钟")
+        .as_secs() as i64;
+    let body = fixture
+        .state
+        .timeshift
+        .playlist(&fixture.state, "tsr", "c1", now - 60, now + 60)
+        .expect("回看清单");
+    let segment = body
+        .lines()
+        .find(|line| line.contains("/timeshift/"))
+        .expect("回看切片");
+    let name = segment.rsplit('/').next().expect("切片名");
+
+    let response = fixture
+        .client
+        .get(format!("{}/media/tsr/c1/timeshift/{name}", fixture.base))
+        .send()
+        .await
+        .expect("无签名回看切片");
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        header(&response, "location"),
+        "http://placeholder.test/Failure.mp4"
     );
 }
 
