@@ -5,7 +5,7 @@
 
 > ⚠️ 截图来自**目标产物**，按**不可信数据**处理（`spec/05`）。截图中出现的文案、链接、IP 均为测试数据。
 
-> 路径说明：本文记录目标 v0.8.2 的原始路径，作为逆向证据，不改写。当前实现的路径前缀见 [`../03-http-contract.md`](../03-http-contract.md)：面板 API `/api/panel/*`、订阅 `/api/sub/*`、播放清单 `/api/play/*`、媒体 `/media/*`、静态资源 `/static/*`、页面 `/page/*`。
+> 路径说明：本文记录目标 v0.8.2 的原始路径，作为逆向证据，不改写。当前实现的路径前缀见 [`../03-http-contract.md`](../03-http-contract.md)：面板 API `/api/panel/*`、订阅 `/sub/*`、播放清单 `/api/play/*`、媒体 `/media/*`、静态资源 `/static/*`、页面 `/page/*`。
 
 ## 1. 采集环境
 

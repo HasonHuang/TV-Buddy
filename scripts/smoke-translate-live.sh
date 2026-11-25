@@ -132,7 +132,7 @@ PY
 
 echo "==> EPG 采集与翻译"
 for _ in $(seq 1 90); do
-    [ "$(curl -s -o "$WORK/epg.xml" -w '%{http_code}' "http://127.0.0.1:$PORT/api/sub/$PTOK/epg.xml")" = "200" ] && break
+    [ "$(curl -s -o "$WORK/epg.xml" -w '%{http_code}' "http://127.0.0.1:$PORT/sub/$PTOK/epg.xml")" = "200" ] && break
     sleep 0.5
 done
 grep -q '你好' "$WORK/epg.xml" || {

@@ -654,7 +654,7 @@ curl -s -o /dev/null -D /tmp/pt.h -w '%{http_code}\n' http://127.0.0.1:9900/api/
 loc /tmp/pt.h
 after=$(grep -c 'GET /master.m3u8' /tmp/upstream.log || true)
 echo "$before $after"
-curl -s "http://127.0.0.1:9900/api/sub/$PTOK/playlist.m3u" | grep -A1 '直通'
+curl -s "http://127.0.0.1:9900/sub/$PTOK/playlist.m3u" | grep -A1 '直通'
 ```
 
 预期输出：
@@ -870,7 +870,7 @@ TOK=$(curl -s -X POST http://127.0.0.1:9900/api/panel/login \
 PTOK=$(curl -s -H "Authorization: Bearer $TOK" \
   http://127.0.0.1:9900/api/panel/me \
   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-curl -s "http://127.0.0.1:9900/api/sub/$PTOK/playlist.m3u"
+curl -s "http://127.0.0.1:9900/sub/$PTOK/playlist.m3u"
 ```
 
 预期一：全局订阅已停用。

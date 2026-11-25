@@ -46,14 +46,14 @@
 
 | 方法 | 路径 | 鉴权 | 响应 | 阶段 | 依据 |
 | --- | --- | --- | --- | --- | --- |
-| GET | `/playlist.m3u` | 无 | `404` 文本，指路 `/api/sub/<令牌>/playlist.m3u` | ✅ | 设计决策（订阅只从用户令牌进入） |
+| GET | `/playlist.m3u` | 无 | `404` 文本，指路 `/sub/<令牌>/playlist.m3u` | ✅ | 设计决策（订阅只从用户令牌进入） |
 | GET | `/{gid}/playlist.m3u` | 无 | `404` 文本，同上 | ✅ | 设计决策 |
 | GET | `/api/panel/subs/status` | 管理员会话 | `200` JSON 源列表；未登录 `401`；非管理员 `403` | ✅ v2026.16 | S-GAP-07 |
 | POST | `/api/panel/subs/groups` | 管理员会话 | `200` JSON 分组；非 http(s) → `400`；抓取失败 → `502` | ✅ v2026.16 | S-GAP-07 |
 | POST | `/api/panel/subs/preview` | 管理员会话 | `200` JSON 预检 | ✅ v2026.16 | S-GAP-07 |
-| GET | `/api/sub/:token/playlist.m3u` | 令牌 | `200` M3U；令牌无效或过期 → `404`；`Cache-Control: private, no-store` | ✅ v2026.7 | F-1 §3.3 |
-| GET | `/api/sub/:token/epg.xml` | 令牌 | `200` XMLTV，只含该用户可见频道；令牌无效 → `404`；EPG 关 → `404`；`private, no-store` | ✅ v2026.7 | F-1 §3.3 |
-| GET | `/api/sub/:token/epg.xml.gz` | 令牌 | 同上，`application/gzip` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/sub/:token/playlist.m3u` | 令牌 | `200` M3U；令牌无效或过期 → `404`；`Cache-Control: private, no-store` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/sub/:token/epg.xml` | 令牌 | `200` XMLTV，只含该用户可见频道；令牌无效 → `404`；EPG 关 → `404`；`private, no-store` | ✅ v2026.7 | F-1 §3.3 |
+| GET | `/sub/:token/epg.xml.gz` | 令牌 | 同上，`application/gzip` | ✅ v2026.7 | F-1 §3.3 |
 | GET | `/api/play/token/:token/:gid/:file` | 路径令牌 | `200` 清单；令牌无效 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
 | GET | `/api/play/:gid/:cid/l/:exp/:sig/*path` | 签名 | `200` 清单；签名错或过期 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
 | GET | `/media/:gid/:cid/l/:exp/:sig/*path` | 签名 | `200` 媒体数据；签名错或过期 → `302` 失败视频 | ✅ v2026.8 | 设计决策 |
@@ -66,8 +66,8 @@
 | GET | `/media/{gid}/{cid}/timeshift/{filename}` | 按 token 开关 | `200` 本地回看 | P1 | F-014 |
 | GET | `/api/play/{gid}/{cid}/dash-timeshift/{track}[/{playlist,playlist.txt,playlist.m3u8}]` | 无 | `200` VOD 清单；缺或错 `playseek` → `400 missing playseek`；区间不重叠、未知轨道、非 `dash` 组 → `404 no segments in range` | P3.5 | S-EP-16、S-TS-01、F-016 §5.1 |
 | GET | `/media/{gid}/{cid}/dash-timeshift/{track}/<段号>.<ext>` | 无 | `200` 切片；ext 取伪装扩展名或 `m4s`；未命中 → `404 segment not found` | P3.5 | 同上 |
-| GET | `/epg` | — | 已删除公开路由，`404`。改用 `/api/sub/<令牌>/epg.xml` 与面板「节目指南」 | ✅ v2026.16 | 安全收紧 |
-| GET | `/epg.xml`、`/epg.xml.gz` | — | 已删除公开路由，`404`。改用 `/api/sub/<令牌>/epg.xml[.gz]` | ✅ v2026.16 | 安全收紧 |
+| GET | `/epg` | — | 已删除公开路由，`404`。改用 `/sub/<令牌>/epg.xml` 与面板「节目指南」 | ✅ v2026.16 | 安全收紧 |
+| GET | `/epg.xml`、`/epg.xml.gz` | — | 已删除公开路由，`404`。改用 `/sub/<令牌>/epg.xml[.gz]` | ✅ v2026.16 | 安全收紧 |
 | GET | `/epg/api/{channels,programmes/:channel,search}` | — | 已删除公开路由，`404`。改用 `/api/panel/epg/*` | ✅ v2026.16 | 安全收紧 |
 | GET | `/logo` | — | 已删除公开页面，`404`。改用面板「台标管理」 | ✅ v2026.16 | 安全收紧 |
 | GET | `/static/logo/<file>` | 无 | `200` 图片 + `public, max-age=3600`；缺文件、越界名、非白名单扩展 → `404` | ✅ P1 | F-011 §6 |
@@ -77,17 +77,48 @@
 | GET | `/api/unban/whoami` | 登录会话 | 开启 IP 管控：`{"banned","enabled":true,"ip","max_per_month":3,"remaining","used"}`；关闭：`{"enabled":false,"ip"}`；未登录 `401`；XFF 取末项，其次 `X-Real-IP`，最后 TCP 对端 | ✅ v2026.16 | S-EP-15 |
 | GET | `/whoami` | 无 | `404`（目标未注册） | ✅ P3 | S-EP-15 |
 | GET | `/api/health` | 无 | `200` `ok`（`text/plain`） | ✅ M0 | S-EP-10 |
-| GET | `/` | 无 | `302` → `[server].home_url`（默认 `/page`） | ✅ M0 | S-EP-01 |
-| GET | `/page`、`/page/` | 无 | `200` `text/html`；未登录时前端显示登录表单 | ✅ M0 | S-EP-01 |
+| GET | `/` | 无 | `302` → `[server].home_url`（默认 `/page/panel`） | ✅ M0 | S-EP-01 |
+| GET | `/page/panel`、`/page/panel/` | 无 | `200` `text/html`；未登录时前端显示登录表单 | ✅ M0 | S-EP-01 |
 | GET | `/static/panel/*path` | 无 | `200` 静态资源 / `404` | ✅ M0 | S-EP-16 |
 | GET | `/static/assets/*path` | 无 | `200` 本地 HLS 清单或切片 / `404` | ✅ P2 | S-EP-16 |
 | GET | `/api/share/pull?key=` | 分享密钥 | `200` JSON；见 §6.10 | ✅ P1 | F-013 |
 
 ### 3.1 页面入口
 
-`GET /page` 返回面板 HTML。未登录时，前端显示登录表单。没有独立登录页。
+`GET /page/panel` 返回面板 HTML。未登录时，前端显示登录表单。没有独立登录页。
 
-`GET /` 返回 `302`。`Location` 取 `[server].home_url`。默认值为 `/page`。
+| 旧路径 | 改写目标 |
+| --- | --- |
+| `GET /health` | `/api/health` |
+| `/panel/api/*` | `/api/panel/*` |
+| `/subs/*` | `/api/panel/subs/*` |
+| `/epg/translate/*` | `/api/panel/epg/translate/*` |
+| `/subtitle/*` | `/api/panel/subtitle/*` |
+| `/sub/*` | `/sub/*`（v2026.60 短暂使用的前缀） |
+| `/l/*` | `/api/play/token/*` |
+| `/logo/*` | `/static/logo/*` |
+| `/__assets/*` | `/static/panel/*` |
+| `/assets/*` | `/static/assets/*` |
+| `GET /unban/whoami` | `/api/unban/whoami` |
+| `POST /unban` | `/api/unban` |
+| `GET /unban` | `/page/unban` |
+| `GET /panel`、`GET /panel/` | `/page/panel`、`/page/panel/` |
+
+播放形状按顺序判断：
+
+| 旧路径形状 | 改写目标 |
+| --- | --- |
+| `/<gid>/<file>` | `/api/play/<gid>/<file>` |
+| `/<gid>/<cid>/l/<exp>/<sig>/<rest>`，清单形状 | `/api/play/<gid>/<cid>/l/<exp>/<sig>/<rest>` |
+| `/<gid>/<cid>/l/<exp>/<sig>/<rest>`，其余形状 | `/media/<gid>/<cid>/l/<exp>/<sig>/<rest>` |
+| `/<gid>/<cid>/<rest>`，清单形状 | `/api/play/<gid>/<cid>/<rest>` |
+| `/<gid>/<cid>/<rest>`，其余形状 | `/media/<gid>/<cid>/<rest>` |
+
+清单形状：`index.m3u8`、`<track>/index.txt`、`<track>/index.m3u8`、`dash-timeshift/<track>/playlist[.txt|.m3u8]`。其余形状按媒体数据处理。
+
+两段 `/<gid>/<file>` 一律改写，不限于入口文件名。旧 `/<gid>/<cid>.mp4` 返回占位 `302`，改写后保持该响应。这是兼容性放宽。处理器的扩展名白名单不变。
+
+`/playlist.m3u` 与 `/<gid>/playlist.m3u` 是固定 `404` 指路。它们不改写。`/api/`、`/media/`、`/static/`、`/page/` 与 `/` 不参与改写。
 
 ## 4. 播放契约（proxy）
 
@@ -185,8 +216,8 @@ GET /media/{gid}/{cid}/<P>_<S>.<ext>
 
 订阅有两个入口：
 
-- `/api/sub/:token/playlist.m3u`：用户订阅，含该用户可见的全部分组。
-- `/api/sub/:token/:gid/playlist.m3u`：单个分组的订阅，只含指定分组的频道。
+- `/sub/:token/playlist.m3u`：用户订阅，含该用户可见的全部分组。
+- `/sub/:token/:gid/playlist.m3u`：单个分组的订阅，只含指定分组的频道。
 
 令牌即身份，范围由用户决定。全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 返回 `404` 文本，指路用户订阅。
 
@@ -194,16 +225,16 @@ GET /media/{gid}/{cid}/<P>_<S>.<ext>
 
 | 路径 | 头 |
 | --- | --- |
-| `/api/sub/:token/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="playlist.m3u"` |
-| `/api/sub/:token/:gid/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="<gid>.m3u"` |
-| `/api/sub/:token/epg.xml` | `content-type: application/xml; charset=utf-8` |
-| `/api/sub/:token/epg.xml.gz` | `content-type: application/gzip` |
+| `/sub/:token/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="playlist.m3u"` |
+| `/sub/:token/:gid/playlist.m3u` | `content-type: application/vnd.apple.mpegurl; charset=utf-8`、`content-disposition: inline; filename="<gid>.m3u"` |
+| `/sub/:token/epg.xml` | `content-type: application/xml; charset=utf-8` |
+| `/sub/:token/epg.xml.gz` | `content-type: application/gzip` |
 | `/playlist.m3u`、`/{gid}/playlist.m3u` | `404` + `text/plain` 提示 |
 
 ### 5.2 正文形状
 
 ```text
-#EXTM3U x-tvg-url="http://<host>/api/sub/<token>/epg.xml.gz"   ← EPG 开启才有
+#EXTM3U x-tvg-url="http://<host>/sub/<token>/epg.xml.gz"   ← EPG 开启才有
 <server.m3u_header_lines 逐行原文>
 #EXTINF:-1 tvg-id="<tvg_id||id>" tvg-name="<tvg_name||name>" tvg-logo="<logo>" group-title="<分组显示名>",<频道名>
 http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
@@ -216,7 +247,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | `tvg-name` | 缺省用频道名 | S-MODEL-04 |
 | `group-title` | 分组**显示名** | F-013 §3 |
 | 令牌段 | 一律用 `/api/play/token/<token>/…` 路径段 | S-URL-04、F-009 |
-| `x-tvg-url` | 指向该用户自己的 `/api/sub/<token>/epg.xml.gz` | F-1 §3.3 |
+| `x-tvg-url` | 指向该用户自己的 `/sub/<token>/epg.xml.gz` | F-1 §3.3 |
 | `m3u_header_lines` | 追加在 `#EXTM3U` 后；热重载生效 | S-URL-07 |
 | 范围 | 只含 `allowed_group_ids` 与 `allowed_channel_ids` 允许的频道 | F-1 §5 |
 | 分组订阅范围 | 只含指定分组；分组不存在、已归档或对用户不可见时返回 `404` | — |
@@ -376,8 +407,8 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 方法 | 路径 | 鉴权 | 行为 |
 | --- | --- | --- | --- |
-| `GET` | `/epg.xml` | — | 已删除公开路由，`404`。用户节目单为 `/api/sub/<令牌>/epg.xml` |
-| `GET` | `/epg.xml.gz` | — | 已删除公开路由，`404`。用户节目单为 `/api/sub/<令牌>/epg.xml.gz` |
+| `GET` | `/epg.xml` | — | 已删除公开路由，`404`。用户节目单为 `/sub/<令牌>/epg.xml` |
+| `GET` | `/epg.xml.gz` | — | 已删除公开路由，`404`。用户节目单为 `/sub/<令牌>/epg.xml.gz` |
 | `GET` | `/epg` | — | 已删除公开页面，`404`。改用面板「节目指南」 |
 | `GET` | `/api/panel/epg/status` | Bearer | `{"enabled","running","sources","channels","programmes","kept","keep_days","future_days","last_success","last_error"}` |
 | `POST` | `/api/panel/epg/refresh` | Bearer | 同步采集一次；`{"ok":true,"msg":"采集完成","channels","programmes"}`；失败 → `500` + 原因 |
@@ -469,7 +500,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 项 | 规则 |
 | --- | --- |
-| 记账 | `/page`、`/page/*`、`/static/panel/*`、`/api/panel/*`、`/api/unban/*` 不记账。其余路径按 `X-Forwarded-For` 末项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略 |
+| 记账 | `/page/panel`、`/page/*`、`/static/panel/*`、`/api/panel/*`、`/api/unban/*` 不记账。其余路径按 `X-Forwarded-For` 末项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略 |
 | 拦截 | 封禁期内 → `403` 纯文本 `banned`；上述豁免路径不拦截（避免管理员或用户自锁） |
 | 容量 | 最多保留 10 000 个地址，超出后忽略新地址 |
 | 未实现 | 按 IP 的会话上限与自动限流 |
@@ -483,12 +514,12 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | 安全管控 | `/api/panel/security/{token,token/rotate,ip/stats,ip/ban,ip/unban}` | ✅ |
 | 缓存状态 | `GET /api/panel/cache/stats`、`POST /api/panel/cache/flush`（二次确认） | ✅ |
 | 频道热度 | `GET /api/panel/stats`（总请求、切片、上游失败、分组排行） | ✅ |
-| 节目指南 | `GET /api/panel/epg/status`、`POST /api/panel/epg/refresh`；链接到 `/epg` 浏览页 | ✅ |
+| 节目指南 | `GET /api/panel/epg/status`、`POST /api/panel/epg/refresh`；面板分区 `#/epg`（公开 `/epg` 页已删除） | ✅ |
 | 运行日志 | `GET /api/panel/logs?limit=`（5 秒轮询） | ✅ |
 | 备份恢复 | `GET /api/panel/backup`、`POST /api/panel/restore`（浏览器内下载/上传） | ✅ |
 | 素材 | `/api/panel/{assets,subtitle}/*`、`/api/panel/assets/ffmpeg-status`、`/api/panel/tools/ffmpeg/{install,remove}` | ✅ |
 | 录制与回看 | `/api/panel/schedule*`、`/api/panel/livestream*`、`GET /api/panel/dash-timeshift/status` | ✅ |
-| 订阅聚合 | `GET/PUT /api/panel/playlist`（源、过滤、缓存与合并位置）；条目追加到 `/api/sub/<令牌>/playlist.m3u` | ✅ |
+| 订阅聚合 | `GET/PUT /api/panel/playlist`（源、过滤、缓存与合并位置）；条目追加到 `/sub/<令牌>/playlist.m3u` | ✅ |
 | 系统状态 | `GET /api/panel/health`、`/api/panel/assets/ffmpeg-status`、`/api/panel/resolver/scripts`、`/api/panel/dash-timeshift/status` | ✅ |
 | 台标 | 面板「台标管理」（`/api/panel/logo/*`） | ✅ |
 | 其它（系统设置） | 概览页已支持 `GET/PUT /api/panel/config` 全量编辑 | ✅ |

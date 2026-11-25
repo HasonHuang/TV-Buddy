@@ -81,7 +81,7 @@ L2（内存滚动预热）取消。它只把 L1 的数据再存一份进内存�
 
 `/api/*`、`/page*`
 
-**缓存**（放在不缓存规则之后）
+**规则 B：缓存**（放在规则 A 之后）
 
 `/media/*`、`/static/panel/*`、`/static/logo/*`、`/static/assets/*`
 
@@ -89,27 +89,41 @@ L2（内存滚动预热）取消。它只把 L1 的数据再存一份进内存�
 
 `/api/*` 覆盖面板 API、订阅、清单、解封接口、健康检查与分享接口。`/media/*` 只包含切片、初始化段、时移切片、DASH 切片与 MPD 代理数据。`/static/*` 包含台标、面板构建产物与本地素材。
 
-`/page*` 覆盖 `/page` 与 `/page/unban`，含裸 `/page`。不要写成 `/page/*`。部分控制台不会用 `/page/*` 匹配裸 `/page`。
+`/page*` 覆盖 `/page/panel` 与 `/page/unban`，含裸 `/page/panel`。不要写成 `/page/*`。部分控制台不会用 `/page/*` 匹配裸 `/page/panel`。
 
 不要颠倒顺序。缓存规则放在不缓存规则之前时，`/api/*` 与 `/page*` 会被缓存。
 
-根路径 `/` 默认 `302` 到 `/page`。不缓存 3xx 与非 200，所以 `/` 与未知路径不入缓存。不要把 `/` 写成前缀规则。部分控制台会把它当成全部路径。
+根路径 `/` 默认 `302` 到 `/page/panel`。不缓存 3xx 与非 200，所以 `/` 与未知路径不入缓存。不要把 `/` 写成前缀规则。部分控制台会把它当成全部路径。
 
 完整规则与验收命令见 [`../deploy/04-cdn.md`](../deploy/04-cdn.md) §6。
 
+**新增规则：不缓存**
+
+`/api/*`、`/sub/*`、`/page/*`、`/logo/api/*`、`/__assets/*`、`/subtitle/*`、`/l/*`、
+与旧清单形状补丁（`/*/*/*/index.txt` 等）。这些规则必须排在规则 B 之前。
+
+**新增规则：缓存**
+
+`/media/*`、`/static/panel/*`、`/static/logo/*`、`/static/assets/*`。
+
+**兜底：不缓存** `/*`。兜底必须放在最后。
+
+迁移期同时保留 A、B 两层旧规则与新增规则。一个主版本后删除旧规则。完整顺序、路径补丁与验收命令见 [`../deploy/04-cdn.md`](../deploy/04-cdn.md) §6。
+
 **不要按扩展名写规则**。伪装扩展名在 jpg/png/gif/bmp/webp 之间轮换。关闭伪装时又是 ts。
-控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。
+控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。旧路径逐分组用 `/{gid}/{cid}/` 前缀。
 
 ### 2.3 操作步骤
 
 1. 打开统一面板，选中全部 4 个域名。
-2. 加入不缓存规则：`/api/*`、`/page*`。
-3. 加入缓存规则：`/media/*`、`/static/panel/*`、`/static/logo/*`、`/static/assets/*`。
-4. 不要加兜底 `/*` 规则。
-5. 在回源配置中加请求头 `X-Forwarded-Proto: https`。
-6. 关闭图片处理、页面优化、智能压缩。
-7. 保存，然后**刷新全部缓存**（Purge All）。
-8. 按 §2.4 验证。四个域名各做一遍。
+2. 加入**规则 A**。
+3. 加入**规则 B**。强制 TTL，忽略源站头，忽略 Set-Cookie。
+4. 在规则 B 之前加入新增不缓存规则；在兜底之前加入 `/media/*` 与 `/static/*` 缓存规则。
+5. 加入兜底不缓存规则 `/*`，放在最后。
+6. 在回源配置中加请求头 `X-Forwarded-Proto: https`。
+7. 关闭图片处理、页面优化、智能压缩。
+8. 保存，然后**刷新全部缓存**（Purge All）。
+9. 按 §2.4 验证。四个域名各做一遍。
 
 ### 2.4 验收命令
 
@@ -136,10 +150,9 @@ printf 'cdn1=%s\ncdn2=%s\norigin=%s\n' "$CDN1" "$CDN2" "$ORIGIN"
 
 # 4) 面板与 API 不被缓存
 curl -s -o /dev/null -D - "https://<域名>/api/panel/status" | grep -iE 'x-cache|cache-control'
-curl -s -o /dev/null -D - "https://<域名>/page" | grep -iE 'x-cache|cache-control'
 ```
 
-期望结果：清单、面板页与 API 返回 `BYPASS`。`/page` 请求验证 `/page*` 覆盖裸 `/page`。切片第二次返回 `HIT` 并带 `Age`。三个哈希一致（CDN 两次 + 源站一次）。切片地址不带 token；只有清单入口需要 token。
+期望结果：清单、面板页与 API 返回 `BYPASS`。`/page/panel` 请求验证 `/page*` 覆盖裸 `/page/panel`。切片第二次返回 `HIT` 并带 `Age`。三个哈希一致（CDN 两次 + 源站一次）。切片地址不带 token；只有清单入口需要 token。
 
 ### 2.5 常见失败对照
 

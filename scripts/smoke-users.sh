@@ -121,7 +121,7 @@ check "建用户 200" "200" "$(code -X POST "${A[@]}" -d "$BODY" "$B/api/panel/u
 check "建用户返回 role" "user" "$(jget 'd["user"]["role"]')"
 UID_=$(jget 'd["user"]["id"]')
 
-check "普通用户至少一个分组" "400" \
+check "普通用户空分组表示全部" "200" \
   "$(code -X POST "${A[@]}" -d '{"username":"nogroup","password":"x123","role":"user","allowed_group_ids":[]}' "$B/api/panel/users")"
 check "重名用户 400" "400" \
   "$(code -X POST "${A[@]}" -d '{"username":"viewer","password":"x123","role":"user","allowed_group_ids":["ga"]}' "$B/api/panel/users")"
@@ -143,42 +143,42 @@ check "普通用户看自己的订阅 200" "200" "$(code "${V[@]}" "$B/api/panel
 
 # --- 每用户订阅 ---
 PTOK=$(jget 'd["token"]' < <(curl -s "${V[@]}" "$B/api/panel/me"))
-VSUB="$B/api/sub/$PTOK/playlist.m3u"
+VSUB="$B/sub/$PTOK/playlist.m3u"
 curl -s "$VSUB" > "$WORK/vpl.m3u"
 check "订阅含授权频道" "1" "$(grep -c "/api/play/token/$PTOK/ga/alpha.m3u8" "$WORK/vpl.m3u" || true)"
 check "订阅不含未授权分组" "0" "$(grep -c '/gb/' "$WORK/vpl.m3u" || true)"
 check "订阅不含归档组" "0" "$(grep -c '/gz/' "$WORK/vpl.m3u" || true)"
 check "订阅条目数" "1" "$(grep -c '^#EXTINF' "$WORK/vpl.m3u" || true)"
 check "订阅头指向自己的 EPG" \
-  "#EXTM3U x-tvg-url=\"$B/api/sub/$PTOK/epg.xml.gz\"" "$(head -n1 "$WORK/vpl.m3u")"
+  "#EXTM3U x-tvg-url=\"$B/sub/$PTOK/epg.xml.gz\"" "$(head -n1 "$WORK/vpl.m3u")"
 
 # 管理员看到全部非归档频道。
 ATOK=$(curl -s "${A[@]}" "$B/api/panel/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-curl -s "$B/api/sub/$ATOK/playlist.m3u" > "$WORK/apl.m3u"
+curl -s "$B/sub/$ATOK/playlist.m3u" > "$WORK/apl.m3u"
 check "管理员订阅 2 条" "2" "$(grep -c '^#EXTINF' "$WORK/apl.m3u" || true)"
 check "管理员仍不含归档组" "0" "$(grep -c '/gz/' "$WORK/apl.m3u" || true)"
 
 # --- 每用户 EPG ---
 curl -s -X POST "${A[@]}" "$B/api/panel/epg/refresh" >/dev/null || true
 sleep 1
-check "管理员 EPG 200" "200" "$(code "$B/api/sub/$ATOK/epg.xml")"
-curl -s "$B/api/sub/$ATOK/epg.xml" > "$WORK/aepg.xml"
+check "管理员 EPG 200" "200" "$(code "$B/sub/$ATOK/epg.xml")"
+curl -s "$B/sub/$ATOK/epg.xml" > "$WORK/aepg.xml"
 check "管理员 EPG 含两个频道" "2" "$(grep -c '<channel id=' "$WORK/aepg.xml" || true)"
-check "用户 EPG 200" "200" "$(code "$B/api/sub/$PTOK/epg.xml")"
+check "用户 EPG 200" "200" "$(code "$B/sub/$PTOK/epg.xml")"
 cp "$WORK/body" "$WORK/vepg.xml"
 check "用户 EPG 只含授权频道" "1" "$(grep -c '<channel id=' "$WORK/vepg.xml" || true)"
 check "用户 EPG 含 alpha" "1" "$(grep -c '<channel id="alpha"' "$WORK/vepg.xml" || true)"
 check "用户 EPG 不含 beta" "0" "$(grep -c 'beta' "$WORK/vepg.xml" || true)"
-check "用户 EPG gz 200" "200" "$(code "$B/api/sub/$PTOK/epg.xml.gz")"
+check "用户 EPG gz 200" "200" "$(code "$B/sub/$PTOK/epg.xml.gz")"
 check "用户 EPG gz 是 gzip" "1" \
   "$(python3 -c 'import sys;d=open(sys.argv[1],"rb").read(2);print(1 if d==b"\x1f\x8b" else 0)' "$WORK/body")"
 
 # --- 全局订阅停用 ---
 check "全局订阅 404" "404" "$(code "$B/playlist.m3u")"
 check "全局分组订阅 404" "404" "$(code "$B/ga/playlist.m3u")"
-check "全局订阅给出去向" "1" "$(grep -c '/api/sub/' "$WORK/body" || true)"
-check "坏令牌订阅 404" "404" "$(code "$B/api/sub/nope/playlist.m3u")"
-check "坏令牌 EPG 404" "404" "$(code "$B/api/sub/nope/epg.xml")"
+check "全局订阅给出去向" "1" "$(grep -c '/sub/' "$WORK/body" || true)"
+check "坏令牌订阅 404" "404" "$(code "$B/sub/nope/playlist.m3u")"
+check "坏令牌 EPG 404" "404" "$(code "$B/sub/nope/epg.xml")"
 
 # --- 令牌管理 ---
 check "建设备令牌 200" "200" \
@@ -186,13 +186,13 @@ check "建设备令牌 200" "200" \
 DTOK=$(jget 'd["token"]["token"]')
 check "自定义凭证生效" "smoke-device" "$DTOK"
 check "设备令牌用途" "device" "$(jget 'd["token"]["purpose"]')"
-check "设备令牌可订阅" "200" "$(code "$B/api/sub/$DTOK/playlist.m3u")"
+check "设备令牌可订阅" "200" "$(code "$B/sub/$DTOK/playlist.m3u")"
 check "改凭证被拒 400" "400" \
   "$(code -X PUT "${A[@]}" -d '{"token":"smoke-device2"}' "$B/api/panel/users/$UID_/tokens/$DTOK")"
-check "原凭证仍可订阅" "200" "$(code "$B/api/sub/smoke-device/playlist.m3u")"
+check "原凭证仍可订阅" "200" "$(code "$B/sub/smoke-device/playlist.m3u")"
 check "撤销设备令牌 200" "200" \
   "$(code -X DELETE "${A[@]}" "$B/api/panel/users/$UID_/tokens/$DTOK")"
-check "撤销后订阅 404" "404" "$(code "$B/api/sub/smoke-device/playlist.m3u")"
+check "撤销后订阅 404" "404" "$(code "$B/sub/smoke-device/playlist.m3u")"
 
 # --- 改密踢会话 ---
 check "重置口令 200" "200" \
@@ -209,6 +209,6 @@ check "删最后管理员 400" "400" "$(code -X DELETE "${A[@]}" "$B/api/panel/u
 
 # --- 删用户连带删令牌 ---
 check "删普通用户 200" "200" "$(code -X DELETE "${A[@]}" "$B/api/panel/users/$UID_")"
-check "删用户后其令牌失效" "404" "$(code "$B/api/sub/$PTOK/playlist.m3u")"
+check "删用户后其令牌失效" "404" "$(code "$B/sub/$PTOK/playlist.m3u")"
 
 if [ "$fail" = "0" ]; then echo "用户功能冒烟测试全部通过"; else echo "用户功能冒烟测试有失败项"; exit 1; fi

@@ -114,14 +114,46 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 
 ### 6.1 规则
 
-不缓存，放在最前：
+迁移期保留现有规则 A 与 B。不要删除。新增规则插在规则 A 之后、兜底规则之前。规则 A 的补充与 `/l/*`、`/logo/api/*` 必须排在规则 B 之前。规则 B 的补充与新增缓存规则排在规则 B 之后。
+
+规则 A，不缓存：
+
+```text
+/panel*
+/epg*
+/subs/*
+/sub/*
+/api/*
+/unban*
+/share*
+/health
+/metrics
+/*/*.m3u8
+/*/*.mpd
+/*/*/index.m3u8
+/*/*/index.txt
+/*/*/video/*
+/*/*/mpd/*
+```
+
+规则 B，缓存：
+
+```text
+/*/*/*
+```
+
+新增规则，不缓存：
 
 ```text
 /api/*
-/page*
+/sub/*
+/page/*
+/logo/api/*
 ```
 
-缓存，放在其后：
+`/sub/*` 是用户订阅与每用户 EPG 的正式前缀，必须不缓存。`/l/*` 属于规则 A 的补充（§6.3）。它必须排在规则 B 之前。`/logo/api/*` 也在规则 A 补充中。
+
+新增规则，缓存：
 
 ```text
 /media/*
@@ -137,8 +169,8 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 - `/api/*` 覆盖面板 API、订阅、清单、解封接口、健康检查与分享接口。订阅与清单都不缓存。
 - `/media/*` 只包含切片、初始化段、时移切片、DASH 切片与 MPD 代理数据。
 - `/static/*` 包含台标、面板构建产物与本地素材。`/static/assets/*` 里的 HLS 清单也按静态资源缓存。
-- `/page*` 覆盖 `/page` 与 `/page/unban`。它返回 HTML。CDN 不缓存。不要写成 `/page/*`。部分控制台不会用 `/page/*` 匹配裸 `/page`。
-- 根路径 `/` 默认 `302` 到 `/page`。§4.2 要求不缓存 3xx，所以 `/` 不入缓存。不要把 `/` 写成前缀规则；部分控制台会把它当成全部路径。
+- `/page*` 覆盖 `/page/panel` 与 `/page/unban`。它返回 HTML。CDN 不缓存。不要写成 `/page/*`。部分控制台不会用 `/page/*` 匹配裸 `/page/panel`。
+- 根路径 `/` 默认 `302` 到 `/page/panel`。§4.2 要求不缓存 3xx，所以 `/` 不入缓存。不要把 `/` 写成前缀规则；部分控制台会把它当成全部路径。
 - 不设兜底 `/*` 规则。源站对未知路径返回 `404`。§4.2 要求不缓存非 200。
 
 不要颠倒顺序。缓存规则放在不缓存规则之前时，`/api/*` 与 `/page*` 会被缓存。
@@ -147,7 +179,12 @@ curl -sS -X POST -H "Authorization: Bearer $ADMIN" \
 
 切片伪装扩展名在 `jpg`、`png`、`gif`、`bmp`、`webp` 之间轮换。关闭伪装时又是 `ts`。按扩展名写规则会漏掉部分切片。
 
-控制台只支持扩展名时，改用路径前缀 `/media/` 或 `/static/assets/`。
+```text
+/api/*
+/sub/*
+/page/*
+/
+```
 
 不同控制台的通配符语义不同。仓库不定义 `*` 是否跨多段。若控制台按单段匹配，改用「路径前缀」规则，不要用通配符规则。
 
@@ -253,11 +290,11 @@ printf 'cdn1=%s\ncdn2=%s\norigin=%s\n' "$CDN1" "$CDN2" "$ORIGIN"
 ```bash
 curl -sS -o /dev/null -D - "$CDN/api/panel/status" \
   | grep -iE 'x-cache|cache-control'
-curl -sS -o /dev/null -D - "$CDN/page" \
+curl -sS -o /dev/null -D - "$CDN/page/panel" \
   | grep -iE 'x-cache|cache-control'
 ```
 
-期望：两个请求都是 `BYPASS`。第二个请求验证 `/page*` 规则覆盖裸 `/page`。
+期望：两个请求都是 `BYPASS`。第二个请求验证 `/page*` 规则覆盖裸 `/page/panel`。
 
 ### 8.6 清单必须下发 https
 

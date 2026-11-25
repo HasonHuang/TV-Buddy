@@ -134,7 +134,7 @@ check "排序落盘" "ga,gc,gb" \
 # 订阅顺序跟着走：EXTINF 的先后就是数组顺序。订阅只从用户令牌进入。
 PTOK=$(curl -s -H "Authorization: Bearer $T" "$B/api/panel/me" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-curl -s "$B/api/sub/$PTOK/playlist.m3u" > "$WORK/pl.m3u"
+curl -s "$B/sub/$PTOK/playlist.m3u" > "$WORK/pl.m3u"
 check "订阅顺序随排序" "ga,gc,gb" \
   "$(python3 - "$WORK/pl.m3u" <<'PY'
 import re, sys

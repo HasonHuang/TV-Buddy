@@ -71,7 +71,7 @@
 | --- | --- | --- | --- |
 | `m3u8-rs` | HLS 清单解析与重写 | P1 | `S-MODE-03` |
 | `quick-xml` | XMLTV 生成、MPD 解析 | P1 | `S-EP-05`、`S-GAP-01` |
-| `flate2`（gzip） | `/api/sub/<token>/epg.xml.gz`、备份包 | P1/P2 | `S-EP-05`、`S-BAK-01` |
+| `flate2`（gzip） | `/sub/<token>/epg.xml.gz`、备份包 | P1/P2 | `S-EP-05`、`S-BAK-01` |
 | `tar` | 备份与恢复 | P2 | `S-BAK-01` |
 | `aes-gcm` / `mp4` | ClearKey KID 检测（不解密） | P1 | `S-GAP-01` |
 | `image` | 台标转码与尺寸探测 | P2 | F-011 |
@@ -82,7 +82,7 @@
 | --- | --- | --- |
 | 构建 | Vite 6 + TypeScript 5 | 产物 `dist/` 由 `rust-embed` 嵌入 |
 | 框架 | React 18 | 组件化复刻两个页面 |
-| 路由 | 哈希分区（无路由器） | 面板用 `#/<分区>` 切换，页面入口 `/page` |
+| 路由 | 哈希分区（无路由器） | 面板用 `#/<分区>` 切换，页面入口 `/page/panel` |
 | 数据层 | 自写 `frontend/src/api.ts` | 统一 `/api/panel/*` 的 Bearer 请求与错误处理；轮询与失效由组件控制 |
 | 样式 | 自写 CSS（CSS Modules + 设计变量） | 从目标面板提取**视觉参数**（配色、间距、字号），不复制其 CSS 文件 |
 | 组件库 | 不加重型 UI 库；按需加 `@radix-ui/*` 无样式原语 | 控制体积，保持外观可控 |

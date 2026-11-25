@@ -357,7 +357,7 @@ struct Fixture {
 impl Fixture {
     /// 用户订阅路径（不含主机），供 [`fetch`] 使用。
     fn sub(&self, token: &str, rest: &str) -> String {
-        format!("/api/sub/{token}/{rest}")
+        format!("/sub/{token}/{rest}")
     }
 
     /// 用户订阅完整地址，供 `client.get` 使用。
@@ -664,7 +664,7 @@ async fn fixture_with_options(
 
     // 预热：一次用户订阅请求会抓取聚合源并写状态。
     let _ = client
-        .get(format!("{base}/api/sub/{token}/playlist.m3u"))
+        .get(format!("{base}/sub/{token}/playlist.m3u"))
         .send()
         .await;
 
@@ -764,6 +764,44 @@ async fn fetch(fixture: &Fixture, path: &str) -> HttpResponse {
         .expect("发请求")
 }
 
+fn fixture_url(fixture: &Fixture, path: &str) -> String {
+    if path.starts_with("http://") || path.starts_with("https://") {
+        path.to_string()
+    } else {
+        format!("{}{path}", fixture.base)
+    }
+}
+
+/// 带可选会话头请求一个路径或绝对地址。
+async fn get_with_session(fixture: &Fixture, path: &str, session: Option<&str>) -> HttpResponse {
+    let mut request = fixture.client.get(fixture_url(fixture, path));
+    if let Some(session) = session {
+        request = request.bearer_auth(session);
+    }
+    request.send().await.expect("发请求")
+}
+
+/// 断言旧路径与新路径的响应一致：状态码、`cache-control` 与正文。
+async fn assert_legacy_matches_new(fixture: &Fixture, old: &str, new: &str, session: Option<&str>) {
+    let old_response = get_with_session(fixture, old, session).await;
+    let new_response = get_with_session(fixture, new, session).await;
+    assert_eq!(
+        old_response.status(),
+        new_response.status(),
+        "{old} vs {new}"
+    );
+    assert_eq!(
+        header(&old_response, "cache-control"),
+        header(&new_response, "cache-control"),
+        "{old} vs {new}"
+    );
+    assert_eq!(
+        old_response.bytes().await.expect("旧正文"),
+        new_response.bytes().await.expect("新正文"),
+        "{old} vs {new}"
+    );
+}
+
 fn local_base_path(body: &str, self_base: &str) -> String {
     let start = body.find("<BaseURL>").expect("BaseURL") + "<BaseURL>".len();
     let end = body[start..].find("</BaseURL>").expect("BaseURL end") + start;
@@ -858,11 +896,11 @@ async fn health_and_user_playlist() {
 }
 
 #[tokio::test]
-async fn subscription_uses_new_paths() {
+async fn subscription_uses_canonical_path() {
     let fx = fixture().await;
     let response = fx
         .client
-        .get(format!("{}/api/sub/{}/playlist.m3u", fx.base, fx.token))
+        .get(format!("{}/sub/{}/playlist.m3u", fx.base, fx.token))
         .send()
         .await
         .expect("请求");
@@ -873,13 +911,55 @@ async fn subscription_uses_new_paths() {
 }
 
 #[tokio::test]
+async fn subscription_alias_matches_canonical() {
+    let fixture = fixture_with(true).await;
+    epg::refresh(&fixture.state).await.expect("采集应成功");
+
+    // 四类订阅端点：v2026.60 别名与本前缀必须返回同一响应。
+    for (canonical, alias) in [
+        (
+            fixture.sub(&fixture.token, "playlist.m3u"),
+            format!("/api/sub/{}/playlist.m3u", fixture.token),
+        ),
+        (
+            fixture.sub(&fixture.token, "pg/playlist.m3u"),
+            format!("/api/sub/{}/pg/playlist.m3u", fixture.token),
+        ),
+        (
+            fixture.sub(&fixture.token, "epg.xml"),
+            format!("/api/sub/{}/epg.xml", fixture.token),
+        ),
+        (
+            fixture.sub(&fixture.token, "epg.xml.gz"),
+            format!("/api/sub/{}/epg.xml.gz", fixture.token),
+        ),
+    ] {
+        let canonical_response = fetch(&fixture, &canonical).await;
+        let alias_response = fetch(&fixture, &alias).await;
+        assert_eq!(
+            canonical_response.status(),
+            alias_response.status(),
+            "{alias}"
+        );
+        assert_eq!(
+            header(&canonical_response, "content-type"),
+            header(&alias_response, "content-type"),
+            "{alias}"
+        );
+        let canonical_body = canonical_response.bytes().await.expect("本前缀正文");
+        let alias_body = alias_response.bytes().await.expect("别名正文");
+        assert_eq!(canonical_body, alias_body, "{alias}");
+    }
+}
+
+#[tokio::test]
 async fn global_playlist_is_gone() {
     let fixture = fixture().await;
     for path in ["/playlist.m3u", "/pg/playlist.m3u"] {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
         let body = response.text().await.expect("读正文");
-        assert!(body.contains("/api/sub/"), "应指路到用户订阅：{body}");
+        assert!(body.contains("/sub/"), "应指路到用户订阅：{body}");
     }
 }
 
@@ -1045,9 +1125,9 @@ async fn slice_signature_path_token_and_rejections() {
 async fn sub_routes_404_on_bad_token() {
     let fixture = fixture().await;
     for path in [
-        "/api/sub/nope/playlist.m3u",
-        "/api/sub/nope/epg.xml",
-        "/api/sub/nope/epg.xml.gz",
+        "/sub/nope/playlist.m3u",
+        "/sub/nope/epg.xml",
+        "/sub/nope/epg.xml.gz",
     ] {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
@@ -1087,13 +1167,13 @@ async fn device_token_can_be_customized() {
     assert_eq!(body["token"]["token"], "living-room");
     assert_eq!(
         body["token"]["playlist_url"],
-        "/api/sub/living-room/playlist.m3u"
+        "/sub/living-room/playlist.m3u"
     );
     let expires = body["token"]["expires_at_ms"].as_i64().expect("应有有效期");
 
     let old = fixture
         .client
-        .get(format!("{}/api/sub/living-room/playlist.m3u", fixture.base))
+        .get(format!("{}/sub/living-room/playlist.m3u", fixture.base))
         .send()
         .await
         .expect("旧凭证订阅");
@@ -1129,7 +1209,7 @@ async fn device_token_can_be_customized() {
 
     let old = fixture
         .client
-        .get(format!("{}/api/sub/living-room/playlist.m3u", fixture.base))
+        .get(format!("{}/sub/living-room/playlist.m3u", fixture.base))
         .send()
         .await
         .expect("原凭证订阅");
@@ -1880,35 +1960,151 @@ async fn panel_api_unknown_path_returns_json() {
     }
 }
 
-/// 旧路径已全部删除，必须返回 404。
+/// 旧路径由改写层映射，响应与当前路径一致。
 ///
 /// `/playlist.m3u` 与 `/<gid>/playlist.m3u` 是故意保留的指路路由，不在此列。
 #[tokio::test]
-async fn legacy_paths_are_gone() {
+async fn legacy_paths_match_new_paths() {
     let fixture = fixture().await;
-    for path in [
-        "/health",
-        "/panel",
-        "/page/panel",
-        "/panel/api/status",
-        "/sub/nope/playlist.m3u",
-        "/logo/missing.png",
-        "/assets/missing.png",
-        "/l/t/g/c.m3u8",
-        "/unban",
-        "/pm/c1.m3u8",
-    ] {
-        let response = fetch(&fixture, path).await;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "GET {path}");
-    }
+    let session = login(&fixture).await;
 
-    let response = fixture
+    // 公开路径：无会话。
+    assert_legacy_matches_new(&fixture, "/health", "/api/health", None).await;
+    assert_legacy_matches_new(&fixture, "/panel", "/page/panel", None).await;
+
+    // HEAD 与 GET 使用同一套改写规则。
+    let old_head = fixture
         .client
-        .post(format!("{}/unban", fixture.base))
+        .head(format!("{}/health", fixture.base))
         .send()
         .await
-        .expect("POST 旧解封");
-    assert_eq!(response.status(), StatusCode::NOT_FOUND, "POST /unban");
+        .expect("旧 HEAD");
+    let new_head = fixture
+        .client
+        .head(format!("{}/api/health", fixture.base))
+        .send()
+        .await
+        .expect("新 HEAD");
+    assert_eq!(old_head.status(), new_head.status(), "HEAD /health");
+    assert_eq!(
+        header(&old_head, "content-type"),
+        header(&new_head, "content-type"),
+        "HEAD /health"
+    );
+
+    // 订阅入口：v2026.60 别名与本前缀一致。
+    let sub_canonical = fixture.sub(&fixture.token, "playlist.m3u");
+    let sub_alias = format!("/api/sub/{}/playlist.m3u", fixture.token);
+    assert_legacy_matches_new(&fixture, &sub_alias, &sub_canonical, None).await;
+
+    // `/l/<token>/...` 是订阅条目的旧路径令牌入口。
+    let token_entry_old = format!("/l/{}/pm/c1.m3u8?token={}", fixture.token, fixture.token);
+    let token_entry_new = format!(
+        "/api/play/token/{}/pm/c1.m3u8?token={}",
+        fixture.token, fixture.token
+    );
+    assert_legacy_matches_new(&fixture, &token_entry_old, &token_entry_new, None).await;
+
+    let entry_old = format!("/pm/c1.m3u8?token={}", fixture.token);
+    let entry_new = format!("/api/play/pm/c1.m3u8?token={}", fixture.token);
+    assert_legacy_matches_new(&fixture, &entry_old, &entry_new, None).await;
+
+    // 非入口扩展名的旧入口形状也由改写层提供，仍返回旧的占位 302。
+    let bad_entry_old = format!("/pt/c1.mp4?token={}", fixture.token);
+    let bad_entry_new = format!("/api/play/pt/c1.mp4?token={}", fixture.token);
+    assert_legacy_matches_new(&fixture, &bad_entry_old, &bad_entry_new, None).await;
+
+    // 面板状态：带会话。正文含运行时数值，两次请求之间会变化；
+    // 归零这些字段后再比较其余正文，避免秒级边界与后台统计造成抖动。
+    let old_status = get_with_session(&fixture, "/panel/api/status", Some(&session)).await;
+    let new_status = get_with_session(&fixture, "/api/panel/status", Some(&session)).await;
+    assert_eq!(old_status.status(), new_status.status());
+    assert_eq!(
+        header(&old_status, "cache-control"),
+        header(&new_status, "cache-control")
+    );
+    let mut old_body: serde_json::Value =
+        serde_json::from_str(&old_status.text().await.expect("旧正文")).expect("旧 JSON");
+    let mut new_body: serde_json::Value =
+        serde_json::from_str(&new_status.text().await.expect("新正文")).expect("新 JSON");
+    for key in [
+        "uptime_secs",
+        "mem_rss_mb",
+        "cpu_seconds",
+        "host_cpu_percent",
+        "load_avg",
+        "disk_free_mb",
+        "host_net_rx_bytes",
+        "host_net_tx_bytes",
+        "traffic_out_bytes",
+    ] {
+        if let Some(value) = old_body.get_mut(key) {
+            *value = json!(0);
+        }
+        if let Some(value) = new_body.get_mut(key) {
+            *value = json!(0);
+        }
+    }
+    assert_eq!(old_body, new_body, "/panel/api/status vs /api/panel/status");
+
+    // 从主清单沿变体取第一个 `/media/` 切片。
+    let master = get_with_session(
+        &fixture,
+        &format!("/pm/c1.m3u8?token={}", fixture.token),
+        None,
+    )
+    .await
+    .text()
+    .await
+    .expect("主清单");
+    let variant = master
+        .lines()
+        .find(|line| line.contains("/api/play/pm/c1/video/index.txt"))
+        .expect("变体地址");
+    let media_list = fixture
+        .client
+        .get(variant)
+        .send()
+        .await
+        .expect("变体请求")
+        .text()
+        .await
+        .expect("媒体清单");
+    let media_url = media_list
+        .lines()
+        .find(|line| line.contains("/media/"))
+        .expect("切片地址")
+        .to_string();
+    let old_media_url = media_url.replacen("/media/", "/", 1);
+
+    // 预热：首包 `public`，命中包 `private`。命中后两条路径的头才一致。
+    let warm = fixture
+        .client
+        .get(&media_url)
+        .send()
+        .await
+        .expect("预热切片");
+    assert_eq!(warm.status(), StatusCode::OK);
+    let _ = warm.bytes().await.expect("预热正文");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let probe = fixture
+            .client
+            .get(&media_url)
+            .send()
+            .await
+            .expect("探测切片");
+        assert_eq!(probe.status(), StatusCode::OK);
+        let hit = header(&probe, "cache-control").starts_with("private");
+        let _ = probe.bytes().await.expect("探测正文");
+        if hit {
+            break;
+        }
+        assert!(Instant::now() < deadline, "切片未在限期内写入缓存");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert_legacy_matches_new(&fixture, &old_media_url, &media_url, None).await;
 }
 
 #[tokio::test]
@@ -1987,7 +2183,7 @@ async fn epg_enabled_serves_xmltv_and_filters() {
     assert_eq!(response.status(), StatusCode::OK);
     let playlist = response.text().await.expect("读订阅");
     let expected = format!(
-        "#EXTM3U x-tvg-url=\"{}/api/sub/{}/epg.xml.gz\"",
+        "#EXTM3U x-tvg-url=\"{}/sub/{}/epg.xml.gz\"",
         fixture.base, fixture.token
     );
     assert_eq!(playlist.lines().next(), Some(expected.as_str()));
@@ -2593,14 +2789,14 @@ async fn epg_panel_api_and_public_removal() {
         let response = fetch(&fixture, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
-    // `/epg/api/*` 公开接口已删除，旧路径返回 404。
+    // `/epg/api/*` 公开接口已删除。改写层按播放形状处理，返回占位跳转。
     for path in [
         "/epg/api/channels",
         "/epg/api/programmes/c1",
         "/epg/api/search?q=新闻",
     ] {
         let response = fetch(&fixture, path).await;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        assert_ne!(response.status(), StatusCode::OK, "{path}");
     }
 
     // 面板频道列表。
@@ -6609,10 +6805,7 @@ async fn epg_translation_engine_appends_target_texts_and_reuses_cache() {
 
     let xml = fixture
         .client
-        .get(format!(
-            "{}/api/sub/{}/epg.xml",
-            fixture.base, fixture.token
-        ))
+        .get(format!("{}/sub/{}/epg.xml", fixture.base, fixture.token))
         .send()
         .await
         .expect("取节目单")

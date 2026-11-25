@@ -104,7 +104,7 @@ check "应用台标 200" "200" "$APPLY"
 PTOK=$(curl -s -H "Authorization: Bearer $TOKEN" "$B/api/panel/me" \
   | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))')
 check "订阅含台标" "1" \
-  "$(curl -s "$B/api/sub/$PTOK/playlist.m3u" | grep -c 'tvg-logo="/static/logo/cctv1.png"' || true)"
+  "$(curl -s "$B/sub/$PTOK/playlist.m3u" | grep -c 'tvg-logo="/static/logo/cctv1.png"' || true)"
 
 # 匹配报告：hunan.png 未使用。
 curl -s -H "Authorization: Bearer $TOKEN" "$B/api/panel/logo/match-report" > "$WORK/report.json"

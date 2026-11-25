@@ -169,7 +169,7 @@ check "分组归属 sync" "1" "$(export_json | python3 -c 'import sys,json;print
 
 # 订阅包含同步频道，播放地址带令牌。
 PTOK=$(curl -s "${A[@]}" "$B/api/panel/me" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-SUB=$(curl -s "$B/api/sub/$PTOK/playlist.m3u")
+SUB=$(curl -s "$B/sub/$PTOK/playlist.m3u")
 check "订阅含同步频道" "1" "$(printf '%s' "$SUB" | grep -c ',C1$' || true)"
 check "订阅含手工频道" "1" "$(printf '%s' "$SUB" | grep -c ',手工频道$' || true)"
 check "托管频道走令牌入口" "1" "$(printf '%s' "$SUB" | PTOK="$PTOK" python3 -c '
@@ -275,7 +275,7 @@ check "保留为手工" "1" "$(export_json | python3 -c 'import sys,json;print(s
 
 # 9) 聚合源行为不变。聚合频道只在订阅里，不物化。
 check "聚合频道不物化" "0" "$(export_json | python3 -c 'import sys,json;print(sum(1 for g in json.load(sys.stdin) for c in g["channels"] if c["name"]=="聚合频道"))')"
-SUB=$(curl -s "$B/api/sub/$PTOK/playlist.m3u")
+SUB=$(curl -s "$B/sub/$PTOK/playlist.m3u")
 check "聚合频道进订阅" "1" "$(printf '%s' "$SUB" | grep -c '聚合频道' || true)"
 
 # 10) 鉴权：未登录状态接口 401。

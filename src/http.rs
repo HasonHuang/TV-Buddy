@@ -3,6 +3,7 @@
 pub mod error;
 pub mod ext;
 pub mod guard;
+mod legacy;
 pub mod routes;
 pub mod static_assets;
 
@@ -19,8 +20,9 @@ use crate::{paths, state::AppState};
 ///
 /// M0：面板与公开页。M1：分组/频道接口与订阅导出。
 /// 播放面（`/api/play` 清单、`/media` 切片）在 M2 接入。
+/// 旧路径改写层在内层路由之外。它先运行，然后内层做路由匹配。
 pub fn router(state: Arc<AppState>) -> Router {
-    Router::new()
+    let inner = Router::new()
         // 公开面
         .route("/api/health", get(routes::public::health))
         .route("/", get(routes::public::home))
@@ -31,15 +33,15 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/playlist.m3u", get(routes::sub::gone))
         .route("/:gid/playlist.m3u", get(routes::sub::gone))
         // 用户订阅入口。令牌见 `tv-buddy.db` 的 access_tokens 表。
-        .route("/api/sub/:token/playlist.m3u", get(routes::sub::playlist))
+        .route("/sub/:token/playlist.m3u", get(routes::sub::playlist))
         // 单个分组的订阅。分组范围仍受令牌所属用户的可见性限制。
         .route(
-            "/api/sub/:token/:gid/playlist.m3u",
+            "/sub/:token/:gid/playlist.m3u",
             get(routes::sub::group_playlist),
         )
-        .route("/api/sub/:token/epg.xml", get(routes::sub::epg))
-        .route("/api/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
-        // 面板接口挂载在 `/api/panel`。
+        .route("/sub/:token/epg.xml", get(routes::sub::epg))
+        .route("/sub/:token/epg.xml.gz", get(routes::sub::epg_gz))
+        // 面板接口挂载在新前缀下。旧 `/panel/api` 由改写层提供。
         .nest(paths::PANEL_API, panel_api_routes())
         // 播放链路（M2）。清单只走 `/api/play`，媒体数据只走 `/media`。
         .route("/api/play/:gid/:file", get(routes::stream::entry))
@@ -68,8 +70,8 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(routes::stream::signed_media),
         )
         // 内嵌页面（免登录）
-        .route("/page", get(static_assets::panel_page))
-        .route("/page/", get(static_assets::panel_page))
+        .route("/page/panel", get(static_assets::panel_page))
+        .route("/page/panel/", get(static_assets::panel_page))
         .route("/page/unban", get(static_assets::unban_page))
         .route("/static/panel/*path", get(static_assets::asset))
         .route("/static/logo/:file", get(routes::logo::file))
@@ -91,10 +93,11 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.clone(),
             guard::admin_gate,
         ))
-        .with_state(state)
+        .with_state(state);
+    legacy::wrap(inner)
 }
 
-/// 面板 API 路由。挂载在 `/api/panel`。
+/// 面板 API 路由。挂载在 `/api/panel`。旧 `/panel/api` 由改写层提供。
 ///
 /// 路径都是相对子路径。未知路径返回 JSON 404。兜底同时登记为通配路由与
 /// 嵌套 fallback：外层兜底可能先于嵌套 fallback 生效，通配路由保证 JSON 404。

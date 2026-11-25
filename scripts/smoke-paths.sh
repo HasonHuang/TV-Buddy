@@ -44,14 +44,15 @@ check() {
     check_method GET "$1" "$2"
 }
 
-# 首页固定 302 到 `/page`。
+# 首页固定 302 到 `/page/panel`。
 check_method GET / 302
 
-# 内嵌页面。`/page/panel` 已删除。
-check /page 200
-check /page/ 200
+# 内嵌页面。`/page` 与 `/page/` 不是页面入口，返回 404。
+check /page 404
+check /page/ 404
+check /page/panel 200
+check /page/panel/ 200
 check /page/unban 200
-check /page/panel 404
 check /static/panel/panel.html 200
 check /static/logo/does-not-exist.png 404
 check /static/assets/does-not-exist.png 404
@@ -64,14 +65,15 @@ check /media/g/c/video/index.txt 404
 # 公开接口新前缀。未登录时面板与 whoami 返回 401，坏令牌订阅返回 404。
 check /api/health 200
 check /api/panel/status 401
-check /api/sub/nope/playlist.m3u 404
+check /sub/nope/playlist.m3u 404
 check /api/unban/whoami 401
 check_method POST /api/unban 401
 # `/api/unban` 只有 POST；页面入口是 `/page/unban`。
 check_method GET /api/unban 405
 
-# 旧路径已全部删除，必须返回 404。
-check /health 404
-check /panel 404
-check /unban 404
-check_method GET /panel/api/status 404
+# 旧路径由改写层映射，响应与当前路径一致。
+check /health 200
+check /panel 200
+check /unban 200
+check /api/sub/nope/playlist.m3u 404
+check /panel/api/status 401

@@ -39,7 +39,7 @@ pub async fn health() -> impl IntoResponse {
     )
 }
 
-/// `GET /` → 跳首页（`server.home_url`，默认 `/page`）。
+/// `GET /` → 跳首页（`server.home_url`，默认 `/page/panel`）。
 pub async fn home(State(state): State<Arc<AppState>>) -> Response {
     let cfg = state.snapshot();
     found(&cfg.server.home_url)

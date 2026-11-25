@@ -123,7 +123,7 @@ A=(-H "Authorization: Bearer $T" -H 'Content-Type: application/json')
 # 订阅只从用户令牌进入。令牌从 `/api/panel/me` 取。
 PTOK=$(curl -s "${A[@]}" "$B/api/panel/me" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-SUB="$B/api/sub/$PTOK/playlist.m3u"
+SUB="$B/sub/$PTOK/playlist.m3u"
 
 # --- 重载：管理 CLI 改库，面板接口生效 ---
 check "重载前 2 条" "2" "$(curl -s "$SUB" | grep -c '^#EXTINF')"

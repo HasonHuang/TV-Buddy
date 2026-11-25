@@ -44,12 +44,12 @@ docker compose exec tv-buddy cat /data/cache/admin_initial_credentials.txt
 打开面板：
 
 ```text
-http://<主机>:9900/page
+http://<主机>:9900/page/panel
 ```
 
 账号是 `admin`。口令来自初始口令文件。首次登录后立即修改口令。
 
-`http://<主机>:9900/` 默认跳转到 `/page`。未登录时，页面显示登录表单。没有独立登录页。
+`http://<主机>:9900/` 默认跳转到 `/page/panel`。未登录时，页面显示登录表单。没有独立登录页。
 
 ## 3. 配置
 

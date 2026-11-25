@@ -94,7 +94,7 @@ T=$(curl -s -X POST "$B/api/panel/login" -H 'Content-Type: application/json' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
 PTOK=$(curl -s -H "Authorization: Bearer $T" "$B/api/panel/me" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-SUB="$B/api/sub/$PTOK/playlist.m3u"
+SUB="$B/sub/$PTOK/playlist.m3u"
 body=$(curl -s "$SUB")
 
 check "含远端频道" "1" "$(printf '%s' "$body" | grep -c '远端频道' || true)"

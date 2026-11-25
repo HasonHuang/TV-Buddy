@@ -173,7 +173,7 @@ sudo tv-buddy url
 输出包含三行：
 
 ```text
-面板地址：http://<主机>:9900/page
+面板地址：http://<主机>:9900/page/panel
 账号：admin
 初始口令：<安装目录>/cache/admin_initial_credentials.txt
 ```
@@ -193,9 +193,9 @@ sudo tv-buddy url
 sudo cat /opt/tv-buddy/cache/admin_initial_credentials.txt
 ```
 
-打开面板 `http://<主机>:9900/page`。使用账号 `admin` 与初始口令登录。
+打开面板 `http://<主机>:9900/page/panel`。使用账号 `admin` 与初始口令登录。
 
-`http://<主机>:9900/` 默认跳转到 `/page`。未登录时，页面显示登录表单。没有独立登录页。
+`http://<主机>:9900/` 默认跳转到 `/page/panel`。未登录时，页面显示登录表单。没有独立登录页。
 
 **立即修改口令：**
 

@@ -489,7 +489,7 @@ TOK=$(curl -s -X POST http://127.0.0.1:9900/api/panel/login \
 PTOK=$(curl -s -H "Authorization: Bearer $TOK" \
   http://127.0.0.1:9900/api/panel/me \
   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-curl -s "http://127.0.0.1:9900/api/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1
+curl -s "http://127.0.0.1:9900/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1
 ```
 
 预期：`http://127.0.0.1:9900/api/play/token/<12 位令牌>/<分组 id>/<频道 id>.m3u8`。
@@ -503,7 +503,7 @@ curl -s "http://127.0.0.1:9900/api/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep
 sudo tee /root/s6-load.sh >/dev/null <<'EOF'
 #!/bin/sh
 GID=main
-ENTRY=$(curl -s "http://127.0.0.1:9900/api/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1)
+ENTRY=$(curl -s "http://127.0.0.1:9900/sub/$PTOK/playlist.m3u" | grep -v '^#' | grep -v '^$' | head -1)
 echo "ENTRY=$ENTRY" > /root/s6-load.log
 while :; do
   curl -s --max-time 20 "$ENTRY" -o /tmp/s6-pl.m3u8

@@ -107,7 +107,7 @@ ADMIN_ID=$(curl -s -H "$A" "$B/api/panel/users" |
 PTOK=$(curl -s -X POST -H "$A" -H 'content-type: application/json' -d '{}' \
   "$B/api/panel/users/$ADMIN_ID/tokens" |
   python3 -c 'import sys,json;print(json.load(sys.stdin)["token"]["token"])')
-SUB="$B/api/sub/$PTOK"
+SUB="$B/sub/$PTOK"
 
 # 建一个采集源。启动后不再从配置导入源，必须走面板接口。
 curl -s -o /dev/null -X POST -H "$A" -H 'content-type: application/json' \
