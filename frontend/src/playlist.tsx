@@ -72,6 +72,8 @@ type GlobalCfg = {
 type Status = {
   id: string;
   mode: string;
+  /** 后端按已保存配置计算的可回填频道数。 */
+  backfill_count: number;
   error: string | null;
   channels: number;
   groups: number;
@@ -104,18 +106,6 @@ type ExistingGroup = {
     mode_source?: string;
   }[];
 };
-
-function backfillCount(groups: ExistingGroup[], sourceId: string): number {
-  return groups
-    .flatMap((group) => group.channels ?? [])
-    .filter(
-      (channel) =>
-        channel.source_id === sourceId &&
-        !channel.mode &&
-        channel.sync_follow !== false &&
-        channel.mode_source !== 'manual',
-    ).length;
-}
 
 function backfillModeText(mode: string): string {
   return mode === 'auto' || mode === ''
@@ -1615,31 +1605,33 @@ export function PlaylistPage() {
                   <span className="hint">0 表示使用全局值</span>
                 </label>
               </div>
-              {drawer.draft.id &&
-                drawer.draft.mode === 'sync' &&
-                backfillCount(allGroups, drawer.draft.id) > 0 && (
+              {(() => {
+                const saved = sources.find((item) => item.id === drawer.draft.id);
+                const count =
+                  saved?.mode === 'sync' ? statuses[saved.id]?.backfill_count ?? 0 : 0;
+                if (count === 0) {
+                  return null;
+                }
+                return (
                   <div className="row between">
-                    <span className="hint">
-                      按源默认回填现有频道（{backfillCount(allGroups, drawer.draft.id)} 条）
-                    </span>
+                    <span className="hint">按源默认回填现有频道（{count} 条）</span>
                     <button
                       className="ghost"
                       type="button"
                       onClick={() =>
                         setBackfill({
                           id: drawer.draft.id,
-                          count: backfillCount(allGroups, drawer.draft.id),
+                          count,
                           // 后端按已保存的源配置回填；草稿里未保存的改动不算。
-                          mode:
-                            sources.find((item) => item.id === drawer.draft.id)
-                              ?.playback_mode ?? drawer.draft.playback_mode,
+                          mode: saved?.playback_mode ?? drawer.draft.playback_mode,
                         })
                       }
                     >
                       回填
                     </button>
                   </div>
-                )}
+                );
+              })()}
               <p className="muted">
                 已有分组的工作模式与内容格式在「分组管理」里修改；这里只设置之后新建分组与频道的默认值。
               </p>

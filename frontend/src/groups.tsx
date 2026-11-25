@@ -2326,6 +2326,15 @@ export function GroupsPage() {
               width={220}
             />
           </Field>
+          {channelForm.form.upstream === 'script' &&
+            (channelForm.form.mode === 'passthrough' ||
+              (channelForm.form.mode === '' &&
+                (groups.find((group) => group.id === channelForm.gid)?.mode ?? 'proxy') ===
+                  'passthrough')) && (
+              <p className="msg warn">
+                直通模式不运行解析脚本，播放器会直接使用源地址。
+              </p>
+            )}
 
           <details className="block">
             <summary>

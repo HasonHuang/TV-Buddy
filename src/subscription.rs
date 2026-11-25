@@ -1760,11 +1760,7 @@ pub fn backfill_modes(
     let mut modes = std::collections::BTreeMap::new();
     for group in &mut config.groups {
         for channel in &mut group.channels {
-            if channel.source_id != source_id
-                || channel.mode.is_some()
-                || !channel.sync_follow
-                || channel.mode_source() == crate::config::model::MODE_SOURCE_MANUAL
-            {
+            if !is_backfill_candidate(channel, source_id) {
                 continue;
             }
             let mode = mode_for(source, crate::config::model::is_dash_url(&channel.url));
@@ -1775,6 +1771,32 @@ pub fn backfill_modes(
         }
     }
     (updated, modes)
+}
+
+/// 回填候选：同源、未设模式、仍在跟随、未由管理员接管。
+fn is_backfill_candidate(channel: &Channel, source_id: &str) -> bool {
+    channel.source_id == source_id
+        && channel.mode.is_none()
+        && channel.sync_follow
+        && channel.mode_source() != crate::config::model::MODE_SOURCE_MANUAL
+}
+
+/// 当前配置下可回填的频道数。面板显示按钮前使用。
+pub fn backfill_count(config: &Config, source_id: &str) -> usize {
+    let sync_source = config
+        .playlist
+        .sources
+        .iter()
+        .any(|source| source.id == source_id && source.mode == "sync");
+    if !sync_source {
+        return 0;
+    }
+    config
+        .groups
+        .iter()
+        .flat_map(|group| group.channels.iter())
+        .filter(|channel| is_backfill_candidate(channel, source_id))
+        .count()
 }
 
 fn format_for(source: &PlaylistSource, dash: bool) -> String {
@@ -2329,9 +2351,11 @@ mod tests {
         });
         config.groups[0].channels[1].set_mode_source("manual");
 
+        assert_eq!(backfill_count(&config, "s1"), 1);
         let (updated, modes) = backfill_modes(&mut config, "s1");
 
         assert_eq!(updated, 1);
+        assert_eq!(backfill_count(&config, "s1"), 0);
         assert_eq!(modes.get("redirect"), Some(&1));
         assert_eq!(
             config.groups[0].channels[0].mode.as_deref(),

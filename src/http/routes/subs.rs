@@ -68,6 +68,7 @@ async fn status_body(state: Arc<AppState>) -> Json<Value> {
                 "queued": status.queued,
                 "next_sync": next_sync,
                 "ttl": crate::subs::effective_ttl_secs(source.ttl_secs),
+                "backfill_count": subscription::backfill_count(&config, &source.id),
             })
         })
         .collect();
