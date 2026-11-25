@@ -56,28 +56,9 @@ pub fn validate(config: &Config) -> anyhow::Result<()> {
             if !chans.insert(&channel.id) {
                 bail!("频道 id 重复: {}/{}", group.id, channel.id);
             }
-            if let Some(mode) = channel.mode.as_deref() {
-                if !crate::config::model::valid_mode(mode) {
-                    bail!("频道 {}/{} 的 mode 不支持 {mode}", group.id, channel.id);
-                }
-                if mode == "passthrough" && !channel.source_id.is_empty() {
-                    bail!("同步频道 {}/{} 不能使用 passthrough", group.id, channel.id);
-                }
-            }
-            if !channel.source_id.is_empty()
-                && channel.mode.is_none()
-                && group.mode == "passthrough"
-            {
-                bail!(
-                    "分组 {} 使用 passthrough，但同步频道 {} 未设置工作模式",
-                    group.id,
-                    channel.id
-                );
-            }
+            validate_channel_mode(group, channel)?;
         }
-        if !crate::config::model::valid_mode(&group.mode) {
-            bail!("分组 {} 的 mode 不支持 {}", group.id, group.mode);
-        }
+        validate_group_mode(group)?;
         if group.origin != "manual" && group.origin != "sync" {
             bail!("分组 {} 的 origin 必须是 manual 或 sync", group.id);
         }
@@ -111,6 +92,48 @@ pub fn validate(config: &Config) -> anyhow::Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+/// 频道工作模式规则。面板接口与配置校验共用。
+pub fn validate_channel_mode(
+    group: &crate::config::model::Group,
+    channel: &crate::config::model::Channel,
+) -> anyhow::Result<()> {
+    if let Some(mode) = channel.mode.as_deref() {
+        if !crate::config::model::valid_mode(mode) {
+            bail!("频道 {}/{} 的 mode 不支持 {mode}", group.id, channel.id);
+        }
+        if mode == "passthrough" && !channel.source_id.is_empty() {
+            bail!("同步频道 {}/{} 不能使用 passthrough", group.id, channel.id);
+        }
+    }
+    if !channel.source_id.is_empty() && channel.mode.is_none() && group.mode == "passthrough" {
+        bail!(
+            "分组 {} 使用 passthrough，但同步频道 {} 未设置工作模式",
+            group.id,
+            channel.id
+        );
+    }
+    Ok(())
+}
+
+/// 分组工作模式规则。面板接口与配置校验共用。
+pub fn validate_group_mode(group: &crate::config::model::Group) -> anyhow::Result<()> {
+    if !crate::config::model::valid_mode(&group.mode) {
+        bail!("分组 {} 的 mode 不支持 {}", group.id, group.mode);
+    }
+    if group.mode == "passthrough"
+        && group
+            .channels
+            .iter()
+            .any(|channel| !channel.source_id.is_empty() && channel.mode.is_none())
+    {
+        bail!(
+            "分组 {} 使用 passthrough，但组内有未设置模式的同步频道",
+            group.id
+        );
     }
     Ok(())
 }

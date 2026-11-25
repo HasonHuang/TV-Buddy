@@ -39,40 +39,12 @@ where
 }
 
 fn validate_channel_mode(group: &Group, channel: &Channel) -> Result<(), ApiError> {
-    if let Some(mode) = channel.mode.as_deref() {
-        if !crate::config::model::valid_mode(mode) {
-            return Err(ApiError::bad_request(format!("不支持的频道模式: {mode}")));
-        }
-        if mode == "passthrough" && !channel.source_id.is_empty() {
-            return Err(ApiError::bad_request("同步频道不能使用 passthrough"));
-        }
-    }
-    if !channel.source_id.is_empty() && channel.mode.is_none() && group.mode == "passthrough" {
-        return Err(ApiError::bad_request(
-            "分组使用 passthrough 时，同步频道必须设置显式模式",
-        ));
-    }
-    Ok(())
+    crate::config::validate_channel_mode(group, channel)
+        .map_err(|err| ApiError::bad_request(err.to_string()))
 }
 
 fn validate_group_mode(group: &Group) -> Result<(), ApiError> {
-    if !crate::config::model::valid_mode(&group.mode) {
-        return Err(ApiError::bad_request(format!(
-            "不支持的分组模式: {}",
-            group.mode
-        )));
-    }
-    if group.mode == "passthrough"
-        && group
-            .channels
-            .iter()
-            .any(|channel| !channel.source_id.is_empty() && channel.mode.is_none())
-    {
-        return Err(ApiError::bad_request(
-            "组内有未设置模式的同步频道，不能使用 passthrough",
-        ));
-    }
-    Ok(())
+    crate::config::validate_group_mode(group).map_err(|err| ApiError::bad_request(err.to_string()))
 }
 
 /// 校验分组请求体内嵌的所有频道。
@@ -627,13 +599,7 @@ pub async fn import_m3u(
             .clone()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "Default".to_string());
-        let is_dash = entry
-            .url
-            .split('?')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .ends_with(".mpd");
+        let is_dash = crate::config::model::is_dash_url(&entry.url);
         let index = match drafts.iter().position(|draft| draft.name == title) {
             Some(index) => index,
             None => {

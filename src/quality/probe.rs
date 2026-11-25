@@ -327,11 +327,6 @@ pub fn clean_url(url: &str) -> &str {
     url.split('$').next().unwrap_or(url).trim()
 }
 
-pub(crate) fn is_dash(url: &str) -> bool {
-    let path = url.split(['?', '#']).next().unwrap_or(url);
-    path.to_ascii_lowercase().ends_with(".mpd")
-}
-
 fn looks_like_hls(url: &str, content_type: &str) -> bool {
     url.to_ascii_lowercase().contains(".m3u8")
         || content_type.contains("mpegurl")
@@ -514,7 +509,7 @@ pub async fn probe(
     };
 
     // P1 不解析 DASH。连通档只检查 HTTP，仍可判定地址是否在线。
-    if is_dash(url) && mode != ProbeMode::Reachability {
+    if crate::config::model::is_dash_url(url) && mode != ProbeMode::Reachability {
         return ProbeOutput {
             measurement: probe_error("DASH 清单暂不支持", true),
             bytes: 0,

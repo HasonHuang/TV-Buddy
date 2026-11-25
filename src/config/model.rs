@@ -34,6 +34,31 @@ pub fn valid_mode(mode: &str) -> bool {
     MODE_VALUES.contains(&mode)
 }
 
+/// 按源默认值决定频道模式。`auto` 按 URL 类型选择。
+pub fn mode_for_source(source_mode: &str, dash: bool) -> String {
+    match source_mode.trim() {
+        "" | "auto" => {
+            if dash {
+                "dash".to_string()
+            } else {
+                "proxy".to_string()
+            }
+        }
+        other => other.to_string(),
+    }
+}
+
+/// 频道模式的来源标记。记录创建时的源模式。
+pub fn source_mode_marker(source_mode: &str) -> String {
+    match source_mode.trim() {
+        "" | "auto" => "sync:auto".to_string(),
+        value if matches!(value, "proxy" | "remux" | "dash" | "redirect" | "rewrite") => {
+            format!("sync:{value}")
+        }
+        _ => MODE_SOURCE_MANUAL.to_string(),
+    }
+}
+
 /// URL 是否为 DASH 清单。忽略查询串与片段，扩展名不区分大小写。
 pub fn is_dash_url(url: &str) -> bool {
     let path = url.split(['?', '#']).next().unwrap_or(url);
@@ -184,22 +209,16 @@ impl Config {
                 if !explicit_passthrough && !inherits_passthrough {
                     continue;
                 }
-                let source_mode = source_modes.get(&channel.source_id).map(String::as_str);
-                let explicit = source_mode.filter(|mode| {
-                    matches!(*mode, "proxy" | "remux" | "dash" | "redirect" | "rewrite")
-                });
-                let mode = explicit.unwrap_or("redirect");
-                channel.mode = Some(mode.to_string());
-                let marker = match source_mode {
-                    Some("") | Some("auto") => "sync:auto".to_string(),
-                    Some(value)
-                        if matches!(value, "proxy" | "remux" | "dash" | "redirect" | "rewrite") =>
-                    {
-                        format!("sync:{value}")
-                    }
-                    _ => MODE_SOURCE_MANUAL.to_string(),
+                let source_mode = source_modes
+                    .get(&channel.source_id)
+                    .map(String::as_str)
+                    .unwrap_or("");
+                let mode = match source_mode {
+                    "proxy" | "remux" | "dash" | "redirect" | "rewrite" => source_mode.to_string(),
+                    _ => "redirect".to_string(),
                 };
-                channel.set_mode_source(&marker);
+                channel.mode = Some(mode.clone());
+                channel.set_mode_source(&source_mode_marker(source_mode));
                 tracing::warn!(
                     group = %gid,
                     channel = %channel.id,

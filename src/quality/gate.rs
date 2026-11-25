@@ -705,7 +705,7 @@ fn reachability_only_verdict(measurement: &Measurement) -> Verdict {
 
 fn dash_url_change(candidate: &Candidate, config: &Config) -> bool {
     candidate.is_url_change
-        && crate::quality::probe::is_dash(&candidate.url)
+        && crate::config::model::is_dash_url(&candidate.url)
         && required_probe_mode(config, &candidate.rules) != ProbeMode::Reachability
 }
 

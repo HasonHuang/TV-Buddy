@@ -1715,24 +1715,12 @@ fn position_for<'a>(source: &'a PlaylistSource, playlist: &'a PlaylistCfg) -> &'
 }
 
 fn mode_for(source: &PlaylistSource, dash: bool) -> String {
-    match source.playback_mode.trim() {
-        "" | "auto" => {
-            if dash {
-                "dash".into()
-            } else {
-                "proxy".into()
-            }
-        }
-        other => other.to_string(),
-    }
+    crate::config::model::mode_for_source(&source.playback_mode, dash)
 }
 
 /// 频道模式的来源标记。记录创建时的源模式。
 fn source_mode_marker(source: &PlaylistSource) -> String {
-    match source.playback_mode.trim() {
-        "" | "auto" => "sync:auto".into(),
-        other => format!("sync:{other}"),
-    }
+    crate::config::model::source_mode_marker(&source.playback_mode)
 }
 
 /// 源仍是 `auto` 时，只在 URL 类型变化后重算频道模式。
