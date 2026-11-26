@@ -118,6 +118,11 @@ impl Config {
         if self.cache.disk_path.trim().is_empty() {
             self.cache.disk_path = "./cache".into();
         }
+        // 面板提示「留空显示默认首页」。空串不能原样进 `Location`：
+        // 客户端会收到 302 但没有跳转目标。这里按默认首页修复。
+        if self.server.home_url.trim().is_empty() {
+            self.server.home_url = DEFAULT_HOME_URL.into();
+        }
         // 旧库可能存了 1..=59 的过期时长。校验要求 0 或 ≥60；加载时先夹到 60，
         // 否则下一次保存会失败。
         if (1..60).contains(&self.cache.gc.max_age_secs) {
@@ -347,6 +352,9 @@ fn strip_legacy(extra: &mut Extra, keys: &[&str]) {
     }
 }
 
+/// 默认首页。`server.home_url` 留空时使用。
+pub const DEFAULT_HOME_URL: &str = "/page/panel";
+
 /// `[server]`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -372,7 +380,7 @@ impl Default for ServerCfg {
             bind: "[::]:9900".into(),
             not_found_url: "https://material.yang-1989.eu.org/v/404.mp4".into(),
             error_url: "https://material.yang-1989.eu.org/v/mistake.mp4".into(),
-            home_url: "/page/panel".into(),
+            home_url: DEFAULT_HOME_URL.into(),
             m3u_header_lines: Vec::new(),
             timezone_offset_hours: 8,
             catchup_tpl: "guonei".into(),
@@ -2056,6 +2064,14 @@ mod tests {
         config.cache.disk_path = "  ".into();
         config.normalize();
         assert_eq!(config.cache.disk_path, "./cache");
+    }
+
+    #[test]
+    fn normalize_fills_empty_home_url() {
+        let mut config = Config::default();
+        config.server.home_url = "   ".into();
+        config.normalize();
+        assert_eq!(config.server.home_url, DEFAULT_HOME_URL);
     }
 
     #[test]

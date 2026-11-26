@@ -999,12 +999,12 @@ export function SettingsPage({
                     <Text
                       label="404 跳转"
                       path="server.not_found_url"
-                      tip="频道或路径不存在时跳转的地址。"
+                      tip="频道或路径不存在时跳转的地址；留空返回 404。"
                     />
                     <Text
                       label="错误跳转"
                       path="server.error_url"
-                      tip="读取源或播放出错时跳转的地址。"
+                      tip="读取源或播放出错时跳转的地址；留空返回 404。"
                     />
                     <BoolPick
                       label="低配模式"

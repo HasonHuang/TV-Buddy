@@ -182,6 +182,10 @@ GET /media/{gid}/{cid}/<P>_<S>.<ext>
 | remux 预热 | `503` + `Retry-After: 2`，体 `remux warming up` | S-MODE-16 |
 | dash 未就绪 | `503 timeout waiting for master playlist` | S-MODE-15 |
 
+**跳转地址为空。** `server.not_found_url` 或 `server.error_url` 为空时，
+对应响应改为 `404 not found`。服务端不发送空 `Location`，也不回退到外部默认地址。
+空值表示「不要占位视频」。
+
 ### 4.1 实现细节（内部，不是兼容契约）
 
 | 项 | 取值 | 说明 |

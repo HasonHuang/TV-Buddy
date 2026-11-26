@@ -862,6 +862,18 @@ fn assert_disguised(fixture: &Fixture, url: &str) {
     );
 }
 
+/// 首页跳转留空时使用默认首页。
+///
+/// 面板提示「留空显示默认首页」。空串不能原样写进 `Location`：
+/// 那会得到 302 但没有跳转目标，客户端停在原地。
+#[tokio::test]
+async fn empty_home_url_falls_back_to_default() {
+    let fixture = fixture_with_all(false, r#"{"server":{"home_url":""}}"#).await;
+    let response = fetch(&fixture, "/").await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(header(&response, "location"), "/page/panel");
+}
+
 #[tokio::test]
 async fn health_and_user_playlist() {
     let fixture = fixture().await;
@@ -1364,6 +1376,40 @@ async fn upstream_playlist_failure_redirects_to_error_url() {
     assert_eq!(
         header(&response, "location"),
         "http://placeholder.test/mistake.mp4"
+    );
+}
+
+/// 跳转地址留空时返回 `404`，不发空 `Location`。
+///
+/// 面板不提供默认占位。空值表示「不要占位视频」，
+/// 服务端不回退到外部默认地址。
+#[tokio::test]
+async fn empty_placeholder_urls_return_404() {
+    let fixture =
+        fixture_with_all(false, r#"{"server":{"not_found_url":"","error_url":""}}"#).await;
+
+    // 未知频道（合法 Token）→ `not_found_url` 为空。
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/pg/ghost.m3u8?token={}", fixture.token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        header(&response, "location").is_empty(),
+        "不应发送空 Location"
+    );
+
+    // 上游清单失败 → `error_url` 为空。
+    let response = fetch(
+        &fixture,
+        &format!("/api/play/badlist/c1.m3u8?token={}", fixture.token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        header(&response, "location").is_empty(),
+        "不应发送空 Location"
     );
 }
 
