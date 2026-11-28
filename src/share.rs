@@ -66,7 +66,8 @@ fn match_ip(ip: &str, entry: &str) -> bool {
         };
         return cidr_contains(address, base, bits);
     }
-    ip == entry
+    // 精确匹配前归一化写法。IPv6 的压缩写法与 IPv4 映射写法等价。
+    crate::auth::ip_guard::normalize_ip(ip) == crate::auth::ip_guard::normalize_ip(entry)
 }
 
 fn cidr_contains(address: IpAddr, base: IpAddr, bits: u8) -> bool {
@@ -228,6 +229,15 @@ mod tests {
         assert!(!ip_allowed("2001:db9::1", &trust));
         assert!(ip_allowed("203.0.113.9", &["*".to_string()]));
         assert!(!ip_allowed("203.0.113.9", &[]));
+    }
+
+    #[test]
+    fn trust_list_normalizes_ipv6_forms() {
+        assert!(ip_allowed("2001:db8::1", &["2001:0db8:0:0::1".to_string()]));
+        assert!(ip_allowed(
+            "192.168.1.5",
+            &["::ffff:192.168.1.5".to_string()]
+        ));
     }
 
     #[test]

@@ -460,7 +460,7 @@ http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 `[auth]` 的播放凭证与 IP 管控默认开启。IP 管控默认 `max_sessions_per_ip = 1`，
 同一出口 IP 同时只保留 1 路播放会话。多人共用网络时改大。
 
-IP 封禁按服务看到的来源地址匹配。直接映射容器端口时，容器运行时会改写源地址（常见为网关地址）。要按客户端真实地址封禁，请经 NGINX 反代并传递 `X-Forwarded-For`。见 [`docs/deploy/03-nginx.md`](docs/deploy/03-nginx.md)。
+IP 封禁按服务看到的来源地址匹配。直接映射容器端口时，容器运行时会改写源地址（常见为网关地址）。要按客户端真实地址封禁，请经 NGINX 反代并传递 `X-Forwarded-For`。见 [`docs/deploy/03-nginx.md`](docs/deploy/03-nginx.md)。IPv4 与 IPv6 是不同地址，需要分别封禁。
 
 生效方式：面板保存立即生效。`[cache].disk_path` 需要重启。EPG 源、绑定与规则已迁入面板与数据库，保存即生效。
 `[epg]` 的其余键仍需要重启。

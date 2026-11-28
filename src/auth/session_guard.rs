@@ -151,14 +151,23 @@ impl SessionGuard {
 /// 地址是否命中白名单。
 ///
 /// 支持的写法：`*`（全部）、精确地址、IPv4 CIDR（`10.0.0.0/8`）。
-/// IPv6 只支持精确匹配，不做前缀；写错规则按「不命中」处理，不报错。
+/// IPv6 只支持精确匹配，不做前缀。精确匹配前归一化地址写法，
+/// 因此 `2001:0db8::1`、`2001:db8::1` 与 IPv4 映射写法等价。
+/// 写错规则按「不命中」处理，不报错。
 pub fn whitelisted(rules: &[String], ip: &str) -> bool {
+    let ip = crate::auth::ip_guard::normalize_ip(ip);
     if ip.is_empty() || ip == "unknown" {
         return false;
     }
     rules.iter().any(|rule| {
         let rule = rule.trim();
-        rule == "*" || rule == ip || cidr_match(rule, ip)
+        if rule == "*" {
+            return true;
+        }
+        if rule.contains('/') {
+            return cidr_match(rule, &ip);
+        }
+        crate::auth::ip_guard::normalize_ip(rule) == ip
     })
 }
 
@@ -270,6 +279,25 @@ mod tests {
         assert!(!whitelisted(&rules[1..], "11.0.0.1"));
         assert!(!whitelisted(&rules, ""));
         assert!(!whitelisted(&rules, "unknown"));
+    }
+
+    #[test]
+    fn whitelist_normalizes_ipv6_and_mapped_forms() {
+        // 规则与请求的 IPv6 写法不同，但地址相同。
+        assert!(whitelisted(
+            &["2001:0db8:0:0::1".to_string()],
+            "2001:db8::1"
+        ));
+        // IPv4 映射的规则等价于纯 IPv4。
+        assert!(whitelisted(
+            &["::ffff:192.168.1.5".to_string()],
+            "192.168.1.5"
+        ));
+        // 请求地址本身是映射写法，规则是纯 IPv4。
+        assert!(whitelisted(
+            &["192.168.1.5".to_string()],
+            "::ffff:192.168.1.5"
+        ));
     }
 
     #[test]

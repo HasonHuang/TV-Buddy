@@ -4175,6 +4175,58 @@ async fn ip_ban_matches_ipv4_and_mapped_forms() {
         sub("::ffff:8.8.8.8").await.expect("请求").status(),
         StatusCode::FORBIDDEN
     );
+
+    // IPv6 的非压缩写法与压缩写法等价。
+    assert_eq!(
+        ban("2001:0db8:0:0::1").send().await.expect("封禁").status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        sub("2001:db8::1").await.expect("请求").status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn whitelist_ipv6_forms_exempt_bans() {
+    let fixture = fixture().await;
+    let mut config = (*fixture.state.snapshot()).clone();
+    config.auth.ip_guard_enabled = true;
+    config.auth.whitelist = vec!["2001:0db8:0:0::1".to_string()];
+    fixture.state.config.store(Arc::new(config));
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    let response = fixture
+        .client
+        .post(format!("{}/api/panel/security/ip/ban", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", &auth)
+        .body(r#"{"ips":["2001:db8::1","2001:db8::2"],"seconds":60}"#)
+        .send()
+        .await
+        .expect("封禁");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 两个地址都已封禁。白名单写法不同，但归一化后命中，封禁不生效。
+    let response = fixture
+        .client
+        .get(fixture.sub_url(&fixture.token, "playlist.m3u"))
+        .header("x-forwarded-for", "2001:0db8:0:0::1")
+        .send()
+        .await
+        .expect("白名单请求");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 不在白名单的 IPv6 地址仍被拦。
+    let response = fixture
+        .client
+        .get(fixture.sub_url(&fixture.token, "playlist.m3u"))
+        .header("x-forwarded-for", "2001:db8::2")
+        .send()
+        .await
+        .expect("非白名单请求");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
