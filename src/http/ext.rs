@@ -121,6 +121,8 @@ pub fn client_ip(headers: &axum::http::HeaderMap) -> String {
 }
 
 /// 同 [`client_ip`]，但对端地址可作为兜底。
+///
+/// 返回前归一化：IPv4 映射的 IPv6 转为 IPv4。见 [`crate::auth::ip_guard::normalize_ip`]。
 pub fn client_ip_with_peer(
     headers: &axum::http::HeaderMap,
     peer: Option<std::net::SocketAddr>,
@@ -131,23 +133,24 @@ pub fn client_ip_with_peer(
             .map(str::trim)
             .rfind(|item| !item.is_empty())
         {
-            return last.to_string();
+            return crate::auth::ip_guard::normalize_ip(last);
         }
         // 目标对“有 XFF 头但全为空项”的情况直接回退到对端，不再看 X-Real-IP。
         if !value.trim().is_empty() {
-            return peer
-                .map(|peer| peer.ip().to_string())
-                .unwrap_or_else(|| "unknown".to_string());
+            return match peer {
+                Some(peer) => crate::auth::ip_guard::normalize_ip(&peer.ip().to_string()),
+                None => "unknown".to_string(),
+            };
         }
     }
     if let Some(value) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
         let value = value.trim();
         if !value.is_empty() {
-            return value.to_string();
+            return crate::auth::ip_guard::normalize_ip(value);
         }
     }
     match peer {
-        Some(peer) => peer.ip().to_string(),
+        Some(peer) => crate::auth::ip_guard::normalize_ip(&peer.ip().to_string()),
         None => "unknown".to_string(),
     }
 }
@@ -189,5 +192,14 @@ mod tests {
         headers.insert("x-real-ip", "1.2.3.4".parse().expect("头值"));
         let peer: std::net::SocketAddr = "9.9.9.9:1234".parse().expect("地址");
         assert_eq!(client_ip_with_peer(&headers, Some(peer)), "9.9.9.9");
+    }
+
+    #[test]
+    fn ipv4_mapped_peer_is_normalized() {
+        let peer: std::net::SocketAddr = "[::ffff:9.9.9.9]:1234".parse().expect("地址");
+        assert_eq!(
+            client_ip_with_peer(&axum::http::HeaderMap::new(), Some(peer)),
+            "9.9.9.9"
+        );
     }
 }

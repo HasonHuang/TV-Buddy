@@ -16,6 +16,22 @@ pub const MAX_BAN_SECS: u64 = 30 * 24 * 3600;
 /// 统计容量上限。
 const CAPACITY: usize = 10_000;
 
+/// 归一化地址文本。
+///
+/// IPv4 映射的 IPv6（`::ffff:a.b.c.d`）转为 IPv4。其他 IPv6 采用标准压缩写法。
+/// 无法解析的文本去空白后原样返回。
+pub fn normalize_ip(raw: &str) -> String {
+    let value = raw.trim();
+    match value.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.to_string(),
+        Ok(std::net::IpAddr::V6(ip)) => match ip.to_ipv4_mapped() {
+            Some(ip) => ip.to_string(),
+            None => ip.to_string(),
+        },
+        Err(_) => value.to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct Entry {
     requests: u64,
@@ -54,45 +70,49 @@ impl IpGuard {
 
     /// 记一次请求。
     pub fn record_request(&self, ip: &str) {
+        let ip = normalize_ip(ip);
         if ip.is_empty() || ip == "unknown" {
             return;
         }
         let mut inner = self.lock();
-        if !inner.contains_key(ip) && inner.len() >= CAPACITY {
+        if !inner.contains_key(&ip) && inner.len() >= CAPACITY {
             return;
         }
-        inner.entry(ip.to_string()).or_default().requests += 1;
+        inner.entry(ip).or_default().requests += 1;
     }
 
     /// 记一次上游失败。
     pub fn record_failure(&self, ip: &str) {
+        let ip = normalize_ip(ip);
         if ip.is_empty() || ip == "unknown" {
             return;
         }
         let mut inner = self.lock();
-        if !inner.contains_key(ip) && inner.len() >= CAPACITY {
+        if !inner.contains_key(&ip) && inner.len() >= CAPACITY {
             return;
         }
-        inner.entry(ip.to_string()).or_default().failures += 1;
+        inner.entry(ip).or_default().failures += 1;
     }
 
     /// 封禁一个地址；返回到期时刻的剩余秒数。
     pub fn ban(&self, ip: &str, seconds: u64) -> u64 {
+        let ip = normalize_ip(ip);
         let seconds = if seconds == 0 {
             DEFAULT_BAN_SECS
         } else {
             seconds.min(MAX_BAN_SECS)
         };
         let mut inner = self.lock();
-        let entry = inner.entry(ip.to_string()).or_default();
+        let entry = inner.entry(ip).or_default();
         entry.banned_until = Some(Instant::now() + Duration::from_secs(seconds));
         seconds
     }
 
     /// 解封；返回是否命中记录。
     pub fn unban(&self, ip: &str) -> bool {
+        let ip = normalize_ip(ip);
         let mut inner = self.lock();
-        match inner.get_mut(ip) {
+        match inner.get_mut(&ip) {
             Some(entry) => {
                 let was = entry.banned_until.take().is_some();
                 if was {
@@ -134,8 +154,9 @@ impl IpGuard {
 
     /// 是否处于封禁期。
     pub fn is_banned(&self, ip: &str) -> bool {
+        let ip = normalize_ip(ip);
         let inner = self.lock();
-        match inner.get(ip) {
+        match inner.get(&ip) {
             Some(entry) => entry.banned(),
             None => false,
         }
@@ -192,6 +213,26 @@ impl IpGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ipv4_mapped_addresses_are_normalized() {
+        let guard = IpGuard::new();
+        guard.record_request("::ffff:1.2.3.4");
+        guard.ban("1.2.3.4", 60);
+        assert!(guard.is_banned("::ffff:1.2.3.4"));
+        assert!(guard.is_banned("1.2.3.4"));
+        assert_eq!(guard.snapshot()[0].ip, "1.2.3.4");
+        assert!(guard.unban("::ffff:1.2.3.4"));
+        assert!(!guard.is_banned("1.2.3.4"));
+    }
+
+    #[test]
+    fn normalize_ip_keeps_other_forms() {
+        assert_eq!(normalize_ip(" 1.2.3.4 "), "1.2.3.4");
+        assert_eq!(normalize_ip("2001:0db8::1"), "2001:db8::1");
+        assert_eq!(normalize_ip("not-an-ip"), "not-an-ip");
+        assert_eq!(normalize_ip(""), "");
+    }
 
     #[test]
     fn counts_and_bans() {

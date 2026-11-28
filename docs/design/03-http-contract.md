@@ -503,7 +503,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 项 | 规则 |
 | --- | --- |
-| 记账 | `/page/panel`、`/page/*`、`/static/panel/*`、`/api/panel/*`、`/api/unban/*` 不记账。其余路径按 `X-Forwarded-For` 末项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略 |
+| 记账 | `/page/panel`、`/page/*`、`/static/panel/*`、`/api/panel/*`、`/api/unban/*` 不记账。其余路径按 `X-Forwarded-For` 末项或 `X-Real-IP` 记账；都没有时记 `unknown` 并忽略。地址文本统一归一化：IPv4 映射的 IPv6（`::ffff:a.b.c.d`）转为 IPv4，封禁与查询用同一形式 |
 | 拦截 | 封禁期内 → `403` 纯文本 `banned`；上述豁免路径不拦截（避免管理员或用户自锁） |
 | 容量 | 最多保留 10 000 个地址，超出后忽略新地址 |
 | 未实现 | 按 IP 的会话上限与自动限流 |

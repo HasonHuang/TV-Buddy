@@ -4136,6 +4136,48 @@ async fn my_devices_are_readable_but_not_editable() {
 }
 
 #[tokio::test]
+async fn ip_ban_matches_ipv4_and_mapped_forms() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+    let ban = |ip: &str| {
+        fixture
+            .client
+            .post(format!("{}/api/panel/security/ip/ban", fixture.base))
+            .header("content-type", "application/json")
+            .header("authorization", &auth)
+            .body(format!(r#"{{"ip":"{ip}","seconds":60}}"#))
+    };
+    let sub = |xff: &str| {
+        fixture
+            .client
+            .get(fixture.sub_url(&fixture.token, "playlist.m3u"))
+            .header("x-forwarded-for", xff)
+            .send()
+    };
+
+    // 封禁映射写法，纯 IPv4 请求也被拦。
+    assert_eq!(
+        ban("::ffff:7.7.7.7").send().await.expect("封禁").status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        sub("7.7.7.7").await.expect("请求").status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // 封禁纯 IPv4，映射写法请求也被拦。
+    assert_eq!(
+        ban("8.8.8.8").send().await.expect("封禁").status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        sub("::ffff:8.8.8.8").await.expect("请求").status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
 async fn self_service_unban_respects_quota() {
     let fixture = fixture().await;
     let mut config = (*fixture.state.snapshot()).clone();
