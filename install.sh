@@ -16,7 +16,7 @@
 #   远程安装包：sudo ./install.sh --archive https://example.com/tv-buddy.tar.gz
 #
 # 只支持 Linux amd64/arm64。脚本幂等；已有数据库不覆盖。
-# 装完即启动服务（`--no-start` 可关闭）。
+# 装完即启动服务（`--no-start` 只跳过启动，NGINX 仍加入开机自启）。
 
 set -eu
 
@@ -56,7 +56,7 @@ usage() {
   --no-low-spec      不使用低配参数，不询问
   --nginx            安装 NGINX 并写入反向代理配置，不询问
   --no-nginx         不安装 NGINX，不询问
-  --no-start         安装后不启动服务（默认会启动）
+  --no-start         安装后不启动服务（默认会启动）；NGINX 仍加入开机自启
   -h, --help         显示本帮助
 
 环境变量：
@@ -489,10 +489,31 @@ configure_nginx() {
     return 0
 }
 
-# 启动 NGINX 并设置开机自启。失败只警告，不中断安装。
+# 把 NGINX 加入开机自启。与是否立即启动无关，`--no-start` 也要执行。
+# 失败打印警告并返回 1，不中断安装。
+enable_nginx() {
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl enable nginx >/dev/null 2>&1; then
+            echo "NGINX：已设置开机自启（systemd）"
+            return 0
+        fi
+        echo "警告：systemctl enable nginx 失败，重启后不会自动运行"
+        return 1
+    elif command -v rc-update >/dev/null 2>&1; then
+        if rc-update add nginx default >/dev/null 2>&1; then
+            echo "NGINX：已设置开机自启（OpenRC）"
+            return 0
+        fi
+        echo "警告：rc-update add nginx default 失败，重启后不会自动运行"
+        return 1
+    fi
+    echo "警告：未发现 systemd/OpenRC；请手动设置 NGINX 开机自启"
+    return 1
+}
+
+# 启动 NGINX。失败只警告，不中断安装。
 start_nginx() {
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl enable nginx >/dev/null 2>&1 || true
         if systemctl restart nginx; then
             echo "NGINX：已启动（systemd）"
             return 0
@@ -500,7 +521,6 @@ start_nginx() {
         echo "警告：NGINX 启动失败，见 systemctl status nginx"
         return 1
     elif command -v rc-update >/dev/null 2>&1; then
-        rc-update add nginx default >/dev/null 2>&1 || true
         if rc-service nginx restart; then
             echo "NGINX：已启动（OpenRC）"
             return 0
@@ -651,10 +671,15 @@ fi
 
 # NGINX 失败不影响 tv-buddy 安装。
 NGINX_CONF_OK=0
+NGINX_ENABLED=0
 NGINX_STARTED=0
 if [ "$DO_NGINX" = 1 ]; then
     if install_nginx_package && configure_nginx; then
         NGINX_CONF_OK=1
+        # 自启不受 --no-start 影响：只跳过启动，不跳过开机自启。
+        if enable_nginx; then
+            NGINX_ENABLED=1
+        fi
         if [ "$DO_START" = 1 ]; then
             if start_nginx; then
                 NGINX_STARTED=1
@@ -680,11 +705,18 @@ fi
 if [ "$DO_NGINX" = 1 ]; then
     if [ "$NGINX_CONF_OK" != 1 ]; then
         echo "NGINX：未配置。见上方警告"
-    elif [ "$NGINX_STARTED" = 1 ]; then
-        echo "NGINX：反向代理已配置并启动，入口 http://<主机>/page"
-    elif [ "$DO_START" = 0 ]; then
-        echo "NGINX：反向代理已配置，未启动（--no-start）"
     else
-        echo "NGINX：反向代理已配置，启动失败。见上方警告"
+        if [ "$NGINX_ENABLED" = 1 ]; then
+            echo "NGINX：已设置开机自启"
+        else
+            echo "NGINX：自启设置失败。见上方警告"
+        fi
+        if [ "$NGINX_STARTED" = 1 ]; then
+            echo "NGINX：反向代理已配置并启动，入口 http://<主机>/page"
+        elif [ "$DO_START" = 0 ]; then
+            echo "NGINX：反向代理已配置，未启动（--no-start），下次开机自动启动"
+        else
+            echo "NGINX：反向代理已配置，启动失败。见上方警告"
+        fi
     fi
 fi
