@@ -412,6 +412,20 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           {query && shownNav.length === 0 ? <div className="nav-empty">没有匹配的分区</div> : null}
         </nav>
         {bottomMy ? <div className="sidebar-my">{navButton(bottomMy)}</div> : null}
+        {/* 普通用户没有「安全管控」分区。解封页是独立入口，放在侧栏底部。 */}
+        {!isAdmin ? (
+          <div className="sidebar-my">
+            <a
+              className="nav-item"
+              href="/page/unban"
+              title="当前地址被封禁时提交解封"
+              aria-label="自助解封"
+            >
+              <Icon name="security" size={15} />
+              <span className="nav-label">自助解封</span>
+            </a>
+          </div>
+        ) : null}
         {isAdmin && (
           <div className="sidebar-meta">
             <div className="kv">
