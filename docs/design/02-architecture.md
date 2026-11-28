@@ -149,7 +149,7 @@
 /static/panel/*、/static/logo/*、/static/assets/* → 内嵌或本地静态资源（免登录）
 ```
 
-旧路径 `/panel`、`/unban`、`/panel/api/*`、`/logo/*` 由最外层改写中间件映射到新前缀。旧路径在本次主版本内继续可用。
+旧路径 `/panel`、`POST /unban`、`/panel/api/*`、`/logo/*` 由最外层改写中间件映射到新前缀。旧路径在本次主版本内继续可用。`GET /unban` 不再改写为页面。
 
 ## 6. 共享状态
 
@@ -218,7 +218,7 @@ frontend/            # Vite + React + TS（独立目录）
 | 项 | 设计 | 依据 |
 | --- | --- | --- |
 | 页面 | 2 页：管理面板、自助解封 | F-003 |
-| 路由 | `/page/panel`、`/page/unban`；旧 `/panel`、`/unban` 为别名 | S-EP-01、S-EP-07 |
+| 路由 | `/page/panel`、`/page/unban`；旧 `/panel` 为别名 | S-EP-01、S-EP-07 |
 | API | 只调 `/api/panel/*`；端点与字段不重命名 | S-EP-12、F-012 §3 |
 | 静态资源 | `/static/panel/*`、`/static/logo/*`、`/static/assets/*` | S-EP-16 |
 | 基准 | 逐屏对照 [`reference/img/`](reference/) | E1b |

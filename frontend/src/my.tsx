@@ -10,10 +10,21 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, copyText } from './api';
 import { Icon } from './icons';
-import { Empty, Loading, PageHead, Tip, useToast } from './ui';
+import { Badge, Empty, Loading, PageHead, Tip, useToast } from './ui';
 
 type Channel = { id: string; name: string; url: string };
 type Group = { id: string; name: string; channels: Channel[] };
+
+/** 只读的设备视图。设备由管理员管理。 */
+type Device = {
+  token: string;
+  label: string | null;
+  created_at_ms: number;
+  expires_at_ms: number | null;
+  last_seen_at_ms: number | null;
+  playlist_url: string;
+  epg_url: string;
+};
 
 type Me = {
   user?: { username?: string; role?: string };
@@ -21,7 +32,25 @@ type Me = {
   playlist_link?: string | null;
   epg_link?: string | null;
   groups?: Group[];
+  devices?: Device[];
 };
+
+/** 毫秒时间戳转本地时间。0 或空值显示占位符。 */
+function formatTime(ms: number | null | undefined): string {
+  if (!ms) return '—';
+  const date = new Date(ms);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+}
+
+/** 设备状态。只读展示，不提供操作。 */
+function deviceState(device: Device): { text: string; tone: string } {
+  if (device.expires_at_ms === null) return { text: '永不过期', tone: 'ok' };
+  if (device.expires_at_ms <= Date.now()) return { text: '已过期', tone: 'danger' };
+  return { text: `有效期至 ${formatTime(device.expires_at_ms)}`, tone: 'info' };
+}
 
 export function MySubsPage() {
   const { node, ok, err } = useToast();
@@ -51,6 +80,7 @@ export function MySubsPage() {
   };
 
   const groups = me?.groups ?? [];
+  const devices = me?.devices ?? [];
   const total = groups.reduce((sum, group) => sum + group.channels.length, 0);
 
   const head = (
@@ -63,6 +93,14 @@ export function MySubsPage() {
           : `${groups.length} 个分组 · ${total} 个频道`
       }
     >
+      <a
+        className="ghost"
+        href="/page/unban"
+        title="当前地址被封禁时提交解封"
+      >
+        <Icon name="security" size={14} />
+        自助解封
+      </a>
       <button
         className="ghost"
         title="重新读取你的订阅地址与授权频道"
@@ -145,6 +183,62 @@ export function MySubsPage() {
           <Empty text="还没有授权任何频道，请联系管理员。" icon="subs" />
         </div>
       )}
+
+      <div className="card flush">
+        <div className="section-title">
+          我的设备
+          <span className="muted">{devices.length} 台</span>
+        </div>
+        <p className="muted" style={{ padding: '0 16px' }}>
+          设备由管理员管理。这里只能查看与复制。需要添加或撤销设备，请联系管理员。
+        </p>
+        {devices.length === 0 ? (
+          <Empty text="还没有设备。" icon="users" />
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>设备</th>
+                <th>凭证</th>
+                <th>状态</th>
+                <th>最后使用</th>
+                <th className="right">订阅地址</th>
+              </tr>
+            </thead>
+            <tbody>
+              {devices.map((device) => {
+                const state = deviceState(device);
+                return (
+                  <tr key={device.token}>
+                    <td>{device.label || '未命名设备'}</td>
+                    <td className="mono">{device.token}</td>
+                    <td>
+                      <Badge tone={state.tone}>{state.text}</Badge>
+                    </td>
+                    <td className="muted">{formatTime(device.last_seen_at_ms)}</td>
+                    <td className="right">
+                      <button
+                        className="chip"
+                        title="复制这台设备的订阅地址"
+                        onClick={() => void copy(device.playlist_url, '订阅地址')}
+                      >
+                        订阅
+                      </button>
+                      <button
+                        className="chip"
+                        title="复制这台设备的 EPG 地址"
+                        onClick={() => void copy(device.epg_url, 'EPG 地址')}
+                      >
+                        EPG
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       {groups.map((group) => (
         <div className="card flush" key={group.id}>

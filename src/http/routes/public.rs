@@ -87,8 +87,8 @@ pub async fn whoami(
 
 /// `POST /api/unban`——调用方自助解封。
 ///
-/// 免登录（S-EP-07）。每个 IP 每月最多 3 次（S-AUTH-07）。
-/// 配额用完时目标仍返回 `200`，正文 `ok=false`。
+/// 需要面板登录会话。每个 IP 每月最多 3 次（S-AUTH-07）。
+/// 未封禁或配额用完时仍返回 `200`，正文 `ok=false`，并带 `remaining`。
 pub async fn unban(
     PanelAuth(_): PanelAuth,
     State(state): State<Arc<AppState>>,
@@ -100,14 +100,23 @@ pub async fn unban(
     }
     let ip = client_ip_with_peer(&headers, Some(peer));
     if !state.ip_guard.is_banned(&ip) {
-        return Json(json!({ "msg": "你的 IP 当前未被封禁", "ok": false }));
+        return Json(json!({
+            "msg": "你的 IP 当前未被封禁",
+            "ok": false,
+            "remaining": state.unban_quota.remaining(&ip),
+        }));
     }
     if !state.unban_quota.consume(&ip) {
         return Json(json!({
             "msg": "本月自助解封次数已用完（每月最多3次）",
             "ok": false,
+            "remaining": 0,
         }));
     }
     state.ip_guard.unban(&ip);
-    Json(json!({ "msg": "解封成功", "ok": true }))
+    Json(json!({
+        "msg": "解封成功",
+        "ok": true,
+        "remaining": state.unban_quota.remaining(&ip),
+    }))
 }

@@ -4063,6 +4063,79 @@ async fn channel_headers_are_sent_upstream() {
 }
 
 #[tokio::test]
+async fn legacy_unban_page_alias_is_gone() {
+    let fixture = fixture().await;
+    // 页面只从 `/page/unban` 打开。裸 `/unban` 不再返回页面。
+    let response = fixture
+        .client
+        .get(format!("{}/unban", fixture.base))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let response = fixture
+        .client
+        .get(format!("{}/page/unban", fixture.base))
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn my_devices_are_readable_but_not_editable() {
+    let fixture = fixture().await;
+    let login = fixture
+        .client
+        .post(format!("{}/api/panel/login", fixture.base))
+        .header("content-type", "application/json")
+        .body(r#"{"username":"viewer","password":"viewer"}"#)
+        .send()
+        .await
+        .expect("登录");
+    assert_eq!(login.status(), StatusCode::OK);
+    let session =
+        serde_json::from_str::<serde_json::Value>(&login.text().await.expect("读登录结果"))
+            .expect("解析登录结果")["token"]
+            .as_str()
+            .expect("取会话")
+            .to_string();
+
+    let response = fixture
+        .client
+        .get(format!("{}/api/panel/me", fixture.base))
+        .bearer_auth(&session)
+        .send()
+        .await
+        .expect("读取我的订阅");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
+    let devices = body["devices"].as_array().expect("应返回设备数组");
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0]["token"], fixture.user_token);
+    assert_eq!(devices[0]["purpose"], "device");
+    assert!(devices[0]["playlist_url"]
+        .as_str()
+        .expect("订阅地址")
+        .starts_with("/sub/"));
+
+    // 普通用户不能改设备。管理接口仍只允许管理员。
+    let user_id = body["user"]["id"].as_str().expect("用户 id");
+    let response = fixture
+        .client
+        .post(format!("{}/api/panel/users/{user_id}/tokens", fixture.base))
+        .bearer_auth(&session)
+        .header("content-type", "application/json")
+        .body(r#"{"label":"新设备"}"#)
+        .send()
+        .await
+        .expect("尝试创建设备");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn self_service_unban_respects_quota() {
     let fixture = fixture().await;
     let mut config = (*fixture.state.snapshot()).clone();
@@ -4111,6 +4184,7 @@ async fn self_service_unban_respects_quota() {
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     assert_eq!(body["ok"], false);
     assert_eq!(body["msg"], "你的 IP 当前未被封禁");
+    assert_eq!(body["remaining"], 3);
     let body: serde_json::Value =
         serde_json::from_str(&whoami().await.expect("请求").text().await.expect("读正文"))
             .expect("解析 JSON");
@@ -4146,6 +4220,7 @@ async fn self_service_unban_respects_quota() {
             serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
         assert_eq!(body["ok"], true);
         assert_eq!(body["msg"], "解封成功");
+        assert_eq!(body["remaining"], 2 - round);
         let body: serde_json::Value =
             serde_json::from_str(&whoami().await.expect("请求").text().await.expect("读正文"))
                 .expect("解析 JSON");
@@ -4171,6 +4246,7 @@ async fn self_service_unban_respects_quota() {
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     assert_eq!(body["ok"], false);
     assert_eq!(body["msg"], "本月自助解封次数已用完（每月最多3次）");
+    assert_eq!(body["remaining"], 0);
     let response = fixture
         .client
         .get(fixture.sub_url(&fixture.token, "playlist.m3u"))

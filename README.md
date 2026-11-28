@@ -412,7 +412,7 @@ http://<host>:9900/sub/<令牌>/<分组>/playlist.m3u  # 该用户单个分组�
 http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 ```
 
-每个用户默认可见全部分组。需要收紧时，在「用户与设备」里开启「只开放指定分组」与「只开放指定频道」。令牌在同一个弹窗里管理。
+每个用户默认可见全部分组。需要收紧时，在「用户与设备」里开启「只开放指定分组」与「只开放指定频道」。令牌在同一个弹窗里管理。普通用户登录后可在「我的订阅」页查看自己的设备与订阅地址。该页只读；添加或撤销设备需要管理员操作。
 旧路径 `/api/sub/...`、`/panel/api/...` 与 `/health` 在本次主版本内仍可用。新部署请使用新地址。
 全局 `/playlist.m3u` 与 `/{gid}/playlist.m3u` 已停用，返回 `404`。分组订阅用 `/sub/<令牌>/<分组>/playlist.m3u`。
 
@@ -657,7 +657,7 @@ ls scripts/smoke-*.sh
 | `GET` | `/api/play/{gid}/{cid}.m3u8`（或 `.mpd`） | 入口清单 |
 | `GET` | `/api/play/{gid}/{cid}/video/index.txt` | 媒体清单 |
 | `POST` | `/api/panel/login` | 面板登录 |
-| `GET` | `/api/panel/me` | 当前账号、订阅地址与可见频道 |
+| `GET` | `/api/panel/me` | 当前账号、订阅地址、自己的设备与可见频道 |
 | `GET` | `/api/panel/health` | 本机健康摘要 |
 
 <details>

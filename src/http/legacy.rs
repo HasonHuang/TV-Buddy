@@ -110,9 +110,7 @@ fn rewrite_prefix(method: &Method, path: &str) -> Option<String> {
     if method == Method::POST && path == "/unban" {
         return Some(format!("{}/unban", paths::API));
     }
-    if get && path == "/unban" {
-        return Some(format!("{}/unban", paths::PAGE));
-    }
+    // 页面只从 `/page/unban` 打开。`GET /unban` 不再改写为页面。
     if get && (path == "/panel" || path == "/panel/") {
         return Some(format!("{}{path}", paths::PAGE));
     }
@@ -245,7 +243,8 @@ mod tests {
             rewrite(&get, "/unban/whoami").as_deref(),
             Some("/api/unban/whoami")
         );
-        assert_eq!(rewrite(&get, "/unban").as_deref(), Some("/page/unban"));
+        // 页面别名已移除。只有 `/page/unban` 提供页面。
+        assert_eq!(rewrite(&get, "/unban"), None);
         assert_eq!(rewrite(&post, "/unban").as_deref(), Some("/api/unban"));
         assert_eq!(rewrite(&get, "/panel").as_deref(), Some("/page/panel"));
         assert_eq!(rewrite(&get, "/panel/").as_deref(), Some("/page/panel/"));
@@ -256,7 +255,7 @@ mod tests {
         let head = Method::HEAD;
         assert_eq!(rewrite(&head, "/health").as_deref(), Some("/api/health"));
         assert_eq!(rewrite(&head, "/panel").as_deref(), Some("/page/panel"));
-        assert_eq!(rewrite(&head, "/unban").as_deref(), Some("/page/unban"));
+        assert_eq!(rewrite(&head, "/unban"), None);
         assert_eq!(
             rewrite(&head, "/unban/whoami").as_deref(),
             Some("/api/unban/whoami")
@@ -327,6 +326,8 @@ mod tests {
             "/media/g/c/seg.png",
             "/static/logo/a.png",
             "/page/panel",
+            "/page/unban",
+            "/unban",
             "/",
         ] {
             assert_eq!(rewrite(&get, path), None, "{path}");

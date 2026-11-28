@@ -73,7 +73,7 @@
 | GET | `/static/logo/<file>` | 无 | `200` 图片 + `public, max-age=3600`；缺文件、越界名、非白名单扩展 → `404` | ✅ P1 | F-011 §6 |
 | GET | `/logo/api/list` | — | 已删除公开接口，`404`。改用 `/api/panel/logo/list` | ✅ v2026.16 | 安全收紧 |
 | GET | `/page/unban` | 无 | `200` `text/html`；封禁期也可访问。无会话时页面提示先登录 | ✅ P3 | S-EP-07 |
-| POST | `/api/unban` | 登录会话 | `200` `{"msg","ok"}`；未登录 `401`；未封禁、配额用完、IP 管控关闭均为 `ok:false` | ✅ v2026.16 | S-AUTH-07 |
+| POST | `/api/unban` | 登录会话 | `200` `{"msg","ok","remaining"}`（IP 管控关闭时无 `remaining`）；未登录 `401`；未封禁、配额用完、IP 管控关闭均为 `ok:false` | ✅ v2026.16 | S-AUTH-07 |
 | GET | `/api/unban/whoami` | 登录会话 | 开启 IP 管控：`{"banned","enabled":true,"ip","max_per_month":3,"remaining","used"}`；关闭：`{"enabled":false,"ip"}`；未登录 `401`；XFF 取末项，其次 `X-Real-IP`，最后 TCP 对端 | ✅ v2026.16 | S-EP-15 |
 | GET | `/whoami` | 无 | `404`（目标未注册） | ✅ P3 | S-EP-15 |
 | GET | `/api/health` | 无 | `200` `ok`（`text/plain`） | ✅ M0 | S-EP-10 |
@@ -101,7 +101,6 @@
 | `/assets/*` | `/static/assets/*` |
 | `GET /unban/whoami` | `/api/unban/whoami` |
 | `POST /unban` | `/api/unban` |
-| `GET /unban` | `/page/unban` |
 | `GET /panel`、`GET /panel/` | `/page/panel`、`/page/panel/` |
 
 播放形状按顺序判断：
@@ -740,12 +739,12 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 
 | 项 | 规则 |
 | --- | --- |
-| 入口 | `GET /page/unban` 免登录；封禁期也可访问 |
+| 入口 | `GET /page/unban` 免登录；封禁期也可访问。`GET /unban` 已移除，返回 `404` |
 | 提交 | `POST /api/unban` 需要登录会话；未登录 `401`。只解封调用方地址 |
 | 配额 | 每个 IP 每月最多 3 次；成功解封才消耗 |
-| 未封禁 | `200` `{"msg":"你的 IP 当前未被封禁","ok":false}` |
-| 成功 | `200` `{"msg":"解封成功","ok":true}` |
-| 配额用完 | `200` `{"msg":"本月自助解封次数已用完（每月最多3次）","ok":false}` |
+| 未封禁 | `200` `{"msg":"你的 IP 当前未被封禁","ok":false,"remaining":<剩余>}` |
+| 成功 | `200` `{"msg":"解封成功","ok":true,"remaining":<剩余>}` |
+| 配额用完 | `200` `{"msg":"本月自助解封次数已用完（每月最多3次）","ok":false,"remaining":0}` |
 | IP 管控关闭 | `200` `{"msg":"IP 管控未启用","ok":false}` |
 | 查询 | `GET /api/unban/whoami`；开启时带 `banned/used/remaining/max_per_month` |
 | 计数 | 保存在内存；进程重启后清零 |

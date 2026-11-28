@@ -424,6 +424,9 @@ pub async fn revoke_token(
 ///
 /// 普通用户也能调。返回的 `groups` 只含该用户可见的分组与频道，
 /// 供面板「我的订阅」页直接渲染，不需要额外的管理权限。
+///
+/// `devices` 只列该用户的设备令牌（`Purpose::Device`）。本接口只读。
+/// 普通用户不能新建、修改或撤销设备。这些操作只允许管理员。
 pub async fn me(
     actor: PanelUser,
     State(state): State<Arc<AppState>>,
@@ -456,12 +459,20 @@ pub async fn me(
         })
     })
     .collect();
+    let devices: Vec<Value> = state
+        .users
+        .list_tokens(&user.id)
+        .iter()
+        .filter(|item| item.purpose == Purpose::Device)
+        .map(token_view)
+        .collect();
     Ok(Json(json!({
         "user": user_view(&user),
         "token": token,
         "playlist_link": crate::paths::sub(&format!("/{token}/playlist.m3u")),
         "epg_link": crate::paths::sub(&format!("/{token}/epg.xml")),
         "groups": groups,
+        "devices": devices,
     })))
 }
 
