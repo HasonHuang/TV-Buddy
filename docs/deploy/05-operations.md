@@ -2,7 +2,7 @@
 
 > 状态：操作指南 ｜ 最后更新：2026-11-22
 > 适用：已安装的 TV Buddy。
-> 相关：[`01-install-linux.md`](01-install-linux.md)、[`02-docker.md`](02-docker.md)、[`03-nginx.md`](03-nginx.md)
+> 相关：[`01-install-linux.md`](01-install-linux.md)、[`02-docker.md`](02-docker.md)、[`03-nginx.md`](03-nginx.md)、[`06-backup.md`](06-backup.md)
 
 ## 1. 服务管理
 
@@ -149,56 +149,7 @@ docker compose restart
 
 ## 6. 备份
 
-### 6.1 面板备份
-
-面板「系统设置」页的「备份与维护」区域提供「备份与恢复」。备份包包含配置、EPG 配置、台标与所选资源。
-
-它不包含用户、令牌与播放记录。这些数据在数据库中。
-
-恢复会覆盖当前配置。恢复前先下载一份当前备份。
-
-### 6.2 完整备份
-
-完整备份必须包含数据库与缓存。先停止服务，保证数据库一致。
-
-```bash
-sudo tv-buddy stop
-sudo tar -C /opt -czf /root/tv-buddy-backup-$(date +%F).tar.gz tv-buddy
-sudo tv-buddy start
-```
-
-备份内容：
-
-| 路径 | 内容 |
-| --- | --- |
-| `tv-buddy.db` | 配置、用户、令牌、分组与频道 |
-| `tv-buddy.db-wal` | 未合并的数据库事务。存在时必须一起备份 |
-| `tv-buddy.db-shm` | SQLite 共享内存文件。存在时一起备份 |
-| `cache/` | 台标、EPG、脚本、解析器、切片缓存 |
-| `tv-buddy.log` | 日志。可选 |
-
-不要只复制运行中的数据库文件。写入过程中复制可能得到损坏的数据库。
-
-缓存很大时，先在面板「缓存状态」页清空切片缓存，再备份。配置与用户不受影响。
-
-### 6.3 恢复
-
-面板恢复：
-
-1. 打开面板「系统设置」页的「备份与维护」区域。
-2. 选择 `.tar.gz` 备份包。
-3. 确认恢复。
-
-完整恢复：
-
-```bash
-sudo tv-buddy stop
-sudo mv /opt/tv-buddy /opt/tv-buddy.old
-sudo tar -C /opt -xzf /root/tv-buddy-backup-<日期>.tar.gz
-sudo tv-buddy start
-```
-
-确认服务正常后，再删除 `/opt/tv-buddy.old`。
+备份与恢复的完整步骤见 [`06-backup.md`](06-backup.md)。
 
 ## 7. 升级
 
@@ -325,31 +276,7 @@ docker compose down -v   # 删除数据卷
 | 读取口令 | `docker compose exec tv-buddy cat /data/cache/admin_initial_credentials.txt` |
 | 进入容器 | `docker compose exec tv-buddy sh` |
 
-### 10.1 备份数据卷
-
-```bash
-docker compose stop
-docker run --rm \
-  -v tv-buddy-data:/data \
-  -v "$PWD":/backup \
-  alpine tar czf /backup/tv-buddy-data-$(date +%F).tar.gz -C /data .
-docker compose start
-```
-
-### 10.2 恢复数据卷
-
-**危险：** 下面的命令会删除当前数据卷内容。
-
-```bash
-docker compose stop
-docker run --rm \
-  -v tv-buddy-data:/data \
-  -v "$PWD":/backup \
-  alpine sh -c 'rm -rf /data/* && tar xzf /backup/<备份文件>.tar.gz -C /data'
-docker compose start
-```
-
-只在确认要覆盖数据时使用。
+Docker 环境的备份与恢复见 [`06-backup.md`](06-backup.md) §4。
 
 ## 11. 安全清单
 
@@ -363,7 +290,7 @@ docker compose start
 | 6 | 播放凭证 | 保持 `auth.token_enabled = true` |
 | 7 | IP 管控 | 保持 `auth.ip_guard_enabled = true` |
 | 8 | 面板 | 限制访问来源。不要在公网无保护暴露 |
-| 9 | 备份 | 定期备份数据库。备份文件异地保存 |
+| 9 | 备份 | 定期备份数据库。备份包异地保存 |
 | 10 | 主机 | systemd 与 OpenRC 服务以 root 运行。限制主机登录用户 |
 | 11 | 更新 | 定期升级，修复已知问题 |
 | 12 | CDN | 公网回源使用 HTTPS。只允许 CDN 回源 IP 访问源站 |

@@ -22,8 +22,11 @@ services:
       # RUST_LOG: tv_buddy=debug
     volumes:
       # 数据库、日志、缓存与初始口令都在 /data。
-      # 换绑定挂载时，先执行 chown -R 10001:10001 <目录>。
-      - tv-buddy-data:/data
+      # 默认使用命名卷 tv-buddy-data。
+      # 要改用宿主机目录，设置 TV_BUDDY_DATA。该值必须是绝对路径。
+      # 例：TV_BUDDY_DATA=/opt/tv-buddy/data docker compose up -d
+      # 先创建目录并设置属主：sudo mkdir -p /opt/tv-buddy/data && sudo chown -R 10001:10001 /opt/tv-buddy/data
+      - ${TV_BUDDY_DATA:-tv-buddy-data}:/data
     logging:
       # 限制 Docker 日志占用，避免占满磁盘。
       driver: json-file

@@ -12,7 +12,8 @@
 | 已有 Docker 与 Compose。 | Docker Compose | [`02-docker.md`](02-docker.md) |
 | 需要域名、HTTPS 或统一入口。 | 加 NGINX | [`03-nginx.md`](03-nginx.md) |
 | 源站带宽小。观众分散。 | 加 CDN | [`04-cdn.md`](04-cdn.md) |
-| 日常启停、升级、备份、排障。 | 运维 | [`05-operations.md`](05-operations.md) |
+| 日常启停、升级、排障。 | 运维 | [`05-operations.md`](05-operations.md) |
+| 备份、恢复、迁移数据。 | 备份 | [`06-backup.md`](06-backup.md) |
 
 通常只选一种安装方式。若同时运行两种方式，必须使用不同端口与不同数据目录。
 

@@ -282,7 +282,7 @@ docker compose logs -f
 | 服务名 | `tv-buddy` |
 | 镜像 | `hason666/tv-buddy:latest`。生产环境请改为固定 tag |
 | 端口 | `${TV_BUDDY_PORT:-9900}` 映射到容器 `9900` |
-| 数据卷 | 命名卷 `tv-buddy-data` 挂到 `/data` |
+| 数据卷 | 默认命名卷 `tv-buddy-data` 挂到 `/data`。设置 `TV_BUDDY_DATA` 可改用宿主机目录 |
 | 初始口令 | `TV_BUDDY_INITIAL_PASSWORD`。仅首次启动生效。留空则随机生成 |
 | 日志 | `json-file`，单文件 10 MB，最多 3 个 |
 | 子进程回收 | `init: true`。ffmpeg 与 python3 需要 |
@@ -324,7 +324,15 @@ docker compose down
 
 加 `-v` 会同时删除数据卷。只在确认要清空数据时使用。
 
-用绑定挂载代替命名卷时，目录属主设置见上一节。
+用绑定挂载代替命名卷时，先设置目录属主，再设置 `TV_BUDDY_DATA`：
+
+```bash
+sudo mkdir -p /opt/tv-buddy/data
+sudo chown -R 10001:10001 /opt/tv-buddy/data
+TV_BUDDY_DATA=/opt/tv-buddy/data docker compose up -d
+```
+
+`TV_BUDDY_DATA` 必须是绝对路径。也可写入 `.env` 文件。容器内数据目录固定为 `/data`。不要挂载 `/opt/tv-buddy`：该目录存放二进制。
 
 镜像不含 ffmpeg 与 python3。ffmpeg / ffprobe 可在面板安装，或构建时加 `--build-arg WITH_FFMPEG=1`。面板不安装 python3；EPG 脚本源需要 Python 时，按 [`docs/design/12-python-scripts.md`](docs/design/12-python-scripts.md) 自建镜像并安装 python3（Alpine 下 `apk add --no-cache python3`）。
 

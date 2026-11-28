@@ -2,7 +2,7 @@
 
 > 状态：操作指南 ｜ 最后更新：2026-11-22
 > 适用：已有 Docker Engine 与 Compose v2 的 Linux 主机。
-> 相关：[`README.md`](README.md)、[`03-nginx.md`](03-nginx.md)、[`05-operations.md`](05-operations.md)
+> 相关：[`README.md`](README.md)、[`03-nginx.md`](03-nginx.md)、[`05-operations.md`](05-operations.md)、[`06-backup.md`](06-backup.md)
 
 ## 1. 前提
 
@@ -11,7 +11,7 @@
 | Docker | Docker Engine 与 Compose v2 |
 | 架构 | `linux/amd64` 或 `linux/arm64` |
 | 端口 | 宿主机端口映射到容器 `9900` |
-| 数据 | 命名卷或绑定挂载到 `/data` |
+| 数据 | 命名卷或绑定挂载到 `/data`。绑定挂载的宿主机目录由 `TV_BUDDY_DATA` 指定 |
 | 网络 | 拉取镜像需要外网 |
 
 镜像内是静态 musl 二进制。镜像不含 Node 与 Rust 运行时。
@@ -31,7 +31,7 @@ docker compose logs -f
 | 容器名 | `tv-buddy` |
 | 镜像 | `docker-compose.yml` 中的已发布镜像。生产环境请改为固定 tag |
 | 端口 | `${TV_BUDDY_PORT:-9900}` 映射到容器 `9900` |
-| 数据卷 | 命名卷 `tv-buddy-data` 挂到 `/data` |
+| 数据卷 | 默认命名卷 `tv-buddy-data` 挂到 `/data`。设置 `TV_BUDDY_DATA` 可改用宿主机目录 |
 | 初始化进程 | `init: true`。回收 ffmpeg、python3 等子进程 |
 | 日志 | `json-file`，单文件 10 MB，最多 3 个 |
 
@@ -59,6 +59,7 @@ Compose 使用的环境变量：
 | --- | --- |
 | `TV_BUDDY_INITIAL_PASSWORD` | 首次启动的 admin 口令。只在用户表为空时生效。留空时随机生成 |
 | `TV_BUDDY_PORT` | 宿主机端口。默认 `9900` |
+| `TV_BUDDY_DATA` | 宿主机数据目录，用于绑定挂载。必须是绝对路径。默认使用命名卷 `tv-buddy-data` |
 | `RUST_LOG` | 日志级别。例如 `tv_buddy=debug` |
 
 首次启动时指定口令：
@@ -107,25 +108,42 @@ docker compose restart
 | 缓存 | `/data/cache` |
 | 初始口令 | `/data/cache/admin_initial_credentials.txt` |
 
-数据库保存配置、用户与令牌。备份时必须包含数据库。
+数据库保存配置、用户与令牌。备份时必须包含数据库。备份方法见 [`06-backup.md`](06-backup.md) §4。
 
-### 3.4 绑定挂载权限
+### 3.4 数据目录与绑定挂载
 
-容器用户是 `tvbuddy`，UID/GID 为 `10001`。使用绑定挂载时，先设置目录属主：
+容器内数据目录固定为 `/data`。不要挂载 `/opt/tv-buddy`：该目录存放二进制。挂载会覆盖二进制，容器无法启动。
+
+默认使用命名卷 `tv-buddy-data`。要改用宿主机目录，先创建目录并设置属主：
 
 ```bash
-sudo mkdir -p /srv/tv-buddy
-sudo chown -R 10001:10001 /srv/tv-buddy
+sudo mkdir -p /opt/tv-buddy/data
+sudo chown -R 10001:10001 /opt/tv-buddy/data
 ```
 
-然后挂载：
+然后在 `.env` 文件写入：
 
-```yaml
-volumes:
-  - /srv/tv-buddy:/data
+```dotenv
+TV_BUDDY_DATA=/opt/tv-buddy/data
 ```
 
-目录属主错误时，容器会启动失败或无法写数据库。
+新部署可直接启动：
+
+```bash
+docker compose up -d
+```
+
+已有命名卷数据时，先停止服务，再迁移数据：
+
+```bash
+docker compose stop
+docker run --rm -v tv-buddy-data:/from -v /opt/tv-buddy/data:/to alpine cp -a /from/. /to/
+docker compose up -d
+```
+
+`TV_BUDDY_DATA` 必须是绝对路径。也可只在单条命令中设置：`TV_BUDDY_DATA=/opt/tv-buddy/data docker compose up -d`。
+
+容器用户是 `tvbuddy`，UID/GID 为 `10001`。目录属主错误时，容器会启动失败或无法写数据库。
 
 ## 4. 镜像构建
 
@@ -193,7 +211,7 @@ docker compose pull
 docker compose up -d --force-recreate
 ```
 
-数据卷保留。升级前先备份。
+数据卷保留。升级前先备份。备份方法见 [`06-backup.md`](06-backup.md) §4。
 
 生产环境固定镜像 tag。不要长期使用 `latest`。
 
