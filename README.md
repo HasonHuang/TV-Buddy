@@ -460,6 +460,8 @@ http://<host>:9900/sub/<令牌>/epg.xml[.gz]   # 该用户的节目单
 `[auth]` 的播放凭证与 IP 管控默认开启。IP 管控默认 `max_sessions_per_ip = 1`，
 同一出口 IP 同时只保留 1 路播放会话。多人共用网络时改大。
 
+IP 统计保留 7 天。超过该时长没有活动的地址自动移除。封禁到期的记录也自动移除。改 `ip_stats_ttl_days`，`0` = 永久保留统计。
+
 IP 封禁按服务看到的来源地址匹配。直接映射容器端口时，容器运行时会改写源地址（常见为网关地址）。要按客户端真实地址封禁，请经 NGINX 反代并传递 `X-Forwarded-For`。见 [`docs/deploy/03-nginx.md`](docs/deploy/03-nginx.md)。IPv4 与 IPv6 是不同地址，需要分别封禁。
 
 生效方式：面板保存立即生效。`[cache].disk_path` 需要重启。EPG 源、绑定与规则已迁入面板与数据库，保存即生效。
@@ -693,7 +695,7 @@ ls scripts/smoke-*.sh
 | `GET` | `/api/panel/logs` | 最近运行日志 |
 | `GET` | `/api/panel/security/token` | 当前播放 Token 与宽限旧值 |
 | `POST` | `/api/panel/security/token/rotate` | 轮换 Token |
-| `GET` | `/api/panel/security/ip/stats` | IP 请求统计与封禁状态 |
+| `GET` | `/api/panel/security/ip/stats?limit=&offset=` | 分页返回 IP 请求统计与封禁状态 |
 | `POST` | `/api/panel/security/ip/{ban,unban}` | 封禁 / 解封地址 |
 | `GET` | `/api/panel/backup?include=` | 导出 gzip(tar) 备份 |
 | `POST` | `/api/panel/restore` | 恢复备份并重载 |

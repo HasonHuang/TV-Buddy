@@ -5890,3 +5890,51 @@ button.tab.active:hover:not(:disabled) {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- IP 统计：表格横滚与分页 --- */
+
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.table-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.pager-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pager-range {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pager-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .table-pager {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pager-actions {
+    width: 100%;
+  }
+}

@@ -908,6 +908,10 @@ pub struct AuthCfg {
     pub random_id_enabled: bool,
     /// IP 限流、播放会话上限与封禁。默认开启。
     pub ip_guard_enabled: bool,
+    /// IP 统计保留天数。超过该时长没有活动的地址从列表移除。
+    ///
+    /// `0` = 不按时间清理。默认 7 天。封禁中的地址始终保留。
+    pub ip_stats_ttl_days: u64,
     /// 每 IP 并发播放会话上限；`0` = 不限。
     ///
     /// 语义自定（F-010 未观测到目标行为）：会话 = `(IP, 频道)`，超出时踢掉最久未用的那路。
@@ -979,6 +983,7 @@ impl Default for AuthCfg {
             slice_sign_secret: String::new(),
             random_id_enabled: false,
             ip_guard_enabled: true,
+            ip_stats_ttl_days: 7,
             max_sessions_per_ip: 1,
             session_ttl_secs: 30,
             limit_url: "https://material.yang-1989.eu.org/v/limit.mp4".into(),
@@ -1906,6 +1911,14 @@ mod tests {
     fn ip_guard_is_on_by_default() {
         assert!(AuthCfg::default().ip_guard_enabled);
         assert!(Config::default().auth.ip_guard_enabled);
+        assert_eq!(AuthCfg::default().ip_stats_ttl_days, 7);
+    }
+
+    #[test]
+    fn ip_stats_ttl_defaults_when_missing() {
+        // 旧配置没有这个键时按 7 天处理。
+        let auth: AuthCfg = serde_json::from_str("{}").expect("解析");
+        assert_eq!(auth.ip_stats_ttl_days, 7);
     }
 
     #[test]

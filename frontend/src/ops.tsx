@@ -18,11 +18,15 @@ type IpEntry = {
   failures: number;
   banned: boolean;
   remaining_secs: number;
+  /** 距最近一次活动的秒数。没有活动时间时为 null。 */
+  idle_secs: number | null;
 };
 
 type IpStats = {
   count: number;
   banned: number;
+  limit: number;
+  offset: number;
   entries: IpEntry[];
 };
 
@@ -42,6 +46,12 @@ type FullConfig = { auth?: AuthCfg } & Record<string, unknown>;
 type NumField = { key: string; label: string; hint?: string; unit?: string; tip?: string };
 
 const AUTH_LIMIT: NumField[] = [
+  {
+    key: 'ip_stats_ttl_days',
+    label: 'IP 统计保留',
+    unit: '天',
+    hint: '超过该时长没有活动的地址从列表移除；0 = 永久保留',
+  },
   {
     key: 'max_sessions_per_ip',
     label: '每 IP 并发会话',
@@ -472,6 +482,15 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** 距今多久。用于 IP 统计的「最后访问」列。 */
+function idleText(secs: number | null): string {
+  if (secs === null) return '—';
+  if (secs < 60) return '刚刚';
+  if (secs < 3600) return `${Math.floor(secs / 60)} 分钟前`;
+  if (secs < 86_400) return `${Math.floor(secs / 3600)} 小时前`;
+  return `${Math.floor(secs / 86_400)} 天前`;
+}
+
 /** 安全管控：访问控制、IP 统计与封禁。 */
 export function SecurityPage() {
   const [stats, setStats] = useState<IpStats | null>(null);
@@ -483,17 +502,30 @@ export function SecurityPage() {
   const [error, setError] = useState('');
   /** 访问控制保存后让只读检查卡重新读取。 */
   const [linkRefresh, setLinkRefresh] = useState(0);
+  /** IP 统计分页。页码从 0 开始。 */
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
 
   const load = useCallback(async () => {
     try {
-      setStats(await api<IpStats>('GET', '/security/ip/stats'));
+      const offset = page * pageSize;
+      const body = await api<IpStats>(
+        'GET',
+        `/security/ip/stats?limit=${pageSize}&offset=${offset}`,
+      );
+      // 当前页已越界（例如清理后总数变小）：回到最后一页。
+      if (offset >= body.count && page > 0) {
+        setPage(Math.max(0, Math.ceil(body.count / pageSize) - 1));
+        return;
+      }
+      setStats(body);
       setError('');
     } catch (err) {
       setError(errorText(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
 
   useEffect(() => {
     void load();
@@ -554,6 +586,13 @@ export function SecurityPage() {
     }
   };
 
+  const count = stats?.count ?? 0;
+  const shown = stats?.entries.length ?? 0;
+  const showFrom = count === 0 ? 0 : Math.min(page * pageSize + 1, count);
+  const showTo = Math.min(page * pageSize + shown, count);
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  const hasNext = (page + 1) * pageSize < count;
+
   return (
     <>
       <PageHead icon="security" title="安全管控" sub="访问控制、播放链接检查与 IP 封禁">
@@ -582,7 +621,7 @@ export function SecurityPage() {
       <div className="card">
         <h2>IP 统计与封禁</h2>
         <p className="muted">
-          共 {stats?.count ?? 0} 个地址，其中封禁 {stats?.banned ?? 0} 个。封禁只作用于非面板路径。
+          封禁只作用于非面板路径。到期封禁与闲置地址会自动清理。
         </p>
         {message && <div className="msg ok">{message}</div>}
         {error && <div className="msg err">{error}</div>}
@@ -620,45 +659,99 @@ export function SecurityPage() {
           </button>
           <Tip text="封禁只作用于非面板路径，不影响面板登录。" />
         </div>
-        <table className="table" style={{ marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>地址</th>
-              <th className="right">请求</th>
-              <th className="right">失败</th>
-              <th>状态</th>
-              <th className="right">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(stats?.entries ?? []).map((entry) => (
-              <tr key={entry.ip}>
-                <td className="mono">{entry.ip}</td>
-                <td className="right">{entry.requests}</td>
-                <td className="right">{entry.failures}</td>
-                <td>{entry.banned ? `封禁中（${entry.remaining_secs} 秒）` : '正常'}</td>
-                <td className="right">
-                  {entry.banned && (
-                    <button
-                      className="ghost"
-                      title="立即解除这个地址的封禁"
-                      onClick={() => void unban(entry.ip)}
-                    >
-                      解封
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {(stats?.entries ?? []).length === 0 && (
+        <div className="table-scroll">
+          <table className="table" style={{ marginTop: 12 }}>
+            <thead>
               <tr>
-                <td colSpan={5} className="muted">
-                  暂无记录。
-                </td>
+                <th>地址</th>
+                <th className="right">请求</th>
+                <th className="right">失败</th>
+                <th>最后访问</th>
+                <th>状态</th>
+                <th className="right">操作</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(stats?.entries ?? []).map((entry) => (
+                <tr key={entry.ip}>
+                  <td className="mono" title={entry.ip}>
+                    {entry.ip}
+                  </td>
+                  <td className="right">{entry.requests}</td>
+                  <td className="right">{entry.failures}</td>
+                  <td className="muted">{idleText(entry.idle_secs)}</td>
+                  <td>
+                    {entry.banned
+                      ? `封禁中（${entry.remaining_secs} 秒）`
+                      : '正常'}
+                  </td>
+                  <td className="right">
+                    {entry.banned && (
+                      <button
+                        className="ghost"
+                        title="立即解除这个地址的封禁"
+                        onClick={() => void unban(entry.ip)}
+                      >
+                        解封
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {shown === 0 && (
+                <tr>
+                  <td colSpan={6} className="muted">
+                    暂无记录。
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="table-pager">
+          <span className="muted">
+            共 {count} 个地址，其中封禁 {stats?.banned ?? 0} 个
+          </span>
+          <div className="pager-actions">
+            <span className="muted pager-range">
+              第 {page + 1} / {totalPages} 页 · {showFrom}–{showTo}
+            </span>
+            <button
+              className="ghost"
+              disabled={page === 0}
+              onClick={() => setPage(page - 1)}
+              aria-label="上一页"
+            >
+              上一页
+            </button>
+            <button
+              className="ghost"
+              disabled={!hasNext}
+              onClick={() => setPage(page + 1)}
+              aria-label="下一页"
+            >
+              下一页
+            </button>
+            <span className="pager-size">
+              <span className="muted">每页</span>
+              <Select
+                ariaLabel="每页条数"
+                value={String(pageSize)}
+                options={[20, 50, 100].map((size) => ({
+                  value: String(size),
+                  label: `${size} 条`,
+                }))}
+                onChange={(next) => {
+                  setPageSize(Number(next));
+                  setPage(0);
+                }}
+                compact
+                width={88}
+              />
+            </span>
+          </div>
+        </div>
       </div>
         </>
       )}

@@ -495,7 +495,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | `GET` | `/api/panel/link-info` | `{"aliases":{},"random_id_enabled":false,"token":"","token_enabled":false,"use_alias":false}`；形状与目标一致（S-GAP-04）；Token 关闭时 `token` 为空串 |
 | `GET` | `/api/panel/security/token` | 目标字段：`{current_value, enabled, status{current{remaining_secs,valid,value}, old, ttl_hours}, ttl_hours}`；`status` 里的 `value` 是掩码（前 4 + `****` + 后 4）。附加字段：`current`、`old` |
 | `POST` | `/api/panel/security/token/rotate` | `{ok, new_token, expires_in_hours}`；附加字段 `token`。旧值保留 1 小时宽限（S-AUTH-09） |
-| `GET` | `/api/panel/security/ip/stats` | `{"count","banned","entries":[{"ip","requests","failures","banned","remaining_secs"}]}`，按请求数降序 |
+| `GET` | `/api/panel/security/ip/stats?limit=&offset=` | `{"count","banned","limit","offset","entries":[{"ip","requests","failures","banned","remaining_secs","idle_secs"}]}`。封禁中的地址在前，其余按请求数降序。`limit` 默认 50，上限 500。`idle_secs` 为距最近一次活动的秒数 |
 | `POST` | `/api/panel/security/ip/ban` | 目标字段：`{"ips":[…],"secs":N}` → `{ok, results[{ip,ok}], secs}`；也接受单数 `{"ip"}` 与 `seconds`。`0` 用默认 3600，上限 30 天 |
 | `POST` | `/api/panel/security/ip/unban`<br>`POST …/ip/unban-batch` | `{"ip"}` 或 `{"ips":[…]}`；`{"ok":true,"removed":n,"requested":n}`；两个路径同义。空请求 → `400 Missing ip` |
 
@@ -507,6 +507,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | 写法 | 精确地址按归一化文本匹配。IPv6 使用压缩写法。白名单与分享信任列表同样处理。IPv4 与 IPv6 是不同地址，同一客户端可能同时出现两种地址，需要分别封禁 |
 | 拦截 | 封禁期内 → `403` 纯文本 `banned`；上述豁免路径不拦截（避免管理员或用户自锁） |
 | 容量 | 最多保留 10 000 个地址，超出后忽略新地址 |
+| 清理 | 每 60 秒执行。封禁到期的记录立即移除。超过 `[auth].ip_stats_ttl_days` 没有活动的记录移除。`0` = 不按时间清理。封禁中的记录始终保留 |
 | 未实现 | 按 IP 的会话上限与自动限流 |
 
 ### 6.8 面板分区（前端）

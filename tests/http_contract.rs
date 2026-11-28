@@ -4230,6 +4230,90 @@ async fn whitelist_ipv6_forms_exempt_bans() {
 }
 
 #[tokio::test]
+async fn ip_stats_paginates_and_puts_bans_first() {
+    let fixture = fixture().await;
+    let session = login(&fixture).await;
+    let auth = format!("Bearer {session}");
+
+    // 产生三个来源地址的记录。
+    for ip in ["1.1.1.1", "2.2.2.2", "3.3.3.3"] {
+        let response = fixture
+            .client
+            .get(format!("{}/api/health", fixture.base))
+            .header("x-forwarded-for", ip)
+            .send()
+            .await
+            .expect("请求");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    // 封禁其中一个。
+    let response = fixture
+        .client
+        .post(format!("{}/api/panel/security/ip/ban", fixture.base))
+        .header("content-type", "application/json")
+        .header("authorization", &auth)
+        .body(r#"{"ip":"2.2.2.2","seconds":60}"#)
+        .send()
+        .await
+        .expect("封禁");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let page = |query: &'static str| {
+        fixture
+            .client
+            .get(format!(
+                "{}/api/panel/security/ip/stats{query}",
+                fixture.base
+            ))
+            .header("authorization", &auth)
+            .send()
+    };
+
+    // 第一页：封禁的地址在最前。
+    let body: serde_json::Value = serde_json::from_str(
+        &page("?limit=2&offset=0")
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert!(body["count"].as_u64().expect("count") >= 4);
+    assert_eq!(body["limit"], 2);
+    assert_eq!(body["offset"], 0);
+    let entries = body["entries"].as_array().expect("entries");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["ip"], "2.2.2.2");
+    assert_eq!(entries[0]["banned"], true);
+    assert!(entries[0]["idle_secs"].as_u64().is_some());
+
+    // 第二页仍有剩余条目。
+    let body: serde_json::Value = serde_json::from_str(
+        &page("?limit=2&offset=2")
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert!(!body["entries"].as_array().expect("entries").is_empty());
+
+    // 每页条数收敛到上限。
+    let body: serde_json::Value = serde_json::from_str(
+        &page("?limit=9999")
+            .await
+            .expect("请求")
+            .text()
+            .await
+            .expect("读正文"),
+    )
+    .expect("解析 JSON");
+    assert_eq!(body["limit"], 500);
+}
+
+#[tokio::test]
 async fn self_service_unban_respects_quota() {
     let fixture = fixture().await;
     let mut config = (*fixture.state.snapshot()).clone();

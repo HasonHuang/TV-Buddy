@@ -86,6 +86,8 @@ async fn main() -> anyhow::Result<()> {
     }
     // `last_seen_at_ms` 只在内存累计，定期落盘。
     spawn_token_flush(state.clone());
+    // IP 统计：清掉到期封禁与闲置地址。
+    spawn_ip_guard_prune(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
@@ -131,6 +133,27 @@ fn spawn_token_flush(state: std::sync::Arc<state::AppState>) {
             ticker.tick().await;
             if let Err(error) = state.users.flush_if_dirty() {
                 tracing::warn!(%error, "写入令牌使用时间失败");
+            }
+        }
+    });
+}
+
+/// 每 60 秒清理 IP 统计。
+///
+/// 封禁到期的记录立即移除。超过 `[auth].ip_stats_ttl_days` 没有活动的记录也移除。
+/// `0` 表示不按时间清理。封禁中的记录始终保留。
+fn spawn_ip_guard_prune(state: std::sync::Arc<state::AppState>) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            let days = state.snapshot().auth.ip_stats_ttl_days;
+            let ttl =
+                (days > 0).then(|| std::time::Duration::from_secs(days.saturating_mul(86_400)));
+            let removed = state.ip_guard.prune(ttl);
+            if removed > 0 {
+                tracing::info!(removed, "清理 IP 统计");
             }
         }
     });

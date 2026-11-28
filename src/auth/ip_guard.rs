@@ -38,6 +38,8 @@ struct Entry {
     failures: u64,
     banned_until: Option<Instant>,
     unbanned_at: Option<Instant>,
+    /// 最近一次请求、失败、封禁或解封的时刻。用于统计 TTL。
+    last_seen: Option<Instant>,
 }
 
 impl Entry {
@@ -56,6 +58,8 @@ pub struct Snapshot {
     pub failures: u64,
     pub banned: bool,
     pub remaining_secs: u64,
+    /// 距最近一次活动的秒数。没有活动时间时为 `None`。
+    pub idle_secs: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -78,7 +82,9 @@ impl IpGuard {
         if !inner.contains_key(&ip) && inner.len() >= CAPACITY {
             return;
         }
-        inner.entry(ip).or_default().requests += 1;
+        let entry = inner.entry(ip).or_default();
+        entry.requests += 1;
+        entry.last_seen = Some(Instant::now());
     }
 
     /// 记一次上游失败。
@@ -91,7 +97,9 @@ impl IpGuard {
         if !inner.contains_key(&ip) && inner.len() >= CAPACITY {
             return;
         }
-        inner.entry(ip).or_default().failures += 1;
+        let entry = inner.entry(ip).or_default();
+        entry.failures += 1;
+        entry.last_seen = Some(Instant::now());
     }
 
     /// 封禁一个地址；返回到期时刻的剩余秒数。
@@ -105,6 +113,7 @@ impl IpGuard {
         let mut inner = self.lock();
         let entry = inner.entry(ip).or_default();
         entry.banned_until = Some(Instant::now() + Duration::from_secs(seconds));
+        entry.last_seen = Some(Instant::now());
         seconds
     }
 
@@ -116,7 +125,10 @@ impl IpGuard {
             Some(entry) => {
                 let was = entry.banned_until.take().is_some();
                 if was {
-                    entry.unbanned_at = Some(Instant::now());
+                    let now = Instant::now();
+                    entry.unbanned_at = Some(now);
+                    // 保留解封记录，避免分享同步前被 TTL 清掉。
+                    entry.last_seen = Some(now);
                 }
                 was
             }
@@ -162,15 +174,16 @@ impl IpGuard {
         }
     }
 
-    /// 全部地址快照，按请求数降序。
+    /// 全部地址快照。封禁中的地址在前，其余按请求数降序。
     pub fn snapshot(&self) -> Vec<Snapshot> {
         let inner = self.lock();
+        let now = Instant::now();
         let mut entries: Vec<Snapshot> = inner
             .iter()
             .map(|(ip, entry)| {
                 let remaining = entry
                     .banned_until
-                    .map(|until| until.saturating_duration_since(Instant::now()).as_secs())
+                    .map(|until| until.saturating_duration_since(now).as_secs())
                     .unwrap_or(0);
                 Snapshot {
                     ip: ip.clone(),
@@ -178,10 +191,18 @@ impl IpGuard {
                     failures: entry.failures,
                     banned: entry.banned(),
                     remaining_secs: remaining,
+                    idle_secs: entry
+                        .last_seen
+                        .map(|at| now.saturating_duration_since(at).as_secs()),
                 }
             })
             .collect();
-        entries.sort_by(|a, b| b.requests.cmp(&a.requests).then(a.ip.cmp(&b.ip)));
+        entries.sort_by(|a, b| {
+            b.banned
+                .cmp(&a.banned)
+                .then(b.requests.cmp(&a.requests))
+                .then(a.ip.cmp(&b.ip))
+        });
         entries
     }
 
@@ -192,15 +213,32 @@ impl IpGuard {
         (inner.len(), banned)
     }
 
-    /// 清理过期封禁与零计数条目；返回清理数量。
-    pub fn prune(&self) -> usize {
+    /// 清理过期封禁与闲置条目；返回清理数量。
+    ///
+    /// - 封禁中的条目始终保留。
+    /// - 封禁已到期的条目移除。
+    /// - 无请求、无失败的条目移除。
+    /// - `ttl` 为 `Some` 时，超过该时长没有活动的条目移除。
+    pub fn prune(&self, ttl: Option<Duration>) -> usize {
         let mut inner = self.lock();
         let before = inner.len();
+        let now = Instant::now();
         inner.retain(|_, entry| {
             if entry.banned() {
                 return true;
             }
-            entry.banned_until.is_none() && (entry.requests > 0 || entry.failures > 0)
+            // 封禁已到期：整条记录移除。
+            if entry.banned_until.is_some() {
+                return false;
+            }
+            if entry.requests == 0 && entry.failures == 0 {
+                return false;
+            }
+            match (ttl, entry.last_seen) {
+                (Some(ttl), Some(at)) => now.saturating_duration_since(at) < ttl,
+                (Some(_), None) => false,
+                (None, _) => true,
+            }
         });
         before - inner.len()
     }
@@ -292,6 +330,40 @@ mod tests {
         guard.record_request("1.1.1.1");
         guard.ban("2.2.2.2", 60);
         // 计数为 0 的条目会被清掉；封禁中的保留。
-        assert_eq!(guard.prune(), 0);
+        assert_eq!(guard.prune(None), 0);
+    }
+
+    #[test]
+    fn prune_respects_ttl_and_keeps_active_bans() {
+        let guard = IpGuard::new();
+        guard.record_request("1.1.1.1");
+        guard.record_request("2.2.2.2");
+        guard.ban("2.2.2.2", 60);
+
+        // 不限制 TTL：有请求记录的条目保留。
+        assert_eq!(guard.prune(None), 0);
+        assert_eq!(guard.snapshot().len(), 2);
+
+        // 零 TTL：闲置条目移除，封禁中的保留。
+        assert_eq!(guard.prune(Some(Duration::ZERO)), 1);
+        let entries = guard.snapshot();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].ip, "2.2.2.2");
+        assert!(entries[0].banned);
+    }
+
+    #[test]
+    fn snapshot_puts_banned_entries_first() {
+        let guard = IpGuard::new();
+        for _ in 0..5 {
+            guard.record_request("1.1.1.1");
+        }
+        guard.record_request("2.2.2.2");
+        guard.ban("2.2.2.2", 60);
+
+        let entries = guard.snapshot();
+        assert_eq!(entries[0].ip, "2.2.2.2");
+        assert!(entries[0].banned);
+        assert!(entries[0].idle_secs.is_some());
     }
 }

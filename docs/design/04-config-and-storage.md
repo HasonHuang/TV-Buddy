@@ -45,7 +45,7 @@
 | `[cache.ttl]` | `sub_url_secs`、`segment_secs` | 订阅地址与切片缓存时长。`segment_secs = 0` 用实测值，无数据用 600 秒回退 |
 | `[cache.dash]` | `mpd_refresh_*`、`*_timeout_secs`、`fetch_concurrency`、`ondemand_idle_secs`、`retry_*`、`watchdog_*` 等 | MPD/切片超时、重试退避、会话空闲回收、`playlist_min_secs` 媒体窗口、`start_time_offset_secs`、`publish_delay_secs`、看门狗 tick/stall/stagger/上限/冷却已接入；`fast_start_secs` 目标无可观测语义，仅保留配置 |
 | `[cache.remux]` | `target_duration_secs`、`window_segments`、`publish_delay_segments`、`reconnect_backoff_ms` | Remux 切片时长、窗口与重连退避 |
-| `[auth]` | `token_enabled`、`token_ttl_hours`、`token_failure_url`、`whitelist`、`max_sessions_per_ip`、`session_ttl_secs`、`ip_guard_enabled` | 播放 Token 与播放会话 |
+| `[auth]` | `token_enabled`、`token_ttl_hours`、`token_failure_url`、`whitelist`、`max_sessions_per_ip`、`session_ttl_secs`、`ip_guard_enabled`、`ip_stats_ttl_days` | 播放 Token 与播放会话。`ip_stats_ttl_days` 是 IP 统计的闲置保留天数，默认 7，`0` = 不按时间清理 |
 | `[subtitle]` | `compat_mode`、`srt_ua_keywords`、`style.{enabled,color,font_size,bold,position}`、`translate.{enabled,url,token,source,target,targets,translation_first,bilingual,set_default,timeout_ms,batch}` | 字幕样式与机翻。`translate.*` 已实现；`style.*` **样式注入未实现**，`compat_mode` 与 `srt_ua_keywords` 兼容保留，均未读取（`PROGRESS.md` §2.3、D19）。缺省 `translation_first = true`（对齐目标） |
 | `[cdn]` | `enabled`、`shared_cache_hits`、`dont_cache_empty`、`empty_status`、`public_base` | 外部 CDN 侧兜底；`enabled=false`（默认）时响应头与状态码逐字节不变。切片 TTL 由 `[cache.ttl].segment_secs` 控制。见 §11 |
 | `[health]`/`[stats]` | `enabled`、`interval_secs`、`online_window_secs` | 健康与指标 |

@@ -4,7 +4,8 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, Json};
+use axum::{extract::Query, extract::State, Json};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{
@@ -12,6 +13,19 @@ use crate::{
     http::{error::ApiError, ext::PanelAuth},
     state::AppState,
 };
+
+/// IP 统计的默认与最大每页条数。
+const STATS_DEFAULT_LIMIT: usize = 50;
+const STATS_MAX_LIMIT: usize = 500;
+
+/// `GET /api/panel/security/ip/stats` 的分页参数。
+#[derive(Debug, Default, Deserialize)]
+pub struct StatsQuery {
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    offset: Option<usize>,
+}
 
 /// `GET /api/panel/link-info`——播放链接与别名审计（S-GAP-04）。
 ///
@@ -38,23 +52,44 @@ pub async fn link_info(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState
     }))
 }
 
-/// `GET /api/panel/security/ip/stats`。
-pub async fn ip_stats(PanelAuth(_): PanelAuth, State(state): State<Arc<AppState>>) -> Json<Value> {
-    let entries = state.ip_guard.snapshot();
-    let (total, banned) = state.ip_guard.summary();
-    Json(json!({
-        "count": total,
-        "banned": banned,
-        "entries": entries
-            .into_iter()
-            .map(|entry| json!({
+/// `GET /api/panel/security/ip/stats`——分页返回 IP 统计。
+///
+/// 封禁中的地址排在最前，其余按请求数降序。
+/// `limit` 默认 50，上限 500；`offset` 默认 0。
+pub async fn ip_stats(
+    PanelAuth(_): PanelAuth,
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<StatsQuery>,
+) -> Json<Value> {
+    let limit = query
+        .limit
+        .unwrap_or(STATS_DEFAULT_LIMIT)
+        .clamp(1, STATS_MAX_LIMIT);
+    let offset = query.offset.unwrap_or(0);
+    let all = state.ip_guard.snapshot();
+    let count = all.len();
+    let banned = all.iter().filter(|entry| entry.banned).count();
+    let entries: Vec<Value> = all
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|entry| {
+            json!({
                 "ip": entry.ip,
                 "requests": entry.requests,
                 "failures": entry.failures,
                 "banned": entry.banned,
                 "remaining_secs": entry.remaining_secs,
-            }))
-            .collect::<Vec<_>>(),
+                "idle_secs": entry.idle_secs,
+            })
+        })
+        .collect();
+    Json(json!({
+        "count": count,
+        "banned": banned,
+        "limit": limit,
+        "offset": offset,
+        "entries": entries,
     }))
 }
 
