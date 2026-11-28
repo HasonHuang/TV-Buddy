@@ -5786,7 +5786,107 @@ button.tab.active:hover:not(:disabled) {
   }
 }
 
-/* 普通用户的解封入口是链接，不是分区按钮。 */
-a.nav-item {
-  text-decoration: none;
+/* --- 自助解封分区 --- */
+
+.unban-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.unban-hero-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--ok-weak);
+  color: var(--ok);
+}
+
+.unban-hero-icon.danger {
+  background: var(--danger-weak);
+  color: var(--danger);
+}
+
+.unban-hero-icon.muted {
+  background: var(--panel-3);
+  color: var(--text3);
+}
+
+.unban-hero-text {
+  min-width: 0;
+}
+
+.unban-hero-text h2 {
+  margin: 0 0 2px;
+}
+
+.unban-hero-text p {
+  margin: 0;
+}
+
+.unban-hero > button {
+  flex: none;
+  margin-left: auto;
+}
+
+.unban-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.unban-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.unban-fact > span {
+  color: var(--text3);
+  font-size: 12px;
+}
+
+.unban-fact strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.unban-fact code {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unban-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text2);
+  font-size: 12.5px;
+}
+
+@media (max-width: 640px) {
+  .unban-hero {
+    flex-wrap: wrap;
+  }
+
+  .unban-hero > button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .unban-facts {
+    grid-template-columns: 1fr;
+  }
 }

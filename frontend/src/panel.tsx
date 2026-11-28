@@ -14,6 +14,7 @@ import { UsersPage } from './users';
 import { PlaylistPage } from './playlist';
 import { LivestreamPage, SchedulePage } from './schedule';
 import { MySubsPage } from './my';
+import { UnbanPanelPage } from './unban-panel';
 import { formatUptime } from './format';
 import { Overview } from './overview';
 import { QualityPage } from './quality-page';
@@ -22,6 +23,7 @@ import './style.css';
 /** 侧栏分区；顺序按目标面板。 */
 type SectionId =
   | 'my'
+  | 'unban'
   | 'dashboard'
   | 'cache'
   | 'groups'
@@ -39,9 +41,17 @@ type SectionId =
   | 'logs';
 
 /** `feature` 指向 `[features]` 的开关名。没有则该分区始终显示。
- *  `adminOnly` 的分区只给管理员；普通用户只看到「我的订阅」。 */
-const NAV: { id: SectionId; label: string; icon: IconName; feature?: string; adminOnly?: boolean }[] = [
+ *  `adminOnly` 的分区只给管理员；`userOnly` 的分区只给普通用户。 */
+const NAV: {
+  id: SectionId;
+  label: string;
+  icon: IconName;
+  feature?: string;
+  adminOnly?: boolean;
+  userOnly?: boolean;
+}[] = [
   { id: 'my', label: '我的订阅', icon: 'subs' },
+  { id: 'unban', label: '自助解封', icon: 'security', userOnly: true },
   { id: 'dashboard', label: '概览', icon: 'overview', adminOnly: true },
   { id: 'cache', label: '缓存状态', icon: 'cache', adminOnly: true },
   { id: 'groups', label: '分组管理', icon: 'groups', adminOnly: true },
@@ -335,9 +345,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     onLogout();
   };
 
-  // 普通用户只有「我的订阅」。关掉的功能分区也不显示入口。
+  // 普通用户只有「我的订阅」与「自助解封」。关掉的功能分区也不显示入口。
   const visibleNav = NAV.filter((item) => {
     if (item.adminOnly && !isAdmin) return false;
+    if (item.userOnly && isAdmin) return false;
     return !item.feature || features?.[item.feature] !== false;
   });
   const fallback: SectionId = isAdmin ? 'dashboard' : 'my';
@@ -412,20 +423,6 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           {query && shownNav.length === 0 ? <div className="nav-empty">没有匹配的分区</div> : null}
         </nav>
         {bottomMy ? <div className="sidebar-my">{navButton(bottomMy)}</div> : null}
-        {/* 普通用户没有「安全管控」分区。解封页是独立入口，放在侧栏底部。 */}
-        {!isAdmin ? (
-          <div className="sidebar-my">
-            <a
-              className="nav-item"
-              href="/page/unban"
-              title="当前地址被封禁时提交解封"
-              aria-label="自助解封"
-            >
-              <Icon name="security" size={15} />
-              <span className="nav-label">自助解封</span>
-            </a>
-          </div>
-        ) : null}
         {isAdmin && (
           <div className="sidebar-meta">
             <div className="kv">
@@ -454,6 +451,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       </aside>
       <main className="content">
         {active === 'my' && <MySubsPage />}
+        {active === 'unban' && <UnbanPanelPage />}
         {active === 'dashboard' && (
           <Overview features={features} featureLabels={FEATURE_LABELS} />
         )}

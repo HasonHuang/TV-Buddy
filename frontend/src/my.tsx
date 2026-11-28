@@ -19,6 +19,7 @@ import {
   UNAUTHORIZED_EVENT,
 } from './api';
 import { Icon } from './icons';
+import { displayIp } from './format';
 import { Badge, Empty, Loading, PageHead, Tip, useToast } from './ui';
 
 type Channel = { id: string; name: string; url: string };
@@ -62,20 +63,34 @@ function formatTime(ms: number | null | undefined): string {
   )}:${pad(date.getMinutes())}`;
 }
 
-/** 设备状态。只读展示，不提供操作。 */
-function deviceState(device: Device): {
-  text: string;
-  tone: string;
-  detail: string;
-} {
+/** 剩余时长。取最大单位，避免徽章文字过长。 */
+function remainingText(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
+  if (minutes < 60) return `剩余 ${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `剩余 ${hours} 小时`;
+  const days = Math.floor(hours / 24);
+  return `剩余 ${days} 天`;
+}
+
+/** 设备状态。只读展示，不提供操作。`now` 用于计算剩余时间。 */
+function deviceState(
+  device: Device,
+  now: number,
+): { text: string; tone: string; detail: string } {
   if (device.expires_at_ms === null) {
     return { text: '永不过期', tone: 'ok', detail: '这台设备的凭证一直有效。' };
   }
   const until = formatTime(device.expires_at_ms);
-  if (device.expires_at_ms <= Date.now()) {
-    return { text: '已过期', tone: 'danger', detail: `有效期到 ${until}。` };
+  const left = device.expires_at_ms - now;
+  if (left <= 0) {
+    return { text: '已过期', tone: 'danger', detail: `已于 ${until} 过期。` };
   }
-  return { text: '有效', tone: 'info', detail: `有效期到 ${until}。` };
+  return {
+    text: remainingText(left),
+    tone: 'info',
+    detail: `有效期至 ${until}。`,
+  };
 }
 
 /** 读取当前地址的封禁状态。失败时返回 null，不影响页面主体。 */
@@ -99,6 +114,18 @@ export function MySubsPage() {
   const [ipState, setIpState] = useState<IpState | null>(null);
   const [loading, setLoading] = useState(true);
   const [unbanBusy, setUnbanBusy] = useState(false);
+  /** 当前时间。有期限的设备需要显示剩余时长，每 30 秒刷新一次。 */
+  const [now, setNow] = useState(() => Date.now());
+
+  const hasExpiring = (me?.devices ?? []).some(
+    (device) => device.expires_at_ms !== null,
+  );
+
+  useEffect(() => {
+    if (!hasExpiring) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [hasExpiring]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -214,7 +241,9 @@ export function MySubsPage() {
           <div className="ban-alert-text">
             <strong>当前地址已被封禁</strong>
             <span className="muted">
-              {ipState?.ip ? `IP ${ipState.ip} 暂时无法访问。` : '当前地址暂时无法访问。'}
+              {ipState?.ip
+                ? `IP ${displayIp(ipState.ip)} 暂时无法访问。`
+                : '当前地址暂时无法访问。'}
               本月还可自助解封 {ipState?.remaining ?? 0} 次。
             </span>
           </div>
@@ -305,7 +334,7 @@ export function MySubsPage() {
         ) : (
           <div className="device-grid">
             {devices.map((device) => {
-              const state = deviceState(device);
+              const state = deviceState(device, now);
               const name = device.label || '未命名设备';
               return (
                 <article className="device-card" key={device.token}>
@@ -368,7 +397,11 @@ export function MySubsPage() {
                     <span title={state.detail}>
                       最后使用 {formatTime(device.last_seen_at_ms)}
                     </span>
-                    <span>创建 {formatTime(device.created_at_ms)}</span>
+                    <span title={state.detail}>
+                      {device.expires_at_ms === null
+                        ? '永不过期'
+                        : `有效期至 ${formatTime(device.expires_at_ms)}`}
+                    </span>
                   </div>
                 </article>
               );

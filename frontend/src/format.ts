@@ -30,3 +30,9 @@ export function formatUptime(secs: number): string {
   if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
   return `${minutes} 分钟`;
 }
+
+/** 地址显示：去掉 IPv4 映射前缀，便于阅读。 */
+export function displayIp(value: string | null | undefined): string {
+  if (!value) return 'unknown';
+  return value.startsWith('::ffff:') ? value.slice(7) : value;
+}
