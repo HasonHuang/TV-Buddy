@@ -89,14 +89,46 @@ pub async fn run_if_subcommand() -> Result<Option<i32>> {
         "update" => crate::update::run(&args[1..]).await?,
         "version" | "--version" | "-V" => println!("tv-buddy {}", crate::VERSION),
         "--help" | "-h" | "help" => print_help(),
-        _ => return Ok(None),
+        _ => {
+            // 裸词（如 `get`）无法与打错的子命令区分。若直接当数据库路径，
+            // 会在当前目录生成 `<词>`、`<词>-wal` 与日志文件。只接受路径形式。
+            if !looks_like_db_path(command) && !Path::new(command).is_file() {
+                bail!(
+                    "未知子命令：{command}\n\
+                     若这是数据库路径，请写成 ./{command} 或使用 .db 后缀。\n\
+                     子命令：config / passwd / update / version / help"
+                );
+            }
+            return Ok(None);
+        }
     }
     Ok(Some(0))
+}
+
+/// 判断第一个参数是否像数据库路径。
+///
+/// 服务启动时第一个位置参数是数据库路径。只接受绝对路径、含分隔符的路径、
+/// 默认库名、点开头的路径或已知数据库后缀。裸词按未知子命令拒绝，
+/// 避免误在当前目录建库。
+fn looks_like_db_path(arg: &str) -> bool {
+    if arg == DEFAULT_DB {
+        return true;
+    }
+    let path = Path::new(arg);
+    path.is_absolute()
+        || arg.contains('/')
+        || arg.contains('\\')
+        || arg.starts_with('.')
+        || matches!(
+            path.extension().and_then(|ext| ext.to_str()),
+            Some("db" | "sqlite" | "sqlite3")
+        )
 }
 
 fn print_help() {
     println!(
         "tv-buddy [数据库路径]\n\
+         \x20 路径需含 / 或以 .db 结尾；否则按未知子命令拒绝\n\
          \n\
          子命令：\n\
          \x20 config import <config.json> [--db <路径>] [--force]    从文件导入整份配置\n\
@@ -557,6 +589,18 @@ mod tests {
         assert_eq!(parse_value("200"), json!(200));
         assert_eq!(parse_value("0.8"), json!(0.8));
         assert_eq!(parse_value("[::]:9900"), json!("[::]:9900"));
+    }
+
+    #[test]
+    fn distinguishes_database_path_from_subcommand() {
+        assert!(looks_like_db_path(DEFAULT_DB));
+        assert!(looks_like_db_path("./tv-buddy.db"));
+        assert!(looks_like_db_path("/opt/tv-buddy/tv-buddy.db"));
+        assert!(looks_like_db_path("data/store"));
+        assert!(looks_like_db_path("tv.sqlite3"));
+        assert!(!looks_like_db_path("get"));
+        assert!(!looks_like_db_path("set"));
+        assert!(!looks_like_db_path("--db"));
     }
 
     #[test]

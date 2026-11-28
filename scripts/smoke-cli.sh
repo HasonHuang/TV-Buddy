@@ -67,6 +67,15 @@ login_ok() { # 参数：端口 口令
 "$CLI" --help >/dev/null
 "$CLI" version | grep -q 'tv-buddy ' || fail "version 输出不对"
 "$CLI" --version | grep -q 'tv-buddy ' || fail "--version 输出不对"
+
+# 裸词不能当数据库路径。在空目录运行，确认既不启动也不生成文件。
+GUARD_DIR=$(mktemp -d)
+if (cd "$GUARD_DIR" && "$WORK/tv-buddy" get >/dev/null 2>&1); then
+    fail "裸词 get 未被拒绝"
+fi
+[ -z "$(ls -A "$GUARD_DIR")" ] || fail "裸词在当前目录生成了文件"
+rm -rf "$GUARD_DIR"
+
 "$CLI" start >/dev/null
 "$CLI" status | grep -q '运行中' || fail "status 未显示运行中"
 

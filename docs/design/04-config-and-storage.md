@@ -9,7 +9,7 @@
 
 | 项 | 设计 | 依据 |
 | --- | --- | --- |
-| 路径 | 来自启动参数（`tv-buddy <tv-buddy.db>`），默认 `./tv-buddy.db` | S-ENV-06 |
+| 路径 | 来自启动参数（`tv-buddy <tv-buddy.db>`），默认 `./tv-buddy.db`。裸词按未知子命令拒绝，避免误建库 | S-ENV-06 |
 | 存储 | `settings` 表一行 JSON 文档，键为 `config`，值是整份配置 | 设计决策（2026-10-31） |
 | 默认值 | 库为空时写入内置默认；默认值对齐目标 v0.8.2 | S-CFG-04 |
 | 未建模键 | 存 `extra`（`serde_json::Map<String, Value>`），随 JSON 往返保留 | 设计决策（避免丢第三方配置） |

@@ -582,6 +582,8 @@ cargo build --release
 target/release/tv-buddy ./tv-buddy.db
 ```
 
+数据库路径要写成路径形式（如 `./tv-buddy.db`）。裸词按未知子命令拒绝，避免误在当前目录建库。
+
 ### 交叉编译静态二进制
 
 ```bash
