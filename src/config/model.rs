@@ -924,14 +924,19 @@ pub struct AuthCfg {
     /// 只在 [`AuthCfg::ip_guard_enabled`] 为真时生效。语义自定（F-010）：
     /// 目标键面里有它，但豁免规则在目标上未观测到行为。
     pub whitelist: Vec<String>,
-    /// 登录失败统计窗口（秒）。
+    /// 登录失败统计窗口（秒）。默认 10 分钟。
     pub auth_fail_window_secs: u64,
-    /// 窗口内免费失败次数。
+    /// 窗口内免费失败次数。默认 3 次。
     pub auth_fail_free_per_window: u64,
-    /// 超出免费次数后，再累计多少次触发锁定。
+    /// 超出免费次数后，再累计多少次触发锁定。默认 2 次。
+    ///
+    /// 默认阈值 = `3 + 2`，即 10 分钟内第 5 次失败后锁定。目标默认 `15 + 6`；
+    /// 这里收紧，避免 60 秒窗口内每分钟约 21 次的爆破速率。
     pub auth_fail_ban_threshold: u64,
-    /// 首次锁定秒数。目标首次锁实测固定 ~300s（`auth_fail_ban_duration_secs` 改小也不变），
-    /// 所以本实现的锁定就用这个键的默认值 `300`；目标文件里没有这个键名。
+    /// 首次锁定秒数。默认 10 分钟。
+    ///
+    /// 目标首次锁实测固定 ~300s（`auth_fail_ban_duration_secs` 改小也不变）；
+    /// 这里取 600s 作为安全默认值。目标文件里没有这个键名。
     pub auth_fail_lock_secs: u64,
     // --- 限流、违规与升级封禁：语义自定（F-010 未观测到目标行为） ---
     // 只计播放入口请求，不计切片。全部只在 `ip_guard_enabled` 为真时生效。
@@ -979,10 +984,10 @@ impl Default for AuthCfg {
             limit_url: "https://material.yang-1989.eu.org/v/limit.mp4".into(),
             ban_url: "https://material.yang-1989.eu.org/v/Ban.mp4".into(),
             whitelist: Vec::new(),
-            auth_fail_window_secs: 60,
-            auth_fail_free_per_window: 15,
-            auth_fail_ban_threshold: 6,
-            auth_fail_lock_secs: 300,
+            auth_fail_window_secs: 600,
+            auth_fail_free_per_window: 3,
+            auth_fail_ban_threshold: 2,
+            auth_fail_lock_secs: 600,
             l1_window_secs: 30,
             l1_limit: 30,
             l2_window_secs: 30,
@@ -1901,6 +1906,16 @@ mod tests {
     fn ip_guard_is_on_by_default() {
         assert!(AuthCfg::default().ip_guard_enabled);
         assert!(Config::default().auth.ip_guard_enabled);
+    }
+
+    #[test]
+    fn login_lock_defaults_are_tight() {
+        let auth = AuthCfg::default();
+        // 10 分钟窗口内第 5 次失败后锁定 10 分钟。
+        assert_eq!(auth.auth_fail_window_secs, 600);
+        assert_eq!(auth.auth_fail_free_per_window, 3);
+        assert_eq!(auth.auth_fail_ban_threshold, 2);
+        assert_eq!(auth.auth_fail_lock_secs, 600);
     }
 
     #[test]

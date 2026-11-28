@@ -219,7 +219,7 @@ cat /tmp/tv-login-bad.json; echo
 
 预期：状态码 `401`，正文 `{"error":"用户名或密码错误"}`（`src/http/routes/panel.rs:79-85`）。
 
-本步只做一次。默认 60 秒窗口内，失败数达到 `auth_fail_free_per_window + auth_fail_ban_threshold` = 15 + 6 = 21 后锁定 300 秒（`src/config/model.rs:739-742`、`src/auth/login_guard.rs:88`）。锁定后的下一次请求返回 `429`，正文含 `locked_for_secs`（`src/http/routes/panel.rs:94-100`）。
+本步只做一次。默认 600 秒窗口内，失败数达到 `auth_fail_free_per_window + auth_fail_ban_threshold` = 3 + 2 = 5 后锁定 600 秒（`src/config/model.rs` 的 `AuthCfg::default`、`src/auth/login_guard.rs:88`）。锁定后的下一次请求返回 `429`，正文含 `locked_for_secs`（`src/http/routes/panel.rs:94-100`）。
 
 ### 12. 核对 CLI
 

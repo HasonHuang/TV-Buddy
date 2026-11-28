@@ -4185,7 +4185,8 @@ async fn self_service_unban_respects_quota() {
 async fn login_locks_after_repeated_failures() {
     let fixture = fixture().await;
     let session = login(&fixture).await;
-    for _ in 0..21 {
+    // 默认阈值 3 + 2 = 5 次。第 6 次请求会被锁。
+    for _ in 0..5 {
         let response = fixture
             .client
             .post(format!("{}/api/panel/login", fixture.base))
@@ -4208,7 +4209,7 @@ async fn login_locks_after_repeated_failures() {
     let body: serde_json::Value =
         serde_json::from_str(&response.text().await.expect("读正文")).expect("解析 JSON");
     let locked = body["locked_for_secs"].as_u64().expect("locked_for_secs");
-    assert!((1..=300).contains(&locked), "{body}");
+    assert!((1..=600).contains(&locked), "{body}");
 
     // 既有会话不受登录锁影响。
     let response = fixture

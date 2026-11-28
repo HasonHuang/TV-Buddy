@@ -491,14 +491,14 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "$AUTH" "$BASE/api/panel/status"
 ##### 8.2 默认阈值
 
 ```bash
-set_auth '{"auth_fail_free_per_window":15,"auth_fail_ban_threshold":6,"auth_fail_lock_secs":300,"auth_fail_ban_duration_secs":3600,"auth_fail_ban_repeat_duration_secs":2592000,"auth_fail_ban_escalate_window_secs":86400}'
-for i in $(seq 1 21); do try_login 203.0.113.78 >/dev/null; done
+set_auth '{"auth_fail_window_secs":600,"auth_fail_free_per_window":3,"auth_fail_ban_threshold":2,"auth_fail_lock_secs":600,"auth_fail_ban_duration_secs":3600,"auth_fail_ban_repeat_duration_secs":2592000,"auth_fail_ban_escalate_window_secs":86400}'
+for i in $(seq 1 5); do try_login 203.0.113.78 >/dev/null; done
 locked 203.0.113.78
 ```
 
-预期：`locked_for_secs` 为 `300`。
+预期：`locked_for_secs` 为 `600`。
 
-依据：默认阈值 15 + 6 = 21 次（`src/config/model.rs:740`、`src/config/model.rs:741`）。第 22 次请求直接锁定。
+依据：默认阈值 3 + 2 = 5 次（`src/config/model.rs` 的 `AuthCfg::default`）。第 6 次请求直接锁定。
 
 ##### 8.3 关闭 IP 管控时锁不升级
 

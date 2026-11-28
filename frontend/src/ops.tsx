@@ -98,7 +98,7 @@ const AUTH_LOCK: NumField[] = [
     key: 'auth_fail_lock_secs',
     label: '首次锁定时长',
     unit: '秒',
-    hint: '默认 5 分钟（300 秒）',
+    hint: '默认 10 分钟（600 秒）',
   },
   {
     key: 'auth_fail_ban_duration_secs',

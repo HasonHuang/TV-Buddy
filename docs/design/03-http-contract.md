@@ -321,7 +321,7 @@ http://<host>/api/play/token/<该用户的令牌>/<gid>/<cid>.<ext>
 | PUT | `/api/panel/config` | 全量配置 | `{"ok":true,"revision":<n>}`；非法 → `400`；缺 `revision` 或版本不符 → `409 stale_revision` |
 | POST | `/api/panel/reload` | — | `{"ok":true}`；读取或保存失败 → `500`（保留当前快照） |
 
-登录锁：窗口内失败数达到 `auth_fail_free_per_window + auth_fail_ban_threshold` 后，后续登录返回 `429`。默认窗口 60 秒、免费 15 次、阈值 6、锁定 300 秒。既有 Bearer 会话不受影响。
+登录锁：窗口内失败数达到 `auth_fail_free_per_window + auth_fail_ban_threshold` 后，后续登录返回 `429`。默认窗口 600 秒、免费 3 次、阈值 2、首次锁定 600 秒（10 分钟内第 5 次失败后锁定）。既有 Bearer 会话不受影响。
 
 ### 6.2 M1 落地
 
