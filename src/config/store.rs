@@ -78,11 +78,13 @@ impl ConfigStore {
         save_conn_full(&conn, config)
     }
 
-    /// 恢复默认配置。用户不受影响。
-    pub fn reset(&self) -> Result<Config> {
-        let mut config = Config::default();
-        config.revision = self.save(&config)?;
-        Ok(config)
+    /// 按 `revision` 条件恢复默认配置。用户不受影响。
+    ///
+    /// 多个写者同时改库时，版本不符返回 [`crate::config::StaleRevision`]。
+    pub fn reset_if_revision(&self, expected: u64) -> Result<Config> {
+        let config = Config::default();
+        let (_, saved) = self.save_if_revision(&config, Some(expected))?;
+        Ok(saved)
     }
 }
 

@@ -96,8 +96,12 @@ ports:
 ```bash
 printf '%s\n' '<新口令>' | docker compose exec -T tv-buddy \
   /opt/tv-buddy/tv-buddy passwd admin --db /data/tv-buddy.db --stdin
-docker compose restart
+docker compose restart   # 让现有会话失效。本版起，新口令在下次登录时生效。
 ```
+
+`--db` 必须是数据库文件，不要传 `/data` 目录。口令必须经标准输入传入：用 `-T` 加 `printf` 管道。`docker exec` 不带 `-i` 时标准输入为空，命令会报「密码太短」。
+
+容器内没有管理脚本。不要执行 `./tv-buddy update`；升级用 `docker compose pull`（见 §7）。
 
 ### 3.3 数据位置
 

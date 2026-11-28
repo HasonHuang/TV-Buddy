@@ -65,6 +65,8 @@ login_ok() { # 参数：端口 口令
 }
 
 "$CLI" --help >/dev/null
+"$CLI" version | grep -q 'tv-buddy ' || fail "version 输出不对"
+"$CLI" --version | grep -q 'tv-buddy ' || fail "--version 输出不对"
 "$CLI" start >/dev/null
 "$CLI" status | grep -q '运行中' || fail "status 未显示运行中"
 

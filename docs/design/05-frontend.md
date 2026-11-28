@@ -111,7 +111,7 @@
 | --- | --- | --- | --- |
 | 服务器 | `[server]` | `bind`、`timezone_offset_hours`、`catchup_tpl`、`log_level`、`home_url`、`not_found_url`、`error_url`、`m3u_header_lines`、`low_resource_mode`、`trust_proxy`（后两项兼容保留） | ✅ |
 | 面板 | `[panel]` | `enabled`、`session_ttl` | ✅ |
-| 面板认证 | `[panel]` | `username`；新密码（浏览器算 `password_sha256`） | ✅ |
+| 面板认证 | `users` 表 | 账号、角色与口令散列（argon2id）；不在配置 JSON 中 | ✅ |
 | 切片伪装 | `[cache.disguise]` | `enabled`、`subtitle`、`playlist`、`master`、`formats` | ✅ |
 | 监控 | `[health]`、`[stats]` | `enabled`、`interval_secs`、`timeout_secs`、`concurrency`；`enabled`、`online_window_secs` | ✅ |
 | 缓存配置 | `[cache]` | `disk_path`、`limit_mb`、`auto_tune`、`disguise.*`；清空本地缓存 | ✅ |

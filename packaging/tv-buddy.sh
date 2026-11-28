@@ -34,7 +34,6 @@ OPENRC_FILE="/etc/init.d/$SERVICE_NAME"
 CLI_LINK=${CLI_LINK:-/usr/local/bin/tv-buddy}
 DEFAULT_PORT=9900
 DEFAULT_USER=admin
-DEFAULT_PASS=admin
 # 版本号从已安装的二进制读取（`tv-buddy version`）。可用 TV_BUDDY_CLI_VERSION 覆盖。
 # 未安装时留空，菜单横幅不显示版本。
 VERSION=${TV_BUDDY_CLI_VERSION:-}
@@ -45,6 +44,10 @@ fi
 GITHUB_REPO=${TV_BUDDY_REPO:-HasonHuang/TV-Buddy}
 TV_BUDDY_VERSION=${TV_BUDDY_VERSION:-latest}
 TMP_DIR=
+# 更新源解析结果。归档源可同时刷新管理脚本。
+UPDATE_BIN=
+UPDATE_ARCHIVE=
+EXTRACTED_BIN=
 
 if [ -t 1 ]; then
     RESET=$(printf '\033[0m')
@@ -84,8 +87,9 @@ tv-buddy 管理 CLI
   log [行数]            查看日志；终端下持续跟随
   url                   打印面板地址
   port <N>              修改面板端口并重启
-  pass [密码] [账号]    修改已有账号的密码；无参数进入交互
-  update                更新二进制，保留数据库
+  pass|passwd [密码] [账号]  修改已有账号的密码；无参数进入交互
+  version               显示版本
+  update                更新二进制与管理脚本，保留数据库
   reinstall             备份数据库、重置配置后重装
   install [参数]        调用同目录 install.sh 安装或修复
   uninstall             卸载服务；询问是否删除数据
@@ -98,7 +102,7 @@ update 来源（按优先级）：
   GitHub Release       默认；用 TV_BUDDY_VERSION 指定 tag
 
 非交互：
-  TV_BUDDY_YES=1      跳过 reinstall / uninstall 的删除确认
+  TV_BUDDY_YES=1      跳过重装确认；卸载时直接删除数据
 
 环境变量：
   TV_BUDDY_REPO       发布仓库，默认内置
@@ -342,11 +346,17 @@ download() {
 extract_binary() {
     archive=$1
     [ -f "$archive" ] || fail "安装包不存在：$archive"
-    TMP_DIR=$(mktemp -d)
-    tar -xzf "$archive" -C "$TMP_DIR" || fail "解包失败：$archive"
-    src=$(find "$TMP_DIR" -type f -name tv-buddy | head -n 1)
+    EXTRACTED_BIN=
+    if [ -z "${TMP_DIR:-}" ]; then
+        TMP_DIR=$(mktemp -d)
+    fi
+    out="$TMP_DIR/extract"
+    rm -rf "$out"
+    mkdir -p "$out"
+    tar -xzf "$archive" -C "$out" || fail "解包失败：$archive"
+    src=$(find "$out" -type f -name tv-buddy | head -n 1)
     [ -n "$src" ] || fail "安装包内没有 tv-buddy：$archive"
-    printf '%s' "$src"
+    EXTRACTED_BIN=$src
 }
 
 # 取 GitHub API 的 JSON。失败返回非 0，由调用方回退。
@@ -431,13 +441,17 @@ release_url() {
 }
 
 update_source() {
+    UPDATE_BIN=
+    UPDATE_ARCHIVE=
     if [ -n "${TV_BUDDY_BIN:-}" ]; then
         [ -f "$TV_BUDDY_BIN" ] || fail "二进制不存在：$TV_BUDDY_BIN"
-        printf '%s' "$TV_BUDDY_BIN"
+        UPDATE_BIN=$TV_BUDDY_BIN
         return
     fi
     if [ -n "${TV_BUDDY_ARCHIVE:-}" ]; then
+        UPDATE_ARCHIVE=$TV_BUDDY_ARCHIVE
         extract_binary "$TV_BUDDY_ARCHIVE"
+        UPDATE_BIN=$EXTRACTED_BIN
         return
     fi
     if [ -n "${TV_BUDDY_URL:-}" ]; then
@@ -447,9 +461,11 @@ update_source() {
         echo "下载：$url" >&2
         download "$url" "$TMP_DIR/pkg"
         if tar -tzf "$TMP_DIR/pkg" >/dev/null 2>&1; then
+            UPDATE_ARCHIVE=$TMP_DIR/pkg
             extract_binary "$TMP_DIR/pkg"
+            UPDATE_BIN=$EXTRACTED_BIN
         else
-            printf '%s' "$TMP_DIR/pkg"
+            UPDATE_BIN=$TMP_DIR/pkg
         fi
         return
     fi
@@ -459,7 +475,9 @@ update_source() {
         [ -d "$dir" ] || continue
         latest=$(ls -t "$dir"/tv-buddy-*-linux-"$arch".tar.gz 2>/dev/null | head -n 1 || true)
         if [ -n "$latest" ]; then
+            UPDATE_ARCHIVE=$latest
             extract_binary "$latest"
+            UPDATE_BIN=$EXTRACTED_BIN
             return
         fi
     done
@@ -472,7 +490,9 @@ update_source() {
     if ( download "$release.sha256" "$TMP_DIR/pkg.sha256" ) >/dev/null 2>&1; then
         verify_digest "$TMP_DIR/pkg.tar.gz" "$TMP_DIR/pkg.sha256" || fail "校验失败：$release"
     fi
+    UPDATE_ARCHIVE=$TMP_DIR/pkg.tar.gz
     extract_binary "$TMP_DIR/pkg.tar.gz"
+    UPDATE_BIN=$EXTRACTED_BIN
 }
 
 # 期望摘要与实测摘要比对。没有 sha256 工具时跳过（不阻断更新）。
@@ -510,6 +530,34 @@ install_binary() {
     }
     chmod 0755 "$new"
     mv -f "$new" "$BIN"
+}
+
+# 从更新包刷新管理脚本。
+#
+# 服务单元在 /etc 下，不在安装目录；需要时重跑发布包内的 install.sh。
+# 写入新文件后原子替换，避免正在运行的脚本读到混合内容。
+refresh_cli_script() {
+    [ -n "${UPDATE_ARCHIVE:-}" ] || return 0
+    tmp=$(mktemp -d)
+    if ! tar -xzf "$UPDATE_ARCHIVE" -C "$tmp"; then
+        warn "解包失败，管理脚本未更新"
+        rm -rf "$tmp"
+        return 0
+    fi
+    src=$(find "$tmp" -type f -name 'tv-buddy.sh' | head -n 1)
+    if [ -z "$src" ]; then
+        warn "安装包内没有管理脚本，未更新"
+        rm -rf "$tmp"
+        return 0
+    fi
+    new="$BASE_DIR/.tv-buddy.sh.new.$$"
+    if cp "$src" "$new" && chmod 0755 "$new" && mv -f "$new" "$BASE_DIR/tv-buddy.sh"; then
+        info "管理脚本已更新"
+    else
+        rm -f "$new"
+        warn "管理脚本更新失败"
+    fi
+    rm -rf "$tmp"
 }
 
 # ---- 命令实现 ----
@@ -673,7 +721,8 @@ cmd_pass() {
 cmd_update() {
     require_installed
     ensure_mutable
-    src=$(update_source)
+    update_source
+    src=$UPDATE_BIN
     backup="$BIN.bak.$$"
     cp -p "$BIN" "$backup" || fail "备份旧二进制失败"
     if svc_managed; then
@@ -687,6 +736,10 @@ cmd_update() {
         mv -f "$backup" "$BIN"
         restart_runtime || true
         exit 1
+    fi
+    refresh_cli_script
+    if [ -n "${UPDATE_ARCHIVE:-}" ]; then
+        info "提示：服务单元不在此更新。需要时重跑发布包内的 install.sh。"
     fi
     if ! restart_runtime; then
         warn "新二进制启动失败，恢复旧版本"
@@ -721,7 +774,7 @@ cmd_reinstall() {
         :
     else
         if [ -t 0 ]; then
-            printf '重装会备份数据库、重置配置；用户与令牌保留。确认继续？[y/N] '
+            printf '重装会备份数据库、重置配置；用户与令牌保留，口令默认不改。确认继续？[y/N] '
         fi
         if read -r answer && { [ "$answer" = "y" ] || [ "$answer" = "Y" ]; }; then
             :
@@ -735,7 +788,8 @@ cmd_reinstall() {
     # 先取更新源，避免停服后才发现下载地址不可用。
     new_bin=
     if [ -n "${TV_BUDDY_BIN:-}${TV_BUDDY_ARCHIVE:-}${TV_BUDDY_URL:-}" ]; then
-        new_bin=$(update_source)
+        update_source
+        new_bin=$UPDATE_BIN
     fi
 
     if svc_managed; then
@@ -751,6 +805,10 @@ cmd_reinstall() {
 
     if [ -n "$new_bin" ]; then
         install_binary "$new_bin" || warn "二进制未更新，继续使用当前版本"
+        refresh_cli_script
+        if [ -n "${UPDATE_ARCHIVE:-}" ]; then
+            info "提示：服务单元不在此更新。需要时重跑发布包内的 install.sh。"
+        fi
     fi
 
     # 重装只重置配置。用户与令牌保留。
@@ -758,24 +816,32 @@ cmd_reinstall() {
 
     port=${TV_BUDDY_PORT:-$(read_default "面板端口" "$old_port")}
     user=${TV_BUDDY_USER:-$DEFAULT_USER}
-    password=${TV_BUDDY_PASS:-}
-    if [ -z "$password" ] && [ -t 0 ]; then
-        printf '面板密码 [回车=%s]：' "$DEFAULT_PASS"
+    pass=${TV_BUDDY_PASS:-}
+    change_pass=0
+    if [ -n "$pass" ]; then
+        change_pass=1
+    elif [ -t 0 ]; then
+        printf '面板密码 [回车=保留现有口令]：'
         stty -echo 2>/dev/null || true
-        read -r password
+        read -r pass || pass=
         stty echo 2>/dev/null || true
         printf '\n'
+        [ -n "$pass" ] && change_pass=1
     fi
-    password=${password:-$DEFAULT_PASS}
     case "$port" in
         ""|*[!0-9]*) fail "端口无效：$port" ;;
     esac
     [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail "端口无效：$port"
-    [ "${#password}" -ge 4 ] || fail "密码太短（至少 4 位）"
 
     set_port "$port"
-    printf '%s' "$password" | "$BIN" passwd "$user" --db "$DB" --stdin >/dev/null ||
-        warn "账号 $user 不存在，未改密码；请在面板创建"
+    if [ "$change_pass" = 1 ]; then
+        [ "${#pass}" -ge 4 ] || fail "密码太短（至少 4 位）"
+        printf '%s' "$pass" | "$BIN" passwd "$user" --db "$DB" --stdin >/dev/null ||
+            warn "账号 $user 不存在，未改密码；请在面板创建"
+        info "口令已更新"
+    else
+        info "未提供新口令，保留现有口令"
+    fi
     restart_runtime || fail "配置已重置，但重启失败；见 $LOG_FILE"
     show_url
 }
@@ -874,7 +940,7 @@ main_menu() {
             printf '   1) 更新二进制(保留配置)  2) 查看面板地址\n'
             printf '   3) 启动   4) 停止   5) 重启   6) 状态   7) 日志\n'
             printf '%s--- 面板设置 --------------------------------%s\n' "$BLUE" "$RESET"
-            printf '   8) 改端口        9) 改账号密码\n'
+            printf '   8) 改端口        9) 改口令\n'
             printf '%s---------------------------------------------%s\n' "$BLUE" "$RESET"
             printf '   r) %s重装(清空配置重来)%s   u) %s卸载%s\n' "$YELLOW" "$RESET" "$RED" "$RESET"
         else
@@ -939,12 +1005,23 @@ case "$cmd" in
     help|-h|--help) usage ;;
     start) cmd_start ;;
     stop) cmd_stop ;;
-    restart|reload) cmd_restart ;;
+    restart) cmd_restart ;;
+    reload)
+        warn "reload 会重启服务，不重读配置。请用面板「重读配置」或 POST /api/panel/reload"
+        cmd_restart
+        ;;
     status|st) cmd_status ;;
     log|logs) cmd_log "$@" ;;
     url) cmd_url ;;
     port) cmd_port "$@" ;;
-    pass) cmd_pass "$@" ;;
+    pass|passwd) cmd_pass "$@" ;;
+    version|--version|-V)
+        if [ -x "$BIN" ]; then
+            "$BIN" version
+        else
+            info "未安装"
+        fi
+        ;;
     update) cmd_update ;;
     reinstall) cmd_reinstall ;;
     install) cmd_install "$@" ;;

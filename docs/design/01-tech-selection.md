@@ -54,7 +54,7 @@
 | `rusqlite` | 0.41（bundled） | 配置、用户与令牌存储 | F-1、v2026.6 |
 | `argon2` | 0.5 | 口令散列 | F-1 |
 | `tracing` / `tracing-subscriber` | 0.1 / 0.3 | 日志（`log_level`） | `S-CACHE-05` |
-| 手写解析 | — | 命令行（数据库参数、`config`/`passwd` 子命令） | `S-CLI-01` |
+| 手写解析 | — | 命令行（数据库参数、`config`/`passwd`/`update` 子命令） | `S-CLI-01` |
 | `sha2` / `hex` | 0.10 / 0.4 | 密码校验、切片指纹 `<S>` | `S-DIS-01`、F-004 |
 | `base64` / `uuid` / `rand` | 0.22 / 1 / 0.8 | Token、Cookie、随机前缀 `<P>` | `S-AUTH-*`、F-017 |
 | `url` / `percent-encoding` | 2 | URL 改写与清单重写 | `S-MODE-05` |
@@ -140,7 +140,7 @@
 
 | 模块 | 责任 | 关联规格 |
 | --- | --- | --- |
-| `cli` | 数据库参数、`config`/`passwd` 子命令 | `S-CLI-01` |
+| `cli` | 数据库参数、`config`/`passwd`/`update` 子命令 | `S-CLI-01` |
 | `config` | 加载、默认值、规范化写回、热重载 | `S-CFG-01/02` |
 | `http` | 路由、中间件、错误映射、302 占位 | `S-EP-*` |
 | `proxy` | 六种模式的分发与转发 | `S-MODE-*` |

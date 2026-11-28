@@ -25,11 +25,14 @@ sudo tv-buddy restart
 | `log [行数]` | 查看日志。终端下持续跟随 |
 | `url` | 打印面板地址与账号 |
 | `port <N>` | 修改端口并重启 |
-| `pass [口令] [账号]` | 修改口令。无参数进入交互 |
-| `update` | 更新二进制。保留数据库 |
-| `reinstall` | 备份数据库、重置配置后重装 |
+| `pass` / `passwd [口令] [账号]` | 修改口令。无参数进入交互 |
+| `version` | 显示版本 |
+| `update` | 更新二进制与管理脚本。保留数据库 |
+| `reinstall` | 备份数据库、重置配置后重装；默认保留原口令 |
 | `install [参数]` | 调用安装脚本 |
 | `uninstall` | 卸载服务。询问是否删除数据 |
+
+`reload` 是 `restart` 的兼容别名，会重启服务，不重读配置。重读配置用面板「重读配置」。
 
 没有 systemd 或 OpenRC 时，命令使用 PID 文件管理进程。
 
@@ -121,6 +124,23 @@ sudo tv-buddy port 8080
 TV_BUDDY_PORT=8080 docker compose up -d
 ```
 
+### 4.4 直接改配置
+
+`config` 是服务二进制的子命令，不是管理脚本的命令。用完整路径：
+
+```bash
+sudo /opt/tv-buddy/tv-buddy config get server.bind --db /opt/tv-buddy/tv-buddy.db
+sudo /opt/tv-buddy/tv-buddy config set server.log_level debug --db /opt/tv-buddy/tv-buddy.db
+```
+
+- `config get` 默认隐藏密钥。`--reveal` 显示原文。`config get .` 打印整份配置。
+- `config set` 写入未知键时告警；`--allow-extra` 关闭告警。
+- 写入用 `revision` 条件保存。并发冲突时 `set` 重试；路径含数组下标时不重试。`import` / `reset` 冲突时报错。
+- `import --force` 与 `reset --force` 覆盖前把当前配置写到 `<库>.bak.json`（权限 0600）。
+- 写入后服务不会自动读取。请在面板点「重读配置」，或执行 `sudo tv-buddy restart`。
+
+`--db` 省略时使用当前目录下的 `tv-buddy.db`。不在安装目录执行时必须显式指定。
+
 ## 5. 修改口令
 
 ```bash
@@ -144,8 +164,11 @@ Docker 环境：
 ```bash
 printf '%s\n' '<新口令>' | docker compose exec -T tv-buddy \
   /opt/tv-buddy/tv-buddy passwd admin --db /data/tv-buddy.db --stdin
-docker compose restart
+docker compose restart   # 让现有会话失效。本版起，新口令在下次登录时生效。
 ```
+
+`--db` 必须是数据库文件，不要传 `/data` 目录。口令必须经标准输入传入：用 `-T` 加 `printf` 管道。`docker exec` 不带 `-i` 时标准输入为空，命令会报「密码太短」。
+容器内没有管理脚本。不要执行 `./tv-buddy update`；升级用 `docker compose pull`。
 
 ## 6. 备份
 
@@ -153,7 +176,7 @@ docker compose restart
 
 ## 7. 升级
 
-### 7.1 二进制安装
+### 7.1 管理脚本更新（推荐）
 
 ```bash
 sudo tv-buddy update
@@ -189,6 +212,35 @@ sudo TV_BUDDY_VERSION=v2026.3.0 tv-buddy update
 
 新二进制启动失败时，脚本恢复旧二进制。启动成功但健康检查失败时，脚本只告警，不自动回滚。此时查看日志并手动处理。
 
+归档更新（`TV_BUDDY_ARCHIVE`、`TV_BUDDY_URL`、本地 `dist/`、GitHub Release）会同时刷新管理脚本。服务单元在 `/etc` 下，不在更新范围；发布包变更了服务单元时，重跑包内 `install.sh`。`TV_BUDDY_BIN` 只更新二进制。
+
+### 7.1.1 直接更新二进制
+
+不经过管理脚本时，二进制自带 `update`：
+
+```bash
+sudo /opt/tv-buddy/tv-buddy update --check
+sudo /opt/tv-buddy/tv-buddy update --version v2026.10 --restart
+```
+
+参数：
+
+| 参数 | 作用 |
+| --- | --- |
+| `--check` | 只查询最新版本，不下载、不替换 |
+| `--version <tag>` | 指定 Release tag |
+| `--repo <owner/name>` | 指定仓库 |
+| `--archive <路径或 URL>` | 使用指定安装包 |
+| `--restart` | 替换后尝试重启 systemd/OpenRC 服务 |
+| `--force` | 同版本也替换 |
+
+行为：
+
+- 只替换当前二进制，不更新管理脚本与服务单元。
+- 旧二进制备份为 `<二进制>.bak`。
+- 下载 GitHub Release 时校验同名 `.sha256`；没有 `.sha256` 时告警并跳过。
+- 容器内替换只对当前容器有效，且通常没有写 `/opt/tv-buddy` 的权限。生产升级用 `docker compose pull`。
+
 ### 7.2 Docker
 
 ```bash
@@ -210,7 +262,7 @@ sudo tv-buddy log 100
 
 ## 8. 重装
 
-重装会重置配置。用户与令牌保留。
+重装会重置配置。用户、令牌与现有口令保留。
 
 ```bash
 sudo tv-buddy reinstall
@@ -221,15 +273,24 @@ sudo tv-buddy reinstall
 1. 备份数据库为 `tv-buddy.db.bak`。
 2. 停止服务。
 3. 重置配置。
-4. 询问端口与口令。
+4. 询问端口与新口令。口令回车表示保留现有口令。
 5. 启动服务。
 
 非交互重装：
 
 ```bash
+TV_BUDDY_YES=1 TV_BUDDY_PORT=9900 \
+  sudo -E tv-buddy reinstall
+```
+
+不提供 `TV_BUDDY_PASS` 时不改口令。要把口令改成指定值：
+
+```bash
 TV_BUDDY_YES=1 TV_BUDDY_PORT=9900 TV_BUDDY_PASS='<口令>' \
   sudo -E tv-buddy reinstall
 ```
+
+不会把口令重置为 `admin`。
 
 重装用于配置损坏或需要恢复默认值。正常升级使用 `update`。
 

@@ -4222,6 +4222,53 @@ async fn login_locks_after_repeated_failures() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
+/// 管理 CLI 只写库。登录必须重读用户，才能看到刚写入的新口令。
+#[tokio::test]
+async fn login_uses_password_written_by_external_cli() {
+    let fixture = fixture().await;
+    let admin = fixture
+        .state
+        .users
+        .find_by_username("admin")
+        .expect("管理员");
+    let changed = tv_buddy::users::User {
+        password_hash: tv_buddy::users::password::hash("outside-pass").expect("散列"),
+        ..admin.clone()
+    };
+    // 第二个连接模拟独立的管理 CLI 进程。
+    let conn = tv_buddy::db::connect(&fixture.dir.join("tv-buddy.db")).expect("第二个连接");
+    conn.lock()
+        .unwrap()
+        .execute(
+            "UPDATE users SET config_json = ?1 WHERE id = ?2",
+            rusqlite::params![
+                serde_json::to_string(&changed).expect("序列化"),
+                admin.id.as_str()
+            ],
+        )
+        .expect("写库");
+
+    let old = fixture
+        .client
+        .post(format!("{}/api/panel/login", fixture.base))
+        .header("content-type", "application/json")
+        .body(r#"{"username":"admin","password":"admin"}"#)
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(old.status(), StatusCode::UNAUTHORIZED);
+
+    let new = fixture
+        .client
+        .post(format!("{}/api/panel/login", fixture.base))
+        .header("content-type", "application/json")
+        .body(r#"{"username":"admin","password":"outside-pass"}"#)
+        .send()
+        .await
+        .expect("请求");
+    assert_eq!(new.status(), StatusCode::OK);
+}
+
 #[tokio::test]
 async fn link_info_matches_target_shape() {
     let fixture = fixture().await;

@@ -22,10 +22,15 @@
 | 命令 | 作用 |
 | --- | --- |
 | `config import <config.json> [--db <路径>] [--force]` | 从 JSON 文件导入整份配置 |
-| `config get <a.b.c>` | 读一个配置值 |
-| `config set <a.b.c> <值>` | 写一个配置值 |
-| `config reset [--force]` | 配置恢复默认，保留用户 |
-| `passwd <用户名> [--stdin]` | 重设口令 |
+| `config get <a.b.c> [--db <路径>] [--reveal]` | 读一个配置值；默认隐藏密钥 |
+| `config set <a.b.c> <值> [--db <路径>] [--allow-extra]` | 写一个配置值；未知键告警 |
+| `config reset [--db <路径>] [--force]` | 配置恢复默认，保留用户 |
+| `pass` / `passwd <用户名> [--db <路径>] [--stdin]` | 重设口令 |
+
+`config set/import/reset` 用 `revision` 条件保存（`ConfigStore::save_if_revision`）。
+并发冲突时 `set` 重读重放；路径含数组下标时不重试。`import` / `reset` 冲突时报错。
+`import --force` 与 `reset --force` 覆盖前把当前配置写到 `<库>.bak.json`（权限 0600）。
+`config get` 默认隐藏 `share.key`、翻译 token、代理口令与认证头；`--reveal` 显示原文。`config get .` 打印整份配置。
 
 ### 1.1 段与职责
 

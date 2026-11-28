@@ -18,7 +18,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::model::{normalize_device_token, now_ms, AccessToken, Purpose, Role, User};
 use crate::db::SharedConn;
@@ -95,6 +95,63 @@ impl UserStore {
             .iter()
             .find(|user| user.username == wanted)
             .cloned()
+    }
+
+    /// 从数据库重读一个用户，并同步内存副本。
+    ///
+    /// 管理 CLI 是独立进程，只写数据库。运行中的服务用内存副本，
+    /// 因此登录必须走这里，才能看到刚写入的新口令。
+    /// 热路径（令牌校验）仍用 [`Self::find_user`]，不碰数据库。
+    pub fn find_by_username_fresh(&self, username: &str) -> Result<Option<User>> {
+        let wanted = username.trim();
+        let raw = {
+            let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+            conn.query_row(
+                "SELECT config_json FROM users
+                 WHERE json_extract(config_json, '$.username') = ?1
+                 ORDER BY sort_order, id LIMIT 1",
+                params![wanted],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+        };
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        let user: User = serde_json::from_str(&raw).context("解析用户记录失败")?;
+        let mut list = self.users.write().unwrap_or_else(|e| e.into_inner());
+        match list.iter_mut().find(|item| item.id == user.id) {
+            Some(slot) => *slot = user.clone(),
+            None => list.push(user.clone()),
+        }
+        Ok(Some(user))
+    }
+
+    /// 只更新口令散列，保留其他字段。
+    ///
+    /// 管理 CLI 在独立进程里改库。整行 [`Self::update_user`] 会用 CLI 载入时的
+    /// 旧快照覆盖面板刚改过的角色或权限。这里用 `json_set` 只动两个字段。
+    pub fn set_password_hash(&self, username: &str, hash: &str) -> Result<bool> {
+        let wanted = username.trim();
+        let now = now_ms();
+        let changed = {
+            let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+            conn.execute(
+                "UPDATE users
+                 SET config_json = json_set(config_json,
+                       '$.password_hash', ?1,
+                       '$.updated_at_ms', ?2),
+                     updated_at_ms = ?2
+                 WHERE json_extract(config_json, '$.username') = ?3",
+                params![hash, now, wanted],
+            )?
+        };
+        if changed == 0 {
+            return Ok(false);
+        }
+        // 重读该行，把完整最新状态同步到内存。
+        self.find_by_username_fresh(wanted)?;
+        Ok(true)
     }
 
     /// 新建用户。用户名重复时返回错误。
@@ -592,6 +649,99 @@ mod tests {
         let reopened = UserStore::attach(conn).expect("载入");
         assert_eq!(reopened.user_count(), 1);
         assert!(reopened.find_by_username("alice").is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn fresh_lookup_sees_external_password_change() {
+        let (store, dir) = temp_store("fresh-pass");
+        let old = super::super::password::hash("old-pass").expect("hash");
+        let user = store
+            .create_user(User {
+                password_hash: old.clone(),
+                ..sample_user("alice")
+            })
+            .expect("新建");
+
+        // 模拟管理 CLI：另一个进程只写库，内存副本仍是旧口令。
+        let new = super::super::password::hash("new-pass").expect("hash");
+        let conn = crate::db::connect(&dir.join("users.db")).expect("第二个连接");
+        let changed = User {
+            password_hash: new.clone(),
+            ..user.clone()
+        };
+        conn.lock()
+            .unwrap()
+            .execute(
+                "UPDATE users SET config_json = ?1 WHERE id = ?2",
+                rusqlite::params![serde_json::to_string(&changed).expect("序列化"), user.id],
+            )
+            .expect("写库");
+
+        assert_eq!(
+            store.find_by_username("alice").expect("内存").password_hash,
+            old
+        );
+
+        let fresh = store
+            .find_by_username_fresh("alice")
+            .expect("读库")
+            .expect("用户");
+        assert!(super::super::password::verify(
+            "new-pass",
+            &fresh.password_hash
+        ));
+        assert!(!super::super::password::verify(
+            "old-pass",
+            &fresh.password_hash
+        ));
+        assert_eq!(
+            store.find_by_username("alice").expect("内存").password_hash,
+            new
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn targeted_password_update_preserves_other_fields() {
+        let (store, dir) = temp_store("targeted-pass");
+        let user = store
+            .create_user(User {
+                role: Role::User,
+                web_ui_access: true,
+                ..sample_user("alice")
+            })
+            .expect("新建");
+
+        // 模拟面板在 CLI 载入之后改了角色与权限。
+        let conn = crate::db::connect(&dir.join("users.db")).expect("第二个连接");
+        let changed = User {
+            role: Role::Admin,
+            web_ui_access: false,
+            ..user.clone()
+        };
+        conn.lock()
+            .unwrap()
+            .execute(
+                "UPDATE users SET config_json = ?1 WHERE id = ?2",
+                rusqlite::params![serde_json::to_string(&changed).expect("序列化"), user.id],
+            )
+            .expect("写库");
+
+        let hash = super::super::password::hash("new-pass").expect("hash");
+        assert!(store.set_password_hash("alice", &hash).expect("改密"));
+
+        let fresh = store
+            .find_by_username_fresh("alice")
+            .expect("读库")
+            .expect("用户");
+        assert!(super::super::password::verify(
+            "new-pass",
+            &fresh.password_hash
+        ));
+        assert!(fresh.role.is_admin());
+        assert!(!fresh.web_ui_access);
         let _ = std::fs::remove_dir_all(dir);
     }
 

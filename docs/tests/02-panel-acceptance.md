@@ -622,7 +622,8 @@ curl -sS -H "Authorization: Bearer $T" "$B/api/panel/health" > /tmp/tv-panel-hea
 curl -sS -H "Authorization: Bearer $T" "$B/api/panel/groups/export" > /tmp/tv-panel-groups.json
 ```
 
-贴配置前删掉敏感值：`panel.password_sha256`、`share.key`、`subtitle.translate.token`、`epg.translate.mtran_token`、各级 `proxy.password`。
+贴配置前删掉敏感值：`share.key`、`subtitle.translate.token`、`epg.translate.mtran_token`、各级 `proxy.password`。用户口令不在配置 JSON 中，位于 `users` 表。
+用 `config get` 导出时默认已隐藏这些字段；`--reveal` 会显示原文。不要把 `--reveal` 的输出贴到工单。
 
 收尾，删掉测试数据与独立实例：
 

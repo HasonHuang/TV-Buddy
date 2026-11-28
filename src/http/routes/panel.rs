@@ -76,12 +76,20 @@ pub async fn login(
         return Err(ApiError::Forbidden("面板未启用".into()));
     }
 
-    // 账号来自数据库。口令用 argon2id 校验。
-    let Some(user) = state.users.find_by_username(req.username.trim()) else {
-        state.login_guard.failure(&ip, window);
-        return Err(ApiError::Unauthorized(
-            json!({ "error": "用户名或密码错误" }),
-        ));
+    // 账号每次从数据库重读。管理 CLI 是独立进程，可能刚改过口令；
+    // 只读内存会继续接受旧口令。
+    let user = match state.users.find_by_username_fresh(req.username.trim()) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            state.login_guard.failure(&ip, window);
+            return Err(ApiError::Unauthorized(
+                json!({ "error": "用户名或密码错误" }),
+            ));
+        }
+        Err(error) => {
+            tracing::error!(%error, "读取用户失败");
+            return Err(ApiError::internal("读取用户失败"));
+        }
     };
     if !crate::users::password::verify(&req.password, &user.password_hash) {
         state.login_guard.failure(&ip, window);

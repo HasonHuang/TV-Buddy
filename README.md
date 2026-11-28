@@ -87,7 +87,7 @@ TV Buddy 把上游 IPTV 直播源转成你自己的订阅地址。它改写、�
 - 备份：一键导出 gzip(tar)，一键回滚。
 - 多 VPS：通过分享密钥同步 Token 与封禁表。
 - 观测：运行指标、运行日志、缓存占用。
-- 交互式 CLI：启停、改端口、改账号密码、更新、重装、卸载。
+- 交互式 CLI：启停、改端口、改口令、更新、重装、卸载。
 
 ---
 
@@ -301,13 +301,16 @@ TV_BUDDY_PORT=8080=8080 docker compose up -d
 
 首次启动可用环境变量指定口令：`TV_BUDDY_INITIAL_PASSWORD='你的口令' docker compose up -d`。它只在首次启动、用户表为空时生效。已有数据卷不会改口令。
 要改已有部署的口令，打开面板「用户与设备」，在 `admin` 行点「重置密码」。
-无法打开面板时，在容器内用二进制改库，然后重启：
+无法打开面板时，在容器内用二进制改库：
 
 ```bash
 printf '%s\n' '新口令' | docker compose exec -T tv-buddy \
   /opt/tv-buddy/tv-buddy passwd admin --db /data/tv-buddy.db --stdin
-docker compose restart
+docker compose restart   # 让现有会话失效。本版起，新口令在下次登录时生效。
 ```
+
+`--db` 必须是数据库文件，不要传 `/data` 目录。口令必须经标准输入传入：用 `-T` 加 `printf` 管道。`docker exec` 不带 `-i` 时标准输入为空，命令会报「密码太短」。
+容器内没有管理脚本。不要执行 `./tv-buddy update`；升级用 `docker compose pull`。
 
 更新镜像：
 
@@ -506,11 +509,34 @@ sudo tv-buddy log 200
 | `log [行数]` | 查看日志。终端下持续跟随 |
 | `url` | 打印面板地址与账号 |
 | `port <N>` | 修改面板端口并重启 |
-| `pass [密码] [账号]` | 修改口令，可同时改账号。无参数进入交互 |
-| `update` | 更换二进制，保留数据库 |
-| `reinstall` | 备份数据库、重置配置后重装（用户保留） |
+| `pass` / `passwd [密码] [账号]` | 修改口令，可指定账号。无参数进入交互 |
+| `version` | 显示版本 |
+| `update` | 更换二进制与管理脚本，保留数据库 |
+| `reinstall` | 备份数据库、重置配置后重装（用户保留；未给新口令时保留原口令） |
 | `install [参数]` | 在发布包目录调用 `install.sh` |
 | `uninstall` | 移除服务。询问是否删除数据 |
+
+`reload` 是 `restart` 的兼容别名，会重启服务，不重读配置。重读配置用面板「重读配置」。
+
+直接改配置（离线或脚本）：
+
+```bash
+sudo /opt/tv-buddy/tv-buddy config get server.bind --db /opt/tv-buddy/tv-buddy.db
+sudo /opt/tv-buddy/tv-buddy config set server.log_level debug --db /opt/tv-buddy/tv-buddy.db
+```
+
+`config get` 默认隐藏密钥，`--reveal` 显示原文；`config get .` 打印整份配置。`config set` 对未知键告警，`--allow-extra` 关闭告警。`config set/import/reset` 用 `revision` 条件保存；并发冲突时 `set` 重试，`import/reset` 报错。`import --force` 与 `reset --force` 覆盖前把当前配置写到 `<库>.bak.json`（权限 0600）。写入后仍需重读配置或重启。
+
+`update` 从归档更新时同时刷新管理脚本。服务单元不更新；发布包变更了单元时，重跑包内 `install.sh`。
+
+二进制也能自更新：
+
+```bash
+sudo /opt/tv-buddy/tv-buddy update --check
+sudo /opt/tv-buddy/tv-buddy update --version v2026.10 --restart
+```
+
+只替换二进制，不改管理脚本与服务单元；旧二进制备份为 `<二进制>.bak`。容器内替换不持久，生产升级用 `docker compose pull`。
 
 `update` 的更新源按优先级读取：
 
@@ -529,7 +555,7 @@ sudo TV_BUDDY_VERSION=v2026.0.0 tv-buddy update    # 固定版本
 
 下载的 Release 包会校验同名 `.sha256`。校验不通过时不替换二进制。
 
-无人值守安装设 `TV_BUDDY_YES=1`，脚本直接重装或删除数据，不再询问。
+无人值守重装设 `TV_BUDDY_YES=1`。重装默认保留口令；要改口令加 `TV_BUDDY_PASS`。卸载时该变量会直接删除数据。
 
 ---
 
